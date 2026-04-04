@@ -11,6 +11,7 @@ from typing import Iterator
 from typing import Protocol
 from typing import Sequence
 from typing import TypeVar
+from typing import Union
 from typing import overload
 from typing import runtime_checkable
 
@@ -45,8 +46,8 @@ T = TypeVar("T")
 TIn = TypeVar("TIn")
 TOut = TypeVar("TOut")
 AnyTypedRoute = TypedRoute[Any]
-RouteLike = AnyTypedRoute | RouteRef
-WriteTarget = WriteBinding | RouteLike
+RouteLike = Union[AnyTypedRoute, RouteRef]
+WriteTarget = Union[WriteBinding, RouteLike]
 EnvelopeIterator = Iterator[ClosedEnvelope]
 
 

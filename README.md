@@ -10,6 +10,8 @@ This repository now contains a first-pass implementation scaffold for the
 - `src/`: Rust in-memory runtime, typed refs, descriptors, envelopes, mailboxes, queries, and control-loop stubs
 - `python/manyfold/`: Python-facing ergonomic wrapper layer
 - `python/manyfold/primitives.py`: primary nouns and verbs for the Python API
+- `python/manyfold/embedded.py`: RFC 21 embedded device profile helpers and validation
+- `python/manyfold/reference_examples.py`: RFC 23 reference example suite registry
 - `examples/`: executable API examples that are also covered by the test suite
 - `proto/manyfold/v1/wiregraph.proto`: extracted protobuf schema scaffold from the RFC appendix
 
@@ -23,6 +25,8 @@ This is an RFC stub implementation, not a production runtime. The current code f
 - catalog/latest/topology/validation query helpers,
 - a minimal `ControlLoop` epoch stub,
 - Python object-first routes and shared-stream `ReadThenWriteNextEpochStep` composition,
+- embedded device profile helpers for scalar and bulk sensors,
+- a named reference example suite that tracks the RFC examples and runs the supported subset,
 - Python bindings via PyO3 in the same layout as the referenced project style.
 
 The intended Python wrapper surface is deliberately narrow:
