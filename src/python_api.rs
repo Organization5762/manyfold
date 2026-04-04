@@ -21,6 +21,53 @@ fn lock_graph<'a>(
         .map_err(|_| PyRuntimeError::new_err("graph mutex poisoned"))
 }
 
+fn validate_route(route: &RouteRefCore) -> PyResult<()> {
+    let valid = match route.namespace.plane {
+        Plane::Read => matches!(
+            route.variant,
+            Variant::Meta | Variant::Payload | Variant::State | Variant::Event | Variant::Health
+        ),
+        Plane::Write => matches!(
+            route.variant,
+            Variant::Request
+                | Variant::Desired
+                | Variant::Reported
+                | Variant::Effective
+                | Variant::Ack
+        ),
+        Plane::State => route.variant == Variant::State,
+        Plane::Query => matches!(
+            route.variant,
+            Variant::QueryRequest | Variant::QueryResponse
+        ),
+        Plane::Debug => matches!(
+            route.variant,
+            Variant::Meta | Variant::Event | Variant::Health
+        ),
+    };
+    if !valid {
+        return Err(PyValueError::new_err(format!(
+            "variant {} is not valid for plane {}",
+            route.variant.as_str(),
+            route.namespace.plane.as_str()
+        )));
+    }
+    if route.namespace.plane != Plane::Write && route.namespace.layer == Layer::Shadow {
+        return Err(PyValueError::new_err(
+            "shadow routes are only valid under the write plane",
+        ));
+    }
+    if route.namespace.plane == Plane::Write
+        && route.variant == Variant::Request
+        && route.namespace.layer == Layer::Shadow
+    {
+        return Err(PyValueError::new_err(
+            "write request routes must not use the shadow layer",
+        ));
+    }
+    Ok(())
+}
+
 #[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
 #[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
 #[pyclass(
@@ -446,16 +493,16 @@ impl RouteRef {
         variant: PyVariant,
         schema: Py<SchemaRef>,
         py: Python<'_>,
-    ) -> Self {
-        Self {
-            inner: RouteRefCore {
-                namespace: namespace.borrow(py).inner.clone(),
-                family,
-                stream,
-                variant: variant.inner,
-                schema: schema.borrow(py).inner.clone(),
-            },
-        }
+    ) -> PyResult<Self> {
+        let inner = RouteRefCore {
+            namespace: namespace.borrow(py).inner.clone(),
+            family,
+            stream,
+            variant: variant.inner,
+            schema: schema.borrow(py).inner.clone(),
+        };
+        validate_route(&inner)?;
+        Ok(Self { inner })
     }
     #[getter]
     fn namespace(&self) -> NamespaceRef {
@@ -839,18 +886,11 @@ impl ReadablePort {
             .collect())
     }
     fn open(&self) -> PyResult<Vec<OpenedEnvelope>> {
-        let graph = lock_graph(&self.graph)?;
+        let mut graph = lock_graph(&self.graph)?;
         Ok(graph
-            .latest
-            .get(&self.route)
-            .cloned()
+            .open_latest(&self.route)
             .into_iter()
-            .map(|closed| OpenedEnvelope {
-                inner: OpenedEnvelopeCore {
-                    payload: closed.payload_ref.inline_bytes.clone(),
-                    closed,
-                },
-            })
+            .map(|inner| OpenedEnvelope { inner })
             .collect())
     }
     fn latest(&self) -> PyResult<Option<ClosedEnvelope>> {
@@ -899,7 +939,11 @@ impl WritablePort {
                 producer_id: "python".to_string(),
                 kind: ProducerKind::Application,
             });
-        let inner = graph.write(&self.route, payload, producer, control_epoch);
+        let inner = graph
+            .write(&self.route, payload, producer, control_epoch)
+            .into_iter()
+            .next()
+            .ok_or_else(|| PyRuntimeError::new_err("write emitted no envelopes"))?;
         Ok(ClosedEnvelope { inner })
     }
     fn describe(&self) -> PyResult<PortDescriptor> {
@@ -939,15 +983,15 @@ impl WriteBinding {
                 "request route must use Variant.Request",
             ));
         }
-        Ok(Self {
-            inner: WriteBindingCore {
-                request: request.inner,
-                desired: desired.inner,
-                reported: reported.inner,
-                effective: effective.inner,
-                ack: ack.map(|route| route.inner),
-            },
-        })
+        let inner = WriteBindingCore {
+            request: request.inner,
+            desired: desired.inner,
+            reported: reported.inner,
+            effective: effective.inner,
+            ack: ack.map(|route| route.inner),
+        };
+        inner.validate().map_err(PyValueError::new_err)?;
+        Ok(Self { inner })
     }
     #[getter]
     fn request(&self) -> RouteRef {

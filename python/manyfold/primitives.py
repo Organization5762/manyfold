@@ -1,4 +1,9 @@
-"""Primary Manyfold nouns and verbs."""
+"""Primary Manyfold nouns and verbs.
+
+The goal in this module is a grokkable, typed surface: small value objects for
+route construction and a minimal set of composition primitives that are useful
+enough to deserve first-class status.
+"""
 
 from __future__ import annotations
 
@@ -46,21 +51,29 @@ class SubscriptionLike(Protocol):
 
 @dataclass(frozen=True)
 class OwnerName:
+    """Typed owner identifier used when building a namespace."""
+
     value: str
 
 
 @dataclass(frozen=True)
 class StreamFamily:
+    """Typed stream family segment."""
+
     value: str
 
 
 @dataclass(frozen=True)
 class StreamName:
+    """Typed stream name segment."""
+
     value: str
 
 
 @dataclass(frozen=True)
 class Schema(Generic[T]):
+    """Encode/decode contract for a typed route payload."""
+
     schema_id: str
     version: int
     encode: Callable[[T], bytes]
@@ -93,6 +106,8 @@ class Schema(Generic[T]):
 
 @dataclass(frozen=True)
 class TypedRoute(Generic[T]):
+    """Fully typed route description used by the ergonomic Python API."""
+
     plane: Plane
     layer: Layer
     owner: OwnerName
@@ -103,6 +118,7 @@ class TypedRoute(Generic[T]):
 
     @property
     def route_ref(self) -> RouteRef:
+        """Materialize the native route reference only when needed."""
         return RouteRef(
             NamespaceRef(plane=self.plane, layer=self.layer, owner=self.owner.value),
             family=self.family.value,
@@ -117,6 +133,8 @@ class TypedRoute(Generic[T]):
 
 @dataclass(frozen=True)
 class TypedEnvelope(Generic[T]):
+    """Decoded view of a closed envelope plus its typed payload value."""
+
     route: TypedRoute[T]
     closed: ClosedEnvelope
     value: T
@@ -132,6 +150,7 @@ def route(
     variant: Variant,
     schema: Schema[T],
 ) -> TypedRoute[T]:
+    """Construct a typed route without exposing native identity plumbing."""
     return TypedRoute(
         plane=plane,
         layer=layer,
@@ -163,6 +182,7 @@ class ReadThenWriteNextEpochStep(Generic[TRead, TWrite]):
         output: TypedRoute[TWrite],
         transform: Callable[[TRead], TWrite],
     ) -> ReadThenWriteNextEpochStep[TRead, TWrite]:
+        """Map one observable input into one typed output stream."""
         write_stream = read.pipe(
             ops.map(transform),
             ops.publish(),
@@ -176,6 +196,7 @@ class ReadThenWriteNextEpochStep(Generic[TRead, TWrite]):
         )
 
     def start(self) -> SubscriptionLike:
+        """Connect the shared write stream once and return the live subscription."""
         if self._connection is None:
             self._connection = self._connect()
         return self._connection

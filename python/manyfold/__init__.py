@@ -24,7 +24,6 @@ from ._manyfold_rust import TaintDomain as TaintDomain
 from ._manyfold_rust import TaintMark as TaintMark
 from ._manyfold_rust import Variant as Variant
 from ._manyfold_rust import WritablePort as WritablePort
-from ._manyfold_rust import WriteBinding as NativeWriteBinding
 from .embedded import EmbeddedBulkSensor as EmbeddedBulkSensor
 from .embedded import EmbeddedDeviceProfile as EmbeddedDeviceProfile
 from .embedded import EmbeddedRuntimeRules as EmbeddedRuntimeRules
@@ -46,6 +45,8 @@ from .reference_examples import REFERENCE_EXAMPLE_SUITE as REFERENCE_EXAMPLE_SUI
 from .reference_examples import ReferenceExample as ReferenceExample
 from .reference_examples import implemented_reference_examples as implemented_reference_examples
 from .reference_examples import reference_example_suite as reference_example_suite
+from ._manyfold_rust import ControlLoop as ControlLoop
+from ._manyfold_rust import WriteBinding as WriteBinding
 
 __all__ = [
     "ClockDomainRef",
@@ -63,9 +64,6 @@ __all__ = [
     "Mailbox",
     "MailboxDescriptor",
     "NamespaceRef",
-    "NativeControlLoop",
-    "NativeGraph",
-    "NativeWriteBinding",
     "OpenedEnvelope",
     "OwnerName",
     "PayloadRef",
@@ -97,6 +95,3 @@ __all__ = [
     "reference_example_suite",
     "route",
 ]
-
-WriteBinding = NativeWriteBinding
-ControlLoop = NativeControlLoop
