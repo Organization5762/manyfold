@@ -264,6 +264,10 @@ class Variant:
     Effective: Variant
     Ack: Variant
     State: Variant
+    QueryRequest: Variant
+    QueryResponse: Variant
+    Event: Variant
+    Health: Variant
     @property
     def value(self) -> builtins.str: ...
     def __eq__(self, other: builtins.object) -> builtins.bool: ...
@@ -289,4 +293,3 @@ class WriteBinding:
     def __new__(cls, request: RouteRef, desired: RouteRef, reported: RouteRef, effective: RouteRef, ack: typing.Optional[RouteRef] = None) -> WriteBinding: ...
 
 def bridge_version() -> builtins.str: ...
-

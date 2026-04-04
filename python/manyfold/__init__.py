@@ -26,7 +26,18 @@ from ._manyfold_rust import WritablePort as WritablePort
 from ._manyfold_rust import WriteBinding as NativeWriteBinding
 from ._manyfold_rust import bridge_version as bridge_version
 from .graph import ControlLoops as ControlLoops
+from .graph import DebugEvent as DebugEvent
 from .graph import Graph as Graph
+from .graph import JoinInput as JoinInput
+from .graph import JoinPlan as JoinPlan
+from .graph import Link as Link
+from .graph import LinkCapabilities as LinkCapabilities
+from .graph import MeshPrimitive as MeshPrimitive
+from .graph import Middleware as Middleware
+from .graph import QueryRequest as QueryRequest
+from .graph import QueryResponse as QueryResponse
+from .graph import QueryServiceRoutes as QueryServiceRoutes
+from .graph import CapabilityGrant as CapabilityGrant
 from .graph import WriteBindings as WriteBindings
 from .primitives import OwnerName as OwnerName
 from .primitives import ReadThenWriteNextEpochStep as ReadThenWriteNextEpochStep
@@ -42,10 +53,17 @@ __all__ = [
     "ClosedEnvelope",
     "ControlLoop",
     "ControlLoops",
+    "DebugEvent",
     "Graph",
+    "JoinInput",
+    "JoinPlan",
     "Layer",
+    "Link",
+    "LinkCapabilities",
     "Mailbox",
     "MailboxDescriptor",
+    "MeshPrimitive",
+    "Middleware",
     "NamespaceRef",
     "NativeControlLoop",
     "NativeGraph",
@@ -57,6 +75,9 @@ __all__ = [
     "PortDescriptor",
     "ProducerKind",
     "ProducerRef",
+    "QueryRequest",
+    "QueryResponse",
+    "QueryServiceRoutes",
     "ReadablePort",
     "ReadThenWriteNextEpochStep",
     "RouteRef",
@@ -71,6 +92,7 @@ __all__ = [
     "TypedEnvelope",
     "TypedRoute",
     "Variant",
+    "CapabilityGrant",
     "WritablePort",
     "WriteBinding",
     "WriteBindings",

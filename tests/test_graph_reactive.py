@@ -96,6 +96,18 @@ def install_reactivex_stub() -> None:
 
         return transform
 
+    def op_filter(predicate):
+        def transform(source):
+            def subscribe(observer=None, scheduler=None):
+                return source.subscribe(
+                    lambda item: observer.on_next(item) if predicate(item) else None,
+                    scheduler=scheduler,
+                )
+
+            return Observable(subscribe)
+
+        return transform
+
     def op_share():
         return lambda source: source
 
@@ -134,6 +146,7 @@ def install_reactivex_stub() -> None:
     subject_module = types.ModuleType("reactivex.subject")
     subject_module.Subject = Subject
     ops_module = types.ModuleType("reactivex.operators")
+    ops_module.filter = op_filter
     ops_module.map = op_map
     ops_module.publish = op_publish
     ops_module.share = op_share
@@ -176,6 +189,10 @@ def install_manyfold_rust_stub() -> None:
         Effective = EnumValue("effective")
         Ack = EnumValue("ack")
         State = EnumValue("state")
+        QueryRequest = EnumValue("query_request")
+        QueryResponse = EnumValue("query_response")
+        Event = EnumValue("event")
+        Health = EnumValue("health")
 
     @dataclass(frozen=True)
     class NamespaceRef:
@@ -215,6 +232,19 @@ def install_manyfold_rust_stub() -> None:
         payload_ref: PayloadRef
         seq_source: int
 
+    @dataclass(frozen=True)
+    class ProducerRef:
+        producer_id: str
+        kind: str = "application"
+
+    @dataclass(frozen=True)
+    class PortDescriptor:
+        route_display: str
+        human_description: str = ""
+        payload_open_policy: str = "lazy"
+        backpressure_policy: str = "propagate"
+        debug_enabled: bool = True
+
     class ReadablePort:
         def __init__(self, graph, route):
             self._graph = graph
@@ -231,7 +261,7 @@ def install_manyfold_rust_stub() -> None:
             return self._graph._latest.get(self._route.display())
 
         def describe(self):
-            return {"route_display": self._route.display()}
+            return PortDescriptor(route_display=self._route.display())
 
     class WritablePort:
         def __init__(self, graph, route):
@@ -255,7 +285,7 @@ def install_manyfold_rust_stub() -> None:
             return envelope
 
         def describe(self):
-            return {"route_display": self._route.display()}
+            return PortDescriptor(route_display=self._route.display())
 
     @dataclass
     class WriteBinding:
@@ -264,6 +294,14 @@ def install_manyfold_rust_stub() -> None:
         reported: RouteRef
         effective: RouteRef
         ack: Optional[RouteRef] = None
+
+    @dataclass
+    class MailboxDescriptor:
+        capacity: int = 128
+
+    @dataclass
+    class Mailbox:
+        name: str
 
     @dataclass
     class ControlLoop:
@@ -277,23 +315,31 @@ def install_manyfold_rust_stub() -> None:
             self._latest = {}
             self._sequence = {}
             self._loops = {}
+            self._catalog = {}
+            self._edges = []
 
         def register_port(self, route):
+            self._catalog[route.display()] = route
             return route
 
         def read(self, route):
+            self.register_port(route)
             return ReadablePort(self, route)
 
         def writable_port(self, route):
+            self.register_port(route)
             return WritablePort(self, route)
 
         def register_binding(self, name, binding):
             return binding
 
         def mailbox(self, name, descriptor=None):
-            return {"name": name, "descriptor": descriptor}
+            return Mailbox(name=name)
 
         def connect(self, source, sink):
+            self.register_port(source)
+            self.register_port(sink)
+            self._edges.append((source.display(), sink.display()))
             return None
 
         def install(self, control_loop):
@@ -316,16 +362,16 @@ def install_manyfold_rust_stub() -> None:
             return envelope
 
         def catalog(self):
-            return []
+            return list(self._catalog.values())
 
         def describe_route(self, route):
-            return {"route_display": route.display()}
+            return PortDescriptor(route_display=route.display())
 
         def latest(self, route):
             return self._latest.get(route.display())
 
         def topology(self):
-            return []
+            return list(self._edges)
 
         def validate_graph(self):
             return []
@@ -334,8 +380,12 @@ def install_manyfold_rust_stub() -> None:
     rust_module.ClosedEnvelope = ClosedEnvelope
     rust_module.Graph = Graph
     rust_module.Layer = Layer
+    rust_module.Mailbox = Mailbox
+    rust_module.MailboxDescriptor = MailboxDescriptor
     rust_module.NamespaceRef = NamespaceRef
+    rust_module.PortDescriptor = PortDescriptor
     rust_module.Plane = Plane
+    rust_module.ProducerRef = ProducerRef
     rust_module.ReadablePort = ReadablePort
     rust_module.RouteRef = RouteRef
     rust_module.SchemaRef = SchemaRef
@@ -436,6 +486,144 @@ class GraphReactiveTests(unittest.TestCase):
         self.assertEqual(mirrored, [b"ONE", b"TWO"])
         self.assertEqual(latest.value, b"TWO")
         self.assertEqual(latest.closed.seq_source, 2)
+
+    def test_plan_join_exposes_repartition_nodes(self) -> None:
+        graph_module = load_graph_module()
+        left = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("left"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("accel"),
+            variant=graph_module.Variant.Meta,
+            schema=graph_module.Schema.bytes("Accel"),
+        )
+        right = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("right"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("gyro"),
+            variant=graph_module.Variant.Meta,
+            schema=graph_module.Schema.bytes("Gyro"),
+        )
+        graph = graph_module.Graph()
+
+        plan = graph.plan_join(
+            "imu_fusion",
+            graph_module.JoinInput(left, partition_key_semantics="device_id"),
+            graph_module.JoinInput(
+                right,
+                partition_key_semantics="axis_id",
+                deterministic_rekey=True,
+            ),
+        )
+
+        self.assertEqual(plan.join_class, "repartition")
+        self.assertEqual(len(plan.visible_nodes), 2)
+        self.assertEqual(graph.explain_join("imu_fusion").join_class, "repartition")
+        topology = list(graph.topology())
+        self.assertEqual(len(topology), 2)
+
+    def test_query_plane_streams_and_capabilities(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("imu"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("accel"),
+            variant=graph_module.Variant.Meta,
+            schema=graph_module.Schema.bytes("Accel"),
+        )
+        graph = graph_module.Graph()
+        graph.publish(route, b"sample")
+        graph.export_route(route)
+        graph.grant_access(
+            graph_module.CapabilityGrant(
+                principal_id="dashboard",
+                route=route,
+                metadata_read=True,
+                replay_read=True,
+                debug_read=True,
+            )
+        )
+
+        response = graph.query(
+            graph_module.QueryRequest(command="latest", route=route),
+            requester_id="dashboard",
+        )
+
+        self.assertEqual(response.command, "latest")
+        self.assertTrue(response.items)
+        service = graph.query_service()
+        self.assertIsNotNone(graph.latest(service.request))
+        self.assertIsNotNone(graph.latest(service.response))
+        debug_routes = list(graph.debug_routes())
+        self.assertTrue(debug_routes)
+        with self.assertRaises(PermissionError):
+            graph.query(
+                graph_module.QueryRequest(command="open_payload", route=route),
+                requester_id="dashboard",
+            )
+
+    def test_register_middleware_link_and_mesh_primitive(self) -> None:
+        graph_module = load_graph_module()
+        source = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("imu"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("accel"),
+            variant=graph_module.Variant.Meta,
+            schema=graph_module.Schema.bytes("Accel"),
+        )
+        sink = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("dashboard"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("accel_copy"),
+            variant=graph_module.Variant.Meta,
+            schema=graph_module.Schema.bytes("Accel"),
+        )
+        graph = graph_module.Graph()
+
+        middleware = graph.add_middleware(
+            graph_module.Middleware(
+                name="validate_accel",
+                kind="validation",
+                attachment_scope="route",
+                target=source.display(),
+            )
+        )
+        link = graph.register_link(
+            graph_module.Link(
+                name="tcp0",
+                link_class="TcpStreamLink",
+                capabilities=graph_module.LinkCapabilities(
+                    ordered=True,
+                    reliable=True,
+                    authenticated=True,
+                ),
+            )
+        )
+        primitive = graph.add_mesh_primitive(
+            graph_module.MeshPrimitive(
+                name="bridge_to_dashboard",
+                kind="bridge",
+                sources=(source,),
+                destinations=(sink,),
+                link_name=link.name,
+                ordering_policy="source-priority",
+            )
+        )
+
+        self.assertEqual(middleware.kind, "validation")
+        self.assertEqual(list(graph.links())[0].name, "tcp0")
+        self.assertEqual(primitive.kind, "bridge")
+        self.assertEqual(len(list(graph.middleware())), 1)
+        self.assertEqual(len(list(graph.mesh_primitives())), 1)
 
 
 if __name__ == "__main__":

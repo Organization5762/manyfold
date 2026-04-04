@@ -150,6 +150,28 @@ impl PyVariant {
     fn State() -> PyVariant {
         Self { inner: Variant::State }
     }
+    #[classattr]
+    fn QueryRequest() -> PyVariant {
+        Self {
+            inner: Variant::QueryRequest,
+        }
+    }
+    #[classattr]
+    fn QueryResponse() -> PyVariant {
+        Self {
+            inner: Variant::QueryResponse,
+        }
+    }
+    #[classattr]
+    fn Event() -> PyVariant {
+        Self { inner: Variant::Event }
+    }
+    #[classattr]
+    fn Health() -> PyVariant {
+        Self {
+            inner: Variant::Health,
+        }
+    }
     #[getter]
     fn value(&self) -> &'static str {
         self.inner.as_str()
