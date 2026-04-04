@@ -679,6 +679,55 @@ class GraphReactiveTests(unittest.TestCase):
         self.assertEqual(opens, 1)
         self.assertIn("payload_open", [event.event_type for event in graph.audit(route)])
 
+    def test_describe_route_exposes_rfc_descriptor_buckets(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Bulk,
+            owner=graph_module.OwnerName("lidar"),
+            family=graph_module.StreamFamily("scan"),
+            stream=graph_module.StreamName("frame"),
+            variant=graph_module.Variant.Meta,
+            schema=graph_module.Schema.bytes("LidarFrame"),
+        )
+        graph = graph_module.Graph()
+
+        descriptor = graph.describe_route(route)
+
+        self.assertEqual(descriptor.identity.route_ref.display(), route.display())
+        self.assertEqual(descriptor.schema.payload_open_policy, "lazy_external")
+        self.assertEqual(descriptor.flow.credit_class, "bulk_payload")
+        self.assertEqual(descriptor.retention.payload_retention_policy, "external_store")
+        self.assertEqual(descriptor.environment.transport_preferences, ("memory", "bulk_link"))
+
+    def test_publish_guarded_releases_on_epoch_and_ack(self) -> None:
+        graph_module = load_graph_module()
+        binding = graph_module.WriteBindings.logical(
+            graph_module.OwnerName("light"),
+            graph_module.StreamFamily("brightness"),
+            graph_module.StreamName("level"),
+            graph_module.Schema.bytes("Brightness"),
+        )
+        graph = graph_module.Graph()
+
+        graph.publish_guarded(
+            binding,
+            b"80",
+            not_before_epoch=2,
+            wait_for_ack=binding.ack,
+        )
+
+        self.assertEqual(graph.run_scheduler(epoch=1), ())
+
+        graph.reconcile_write_binding(binding.request, ack=b"ok")
+        self.assertEqual(graph.run_scheduler(epoch=1), ())
+
+        released = graph.run_scheduler(epoch=2)
+        self.assertEqual(len(released), 1)
+        shadow = graph.shadow_state(binding.request)
+        self.assertTrue(shadow.pending_write)
+        self.assertIsNotNone(shadow.desired)
+
     def test_shadow_state_tracks_pending_and_reconciliation(self) -> None:
         graph_module = load_graph_module()
         binding = graph_module.WriteBindings.logical(
@@ -737,6 +786,48 @@ class GraphReactiveTests(unittest.TestCase):
         issues = list(graph.validate_graph())
 
         self.assertTrue(any("lacks a shadow binding" in issue for issue in issues))
+
+    def test_validate_graph_rejects_unsafe_write_feedback_loop(self) -> None:
+        graph_module = load_graph_module()
+        binding = graph_module.WriteBindings.logical(
+            graph_module.OwnerName("motor"),
+            graph_module.StreamFamily("speed"),
+            graph_module.StreamName("target"),
+            graph_module.Schema.bytes("MotorSpeed"),
+        )
+        graph = graph_module.Graph()
+
+        graph.publish(binding, b"500")
+        graph.connect(binding.effective, binding.request)
+        issues = list(graph.validate_graph())
+
+        self.assertTrue(any("Unsafe write-back loop" in issue for issue in issues))
+
+    def test_validate_graph_allows_write_feedback_loop_with_internal_boundary(self) -> None:
+        graph_module = load_graph_module()
+        binding = graph_module.WriteBindings.logical(
+            graph_module.OwnerName("motor"),
+            graph_module.StreamFamily("speed"),
+            graph_module.StreamName("target"),
+            graph_module.Schema.bytes("MotorSpeed"),
+        )
+        bridge = graph_module.route(
+            plane=graph_module.Plane.State,
+            layer=graph_module.Layer.Internal,
+            owner=graph_module.OwnerName("boundary"),
+            family=graph_module.StreamFamily("loop"),
+            stream=graph_module.StreamName("delay"),
+            variant=graph_module.Variant.State,
+            schema=graph_module.Schema.bytes("MotorSpeed"),
+        )
+        graph = graph_module.Graph()
+
+        graph.publish(binding, b"500")
+        graph.connect(binding.effective, bridge)
+        graph.connect(bridge, binding.request)
+        issues = list(graph.validate_graph())
+
+        self.assertFalse(any("Unsafe write-back loop" in issue for issue in issues))
 
     def test_route_accepts_wrapped_identity_namespace_and_schema_class(self) -> None:
         graph_module = load_graph_module()
