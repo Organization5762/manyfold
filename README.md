@@ -49,6 +49,15 @@ the step is installed and started.
 The `examples/` directory demonstrates these calls directly, and the examples are
 validated by the regular `unittest` run so they do not drift away from the API.
 
+## Implementation Standards
+
+Changes in this repository should generally include:
+
+- tests at two levels: extremely small executable examples in `examples/`, and more behavior-focused coverage in `tests/`
+- extensive docstrings and repository documentation, plus concise comments where logic is non-obvious
+- explicit types and APIs shaped to be easy to read and hard to misuse
+- a narrow primary API, with helper plumbing kept semi-private via `_` names unless it is clearly important enough to elevate
+
 ## Verification
 
 Use `cargo test` for native verification.

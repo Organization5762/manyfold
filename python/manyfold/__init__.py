@@ -2,8 +2,6 @@
 
 from ._manyfold_rust import ClockDomainRef as ClockDomainRef
 from ._manyfold_rust import ClosedEnvelope as ClosedEnvelope
-from ._manyfold_rust import ControlLoop as NativeControlLoop
-from ._manyfold_rust import Graph as NativeGraph
 from ._manyfold_rust import Layer as Layer
 from ._manyfold_rust import Mailbox as Mailbox
 from ._manyfold_rust import MailboxDescriptor as MailboxDescriptor
@@ -23,7 +21,6 @@ from ._manyfold_rust import TaintDomain as TaintDomain
 from ._manyfold_rust import TaintMark as TaintMark
 from ._manyfold_rust import Variant as Variant
 from ._manyfold_rust import WritablePort as WritablePort
-from ._manyfold_rust import WriteBinding as NativeWriteBinding
 from ._manyfold_rust import bridge_version as bridge_version
 from .graph import ControlLoops as ControlLoops
 from .graph import Graph as Graph
@@ -47,9 +44,6 @@ __all__ = [
     "Mailbox",
     "MailboxDescriptor",
     "NamespaceRef",
-    "NativeControlLoop",
-    "NativeGraph",
-    "NativeWriteBinding",
     "OpenedEnvelope",
     "OwnerName",
     "PayloadRef",
@@ -78,5 +72,5 @@ __all__ = [
     "route",
 ]
 
-WriteBinding = NativeWriteBinding
-ControlLoop = NativeControlLoop
+from ._manyfold_rust import ControlLoop as ControlLoop
+from ._manyfold_rust import WriteBinding as WriteBinding

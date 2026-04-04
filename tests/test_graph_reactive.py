@@ -215,6 +215,24 @@ def install_manyfold_rust_stub() -> None:
         payload_ref: PayloadRef
         seq_source: int
 
+    @dataclass(frozen=True)
+    class ProducerRef:
+        producer_id: str
+        kind: str = "application"
+
+    @dataclass
+    class PortDescriptor:
+        route_display: str
+
+    @dataclass
+    class MailboxDescriptor:
+        capacity: int = 128
+
+    @dataclass
+    class Mailbox:
+        name: str
+        descriptor: Optional[MailboxDescriptor] = None
+
     class ReadablePort:
         def __init__(self, graph, route):
             self._graph = graph
@@ -231,7 +249,7 @@ def install_manyfold_rust_stub() -> None:
             return self._graph._latest.get(self._route.display())
 
         def describe(self):
-            return {"route_display": self._route.display()}
+            return PortDescriptor(route_display=self._route.display())
 
     class WritablePort:
         def __init__(self, graph, route):
@@ -255,7 +273,7 @@ def install_manyfold_rust_stub() -> None:
             return envelope
 
         def describe(self):
-            return {"route_display": self._route.display()}
+            return PortDescriptor(route_display=self._route.display())
 
     @dataclass
     class WriteBinding:
@@ -291,7 +309,7 @@ def install_manyfold_rust_stub() -> None:
             return binding
 
         def mailbox(self, name, descriptor=None):
-            return {"name": name, "descriptor": descriptor}
+            return Mailbox(name=name, descriptor=descriptor)
 
         def connect(self, source, sink):
             return None
@@ -319,7 +337,7 @@ def install_manyfold_rust_stub() -> None:
             return []
 
         def describe_route(self, route):
-            return {"route_display": route.display()}
+            return PortDescriptor(route_display=route.display())
 
         def latest(self, route):
             return self._latest.get(route.display())
@@ -334,8 +352,12 @@ def install_manyfold_rust_stub() -> None:
     rust_module.ClosedEnvelope = ClosedEnvelope
     rust_module.Graph = Graph
     rust_module.Layer = Layer
+    rust_module.Mailbox = Mailbox
+    rust_module.MailboxDescriptor = MailboxDescriptor
     rust_module.NamespaceRef = NamespaceRef
     rust_module.Plane = Plane
+    rust_module.PortDescriptor = PortDescriptor
+    rust_module.ProducerRef = ProducerRef
     rust_module.ReadablePort = ReadablePort
     rust_module.RouteRef = RouteRef
     rust_module.SchemaRef = SchemaRef
