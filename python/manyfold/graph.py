@@ -1,4 +1,9 @@
-"""High-level Python helpers matching the RFC examples."""
+"""High-level Python helpers matching the RFC examples.
+
+This module intentionally keeps the public API narrow and typed. Most helpers are
+semi-private so the user-facing surface can stay centered on `Graph`,
+`WriteBindings`, and `ControlLoops`.
+"""
 
 from __future__ import annotations
 
@@ -264,15 +269,10 @@ class ReactiveWritablePort:
 class Graph:
     """Narrow Python-facing Manyfold API.
 
-    Intended public calls:
-    - observe(route_ref)
-    - latest(route_ref)
-    - describe_route(route_ref)
-    - publish(route_ref, payload)
-    - pipe(source, route_ref)
-    - run_control_loop(name)
-    - install(control_loop)
-    - connect(source, sink)
+    Public methods stay focused on route construction, observation, publishing,
+    and installing simple control primitives. Lower-level coercion, decoding,
+    and subject management remain semi-private to avoid turning the top-level
+    API into a mirror of the native bridge.
     """
 
     def __init__(self) -> None:
@@ -298,11 +298,24 @@ class Graph:
         self._subject_for(route_ref).on_next(envelope)
         return envelope
 
+    def _payload_bytes(self, route_ref: TypedRoute[T], envelope: ClosedEnvelope) -> bytes:
+        # Closed envelopes are metadata-only when the native runtime chooses lazy
+        # payload storage, so typed reads reopen the payload only when decode is
+        # actually needed.
+        inline_payload = bytes(envelope.payload_ref.inline_bytes)
+        if inline_payload:
+            return inline_payload
+        opened = tuple(self._read_port(route_ref).open())
+        if not opened:
+            return b""
+        return bytes(opened[-1].payload)
+
     def _decode_envelope(self, route_ref: TypedRoute[T], envelope: ClosedEnvelope) -> TypedEnvelope[T]:
-        payload = bytes(envelope.payload_ref.inline_bytes)
+        payload = self._payload_bytes(route_ref, envelope)
         return TypedEnvelope(route=route_ref, closed=envelope, value=route_ref.schema.decode(payload))
 
     def register_port(self, route_ref: RouteLike) -> RouteRef:
+        """Register a route and return the canonical native route reference."""
         return self._graph.register_port(self._coerce_route_ref(route_ref))
 
     def _read_port(self, route_ref: RouteLike) -> ReactiveReadablePort:
@@ -322,6 +335,7 @@ class Graph:
     def observe(self, route_ref: RouteRef, *, replay_latest: bool = True) -> Observable[ClosedEnvelope]: ...
 
     def observe(self, route_ref: RouteLike, *, replay_latest: bool = True) -> Observable[Any]:
+        """Observe a route as raw envelopes or decoded typed envelopes."""
         if isinstance(route_ref, TypedRoute):
             def subscribe(
                 observer: ObserverLike[TypedEnvelope[T]],
@@ -356,6 +370,7 @@ class Graph:
         producer: ProducerRef | None = None,
         control_epoch: int | None = None,
     ) -> SubscriptionLike:
+        """Bind an observable source into a typed route or native writable port."""
         if isinstance(target, TypedRoute):
             class _Observer:
                 def on_next(_, value: TIn) -> None:
@@ -398,6 +413,7 @@ class Graph:
         producer: ProducerRef | None = None,
         control_epoch: int | None = None,
     ) -> TypedEnvelope[Any] | ClosedEnvelope:
+        """Publish either typed payloads or raw bytes, depending on the target."""
         if isinstance(target, TypedRoute):
             encoded = target.schema.encode(payload)
             envelope = self._write_port(target).write(encoded, producer=producer, control_epoch=control_epoch)  # type: ignore[union-attr]
@@ -412,9 +428,11 @@ class Graph:
         return self._graph.mailbox(name, descriptor)
 
     def connect(self, source: RouteLike, sink: RouteLike) -> None:
+        """Connect two registered routes through the native graph."""
         self._graph.connect(self._coerce_route_ref(source), self._coerce_route_ref(sink))
 
     def install(self, control_loop: NativeControlLoop | ReadThenWriteNextEpochStep[Any, Any]) -> None:
+        """Install either a native control loop or a typed shared-stream step."""
         if isinstance(control_loop, ReadThenWriteNextEpochStep):
             subscription = control_loop.write.subscribe(
                 lambda value: self.publish(control_loop.output, value)
@@ -428,6 +446,7 @@ class Graph:
         return self._graph.tick_control_loop(name)
 
     def run_control_loop(self, name: str) -> ClosedEnvelope:
+        """Advance one installed control loop epoch and publish the emitted write."""
         envelope = self._tick_control_loop(name)
         return self._publish(envelope.route, envelope)
 
@@ -444,6 +463,7 @@ class Graph:
     def latest(self, route_ref: RouteRef) -> ClosedEnvelope | None: ...
 
     def latest(self, route_ref: RouteLike) -> TypedEnvelope[Any] | ClosedEnvelope | None:
+        """Return the latest route value, decoding through the route schema when typed."""
         latest = self._graph.latest(self._coerce_route_ref(route_ref))
         if latest is None:
             return None

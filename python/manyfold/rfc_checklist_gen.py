@@ -20,10 +20,10 @@ CHECKLIST_PATH = REPO_ROOT / "docs" / "rfc" / "implementation_checklist.md"
 
 CHECKLIST_STATUS = {
     "6": ("x", "Typed identity objects, routes, ports, and producer/runtime refs are in the scaffold."),
-    "7": (" ", "Descriptor shapes exist, but most RFC buckets still need semantic enforcement."),
-    "8": (" ", "Closed/opened envelope scaffolding exists; lazy payload and audit behavior remain to implement."),
-    "9": (" ", "Read/write namespace and shadow-route scaffolding exist; coherence rules are still incomplete."),
-    "10": (" ", "Clock domains, taints, and schedule guard types exist; time semantics are still partial."),
+    "7": ("x", "Descriptors now derive route-specific policies for identity, time, flow, retention, visibility, and debug behavior."),
+    "8": ("x", "Closed envelopes stay metadata-only while payload bytes live in a separate store and are joined on demand with route audit events."),
+    "9": ("x", "Route and write-binding validation now enforce read/write plane semantics and write.shadow coherence contracts."),
+    "10": ("x", "Writes now carry clock-domain metadata plus determinism/coherence/scheduling taints, and control loops emit epoch guards."),
     "11": (" ", "WriteBinding and shadow surfaces exist; closed-loop behavior is still a stub."),
     "12": (" ", "In-memory graph, mailboxes, and control-loop ticking exist; scheduler semantics are still incomplete."),
     "13": (" ", "Credit and backpressure flow control are not implemented yet."),
@@ -58,20 +58,20 @@ APPENDIX_STATUS = {
     "Middleware as a first-class composition surface": (" ", "Pending middleware implementation."),
     "Transport-flexible mesh building blocks": (" ", "Pending transport and mesh implementation."),
     "Explicit support for write-back loops and shadow semantics": (
-        " ",
-        "WriteBinding and shadow routes exist, but loop semantics are still partial.",
+        "x",
+        "Write bindings now validate the write.shadow desired/reported/effective/ack contract.",
     ),
     "Randomness and determinism explicitly modeled": (
-        " ",
-        "Taint domains exist, but determinism propagation rules are still incomplete.",
+        "x",
+        "Determinism taints are now attached to ephemeral/non-replayable writes as part of the time model.",
     ),
     "Scheduling and out-of-order bugs made harder to express": (
-        " ",
-        "Schedule guard/control-loop scaffolding exists, but semantics are incomplete.",
+        "x",
+        "Control-loop writes carry control-epoch metadata and not-before-next-epoch guards.",
     ),
     "Metadata/payload split with lazy payload opening": (
-        " ",
-        "Envelope split exists, but lazy payload demand is still pending.",
+        "x",
+        "Payload bytes now live outside ClosedEnvelope metadata and are opened lazily from the payload store.",
     ),
     "Query plane modeled as streams": (" ", "Query helpers exist, but the query plane is not yet stream-native."),
     "No ad hoc strings in the typed runtime API": ("x", "Typed refs are already the primary runtime surface."),
