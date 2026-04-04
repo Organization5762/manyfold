@@ -3,6 +3,7 @@
 from ._manyfold_rust import ClockDomainRef as ClockDomainRef
 from ._manyfold_rust import ClosedEnvelope as ClosedEnvelope
 from ._manyfold_rust import ControlLoop as NativeControlLoop
+from ._manyfold_rust import CreditSnapshot as CreditSnapshot
 from ._manyfold_rust import Graph as NativeGraph
 from ._manyfold_rust import Layer as Layer
 from ._manyfold_rust import Mailbox as Mailbox
@@ -42,6 +43,7 @@ __all__ = [
     "ClosedEnvelope",
     "ControlLoop",
     "ControlLoops",
+    "CreditSnapshot",
     "Graph",
     "Layer",
     "Mailbox",

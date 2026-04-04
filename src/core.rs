@@ -476,6 +476,20 @@ pub struct MailboxCore {
     pub egress: RouteRefCore,
     pub descriptor: MailboxDescriptorCore,
     pub queue: VecDeque<ClosedEnvelopeCore>,
+    pub blocked_writes: u64,
+    pub dropped_messages: u64,
+    pub coalesced_messages: u64,
+    pub delivered_messages: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CreditSnapshotCore {
+    pub route_display: String,
+    pub credit_class: String,
+    pub available: u64,
+    pub blocked_senders: u64,
+    pub dropped_messages: u64,
+    pub largest_queue_depth: usize,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -545,8 +559,10 @@ pub enum QueryResultCore {
 pub struct GraphCore {
     pub descriptors: HashMap<RouteRefCore, PortDescriptorCore>,
     pub latest: HashMap<RouteRefCore, ClosedEnvelopeCore>,
+    pub history: HashMap<RouteRefCore, Vec<ClosedEnvelopeCore>>,
     pub edges: Vec<(RouteRefCore, RouteRefCore)>,
     pub bindings: HashMap<String, WriteBindingCore>,
+    pub request_bindings: HashMap<RouteRefCore, WriteBindingCore>,
     pub mailboxes: HashMap<String, MailboxCore>,
     pub loops: HashMap<String, ControlLoopCore>,
 }
@@ -571,6 +587,8 @@ impl GraphCore {
         if let Some(ack) = binding.ack.clone() {
             self.register_port(ack);
         }
+        self.request_bindings
+            .insert(binding.request.clone(), binding.clone());
         self.bindings.insert(name, binding);
     }
 
@@ -584,9 +602,10 @@ impl GraphCore {
         self.register_port(source.clone());
         self.register_port(sink.clone());
         self.edges.push((source.clone(), sink.clone()));
+        self.try_drain_mailbox_for_source(source);
     }
 
-    pub fn write(
+    fn direct_write(
         &mut self,
         route: &RouteRefCore,
         payload: Vec<u8>,
@@ -617,7 +636,201 @@ impl GraphCore {
             },
         };
         self.latest.insert(route.clone(), envelope.clone());
+        self.history
+            .entry(route.clone())
+            .or_default()
+            .push(envelope.clone());
         envelope
+    }
+
+    fn route_credit_snapshot(&self, route: &RouteRefCore) -> CreditSnapshotCore {
+        let descriptor = self
+            .descriptors
+            .get(route)
+            .cloned()
+            .unwrap_or_else(|| PortDescriptorCore::for_route(route));
+        let maybe_mailbox = self
+            .mailboxes
+            .values()
+            .find(|mailbox| mailbox.ingress == *route || mailbox.egress == *route);
+
+        match maybe_mailbox {
+            Some(mailbox) => CreditSnapshotCore {
+                route_display: route.display(),
+                credit_class: descriptor.flow.credit_class,
+                available: mailbox
+                    .descriptor
+                    .capacity
+                    .saturating_sub(mailbox.queue.len()) as u64,
+                blocked_senders: mailbox.blocked_writes,
+                dropped_messages: mailbox.dropped_messages,
+                largest_queue_depth: mailbox.descriptor.capacity.max(mailbox.queue.len()),
+            },
+            None => CreditSnapshotCore {
+                route_display: route.display(),
+                credit_class: descriptor.flow.credit_class,
+                available: u64::MAX,
+                blocked_senders: 0,
+                dropped_messages: 0,
+                largest_queue_depth: self.history.get(route).map_or(0, Vec::len),
+            },
+        }
+    }
+
+    fn try_enqueue_mailbox(
+        &mut self,
+        route: &RouteRefCore,
+        envelope: ClosedEnvelopeCore,
+    ) -> Option<RouteRefCore> {
+        // Mailbox ingress is the explicit async boundary. Once a route resolves to
+        // mailbox ingress, delivery semantics are owned by the mailbox descriptor
+        // rather than by normal edge fanout.
+        let Some(name) = self
+            .mailboxes
+            .iter()
+            .find(|(_, mailbox)| mailbox.ingress == *route)
+            .map(|(name, _)| name.clone())
+        else {
+            return None;
+        };
+
+        let mailbox = self
+            .mailboxes
+            .get_mut(&name)
+            .expect("mailbox existed during lookup");
+        let capacity = mailbox.descriptor.capacity;
+        let full = mailbox.queue.len() >= capacity;
+
+        if full {
+            match mailbox.descriptor.overflow_policy {
+                OverflowPolicy::Block | OverflowPolicy::RejectWrite => {
+                    mailbox.blocked_writes += 1;
+                    return Some(mailbox.egress.clone());
+                }
+                OverflowPolicy::DropNewest
+                | OverflowPolicy::DeadlineDrop
+                | OverflowPolicy::SpillToStore => {
+                    mailbox.dropped_messages += 1;
+                    return Some(mailbox.egress.clone());
+                }
+                OverflowPolicy::DropOldest => {
+                    mailbox.queue.pop_front();
+                    mailbox.dropped_messages += 1;
+                }
+                OverflowPolicy::CoalesceLatest => {
+                    if let Some(last) = mailbox.queue.back_mut() {
+                        *last = envelope;
+                        mailbox.coalesced_messages += 1;
+                        return Some(mailbox.egress.clone());
+                    }
+                }
+            }
+        }
+
+        mailbox.queue.push_back(envelope);
+        Some(mailbox.egress.clone())
+    }
+
+    fn try_drain_mailbox_for_source(&mut self, source: &RouteRefCore) {
+        // Draining is demand-shaped by graph topology: if nothing consumes the
+        // egress route, items stay queued and consume credit.
+        let Some((name, _)) = self
+            .mailboxes
+            .iter()
+            .find(|(_, mailbox)| mailbox.egress == *source)
+            .map(|(name, mailbox)| (name.clone(), mailbox.egress.clone()))
+        else {
+            return;
+        };
+
+        let has_consumer = self.edges.iter().any(|(left, _)| *left == source.clone());
+        if !has_consumer {
+            return;
+        }
+
+        let mut staged = Vec::new();
+        if let Some(mailbox) = self.mailboxes.get_mut(&name) {
+            while let Some(item) = mailbox.queue.pop_front() {
+                mailbox.delivered_messages += 1;
+                staged.push(item);
+            }
+        }
+
+        for item in staged {
+            self.route_envelope(item, false);
+        }
+    }
+
+    fn route_envelope(
+        &mut self,
+        envelope: ClosedEnvelopeCore,
+        fanout: bool,
+    ) -> Vec<ClosedEnvelopeCore> {
+        let route = envelope.route.clone();
+        let mut emitted = vec![envelope.clone()];
+
+        if fanout {
+            // A request write projects into shadow state before any downstream fanout
+            // so desired-state observability exists even when the device has not yet
+            // reported or applied the value.
+            if let Some(binding) = self.request_bindings.get(&route).cloned() {
+                let desired = self.direct_write(
+                    &binding.desired,
+                    envelope.payload_ref.inline_bytes.clone(),
+                    ProducerRefCore {
+                        producer_id: binding.request.display(),
+                        kind: ProducerKind::Reconciler,
+                    },
+                    envelope.control_epoch,
+                );
+                emitted.push(desired);
+            }
+
+            if let Some(egress) = self.try_enqueue_mailbox(&route, envelope.clone()) {
+                self.try_drain_mailbox_for_source(&egress);
+                return emitted;
+            }
+
+            let downstream = self
+                .edges
+                .iter()
+                .filter(|(source, _)| *source == route)
+                .map(|(_, sink)| sink.clone())
+                .collect::<Vec<_>>();
+            for sink in downstream {
+                let forwarded = self.direct_write(
+                    &sink,
+                    envelope.payload_ref.inline_bytes.clone(),
+                    envelope.producer.clone(),
+                    envelope.control_epoch,
+                );
+                emitted.extend(self.route_envelope(forwarded, false));
+            }
+        }
+
+        emitted
+    }
+
+    pub fn write(
+        &mut self,
+        route: &RouteRefCore,
+        payload: Vec<u8>,
+        producer: ProducerRefCore,
+        control_epoch: Option<u64>,
+    ) -> Vec<ClosedEnvelopeCore> {
+        self.register_port(route.clone());
+        let envelope = self.direct_write(route, payload, producer, control_epoch);
+        self.route_envelope(envelope, true)
+    }
+
+    pub fn credit_snapshot(&self) -> Vec<CreditSnapshotCore> {
+        let mut snapshots = self
+            .descriptors
+            .keys()
+            .map(|route| self.route_credit_snapshot(route))
+            .collect::<Vec<_>>();
+        snapshots.sort_by(|left, right| left.route_display.cmp(&right.route_display));
+        snapshots
     }
 
     pub fn query(&self, query: QueryKindCore) -> QueryResultCore {
@@ -633,7 +846,9 @@ impl GraphCore {
                     .cloned()
                     .unwrap_or_else(|| PortDescriptorCore::for_route(&route)),
             ),
-            QueryKindCore::Latest(route) => QueryResultCore::Latest(self.latest.get(&route).cloned()),
+            QueryKindCore::Latest(route) => {
+                QueryResultCore::Latest(self.latest.get(&route).cloned())
+            }
             QueryKindCore::Topology => QueryResultCore::Topology(
                 self.edges
                     .iter()
@@ -645,13 +860,9 @@ impl GraphCore {
                 items.sort_by_key(|item| item.seq_source);
                 QueryResultCore::Trace(items)
             }
-            QueryKindCore::Replay(route) => QueryResultCore::Replay(
-                self.latest
-                    .get(&route)
-                    .cloned()
-                    .into_iter()
-                    .collect::<Vec<_>>(),
-            ),
+            QueryKindCore::Replay(route) => {
+                QueryResultCore::Replay(self.history.get(&route).cloned().unwrap_or_default())
+            }
             QueryKindCore::ValidateGraph => {
                 let mut issues = Vec::new();
                 for (source, sink) in &self.edges {
@@ -661,6 +872,11 @@ impl GraphCore {
                             source.display(),
                             sink.display()
                         ));
+                    }
+                }
+                for (name, mailbox) in &self.mailboxes {
+                    if mailbox.descriptor.capacity == 0 {
+                        issues.push(format!("Mailbox {name} must declare positive capacity"));
                     }
                 }
                 QueryResultCore::ValidateGraph(issues)
@@ -673,7 +889,14 @@ impl GraphCore {
 mod tests {
     use super::*;
 
-    fn sample_route(plane: Plane, layer: Layer, owner: &str, family: &str, stream: &str, variant: Variant) -> RouteRefCore {
+    fn sample_route(
+        plane: Plane,
+        layer: Layer,
+        owner: &str,
+        family: &str,
+        stream: &str,
+        variant: Variant,
+    ) -> RouteRefCore {
         RouteRefCore {
             namespace: NamespaceRefCore {
                 plane,
@@ -692,7 +915,14 @@ mod tests {
 
     #[test]
     fn write_tracks_latest_envelope() {
-        let route = sample_route(Plane::Read, Layer::Logical, "app", "imu", "accel", Variant::Meta);
+        let route = sample_route(
+            Plane::Read,
+            Layer::Logical,
+            "app",
+            "imu",
+            "accel",
+            Variant::Meta,
+        );
         let mut graph = GraphCore::default();
         let producer = ProducerRefCore {
             producer_id: "app".to_string(),
@@ -702,11 +932,11 @@ mod tests {
         let first = graph.write(&route, b"one".to_vec(), producer.clone(), None);
         let second = graph.write(&route, b"two".to_vec(), producer, None);
 
-        assert_eq!(first.seq_source, 1);
-        assert_eq!(second.seq_source, 2);
+        assert_eq!(first[0].seq_source, 1);
+        assert_eq!(second[0].seq_source, 2);
         assert_eq!(
             graph.query(QueryKindCore::Latest(route.clone())),
-            QueryResultCore::Latest(Some(second))
+            QueryResultCore::Latest(Some(second[0].clone()))
         );
     }
 
@@ -739,7 +969,14 @@ mod tests {
 
     #[test]
     fn validate_graph_reports_schema_mismatch() {
-        let left = sample_route(Plane::Read, Layer::Raw, "imu", "imu", "accel", Variant::Meta);
+        let left = sample_route(
+            Plane::Read,
+            Layer::Raw,
+            "imu",
+            "imu",
+            "accel",
+            Variant::Meta,
+        );
         let mut right = sample_route(
             Plane::Read,
             Layer::Logical,
@@ -753,9 +990,125 @@ mod tests {
         let mut graph = GraphCore::default();
         graph.connect(&left, &right);
 
-        let QueryResultCore::ValidateGraph(issues) = graph.query(QueryKindCore::ValidateGraph) else {
+        let QueryResultCore::ValidateGraph(issues) = graph.query(QueryKindCore::ValidateGraph)
+        else {
             panic!("unexpected query result");
         };
         assert_eq!(issues.len(), 1);
+    }
+
+    #[test]
+    fn write_binding_updates_desired_shadow() {
+        let request = sample_route(
+            Plane::Write,
+            Layer::Logical,
+            "counter",
+            "counter",
+            "value",
+            Variant::Request,
+        );
+        let desired = sample_route(
+            Plane::Write,
+            Layer::Shadow,
+            "counter",
+            "counter",
+            "value",
+            Variant::Desired,
+        );
+        let reported = sample_route(
+            Plane::Write,
+            Layer::Shadow,
+            "counter",
+            "counter",
+            "value",
+            Variant::Reported,
+        );
+        let effective = sample_route(
+            Plane::Write,
+            Layer::Shadow,
+            "counter",
+            "counter",
+            "value",
+            Variant::Effective,
+        );
+        let mut graph = GraphCore::default();
+        graph.register_binding(
+            "counter".to_string(),
+            WriteBindingCore {
+                request: request.clone(),
+                desired: desired.clone(),
+                reported,
+                effective,
+                ack: None,
+            },
+        );
+
+        let producer = ProducerRefCore {
+            producer_id: "app".to_string(),
+            kind: ProducerKind::Application,
+        };
+        let emitted = graph.write(&request, b"42".to_vec(), producer, None);
+
+        assert_eq!(emitted.len(), 2);
+        assert_eq!(
+            graph.latest.get(&desired).unwrap().payload_ref.inline_bytes,
+            b"42"
+        );
+    }
+
+    #[test]
+    fn mailbox_blocks_when_full_without_consumer() {
+        let ingress = sample_route(
+            Plane::Write,
+            Layer::Internal,
+            "mailbox",
+            "mailbox",
+            "work",
+            Variant::Request,
+        );
+        let egress = sample_route(
+            Plane::Read,
+            Layer::Internal,
+            "mailbox",
+            "mailbox",
+            "work",
+            Variant::Meta,
+        );
+        let mut graph = GraphCore::default();
+        graph.register_mailbox(
+            "work".to_string(),
+            MailboxCore {
+                ingress: ingress.clone(),
+                egress: egress.clone(),
+                descriptor: MailboxDescriptorCore {
+                    delivery_mode: DeliveryMode::MpscSerial,
+                    ordering_policy: OrderingPolicy::Fifo,
+                    overflow_policy: OverflowPolicy::Block,
+                    capacity: 1,
+                },
+                queue: VecDeque::new(),
+                blocked_writes: 0,
+                dropped_messages: 0,
+                coalesced_messages: 0,
+                delivered_messages: 0,
+            },
+        );
+        let producer = ProducerRefCore {
+            producer_id: "p1".to_string(),
+            kind: ProducerKind::Application,
+        };
+
+        let first = graph.write(&ingress, b"one".to_vec(), producer.clone(), None);
+        let second = graph.write(&ingress, b"two".to_vec(), producer, None);
+
+        assert_eq!(first.len(), 1);
+        assert_eq!(second.len(), 1);
+        let snapshot = graph.credit_snapshot();
+        let ingress_snapshot = snapshot
+            .into_iter()
+            .find(|item| item.route_display == ingress.display())
+            .unwrap();
+        assert_eq!(ingress_snapshot.available, 0);
+        assert_eq!(ingress_snapshot.blocked_senders, 1);
     }
 }

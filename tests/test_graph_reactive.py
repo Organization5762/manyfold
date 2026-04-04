@@ -215,6 +215,19 @@ def install_manyfold_rust_stub() -> None:
         payload_ref: PayloadRef
         seq_source: int
 
+    @dataclass
+    class ProducerRef:
+        producer_id: str
+        kind: str = "application"
+
+    @dataclass
+    class PortDescriptor:
+        route_display: str
+        human_description: str = ""
+        payload_open_policy: str = "lazy"
+        backpressure_policy: str = "propagate"
+        debug_enabled: bool = True
+
     class ReadablePort:
         def __init__(self, graph, route):
             self._graph = graph
@@ -231,7 +244,7 @@ def install_manyfold_rust_stub() -> None:
             return self._graph._latest.get(self._route.display())
 
         def describe(self):
-            return {"route_display": self._route.display()}
+            return PortDescriptor(route_display=self._route.display())
 
     class WritablePort:
         def __init__(self, graph, route):
@@ -255,7 +268,7 @@ def install_manyfold_rust_stub() -> None:
             return envelope
 
         def describe(self):
-            return {"route_display": self._route.display()}
+            return PortDescriptor(route_display=self._route.display())
 
     @dataclass
     class WriteBinding:
@@ -264,6 +277,49 @@ def install_manyfold_rust_stub() -> None:
         reported: RouteRef
         effective: RouteRef
         ack: Optional[RouteRef] = None
+
+    @dataclass
+    class CreditSnapshot:
+        route_display: str
+        credit_class: str = "default"
+        available: int = 2**63 - 1
+        blocked_senders: int = 0
+        dropped_messages: int = 0
+
+    @dataclass
+    class MailboxDescriptor:
+        capacity: int = 128
+        delivery_mode: str = "mpsc_serial"
+        ordering_policy: str = "fifo"
+        overflow_policy: str = "block"
+
+    class Mailbox:
+        def __init__(self, name, descriptor=None):
+            self._name = name
+            self._descriptor = descriptor or MailboxDescriptor()
+
+        @property
+        def ingress(self):
+            return self
+
+        @property
+        def egress(self):
+            return self
+
+        def name(self):
+            return self._name
+
+        def depth(self):
+            return 0
+
+        def available_credit(self):
+            return self._descriptor.capacity
+
+        def blocked_writes(self):
+            return 0
+
+        def dropped_messages(self):
+            return 0
 
     @dataclass
     class ControlLoop:
@@ -277,6 +333,7 @@ def install_manyfold_rust_stub() -> None:
             self._latest = {}
             self._sequence = {}
             self._loops = {}
+            self._bindings = {}
 
         def register_port(self, route):
             return route
@@ -288,10 +345,24 @@ def install_manyfold_rust_stub() -> None:
             return WritablePort(self, route)
 
         def register_binding(self, name, binding):
+            self._bindings[binding.request.display()] = binding
             return binding
 
+        def emit(self, route, payload, producer=None, control_epoch=None):
+            emitted = [self.writable_port(route).write(payload, producer=producer, control_epoch=control_epoch)]
+            binding = self._bindings.get(route.display())
+            if binding is not None:
+                emitted.append(
+                    self.writable_port(binding.desired).write(
+                        payload,
+                        producer=producer,
+                        control_epoch=control_epoch,
+                    )
+                )
+            return emitted
+
         def mailbox(self, name, descriptor=None):
-            return {"name": name, "descriptor": descriptor}
+            return Mailbox(name, descriptor)
 
         def connect(self, source, sink):
             return None
@@ -319,7 +390,7 @@ def install_manyfold_rust_stub() -> None:
             return []
 
         def describe_route(self, route):
-            return {"route_display": route.display()}
+            return PortDescriptor(route_display=route.display())
 
         def latest(self, route):
             return self._latest.get(route.display())
@@ -330,12 +401,20 @@ def install_manyfold_rust_stub() -> None:
         def validate_graph(self):
             return []
 
+        def credit_snapshot(self):
+            return [CreditSnapshot(route_display=route) for route in self._latest]
+
     rust_module.ControlLoop = ControlLoop
     rust_module.ClosedEnvelope = ClosedEnvelope
     rust_module.Graph = Graph
+    rust_module.CreditSnapshot = CreditSnapshot
     rust_module.Layer = Layer
+    rust_module.Mailbox = Mailbox
+    rust_module.MailboxDescriptor = MailboxDescriptor
     rust_module.NamespaceRef = NamespaceRef
     rust_module.Plane = Plane
+    rust_module.PortDescriptor = PortDescriptor
+    rust_module.ProducerRef = ProducerRef
     rust_module.ReadablePort = ReadablePort
     rust_module.RouteRef = RouteRef
     rust_module.SchemaRef = SchemaRef
@@ -436,6 +515,93 @@ class GraphReactiveTests(unittest.TestCase):
         self.assertEqual(mirrored, [b"ONE", b"TWO"])
         self.assertEqual(latest.value, b"TWO")
         self.assertEqual(latest.closed.seq_source, 2)
+
+    def test_publish_write_binding_updates_desired_shadow(self) -> None:
+        graph_module = load_graph_module()
+        binding = graph_module.WriteBindings.logical(
+            owner=graph_module.OwnerName("counter"),
+            family=graph_module.StreamFamily("counter"),
+            stream=graph_module.StreamName("value"),
+            schema=graph_module.Schema.bytes("CounterValue"),
+        )
+        graph = graph_module.Graph()
+
+        emitted = graph.publish(binding, b"42")
+        desired = graph.latest(binding.desired)
+
+        self.assertEqual(emitted.payload_ref.inline_bytes, b"42")
+        self.assertIsNotNone(desired)
+        assert desired is not None
+        self.assertEqual(desired.payload_ref.inline_bytes, b"42")
+
+    def test_stateful_window_join_and_materialize_surfaces_exist(self) -> None:
+        graph_module = load_graph_module()
+        left = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("sensor"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("left"),
+            variant=graph_module.Variant.Meta,
+            schema=graph_module.Schema.bytes("Left"),
+        )
+        right = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("sensor"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("right"),
+            variant=graph_module.Variant.Meta,
+            schema=graph_module.Schema.bytes("Right"),
+        )
+        state_route = graph_module.route(
+            plane=graph_module.Plane.State,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("sensor"),
+            family=graph_module.StreamFamily("state"),
+            stream=graph_module.StreamName("sum"),
+            variant=graph_module.Variant.State,
+            schema=graph_module.Schema.bytes("State"),
+        )
+        output = graph_module.route(
+            plane=graph_module.Plane.Write,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("sensor"),
+            family=graph_module.StreamFamily("calc"),
+            stream=graph_module.StreamName("sum"),
+            variant=graph_module.Variant.Request,
+            schema=graph_module.Schema.bytes("Output"),
+        )
+        graph = graph_module.Graph()
+
+        windows = []
+        joined = []
+        graph.window(left, size=2).subscribe(lambda items: windows.append(items))
+        graph.join_latest(left, right, combine=lambda l, r: l + b":" + r).subscribe(
+            lambda item: joined.append(item)
+        )
+        graph.stateful_map(
+            left,
+            initial_state=0,
+            step=lambda state, payload: (state + 1, payload + str(state + 1).encode()),
+            output=output,
+        )
+        graph.materialize(output, state_route=state_route)
+
+        graph.publish(left, b"a")
+        graph.publish(right, b"b")
+        graph.publish(left, b"c")
+
+        latest_state = graph.latest(state_route)
+        latest_output = graph.latest(output)
+
+        self.assertEqual(windows, [[b"a"], [b"a", b"c"]])
+        self.assertEqual(joined, [b"a:b", b"c:b"])
+        self.assertIsNotNone(latest_output)
+        self.assertIsNotNone(latest_state)
+        assert latest_output is not None and latest_state is not None
+        self.assertEqual(latest_output.value, b"c2")
+        self.assertEqual(latest_state.value, b"c2")
 
 
 if __name__ == "__main__":
