@@ -24,6 +24,11 @@ from ._manyfold_rust import TaintMark as TaintMark
 from ._manyfold_rust import Variant as Variant
 from ._manyfold_rust import WritablePort as WritablePort
 from ._manyfold_rust import WriteBinding as NativeWriteBinding
+from .embedded import EmbeddedBulkSensor as EmbeddedBulkSensor
+from .embedded import EmbeddedDeviceProfile as EmbeddedDeviceProfile
+from .embedded import EmbeddedRuntimeRules as EmbeddedRuntimeRules
+from .embedded import EmbeddedScalarSensor as EmbeddedScalarSensor
+from .embedded import FirmwareAgentProfile as FirmwareAgentProfile
 from ._manyfold_rust import bridge_version as bridge_version
 from .graph import ControlLoops as ControlLoops
 from .graph import Graph as Graph
@@ -36,12 +41,21 @@ from .primitives import StreamName as StreamName
 from .primitives import TypedEnvelope as TypedEnvelope
 from .primitives import TypedRoute as TypedRoute
 from .primitives import route as route
+from .reference_examples import REFERENCE_EXAMPLE_SUITE as REFERENCE_EXAMPLE_SUITE
+from .reference_examples import ReferenceExample as ReferenceExample
+from .reference_examples import implemented_reference_examples as implemented_reference_examples
+from .reference_examples import reference_example_suite as reference_example_suite
 
 __all__ = [
     "ClockDomainRef",
     "ClosedEnvelope",
     "ControlLoop",
     "ControlLoops",
+    "EmbeddedBulkSensor",
+    "EmbeddedDeviceProfile",
+    "EmbeddedRuntimeRules",
+    "EmbeddedScalarSensor",
+    "FirmwareAgentProfile",
     "Graph",
     "Layer",
     "Mailbox",
@@ -74,7 +88,11 @@ __all__ = [
     "WritablePort",
     "WriteBinding",
     "WriteBindings",
+    "REFERENCE_EXAMPLE_SUITE",
+    "ReferenceExample",
     "bridge_version",
+    "implemented_reference_examples",
+    "reference_example_suite",
     "route",
 ]
 
