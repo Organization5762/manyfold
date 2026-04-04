@@ -1,22 +1,27 @@
 # manyfold
 
-## PyPI publishing
+This repository now contains a first-pass implementation scaffold for the
+`docs/rfc/wiregraph_rfc_rev2.md` Manyfold RFC.
 
-This repository includes a GitHub Actions workflow at
-`.github/workflows/pypi.yml` that builds the project and publishes it to PyPI
-when a GitHub release is published. The same workflow can also be run manually
-with `workflow_dispatch`.
+## Layout
 
-The workflow uses PyPI trusted publishing via GitHub OIDC. Before the publish
-job can succeed, set up the following:
+- `pyproject.toml`: maturin/PyO3 Python packaging entrypoint
+- `Cargo.toml`: Rust crate for the native core and Python extension
+- `src/`: Rust in-memory runtime, typed refs, descriptors, envelopes, mailboxes, queries, and control-loop stubs
+- `python/manyfold/`: Python-facing ergonomic wrapper layer
+- `proto/manyfold/v1/wiregraph.proto`: extracted protobuf schema scaffold from the RFC appendix
 
-1. Add Python packaging metadata to the repository such as `pyproject.toml` or
-   `setup.py`, so `python -m build` can produce files in `dist/`.
-2. Create the project on PyPI.
-3. In PyPI, add this GitHub repository as a trusted publisher for the workflow
-   file `.github/workflows/pypi.yml`.
-4. In GitHub, create an environment named `pypi`. Add protection rules there if
-   you want manual approval before publishing.
+## Status
 
-Once those prerequisites are in place, publishing a GitHub release will trigger
-the workflow and upload the built distributions to PyPI.
+This is an RFC stub implementation, not a production runtime. The current code focuses on:
+
+- typed namespace/route/schema identity objects,
+- explicit `ReadablePort`, `WritablePort`, `WriteBinding`, and `Mailbox` surfaces,
+- descriptor and envelope scaffolding,
+- catalog/latest/topology/validation query helpers,
+- a minimal `ControlLoop` epoch stub,
+- Python bindings via PyO3 in the same layout as the referenced project style.
+
+## Verification
+
+Use `cargo test` for native verification.

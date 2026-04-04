@@ -1,0 +1,75 @@
+syntax = "proto3";
+
+package manyfold.v1;
+
+message NamespaceRef {
+  bytes namespace_id = 1;
+
+  enum Plane {
+    PLANE_UNSPECIFIED = 0;
+    PLANE_READ = 1;
+    PLANE_WRITE = 2;
+    PLANE_STATE = 3;
+    PLANE_QUERY = 4;
+    PLANE_DEBUG = 5;
+  }
+
+  enum Layer {
+    LAYER_UNSPECIFIED = 0;
+    LAYER_RAW = 1;
+    LAYER_LOGICAL = 2;
+    LAYER_SHADOW = 3;
+    LAYER_BULK = 4;
+    LAYER_INTERNAL = 5;
+    LAYER_EPHEMERAL = 6;
+  }
+
+  Plane plane = 2;
+  Layer layer = 3;
+}
+
+message SchemaRef {
+  bytes schema_id = 1;
+  uint32 version = 2;
+}
+
+message RouteRef {
+  NamespaceRef namespace = 1;
+  bytes route_id = 2;
+  bytes family_id = 3;
+  bytes stream_id = 4;
+
+  enum Variant {
+    VARIANT_UNSPECIFIED = 0;
+    VARIANT_META = 1;
+    VARIANT_PAYLOAD = 2;
+    VARIANT_REQUEST = 3;
+    VARIANT_DESIRED = 4;
+    VARIANT_REPORTED = 5;
+    VARIANT_EFFECTIVE = 6;
+    VARIANT_ACK = 7;
+    VARIANT_STATE = 8;
+    VARIANT_QUERY_REQUEST = 9;
+    VARIANT_QUERY_RESPONSE = 10;
+    VARIANT_EVENT = 11;
+    VARIANT_HEALTH = 12;
+  }
+
+  Variant variant = 5;
+  SchemaRef schema = 6;
+}
+
+message PayloadRef {
+  bytes payload_id = 1;
+  uint64 logical_length_bytes = 2;
+  bytes codec_id = 3;
+  bytes digest = 4;
+  bytes inline_bytes = 5;
+}
+
+message ClosedEnvelope {
+  RouteRef route = 1;
+  uint64 seq_source = 2;
+  optional uint64 control_epoch = 3;
+  PayloadRef payload_ref = 4;
+}
