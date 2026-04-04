@@ -286,6 +286,10 @@ class Variant:
     Effective: Variant
     Ack: Variant
     State: Variant
+    QueryRequest: Variant
+    QueryResponse: Variant
+    Event: Variant
+    Health: Variant
     @property
     def value(self) -> builtins.str: ...
     def __eq__(self, other: builtins.object) -> builtins.bool: ...

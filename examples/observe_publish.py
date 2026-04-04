@@ -11,7 +11,7 @@ from manyfold import Schema
 from manyfold import StreamFamily
 from manyfold import StreamName
 from manyfold import Variant
-from manyfold.graph import route
+from manyfold import route
 
 
 class ObservePublishExampleResult(TypedDict):
@@ -21,6 +21,7 @@ class ObservePublishExampleResult(TypedDict):
 
 
 def run_example() -> ObservePublishExampleResult:
+    """Observe a route, then publish a second value and inspect the replay."""
     graph = Graph()
     accel_route = route(
         plane=Plane.Read,

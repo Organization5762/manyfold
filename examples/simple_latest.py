@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from typing import TypedDict
 
-import reactivex as rx
-
 from manyfold import Graph
 from manyfold import Layer
 from manyfold import OwnerName
@@ -15,30 +13,27 @@ from manyfold import Variant
 from manyfold import route
 
 
-class PipeRouteExampleResult(TypedDict):
+class SimpleLatestExampleResult(TypedDict):
     latest_payload: bytes
     latest_seq: int
 
 
-def run_example() -> PipeRouteExampleResult:
-    """Pipe an Rx stream into a writable route and inspect the latest value."""
+def run_example() -> SimpleLatestExampleResult:
+    """Smallest end-to-end example: publish one value, then read it back."""
     graph = Graph()
-    command_route = route(
-        plane=Plane.Write,
+    route_ref = route(
+        plane=Plane.Read,
         layer=Layer.Logical,
-        owner=OwnerName("motor"),
-        family=StreamFamily("speed"),
-        stream=StreamName("command"),
-        variant=Variant.Request,
-        schema=Schema.bytes("SpeedCommand"),
+        owner=OwnerName("demo"),
+        family=StreamFamily("example"),
+        stream=StreamName("latest"),
+        variant=Variant.Meta,
+        schema=Schema.bytes("DemoLatest"),
     )
 
-    graph.pipe(rx.from_iterable([b"slow", b"fast"]), command_route)
-
-    latest = graph.latest(command_route)
+    graph.publish(route_ref, b"hello")
+    latest = graph.latest(route_ref)
     assert latest is not None
-    assert latest.value == b"fast"
-    assert latest.closed.seq_source == 2
 
     return {
         "latest_payload": latest.value,

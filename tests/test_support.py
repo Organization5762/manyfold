@@ -201,6 +201,10 @@ def install_manyfold_rust_stub() -> None:
         Effective = EnumValue("effective")
         Ack = EnumValue("ack")
         State = EnumValue("state")
+        QueryRequest = EnumValue("query_request")
+        QueryResponse = EnumValue("query_response")
+        Event = EnumValue("event")
+        Health = EnumValue("health")
 
     class ProducerKind:
         Device = EnumValue("device")

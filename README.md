@@ -29,6 +29,15 @@ This is an RFC stub implementation, not a production runtime. The current code f
 - a named reference example suite that tracks the RFC examples and runs the supported subset,
 - Python bindings via PyO3 in the same layout as the referenced project style.
 
+## API Design Rules
+
+The repository follows four implementation rules:
+
+- write both very small examples and deeper behavioral tests;
+- prefer extensive docstrings, targeted comments for non-obvious logic, and README-level guidance;
+- add types aggressively and shape APIs around understandable objects rather than stringly calls;
+- keep the top-level `manyfold` namespace narrow, with advanced helpers living under `manyfold.graph` and helper internals prefixed with `_`.
+
 The intended Python wrapper surface is deliberately narrow:
 
 - build a `TypedRoute` with `OwnerName`, `StreamFamily`, `StreamName`, and `Schema`
@@ -52,6 +61,9 @@ the step is installed and started.
 
 The `examples/` directory demonstrates these calls directly, and the examples are
 validated by the regular `unittest` run so they do not drift away from the API.
+`examples/simple_latest.py` is the smallest publish/read-back example; more
+involved query, join, transport, mesh, and security coverage stays in
+`tests/test_graph_reactive.py`.
 
 ## Best Practices
 

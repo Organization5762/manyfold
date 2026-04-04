@@ -6,6 +6,12 @@ from test_support import load_example_module
 
 
 class ExampleTests(unittest.TestCase):
+    def test_simple_latest_example(self) -> None:
+        result = load_example_module("simple_latest").run_example()
+
+        self.assertEqual(result["latest_payload"], b"hello")
+        self.assertEqual(result["latest_seq"], 1)
+
     def test_observe_publish_example(self) -> None:
         result = load_example_module("observe_publish").run_example()
 
