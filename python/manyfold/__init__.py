@@ -28,6 +28,14 @@ from ._manyfold_rust import bridge_version as bridge_version
 from .graph import ControlLoops as ControlLoops
 from .graph import Graph as Graph
 from .graph import WriteBindings as WriteBindings
+from .primitives import OwnerName as OwnerName
+from .primitives import ReadThenWriteNextEpochStep as ReadThenWriteNextEpochStep
+from .primitives import Schema as Schema
+from .primitives import StreamFamily as StreamFamily
+from .primitives import StreamName as StreamName
+from .primitives import TypedEnvelope as TypedEnvelope
+from .primitives import TypedRoute as TypedRoute
+from .primitives import route as route
 
 __all__ = [
     "ClockDomainRef",
@@ -43,23 +51,31 @@ __all__ = [
     "NativeGraph",
     "NativeWriteBinding",
     "OpenedEnvelope",
+    "OwnerName",
     "PayloadRef",
     "Plane",
     "PortDescriptor",
     "ProducerKind",
     "ProducerRef",
     "ReadablePort",
+    "ReadThenWriteNextEpochStep",
     "RouteRef",
     "RuntimeRef",
     "ScheduleGuard",
     "SchemaRef",
+    "Schema",
+    "StreamFamily",
+    "StreamName",
     "TaintDomain",
     "TaintMark",
+    "TypedEnvelope",
+    "TypedRoute",
     "Variant",
     "WritablePort",
     "WriteBinding",
     "WriteBindings",
     "bridge_version",
+    "route",
 ]
 
 WriteBinding = NativeWriteBinding

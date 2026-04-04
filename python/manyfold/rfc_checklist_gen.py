@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import argparse
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
+from typing import Iterator
+from typing import TypeVar
 
 import reactivex as rx
 from reactivex import operators as ops
@@ -34,7 +37,7 @@ CHECKLIST_STATUS = {
     "21": (" ", "Embedded device profile rules are not implemented yet."),
     "22": ("x", "The public API already prefers typed refs over ad hoc string identities."),
     "23": (" ", "The reference example suite has not been added yet."),
-    "24": (" ", "Python wrapper ergonomics exist, but Rx-style composition still needs implementation."),
+    "24": ("x", "Python wrapper ergonomics now include Rx-style observe/publish composition helpers."),
 }
 
 APPENDIX_STATUS = {
@@ -77,6 +80,9 @@ APPENDIX_STATUS = {
 }
 
 
+T = TypeVar("T")
+
+
 @dataclass(frozen=True)
 class SectionStatus:
     number: str
@@ -92,10 +98,10 @@ class AppendixStatus:
     detail: str
 
 
-def _collect(observable) -> list[object]:
-    items: list[object] = []
+def _collect(observable) -> Iterator[T]:
+    items: deque[T] = deque()
     observable.subscribe(items.append)
-    return items
+    return iter(items)
 
 
 def parse_rfc_sections(rfc_path: Path = RFC_PATH) -> tuple[list[SectionStatus], list[AppendixStatus]]:

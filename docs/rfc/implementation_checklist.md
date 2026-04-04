@@ -21,7 +21,7 @@ Generated from `docs/rfc/wiregraph_rfc_rev2.md` by `manyfold-rfc-checklist`.
 - [ ] 21. Embedded device profile (Embedded device profile rules are not implemented yet.)
 - [x] 22. API design constraints (The public API already prefers typed refs over ad hoc string identities.)
 - [ ] 23. Reference example suite (The reference example suite has not been added yet.)
-- [ ] 24. Recommended Python-facing SDK shape (Python wrapper ergonomics exist, but Rx-style composition still needs implementation.)
+- [x] 24. Recommended Python-facing SDK shape (Python wrapper ergonomics now include Rx-style observe/publish composition helpers.)
 
 ## Appendix F Acceptance Criteria
 - [ ] Common framework for flashed devices over serial, BLE, radio, USB, shared memory, and IP links (Transport scaffolding is not implemented yet.)
