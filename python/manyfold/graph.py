@@ -1,4 +1,10 @@
-"""High-level Python helpers matching the RFC examples."""
+"""High-level Python helpers matching the RFC examples.
+
+The top-level :mod:`manyfold` package intentionally exposes only the narrow,
+day-to-day API. This module contains those primary wrappers plus the more
+specialized planning, query, transport, mesh, and security helpers added for
+RFC checklist coverage.
+"""
 
 from __future__ import annotations
 
@@ -78,6 +84,12 @@ class ObservableLike(Protocol[T]):
 
 @dataclass(frozen=True)
 class JoinInput:
+    """Describe one side of a planned join.
+
+    The planner keeps these requirements explicit so it can reject illegal
+    cross-partition joins instead of quietly inventing hidden repartition work.
+    """
+
     route: RouteLike
     partition_key_semantics: str
     ordering_guarantee: str = "fifo"
@@ -91,6 +103,8 @@ class JoinInput:
 
 @dataclass(frozen=True)
 class JoinPlan:
+    """Planner output for a join registered in the graph."""
+
     name: str
     join_class: str
     left: RouteRef
@@ -104,6 +118,8 @@ class JoinPlan:
 
 @dataclass(frozen=True)
 class Middleware:
+    """Declare middleware attached to a route, edge, or namespace."""
+
     name: str
     kind: str
     attachment_scope: str
@@ -116,6 +132,8 @@ class Middleware:
 
 @dataclass(frozen=True)
 class LinkCapabilities:
+    """Transport/link semantics the planner may rely on."""
+
     ordered: bool = False
     reliable: bool = False
     replayable: bool = False
@@ -129,6 +147,8 @@ class LinkCapabilities:
 
 @dataclass(frozen=True)
 class Link:
+    """A named transport adapter plus its advertised capabilities."""
+
     name: str
     link_class: str
     capabilities: LinkCapabilities = field(default_factory=LinkCapabilities)
@@ -136,6 +156,12 @@ class Link:
 
 @dataclass(frozen=True)
 class MeshPrimitive:
+    """Explicit mesh topology building block.
+
+    These are graph-visible nodes rather than hidden wiring so topology queries
+    and debug streams can explain what the runtime is doing.
+    """
+
     name: str
     kind: str
     sources: tuple[RouteLike, ...]
@@ -149,6 +175,8 @@ class MeshPrimitive:
 
 @dataclass(frozen=True)
 class CapabilityGrant:
+    """Per-principal access policy for one route."""
+
     principal_id: str
     route: RouteLike
     metadata_read: bool = True
@@ -161,6 +189,8 @@ class CapabilityGrant:
 
 @dataclass(frozen=True)
 class QueryRequest:
+    """Typed query-plane request description."""
+
     command: str
     route: RouteLike | None = None
     join_name: str | None = None
@@ -170,6 +200,8 @@ class QueryRequest:
 
 @dataclass(frozen=True)
 class QueryResponse:
+    """Typed query-plane response description."""
+
     command: str
     correlation_id: str
     items: tuple[str, ...]
@@ -177,6 +209,8 @@ class QueryResponse:
 
 @dataclass(frozen=True)
 class DebugEvent:
+    """High-level debug/audit event mirrored onto a debug route."""
+
     event_type: str
     detail: str
     route_display: str | None
@@ -185,6 +219,8 @@ class DebugEvent:
 
 @dataclass(frozen=True)
 class QueryServiceRoutes:
+    """The well-known request/response routes for one query service owner."""
+
     request: RouteRef
     response: RouteRef
 
@@ -395,9 +431,9 @@ class _TrackedSubscription:
 
 
 class Graph:
-    """Narrow Python-facing Manyfold API.
+    """Python-facing Manyfold API.
 
-    Intended public calls:
+    Primary public calls:
     - observe(route_ref)
     - latest(route_ref)
     - describe_route(route_ref)
@@ -406,6 +442,8 @@ class Graph:
     - run_control_loop(name)
     - install(control_loop)
     - connect(source, sink)
+    More specialized planning and inspection helpers also live here, but they
+    stay off the top-level package namespace so the primary API remains small.
     """
 
     def __init__(self) -> None:
@@ -447,6 +485,7 @@ class Graph:
         *,
         producer_id: str | None = None,
     ) -> ClosedEnvelope:
+        """Persist envelope-derived bookkeeping before notifying observers."""
         key = self._route_key(route_ref)
         self._history.setdefault(key, []).append(envelope)
         if producer_id is not None:
@@ -473,6 +512,7 @@ class Graph:
         variant: Variant,
         schema_id: str,
     ) -> RouteRef:
+        """Construct graph-owned internal routes for query/debug/state plumbing."""
         return RouteRef(
             namespace=NamespaceRef(plane=plane, layer=layer, owner=owner),
             family=family,
@@ -482,6 +522,7 @@ class Graph:
         )
 
     def _debug_route(self, event_type: str) -> RouteRef:
+        """Return the well-known route backing one debug event stream."""
         if event_type not in self._debug_routes:
             self._debug_routes[event_type] = self.register_port(
                 self._make_internal_route(
@@ -497,6 +538,7 @@ class Graph:
         return self._debug_routes[event_type]
 
     def _emit_debug_event(self, event_type: str, detail: str, route_ref: RouteLike | None = None) -> DebugEvent:
+        """Emit a debug event on both the in-memory audit log and a debug route."""
         debug_route = self._debug_route(event_type)
         payload = json.dumps(
             {
@@ -522,6 +564,7 @@ class Graph:
         return f"query-{self._query_sequence}"
 
     def _authorize(self, principal_id: str | None, route_ref: RouteLike | None, capability: str) -> None:
+        """Enforce per-route capability checks for third-party access."""
         if principal_id in (None, "", "python", "internal"):
             return
         if capability == "graph_validation":
@@ -541,6 +584,7 @@ class Graph:
             raise PermissionError(f"{principal_id} lacks {capability} capability for {key[1]}")
 
     def _execute_query(self, request: QueryRequest) -> tuple[str, ...]:
+        """Resolve query commands against the current in-memory graph state."""
         command = request.command.lower()
         route_ref = None if request.route is None else self._coerce_route_ref(request.route)
         if command == "catalog":
@@ -620,6 +664,7 @@ class Graph:
         raise ValueError(f"unsupported query command: {request.command}")
 
     def register_port(self, route_ref: RouteLike) -> RouteRef:
+        """Register a route in the native graph and return its concrete ref."""
         return self._graph.register_port(self._coerce_route_ref(route_ref))
 
     def _read_port(self, route_ref: RouteLike) -> ReactiveReadablePort:
@@ -639,6 +684,11 @@ class Graph:
     def observe(self, route_ref: RouteRef, *, replay_latest: bool = True) -> Observable[ClosedEnvelope]: ...
 
     def observe(self, route_ref: RouteLike, *, replay_latest: bool = True) -> Observable[Any]:
+        """Observe route updates as an Rx stream.
+
+        Typed routes decode payloads before delivery; raw route refs expose the
+        underlying closed envelopes.
+        """
         native_route = self._coerce_route_ref(route_ref)
 
         def subscribe(
@@ -653,6 +703,8 @@ class Graph:
                     observer.on_next(latest)
 
             if isinstance(route_ref, TypedRoute):
+                # Typed observers see decoded values, but the graph internally
+                # continues to fan out closed envelopes on one shared subject.
                 class _Observer:
                     def on_next(_, envelope) -> None:
                         observer.on_next(self._decode_envelope(route_ref, envelope))
@@ -678,6 +730,7 @@ class Graph:
         producer: ProducerRef | None = None,
         control_epoch: int | None = None,
     ) -> SubscriptionLike:
+        """Bind an observable source into a route."""
         if isinstance(target, TypedRoute):
             class _Observer:
                 def on_next(_, value: TIn) -> None:
@@ -720,6 +773,7 @@ class Graph:
         producer: ProducerRef | None = None,
         control_epoch: int | None = None,
     ) -> TypedEnvelope[Any] | ClosedEnvelope:
+        """Write one payload to a route and return the resulting envelope."""
         if isinstance(target, TypedRoute):
             encoded = target.schema.encode(payload)
             envelope = self._write_port(target).write(encoded, producer=producer, control_epoch=control_epoch)  # type: ignore[union-attr]
@@ -734,9 +788,11 @@ class Graph:
         name: str,
         descriptor: NativeMailboxDescriptor | None = None,
     ) -> NativeMailbox:
+        """Create or return a named mailbox from the native graph."""
         return self._graph.mailbox(name, descriptor)
 
     def connect(self, source: RouteLike, sink: RouteLike) -> None:
+        """Connect two routes in topology metadata."""
         self._graph.connect(self._coerce_route_ref(source), self._coerce_route_ref(sink))
         self._emit_debug_event(
             "topology",
@@ -745,6 +801,7 @@ class Graph:
         )
 
     def install(self, control_loop: NativeControlLoop | ReadThenWriteNextEpochStep[Any, Any]) -> None:
+        """Install a native control loop or a shared-stream Python step."""
         if isinstance(control_loop, ReadThenWriteNextEpochStep):
             subscription = control_loop.write.subscribe(
                 lambda value: self.publish(control_loop.output, value)
@@ -758,15 +815,18 @@ class Graph:
         return self._graph.tick_control_loop(name)
 
     def run_control_loop(self, name: str) -> ClosedEnvelope:
+        """Advance one installed control loop once."""
         envelope = self._tick_control_loop(name)
         self._record_envelope(envelope.route, envelope, producer_id=name)
         self._emit_debug_event("scheduler", f"ticked control loop {name}", envelope.route)
         return envelope
 
     def catalog(self) -> Iterator[RouteRef]:
+        """Return all registered routes."""
         return iter(tuple(self._graph.catalog()))
 
     def describe_route(self, route_ref: RouteLike) -> PortDescriptor:
+        """Return the descriptor for one route."""
         return self._graph.describe_route(self._coerce_route_ref(route_ref))
 
     @overload
@@ -776,6 +836,7 @@ class Graph:
     def latest(self, route_ref: RouteRef) -> ClosedEnvelope | None: ...
 
     def latest(self, route_ref: RouteLike) -> TypedEnvelope[Any] | ClosedEnvelope | None:
+        """Return the latest envelope seen for one route."""
         latest = self._graph.latest(self._coerce_route_ref(route_ref))
         if latest is None:
             return None
@@ -784,25 +845,32 @@ class Graph:
         return latest
 
     def topology(self) -> Iterator[tuple[str, str]]:
+        """Return graph edges as `(source, sink)` display pairs."""
         return iter(tuple(self._graph.topology()))
 
     def validate_graph(self) -> Iterator[str]:
+        """Return graph validation issues detected by the native layer."""
         return iter(tuple(self._graph.validate_graph()))
 
     def replay(self, route_ref: RouteLike) -> Iterator[ClosedEnvelope]:
+        """Return the retained in-memory history for one route."""
         return iter(tuple(self._history.get(self._route_key(route_ref), ())))
 
     def subscribers(self, route_ref: RouteLike) -> int:
+        """Return the number of active observers on a route."""
         return self._subscriber_count.get(self._route_key(route_ref), 0)
 
     def writers(self, route_ref: RouteLike) -> Iterator[str]:
+        """Return distinct producer ids that have written to a route."""
         return iter(tuple(sorted(self._writers.get(self._route_key(route_ref), ()))))
 
     def export_route(self, route_ref: RouteLike, *, visibility: str = "exported") -> None:
+        """Mark a route as visible to third-party metadata readers."""
         self.register_port(route_ref)
         self._route_visibility[self._route_key(route_ref)] = visibility
 
     def grant_access(self, grant: CapabilityGrant) -> CapabilityGrant:
+        """Register per-principal access control for one route."""
         route_ref = self._coerce_route_ref(grant.route)
         normalized = CapabilityGrant(
             principal_id=grant.principal_id,
@@ -818,6 +886,11 @@ class Graph:
         return normalized
 
     def plan_join(self, name: str, left: JoinInput, right: JoinInput) -> JoinPlan:
+        """Plan a join and reject illegal cross-partition cases.
+
+        The method makes repartition boundaries explicit by registering visible
+        internal routes that also appear in topology and debug output.
+        """
         left_route = self.register_port(left.route)
         right_route = self.register_port(right.route)
         if left.clock_domain != right.clock_domain:
@@ -931,9 +1004,11 @@ class Graph:
         return plan
 
     def explain_join(self, name: str) -> JoinPlan:
+        """Return a previously planned join."""
         return self._join_plans[name]
 
     def add_middleware(self, middleware: Middleware) -> Middleware:
+        """Register middleware after enforcing RFC preservation rules."""
         if not middleware.preserves_envelope_identity:
             raise ValueError("middleware must preserve envelope identity unless explicitly reframing")
         if not middleware.updates_taints:
@@ -945,17 +1020,21 @@ class Graph:
         return middleware
 
     def middleware(self) -> Iterator[Middleware]:
+        """Iterate over registered middleware."""
         return iter(tuple(self._middlewares))
 
     def register_link(self, link: Link) -> Link:
+        """Register a transport/link adapter."""
         self._links[link.name] = link
         self._emit_debug_event("link_health", f"registered {link.link_class} link {link.name}")
         return link
 
     def links(self) -> Iterator[Link]:
+        """Iterate over registered links."""
         return iter(tuple(self._links.values()))
 
     def add_mesh_primitive(self, primitive: MeshPrimitive) -> MeshPrimitive:
+        """Register an explicit mesh primitive in topology metadata."""
         if primitive.kind in {"bridge", "mirror", "replicate"} and primitive.link_name is None:
             raise ValueError(f"{primitive.kind} requires a link")
         if primitive.link_name is not None and primitive.link_name not in self._links:
@@ -983,9 +1062,11 @@ class Graph:
         return normalized
 
     def mesh_primitives(self) -> Iterator[MeshPrimitive]:
+        """Iterate over registered mesh primitives."""
         return iter(tuple(self._mesh_primitives.values()))
 
     def query_service(self, owner: str = "query") -> QueryServiceRoutes:
+        """Return or lazily create the query request/response routes."""
         if owner not in self._query_services:
             request = self.register_port(
                 self._make_internal_route(
@@ -1013,6 +1094,7 @@ class Graph:
         return self._query_services[owner]
 
     def query(self, request: QueryRequest, *, requester_id: str = "python", service_owner: str = "query") -> QueryResponse:
+        """Execute a typed query through the query-plane stream model."""
         service = self.query_service(service_owner)
         correlation_id = request.correlation_id or self._correlation_id()
         request_payload = json.dumps(
@@ -1051,8 +1133,10 @@ class Graph:
         return response
 
     def debug_routes(self) -> Iterator[RouteRef]:
+        """Return the well-known debug routes created so far."""
         return iter(tuple(self._debug_routes.values()))
 
     def audit(self, route_ref: RouteLike | None = None) -> Iterator[DebugEvent]:
+        """Return retained audit/debug events, optionally filtered by route."""
         route_display = None if route_ref is None else self._route_key(route_ref)
         return iter(tuple(event for event in self._audit_events if route_display is None or event.route_display == route_display))

@@ -24,6 +24,7 @@ class ReadThenWriteNextEpochStepExampleResult(TypedDict):
 
 
 def run_example() -> ReadThenWriteNextEpochStepExampleResult:
+    """Install a shared-stream step and verify the graph sees the same writes."""
     graph = Graph()
     command_route = route(
         plane=Plane.Write,
