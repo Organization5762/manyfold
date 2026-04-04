@@ -10,6 +10,8 @@ This repository now contains a first-pass implementation scaffold for the
 - `src/`: Rust in-memory runtime, typed refs, descriptors, envelopes, mailboxes, queries, and control-loop stubs
 - `python/manyfold/`: Python-facing ergonomic wrapper layer
 - `python/manyfold/primitives.py`: primary nouns and verbs for the Python API
+- `python/manyfold/embedded.py`: RFC 21 embedded device profile helpers and validation
+- `python/manyfold/reference_examples.py`: RFC 23 reference example suite registry
 - `examples/`: executable API examples that are also covered by the test suite
 - `proto/manyfold/v1/wiregraph.proto`: extracted protobuf schema scaffold from the RFC appendix
 
@@ -23,6 +25,8 @@ This is an RFC stub implementation, not a production runtime. The current code f
 - catalog/latest/topology/validation query helpers,
 - a minimal `ControlLoop` epoch stub,
 - Python object-first routes and shared-stream `ReadThenWriteNextEpochStep` composition,
+- embedded device profile helpers for scalar and bulk sensors,
+- a named reference example suite that tracks the RFC examples and runs the supported subset,
 - Python bindings via PyO3 in the same layout as the referenced project style.
 
 The intended Python wrapper surface is deliberately narrow:
@@ -49,14 +53,26 @@ the step is installed and started.
 The `examples/` directory demonstrates these calls directly, and the examples are
 validated by the regular `unittest` run so they do not drift away from the API.
 
-## Implementation Standards
+## Best Practices
 
-Changes in this repository should follow these rules:
+When extending this repository, prefer a narrow, explicit, well-documented API
+over a broad convenience surface.
 
-- write tests at two levels: extremely simple executable examples in `examples/`, and more complex behavioral coverage in `tests/`;
-- write extensive docstrings and documentation, and add comments where runtime behavior is non-obvious;
-- add types everywhere practical and prefer API shapes that are easier to read and reason about;
-- keep the primary API narrow, and default to `_`-prefixed helpers unless a surface is essential for normal users.
+- Write tests for every meaningful behavior change. Keep the smallest,
+  easiest-to-understand examples close to the usage they demonstrate in
+  `examples/` and mirror them with straightforward assertions in
+  `tests/test_examples.py`. Put more complex integration, reactive, and
+  repository-level coverage in the rest of the `tests/` directory.
+- Write extensive docstrings and supporting documentation for public modules,
+  classes, and functions. If a section of code is non-obvious, add a concise
+  comment that explains the invariant, constraint, or design reason behind it.
+- Always add types. Prefer signatures, return types, and data shapes that make
+  the code self-describing, and keep pushing the API toward something a new
+  reader can grok quickly without tracing through multiple layers of code.
+- Only elevate essential concepts into the primary API. Keep helper functions
+  and intermediate building blocks semi-private by default, and use a leading
+  underscore liberally for methods and functions that support the implementation
+  but should not become part of the stable surface area.
 
 ## Verification
 

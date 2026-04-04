@@ -34,9 +34,9 @@ CHECKLIST_STATUS = {
     "18": (" ", "Mesh primitives are not implemented yet."),
     "19": (" ", "Catalog/latest/topology/validation helpers exist; stream-shaped query/debug planes still need work."),
     "20": (" ", "Third-party export and capability security model are not implemented yet."),
-    "21": (" ", "Embedded device profile rules are not implemented yet."),
+    "21": ("x", "Embedded firmware profile helpers and embedded-rule validation now cover scalar and bulk device routes."),
     "22": ("x", "The public API already prefers typed refs over ad hoc string identities."),
-    "23": (" ", "The reference example suite has not been added yet."),
+    "23": ("x", "The repository now ships a named RFC reference example suite, with runnable coverage for the currently supported examples."),
     "24": ("x", "Python wrapper ergonomics now include Rx-style observe/publish composition helpers."),
 }
 
