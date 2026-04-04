@@ -1,0 +1,18 @@
+[build-system]
+requires = ["maturin>=1.8,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "manyfold"
+version = "0.1.0"
+description = "PyO3-backed Manyfold RFC scaffolding and in-memory runtime."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [{ name = "Codex" }]
+
+[tool.maturin]
+features = ["python-extension"]
+module-name = "manyfold._manyfold_rust"
+profile = "release"
+python-source = "python"

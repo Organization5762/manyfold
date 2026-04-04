@@ -1,0 +1,20 @@
+[package]
+name = "manyfold"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "manyfold"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+python-extension = ["dep:pyo3", "pyo3/extension-module"]
+
+[dependencies]
+pyo3 = { version = "0.28.2", features = ["abi3-py39"], optional = true }
+serde = { version = "1.0", features = ["derive"] }
+
+[dev-dependencies]
+pretty_assertions = "1.4"
