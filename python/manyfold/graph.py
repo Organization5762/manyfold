@@ -58,6 +58,7 @@ TOut = TypeVar("TOut")
 AnyTypedRoute = TypedRoute[Any]
 RouteLike = Union[AnyTypedRoute, RouteRef]
 WriteTarget = Union[WriteBinding, RouteLike]
+ConnectableTarget = Union[RouteLike, NativeMailbox]
 EnvelopeIterator = Iterator[ClosedEnvelope]
 
 
@@ -469,6 +470,13 @@ class Graph:
             return route_ref.route_ref
         return route_ref
 
+    def _connectable_key(self, target: ConnectableTarget, *, edge_role: str) -> str:
+        if isinstance(target, NativeMailbox):
+            if edge_role == "source":
+                return target.egress.describe().route_display
+            return target.ingress.describe().route_display
+        return self._route_key(target)
+
     def _route_key(self, route_ref: RouteLike) -> str:
         return self._coerce_route_ref(route_ref).display()
 
@@ -791,13 +799,13 @@ class Graph:
         """Create or return a named mailbox from the native graph."""
         return self._graph.mailbox(name, descriptor)
 
-    def connect(self, source: RouteLike, sink: RouteLike) -> None:
+    def connect(self, source: ConnectableTarget, sink: ConnectableTarget) -> None:
         """Connect two routes in topology metadata."""
-        self._graph.connect(self._coerce_route_ref(source), self._coerce_route_ref(sink))
+        self._graph.connect(source, sink)
         self._emit_debug_event(
             "topology",
-            f"connected {self._route_key(source)} -> {self._route_key(sink)}",
-            source,
+            f"connected {self._connectable_key(source, edge_role='source')} -> {self._connectable_key(sink, edge_role='sink')}",
+            None if isinstance(source, NativeMailbox) else self._coerce_route_ref(source),
         )
 
     def install(self, control_loop: NativeControlLoop | ReadThenWriteNextEpochStep[Any, Any]) -> None:

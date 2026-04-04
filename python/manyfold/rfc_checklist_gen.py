@@ -34,9 +34,9 @@ CHECKLIST_STATUS = {
     "18": ("x", "Bridge-style mesh primitives now register as explicit graph topology instead of hidden wiring."),
     "19": ("x", "Query request/response routes and well-known debug event routes are now modeled as streams."),
     "20": ("x", "Route export visibility and per-principal capabilities now gate metadata, payload, replay, debug, and validation access."),
-    "21": (" ", "Embedded device profile rules are not implemented yet."),
+    "21": ("x", "Embedded firmware profile helpers and embedded-rule validation now cover scalar and bulk device routes."),
     "22": ("x", "The public API already prefers typed refs over ad hoc string identities."),
-    "23": (" ", "The reference example suite has not been added yet."),
+    "23": ("x", "The repository now ships a named RFC reference example suite, with runnable coverage for the currently supported examples."),
     "24": ("x", "Python wrapper ergonomics now include Rx-style observe/publish composition helpers."),
 }
 

@@ -18,9 +18,9 @@ Generated from `docs/rfc/wiregraph_rfc_rev2.md` by `manyfold-rfc-checklist`.
 - [x] 18. Mesh primitives (Bridge-style mesh primitives now register as explicit graph topology instead of hidden wiring.)
 - [x] 19. Query plane and debug plane (Query request/response routes and well-known debug event routes are now modeled as streams.)
 - [x] 20. Third-party consumption and security (Route export visibility and per-principal capabilities now gate metadata, payload, replay, debug, and validation access.)
-- [ ] 21. Embedded device profile (Embedded device profile rules are not implemented yet.)
+- [x] 21. Embedded device profile (Embedded firmware profile helpers and embedded-rule validation now cover scalar and bulk device routes.)
 - [x] 22. API design constraints (The public API already prefers typed refs over ad hoc string identities.)
-- [ ] 23. Reference example suite (The reference example suite has not been added yet.)
+- [x] 23. Reference example suite (The repository now ships a named RFC reference example suite, with runnable coverage for the currently supported examples.)
 - [x] 24. Recommended Python-facing SDK shape (Python wrapper ergonomics now include Rx-style observe/publish composition helpers.)
 
 ## Appendix F Acceptance Criteria
