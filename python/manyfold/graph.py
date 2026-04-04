@@ -253,6 +253,143 @@ class ShadowSnapshot:
 
 
 @dataclass(frozen=True)
+class DescriptorIdentityBlock:
+    route_ref: RouteRef
+    namespace_ref: NamespaceRef
+    producer_ref: ProducerRef
+    owning_runtime_kind: str
+    stream_family: str
+    stream_variant: str
+    aliases: tuple[str, ...]
+    human_description: str
+
+
+@dataclass(frozen=True)
+class DescriptorSchemaBlock:
+    schema_ref: SchemaRef
+    payload_kind: str
+    codec_ref: str
+    structured_payload_type: str
+    payload_open_policy: str
+
+
+@dataclass(frozen=True)
+class DescriptorTimeBlock:
+    clock_domain: str
+    event_time_policy: str
+    processing_time_allowed: bool
+    watermark_policy: str
+    control_epoch_policy: str
+    ttl_policy: str
+
+
+@dataclass(frozen=True)
+class DescriptorOrderingBlock:
+    partition_spec: str
+    sequence_source_kind: str
+    resequence_policy: str
+    dedupe_policy: str
+    causality_policy: str
+
+
+@dataclass(frozen=True)
+class DescriptorFlowBlock:
+    backpressure_policy: str
+    credit_class: str
+    mailbox_policy: str
+    async_boundary_kind: str
+    overflow_policy: str
+
+
+@dataclass(frozen=True)
+class DescriptorRetentionBlock:
+    latest_replay_policy: str
+    durability_class: str
+    replay_window: str
+    payload_retention_policy: str
+
+
+@dataclass(frozen=True)
+class DescriptorSecurityBlock:
+    read_capabilities: tuple[str, ...]
+    write_capabilities: tuple[str, ...]
+    payload_open_capabilities: tuple[str, ...]
+    redaction_policy: str
+    integrity_policy: str
+
+
+@dataclass(frozen=True)
+class DescriptorVisibilityBlock:
+    private_or_exported: str
+    third_party_subscription_allowed: bool
+    query_plane_visibility: str
+    debug_plane_visibility: str
+
+
+@dataclass(frozen=True)
+class DescriptorEnvironmentBlock:
+    locality: str
+    transport_preferences: tuple[str, ...]
+    device_class: str
+    resource_class: str
+    ephemeral_scope: str | None
+
+
+@dataclass(frozen=True)
+class DescriptorDebugBlock:
+    audit_enabled: bool
+    trace_enabled: bool
+    metrics_enabled: bool
+    payload_peek_allowed: bool
+    explain_enabled: bool
+
+
+@dataclass(frozen=True)
+class RouteDescriptor:
+    identity: DescriptorIdentityBlock
+    schema: DescriptorSchemaBlock
+    time: DescriptorTimeBlock
+    ordering: DescriptorOrderingBlock
+    flow: DescriptorFlowBlock
+    retention: DescriptorRetentionBlock
+    security: DescriptorSecurityBlock
+    visibility: DescriptorVisibilityBlock
+    environment: DescriptorEnvironmentBlock
+    debug: DescriptorDebugBlock
+
+    @property
+    def route_display(self) -> str:
+        return self.identity.route_ref.display()
+
+    @property
+    def human_description(self) -> str:
+        return self.identity.human_description
+
+    @property
+    def payload_open_policy(self) -> str:
+        return self.schema.payload_open_policy
+
+    @property
+    def backpressure_policy(self) -> str:
+        return self.flow.backpressure_policy
+
+    @property
+    def debug_enabled(self) -> bool:
+        return self.debug.audit_enabled
+
+
+@dataclass(frozen=True)
+class ScheduledWrite:
+    target: RouteLike
+    payload: Any
+    not_before_epoch: int | None = None
+    wait_for_ack: RouteLike | None = None
+    expires_at_epoch: int | None = None
+    producer: ProducerRef | None = None
+    control_epoch: int | None = None
+
+
+@dataclass(frozen=True)
 class WriteBindings:
     """Factories for common shadow-route write binding layouts."""
 
@@ -492,6 +629,8 @@ class Graph:
         self._write_bindings: dict[str, WriteBinding] = {}
         self._lazy_payload_sources: dict[str, LazyPayloadSource] = {}
         self._materialized_payloads: dict[str, bytes] = {}
+        self._pending_writes: list[ScheduledWrite] = []
+        self._scheduler_epoch = 0
         self._query_sequence = 0
 
     def _coerce_route_ref(self, route_ref: RouteLike) -> RouteRef:
@@ -579,6 +718,127 @@ class Graph:
 
     def _payload_bytes(self, route_ref: TypedRoute[T], envelope: ClosedEnvelope) -> bytes:
         return self._resolve_payload_bytes(route_ref, envelope, record_open=False)
+
+    def _descriptor_defaults(self, route_ref: RouteRef, native: PortDescriptor | None = None) -> RouteDescriptor:
+        route_display = route_ref.display()
+        payload_open_policy = (
+            "lazy_external"
+            if route_ref.namespace.layer == Layer.Bulk
+            else "owner_only"
+            if route_ref.namespace.layer == Layer.Internal
+            else getattr(native, "payload_open_policy", None) or "lazy"
+        )
+        backpressure_policy = getattr(native, "backpressure_policy", None) or "propagate"
+        debug_enabled = bool(getattr(native, "debug_enabled", True))
+        visibility = self._route_visibility.get(route_display, "private")
+        third_party_subscription_allowed = visibility == "exported"
+        return RouteDescriptor(
+            identity=DescriptorIdentityBlock(
+                route_ref=route_ref,
+                namespace_ref=route_ref.namespace,
+                producer_ref=ProducerRef(
+                    producer_id=route_ref.namespace.owner,
+                    kind=(
+                        "query_service"
+                        if route_ref.namespace.plane in (Plane.Query, Plane.Debug)
+                        else "reconciler"
+                        if route_ref.namespace.plane == Plane.Write and route_ref.namespace.layer == Layer.Shadow
+                        else "device"
+                        if route_ref.namespace.plane == Plane.Read and route_ref.namespace.layer == Layer.Raw
+                        else "application"
+                    ),
+                ),
+                owning_runtime_kind="in_memory",
+                stream_family=route_ref.family,
+                stream_variant=getattr(route_ref.variant, "value", str(route_ref.variant)).lower(),
+                aliases=(route_display,),
+                human_description=getattr(native, "human_description", f"Manyfold port for {route_display}"),
+            ),
+            schema=DescriptorSchemaBlock(
+                schema_ref=route_ref.schema,
+                payload_kind="structured",
+                codec_ref="identity",
+                structured_payload_type=route_ref.schema.schema_id,
+                payload_open_policy=payload_open_policy,
+            ),
+            time=DescriptorTimeBlock(
+                clock_domain=(
+                    "ephemeral"
+                    if route_ref.namespace.layer == Layer.Ephemeral
+                    else "control_epoch"
+                    if route_ref.namespace.plane == Plane.Write
+                    else "monotonic"
+                ),
+                event_time_policy="control_epoch_or_ingest" if route_ref.namespace.plane == Plane.Write else "ingest",
+                processing_time_allowed=True,
+                watermark_policy="recommended" if route_ref.namespace.layer == Layer.Bulk else "none",
+                control_epoch_policy="allowed" if route_ref.namespace.plane == Plane.Write else "optional",
+                ttl_policy="ttl_required" if route_ref.namespace.layer == Layer.Ephemeral else "retain_latest",
+            ),
+            ordering=DescriptorOrderingBlock(
+                partition_spec="unpartitioned",
+                sequence_source_kind="route_local",
+                resequence_policy="none",
+                dedupe_policy="none",
+                causality_policy="opaque",
+            ),
+            flow=DescriptorFlowBlock(
+                backpressure_policy=backpressure_policy,
+                credit_class=(
+                    "bulk_payload"
+                    if route_ref.namespace.layer == Layer.Bulk
+                    else "control"
+                    if route_ref.namespace.plane == Plane.Write
+                    else "default"
+                ),
+                mailbox_policy="none",
+                async_boundary_kind="inline",
+                overflow_policy="reject_write",
+            ),
+            retention=DescriptorRetentionBlock(
+                latest_replay_policy="none" if route_ref.namespace.layer == Layer.Ephemeral else "latest_only",
+                durability_class="memory",
+                replay_window="none",
+                payload_retention_policy=(
+                    "external_store"
+                    if route_ref.namespace.layer == Layer.Bulk
+                    else "non_replayable"
+                    if route_ref.namespace.layer == Layer.Ephemeral
+                    else "separate_store"
+                ),
+            ),
+            security=DescriptorSecurityBlock(
+                read_capabilities=("read",),
+                write_capabilities=("write",),
+                payload_open_capabilities=("payload_open",),
+                redaction_policy="none",
+                integrity_policy="best_effort",
+            ),
+            visibility=DescriptorVisibilityBlock(
+                private_or_exported=visibility,
+                third_party_subscription_allowed=third_party_subscription_allowed,
+                query_plane_visibility="exported" if third_party_subscription_allowed else "owner",
+                debug_plane_visibility="exported" if third_party_subscription_allowed else "owner",
+            ),
+            environment=DescriptorEnvironmentBlock(
+                locality="process",
+                transport_preferences=(
+                    ("memory", "bulk_link")
+                    if route_ref.namespace.layer == Layer.Bulk
+                    else ("memory",)
+                ),
+                device_class="generic",
+                resource_class="standard",
+                ephemeral_scope=route_ref.namespace.owner if route_ref.namespace.layer == Layer.Ephemeral else None,
+            ),
+            debug=DescriptorDebugBlock(
+                audit_enabled=debug_enabled,
+                trace_enabled=debug_enabled,
+                metrics_enabled=True,
+                payload_peek_allowed=route_ref.namespace.layer != Layer.Bulk,
+                explain_enabled=True,
+            ),
+        )
 
     def _make_internal_route(
         self,
@@ -955,7 +1215,9 @@ class Graph:
 
     def connect(self, source: ConnectableTarget, sink: ConnectableTarget) -> None:
         """Connect two routes in topology metadata."""
-        self._graph.connect(source, sink)
+        native_source = source if isinstance(source, NativeMailbox) else self._coerce_route_ref(source)
+        native_sink = sink if isinstance(sink, NativeMailbox) else self._coerce_route_ref(sink)
+        self._graph.connect(native_source, native_sink)
         self._emit_debug_event(
             "topology",
             f"connected {self._connectable_key(source, edge_role='source')} -> {self._connectable_key(sink, edge_role='sink')}",
@@ -987,9 +1249,11 @@ class Graph:
         """Return all registered routes."""
         return iter(tuple(self._graph.catalog()))
 
-    def describe_route(self, route_ref: RouteLike) -> PortDescriptor:
+    def describe_route(self, route_ref: RouteLike) -> RouteDescriptor:
         """Return the descriptor for one route."""
-        return self._graph.describe_route(self._coerce_route_ref(route_ref))
+        native_route = self._coerce_route_ref(route_ref)
+        native = self._graph.describe_route(native_route)
+        return self._descriptor_defaults(native_route, native)
 
     @overload
     def latest(self, route_ref: TypedRoute[T]) -> TypedEnvelope[T] | None: ...
@@ -1022,6 +1286,7 @@ class Graph:
         """Return graph validation issues detected by the native layer and wrapper semantics."""
         issues = list(self._graph.validate_graph())
         for route in self.catalog():
+            route = self._coerce_route_ref(route)
             if (
                 route.namespace.plane == Plane.Write
                 and route.variant == Variant.Request
@@ -1031,7 +1296,77 @@ class Graph:
                 issues.append(
                     f"Write request route {route.display()} lacks a shadow binding"
                 )
+        issues.extend(self._unsafe_write_feedback_issues())
         return iter(tuple(issues))
+
+    def _unsafe_write_feedback_issues(self) -> list[str]:
+        adjacency: dict[str, set[str]] = {}
+        route_refs: dict[str, RouteRef] = {}
+        for left, right in self.topology():
+            adjacency.setdefault(left, set()).add(right)
+        for route in self.catalog():
+            route_refs[route.display()] = route
+
+        issues: list[str] = []
+        for binding in self._write_bindings.values():
+            request = binding.request.display()
+            feedback_sources = (
+                binding.reported.display(),
+                binding.effective.display(),
+            )
+            for source in feedback_sources:
+                if not self._path_exists(adjacency, source, request):
+                    continue
+                if self._path_has_boundary(adjacency, route_refs, source, request):
+                    continue
+                ack_seen = binding.ack is not None and self.latest(binding.ack) is not None
+                if ack_seen:
+                    continue
+                issues.append(
+                    f"Unsafe write-back loop from {source} to {request} lacks mailbox, internal boundary, epoch guard, or ack barrier"
+                )
+        return issues
+
+    @staticmethod
+    def _path_exists(adjacency: dict[str, set[str]], start: str, goal: str) -> bool:
+        pending = [start]
+        seen: set[str] = set()
+        while pending:
+            current = pending.pop()
+            if current == goal:
+                return True
+            if current in seen:
+                continue
+            seen.add(current)
+            pending.extend(adjacency.get(current, ()))
+        return False
+
+    @staticmethod
+    def _path_has_boundary(
+        adjacency: dict[str, set[str]],
+        route_refs: dict[str, RouteRef],
+        start: str,
+        goal: str,
+    ) -> bool:
+        pending: list[tuple[str, bool]] = [(start, False)]
+        seen: set[tuple[str, bool]] = set()
+        while pending:
+            current, has_boundary = pending.pop()
+            if current == goal:
+                if has_boundary:
+                    return True
+                continue
+            state = (current, has_boundary)
+            if state in seen:
+                continue
+            seen.add(state)
+            route = route_refs.get(current)
+            next_has_boundary = has_boundary or (
+                route is not None and route.namespace.layer == Layer.Internal
+            )
+            for neighbor in adjacency.get(current, ()):
+                pending.append((neighbor, next_has_boundary))
+        return False
 
     def credit_snapshot(self) -> Iterator[CreditSnapshot]:
         """Expose the current credit/backpressure view for registered routes."""
@@ -1132,6 +1467,83 @@ class Graph:
                 raise ValueError("write binding does not define an ack route")
             self.publish(binding.ack, ack, producer=producer, control_epoch=control_epoch)
         return self.shadow_state(binding)
+
+    def publish_guarded(
+        self,
+        target: WriteTarget,
+        payload: Any,
+        *,
+        not_before_epoch: int | None = None,
+        wait_for_ack: RouteLike | None = None,
+        expires_at_epoch: int | None = None,
+        producer: ProducerRef | None = None,
+        control_epoch: int | None = None,
+    ) -> ScheduledWrite:
+        """Queue a guarded write for later scheduler release."""
+        if isinstance(target, WriteBinding):
+            self._write_bindings[target.request.display()] = target
+            self._graph.register_binding(target.request.display(), target)
+        scheduled = ScheduledWrite(
+            target=target,
+            payload=payload,
+            not_before_epoch=not_before_epoch,
+            wait_for_ack=wait_for_ack,
+            expires_at_epoch=expires_at_epoch,
+            producer=producer,
+            control_epoch=control_epoch,
+        )
+        self._pending_writes.append(scheduled)
+        self._emit_debug_event(
+            "scheduler",
+            f"queued guarded write for {self._route_key(target.request if isinstance(target, WriteBinding) else target)}",
+            target.request if isinstance(target, WriteBinding) else self._coerce_route_ref(target),
+        )
+        return scheduled
+
+    def run_scheduler(self, epoch: int | None = None) -> tuple[TypedEnvelope[Any] | ClosedEnvelope, ...]:
+        """Advance scheduler state and release any writes whose guards are satisfied."""
+        self._scheduler_epoch = self._scheduler_epoch + 1 if epoch is None else epoch
+        ready: list[ScheduledWrite] = []
+        pending: list[ScheduledWrite] = []
+        for scheduled in self._pending_writes:
+            if (
+                scheduled.expires_at_epoch is not None
+                and self._scheduler_epoch > scheduled.expires_at_epoch
+            ):
+                self._emit_debug_event(
+                    "scheduler",
+                    f"expired guarded write for {self._route_key(scheduled.target.request if isinstance(scheduled.target, WriteBinding) else scheduled.target)}",
+                    scheduled.target.request if isinstance(scheduled.target, WriteBinding) else self._coerce_route_ref(scheduled.target),
+                )
+                continue
+            ack_ready = True
+            if scheduled.wait_for_ack is not None:
+                ack_ready = self.latest(scheduled.wait_for_ack) is not None
+            epoch_ready = (
+                scheduled.not_before_epoch is None
+                or self._scheduler_epoch >= scheduled.not_before_epoch
+            )
+            if ack_ready and epoch_ready:
+                ready.append(scheduled)
+            else:
+                pending.append(scheduled)
+        self._pending_writes = pending
+        emitted: list[TypedEnvelope[Any] | ClosedEnvelope] = []
+        for scheduled in ready:
+            emitted.append(
+                self.publish(
+                    scheduled.target,
+                    scheduled.payload,
+                    producer=scheduled.producer,
+                    control_epoch=scheduled.control_epoch,
+                )
+            )
+        if emitted:
+            self._emit_debug_event(
+                "scheduler",
+                f"released {len(emitted)} guarded writes at epoch {self._scheduler_epoch}",
+            )
+        return tuple(emitted)
 
     def stateful_map(
         self,

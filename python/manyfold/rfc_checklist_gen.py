@@ -20,12 +20,12 @@ CHECKLIST_PATH = REPO_ROOT / "docs" / "rfc" / "implementation_checklist.md"
 
 CHECKLIST_STATUS = {
     "6": ("x", "Typed identity objects, routes, ports, and producer/runtime refs are in the scaffold."),
-    "7": (" ", "Descriptor shapes exist, but most RFC buckets still need semantic enforcement."),
+    "7": (" ", "Route descriptions now expose RFC-shaped identity/schema/time/ordering/flow/retention/security/visibility/environment/debug buckets, but most bucket semantics are still defaults."),
     "8": (" ", "Closed/opened envelope scaffolding exists; lazy payload and audit behavior remain to implement."),
     "9": (" ", "Read/write namespace and shadow-route scaffolding exist; coherence rules are still incomplete."),
-    "10": (" ", "Clock domains, taints, and schedule guard types exist; time semantics are still partial."),
-    "11": (" ", "WriteBinding and shadow surfaces exist; closed-loop behavior is still a stub."),
-    "12": (" ", "In-memory graph, mailboxes, and control-loop ticking exist; scheduler semantics are still incomplete."),
+    "10": (" ", "Clock domains, taints, and guarded scheduler release now exist, but broader time semantics and repair rules are still partial."),
+    "11": (" ", "WriteBinding/shadow state exists and unsafe direct feedback loops are now validated, but full closed-loop reconciliation remains partial."),
+    "12": (" ", "In-memory graph, mailboxes, and guarded scheduler/control-loop ticking exist, but execution semantics are still incomplete."),
     "13": (" ", "Credit and backpressure flow control are not implemented yet."),
     "14": (" ", "Stateful operators, windows, and joins are not implemented yet."),
     "15": ("x", "Join planning now distinguishes local, repartition, broadcast-mirror, and lookup joins with explicit visible repartition nodes."),
@@ -59,7 +59,7 @@ APPENDIX_STATUS = {
     "Transport-flexible mesh building blocks": ("x", "Links and mesh primitives now compose explicitly in the graph surface."),
     "Explicit support for write-back loops and shadow semantics": (
         " ",
-        "WriteBinding and shadow routes exist, but loop semantics are still partial.",
+        "WriteBinding and shadow routes exist, and direct unsafe feedback loops are now validated, but full loop semantics remain partial.",
     ),
     "Randomness and determinism explicitly modeled": (
         " ",
@@ -67,11 +67,11 @@ APPENDIX_STATUS = {
     ),
     "Scheduling and out-of-order bugs made harder to express": (
         " ",
-        "Schedule guard/control-loop scaffolding exists, but semantics are incomplete.",
+        "Guarded scheduler release and control-loop scaffolding now exist, but semantics are still incomplete.",
     ),
     "Metadata/payload split with lazy payload opening": (
         " ",
-        "Envelope split exists, but lazy payload demand is still pending.",
+        "Envelope split exists, and lazy payload open-on-demand now works, but richer payload-demand accounting is still pending.",
     ),
     "Query plane modeled as streams": ("x", "Query request/response routes now behave like normal streams."),
     "No ad hoc strings in the typed runtime API": ("x", "Typed refs are already the primary runtime surface."),
