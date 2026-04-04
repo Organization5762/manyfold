@@ -10,37 +10,44 @@ use crate::core::{
 use pyo3::exceptions::{PyKeyError, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 
+#[cfg(feature = "stub-gen")]
+use pyo3_stub_gen::define_stub_info_gatherer;
+
 fn lock_graph<'a>(state: &'a Arc<Mutex<GraphCore>>) -> PyResult<std::sync::MutexGuard<'a, GraphCore>> {
     state.lock().map_err(|_| PyRuntimeError::new_err("graph mutex poisoned"))
 }
 
-#[pyclass(eq, frozen, module = "manyfold", name = "Plane", from_py_object)]
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(eq, frozen, module = "manyfold._manyfold_rust", name = "Plane", from_py_object)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PyPlane {
     inner: Plane,
 }
 
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
 #[pymethods]
 #[allow(non_snake_case)]
 impl PyPlane {
     #[classattr]
-    fn Read() -> Self {
+    fn Read() -> PyPlane {
         Self { inner: Plane::Read }
     }
     #[classattr]
-    fn Write() -> Self {
+    fn Write() -> PyPlane {
         Self { inner: Plane::Write }
     }
     #[classattr]
-    fn State() -> Self {
+    fn State() -> PyPlane {
         Self { inner: Plane::State }
     }
     #[classattr]
-    fn Query() -> Self {
+    fn Query() -> PyPlane {
         Self { inner: Plane::Query }
     }
     #[classattr]
-    fn Debug() -> Self {
+    fn Debug() -> PyPlane {
         Self { inner: Plane::Debug }
     }
     #[getter]
@@ -52,37 +59,41 @@ impl PyPlane {
     }
 }
 
-#[pyclass(eq, frozen, module = "manyfold", name = "Layer", from_py_object)]
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(eq, frozen, module = "manyfold._manyfold_rust", name = "Layer", from_py_object)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PyLayer {
     inner: Layer,
 }
 
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
 #[pymethods]
 #[allow(non_snake_case)]
 impl PyLayer {
     #[classattr]
-    fn Raw() -> Self {
+    fn Raw() -> PyLayer {
         Self { inner: Layer::Raw }
     }
     #[classattr]
-    fn Logical() -> Self {
+    fn Logical() -> PyLayer {
         Self { inner: Layer::Logical }
     }
     #[classattr]
-    fn Shadow() -> Self {
+    fn Shadow() -> PyLayer {
         Self { inner: Layer::Shadow }
     }
     #[classattr]
-    fn Bulk() -> Self {
+    fn Bulk() -> PyLayer {
         Self { inner: Layer::Bulk }
     }
     #[classattr]
-    fn Internal() -> Self {
+    fn Internal() -> PyLayer {
         Self { inner: Layer::Internal }
     }
     #[classattr]
-    fn Ephemeral() -> Self {
+    fn Ephemeral() -> PyLayer {
         Self { inner: Layer::Ephemeral }
     }
     #[getter]
@@ -94,45 +105,49 @@ impl PyLayer {
     }
 }
 
-#[pyclass(eq, frozen, module = "manyfold", name = "Variant", from_py_object)]
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(eq, frozen, module = "manyfold._manyfold_rust", name = "Variant", from_py_object)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PyVariant {
     inner: Variant,
 }
 
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
 #[pymethods]
 #[allow(non_snake_case)]
 impl PyVariant {
     #[classattr]
-    fn Meta() -> Self {
+    fn Meta() -> PyVariant {
         Self { inner: Variant::Meta }
     }
     #[classattr]
-    fn Payload() -> Self {
+    fn Payload() -> PyVariant {
         Self { inner: Variant::Payload }
     }
     #[classattr]
-    fn Request() -> Self {
+    fn Request() -> PyVariant {
         Self { inner: Variant::Request }
     }
     #[classattr]
-    fn Desired() -> Self {
+    fn Desired() -> PyVariant {
         Self { inner: Variant::Desired }
     }
     #[classattr]
-    fn Reported() -> Self {
+    fn Reported() -> PyVariant {
         Self { inner: Variant::Reported }
     }
     #[classattr]
-    fn Effective() -> Self {
+    fn Effective() -> PyVariant {
         Self { inner: Variant::Effective }
     }
     #[classattr]
-    fn Ack() -> Self {
+    fn Ack() -> PyVariant {
         Self { inner: Variant::Ack }
     }
     #[classattr]
-    fn State() -> Self {
+    fn State() -> PyVariant {
         Self { inner: Variant::State }
     }
     #[getter]
@@ -144,53 +159,57 @@ impl PyVariant {
     }
 }
 
-#[pyclass(eq, frozen, module = "manyfold", name = "ProducerKind", from_py_object)]
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(eq, frozen, module = "manyfold._manyfold_rust", name = "ProducerKind", from_py_object)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PyProducerKind {
     inner: ProducerKind,
 }
 
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
 #[pymethods]
 #[allow(non_snake_case)]
 impl PyProducerKind {
     #[classattr]
-    fn Device() -> Self {
+    fn Device() -> PyProducerKind {
         Self {
             inner: ProducerKind::Device,
         }
     }
     #[classattr]
-    fn FirmwareAgent() -> Self {
+    fn FirmwareAgent() -> PyProducerKind {
         Self {
             inner: ProducerKind::FirmwareAgent,
         }
     }
     #[classattr]
-    fn Transform() -> Self {
+    fn Transform() -> PyProducerKind {
         Self {
             inner: ProducerKind::Transform,
         }
     }
     #[classattr]
-    fn ControlLoop() -> Self {
+    fn ControlLoop() -> PyProducerKind {
         Self {
             inner: ProducerKind::ControlLoop,
         }
     }
     #[classattr]
-    fn Mailbox() -> Self {
+    fn Mailbox() -> PyProducerKind {
         Self {
             inner: ProducerKind::Mailbox,
         }
     }
     #[classattr]
-    fn QueryService() -> Self {
+    fn QueryService() -> PyProducerKind {
         Self {
             inner: ProducerKind::QueryService,
         }
     }
     #[classattr]
-    fn Application() -> Self {
+    fn Application() -> PyProducerKind {
         Self {
             inner: ProducerKind::Application,
         }
@@ -204,53 +223,57 @@ impl PyProducerKind {
     }
 }
 
-#[pyclass(eq, frozen, module = "manyfold", name = "TaintDomain", from_py_object)]
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(eq, frozen, module = "manyfold._manyfold_rust", name = "TaintDomain", from_py_object)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PyTaintDomain {
     inner: TaintDomain,
 }
 
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
 #[pymethods]
 #[allow(non_snake_case)]
 impl PyTaintDomain {
     #[classattr]
-    fn Time() -> Self {
+    fn Time() -> PyTaintDomain {
         Self {
             inner: TaintDomain::Time,
         }
     }
     #[classattr]
-    fn Order() -> Self {
+    fn Order() -> PyTaintDomain {
         Self {
             inner: TaintDomain::Order,
         }
     }
     #[classattr]
-    fn Delivery() -> Self {
+    fn Delivery() -> PyTaintDomain {
         Self {
             inner: TaintDomain::Delivery,
         }
     }
     #[classattr]
-    fn Determinism() -> Self {
+    fn Determinism() -> PyTaintDomain {
         Self {
             inner: TaintDomain::Determinism,
         }
     }
     #[classattr]
-    fn Scheduling() -> Self {
+    fn Scheduling() -> PyTaintDomain {
         Self {
             inner: TaintDomain::Scheduling,
         }
     }
     #[classattr]
-    fn Trust() -> Self {
+    fn Trust() -> PyTaintDomain {
         Self {
             inner: TaintDomain::Trust,
         }
     }
     #[classattr]
-    fn Coherence() -> Self {
+    fn Coherence() -> PyTaintDomain {
         Self {
             inner: TaintDomain::Coherence,
         }
@@ -261,12 +284,16 @@ impl PyTaintDomain {
     }
 }
 
-#[pyclass(module = "manyfold", frozen, from_py_object)]
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust", frozen, from_py_object)]
 #[derive(Clone, Debug)]
 pub struct NamespaceRef {
     pub(crate) inner: NamespaceRefCore,
 }
 
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
 #[pymethods]
 impl NamespaceRef {
     #[new]
@@ -305,12 +332,16 @@ impl NamespaceRef {
     }
 }
 
-#[pyclass(module = "manyfold", frozen, from_py_object)]
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust", frozen, from_py_object)]
 #[derive(Clone, Debug)]
 pub struct SchemaRef {
     pub(crate) inner: SchemaRefCore,
 }
 
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
 #[pymethods]
 impl SchemaRef {
     #[new]
@@ -329,12 +360,16 @@ impl SchemaRef {
     }
 }
 
-#[pyclass(module = "manyfold", frozen, from_py_object)]
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust", frozen, from_py_object)]
 #[derive(Clone, Debug)]
 pub struct RouteRef {
     pub(crate) inner: RouteRefCore,
 }
 
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
 #[pymethods]
 impl RouteRef {
     #[new]
@@ -390,12 +425,16 @@ impl RouteRef {
     }
 }
 
-#[pyclass(module = "manyfold", frozen, from_py_object)]
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust", frozen, from_py_object)]
 #[derive(Clone, Debug)]
 pub struct ProducerRef {
     inner: ProducerRefCore,
 }
 
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
 #[pymethods]
 impl ProducerRef {
     #[new]
@@ -419,12 +458,16 @@ impl ProducerRef {
     }
 }
 
-#[pyclass(module = "manyfold", frozen, from_py_object)]
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust", frozen, from_py_object)]
 #[derive(Clone, Debug)]
 pub struct RuntimeRef {
     inner: RuntimeRefCore,
 }
 
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
 #[pymethods]
 impl RuntimeRef {
     #[new]
@@ -439,12 +482,16 @@ impl RuntimeRef {
     }
 }
 
-#[pyclass(module = "manyfold", frozen, from_py_object)]
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust", frozen, from_py_object)]
 #[derive(Clone, Debug)]
 pub struct ClockDomainRef {
     inner: ClockDomainRefCore,
 }
 
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
 #[pymethods]
 impl ClockDomainRef {
     #[new]
@@ -459,12 +506,16 @@ impl ClockDomainRef {
     }
 }
 
-#[pyclass(module = "manyfold", frozen, from_py_object)]
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust", frozen, from_py_object)]
 #[derive(Clone, Debug)]
 pub struct PayloadRef {
     inner: crate::core::PayloadRefCore,
 }
 
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
 #[pymethods]
 impl PayloadRef {
     #[new]
@@ -502,12 +553,16 @@ impl PayloadRef {
     }
 }
 
-#[pyclass(module = "manyfold", frozen, from_py_object)]
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust", frozen, from_py_object)]
 #[derive(Clone, Debug)]
 pub struct TaintMark {
     inner: TaintMarkCore,
 }
 
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
 #[pymethods]
 impl TaintMark {
     #[new]
@@ -536,12 +591,16 @@ impl TaintMark {
     }
 }
 
-#[pyclass(module = "manyfold", frozen, from_py_object)]
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust", frozen, from_py_object)]
 #[derive(Clone, Debug)]
 pub struct ScheduleGuard {
     inner: ScheduleGuardCore,
 }
 
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
 #[pymethods]
 impl ScheduleGuard {
     #[staticmethod]
@@ -568,12 +627,16 @@ impl ScheduleGuard {
     }
 }
 
-#[pyclass(module = "manyfold", frozen, from_py_object)]
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust", frozen, from_py_object)]
 #[derive(Clone, Debug)]
 pub struct ClosedEnvelope {
     inner: ClosedEnvelopeCore,
 }
 
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
 #[pymethods]
 impl ClosedEnvelope {
     #[getter]
@@ -628,12 +691,16 @@ impl ClosedEnvelope {
     }
 }
 
-#[pyclass(module = "manyfold", frozen, from_py_object)]
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust", frozen, from_py_object)]
 #[derive(Clone, Debug)]
 pub struct OpenedEnvelope {
     inner: OpenedEnvelopeCore,
 }
 
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
 #[pymethods]
 impl OpenedEnvelope {
     #[getter]
@@ -648,12 +715,16 @@ impl OpenedEnvelope {
     }
 }
 
-#[pyclass(module = "manyfold", frozen, from_py_object)]
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust", frozen, from_py_object)]
 #[derive(Clone, Debug)]
 pub struct PortDescriptor {
     inner: PortDescriptorCore,
 }
 
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
 #[pymethods]
 impl PortDescriptor {
     #[getter]
@@ -678,13 +749,17 @@ impl PortDescriptor {
     }
 }
 
-#[pyclass(module = "manyfold", from_py_object)]
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust", from_py_object)]
 #[derive(Clone)]
 pub struct ReadablePort {
     graph: Arc<Mutex<GraphCore>>,
     route: RouteRefCore,
 }
 
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
 #[pymethods]
 impl ReadablePort {
     fn meta(&self) -> PyResult<Vec<ClosedEnvelope>> {
@@ -731,13 +806,17 @@ impl ReadablePort {
     }
 }
 
-#[pyclass(module = "manyfold", from_py_object)]
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust", from_py_object)]
 #[derive(Clone)]
 pub struct WritablePort {
     graph: Arc<Mutex<GraphCore>>,
     route: RouteRefCore,
 }
 
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
 #[pymethods]
 impl WritablePort {
     #[pyo3(signature = (payload, producer=None, control_epoch=None))]
@@ -768,12 +847,16 @@ impl WritablePort {
     }
 }
 
-#[pyclass(module = "manyfold", frozen, from_py_object)]
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust", frozen, from_py_object)]
 #[derive(Clone)]
 pub struct WriteBinding {
     inner: WriteBindingCore,
 }
 
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
 #[pymethods]
 impl WriteBinding {
     #[new]
@@ -828,12 +911,16 @@ impl WriteBinding {
     }
 }
 
-#[pyclass(module = "manyfold", frozen, from_py_object)]
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust", frozen, from_py_object)]
 #[derive(Clone)]
 pub struct MailboxDescriptor {
     inner: MailboxDescriptorCore,
 }
 
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
 #[pymethods]
 impl MailboxDescriptor {
     #[new]
@@ -886,13 +973,17 @@ impl MailboxDescriptor {
     }
 }
 
-#[pyclass(module = "manyfold", from_py_object)]
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust", from_py_object)]
 #[derive(Clone)]
 pub struct Mailbox {
     graph: Arc<Mutex<GraphCore>>,
     name: String,
 }
 
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
 #[pymethods]
 impl Mailbox {
     #[getter]
@@ -924,12 +1015,16 @@ impl Mailbox {
     }
 }
 
-#[pyclass(module = "manyfold", frozen, from_py_object)]
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust", frozen, from_py_object)]
 #[derive(Clone)]
 pub struct ControlLoop {
     inner: ControlLoopCore,
 }
 
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
 #[pymethods]
 impl ControlLoop {
     #[new]
@@ -953,11 +1048,15 @@ impl ControlLoop {
     }
 }
 
-#[pyclass(module = "manyfold")]
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust")]
 pub struct Graph {
     state: Arc<Mutex<GraphCore>>,
 }
 
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
 #[pymethods]
 impl Graph {
     #[new]
@@ -1139,6 +1238,8 @@ impl Graph {
     }
 }
 
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyfunction)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
 #[pyfunction]
 fn bridge_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
@@ -1173,3 +1274,6 @@ fn _manyfold_rust(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()>
     module.add_class::<Graph>()?;
     Ok(())
 }
+
+#[cfg(feature = "stub-gen")]
+define_stub_info_gatherer!(stub_info);

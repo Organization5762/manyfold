@@ -1,9 +1,8 @@
-"""Generate package stubs and an RFC implementation checklist."""
+"""Generate an RFC implementation checklist."""
 
 from __future__ import annotations
 
 import argparse
-import ast
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -13,8 +12,6 @@ from reactivex import operators as ops
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 REPO_ROOT = PACKAGE_DIR.parent.parent
-INIT_PATH = PACKAGE_DIR / "__init__.py"
-STUB_PATH = PACKAGE_DIR / "__init__.pyi"
 RFC_PATH = REPO_ROOT / "docs" / "rfc" / "wiregraph_rfc_rev2.md"
 CHECKLIST_PATH = REPO_ROOT / "docs" / "rfc" / "implementation_checklist.md"
 
@@ -81,26 +78,6 @@ APPENDIX_STATUS = {
 
 
 @dataclass(frozen=True)
-class ImportSpec:
-    module: str
-    name: str
-    alias: str
-
-
-@dataclass(frozen=True)
-class AssignmentSpec:
-    target: str
-    source: str
-
-
-@dataclass(frozen=True)
-class PublicSurface:
-    imports: list[ImportSpec]
-    assignments: list[AssignmentSpec]
-    exports: list[str]
-
-
-@dataclass(frozen=True)
 class SectionStatus:
     number: str
     title: str
@@ -119,78 +96,6 @@ def _collect(observable) -> list[object]:
     items: list[object] = []
     observable.subscribe(items.append)
     return items
-
-
-def parse_public_surface(init_path: Path = INIT_PATH) -> PublicSurface:
-    module = ast.parse(init_path.read_text(), filename=str(init_path))
-    imports: list[ImportSpec] = []
-    assignments: list[AssignmentSpec] = []
-    exports: list[str] = []
-
-    for node in module.body:
-        if isinstance(node, ast.ImportFrom) and node.level == 1 and node.module is not None:
-            for alias in node.names:
-                imports.append(
-                    ImportSpec(
-                        module=node.module,
-                        name=alias.name,
-                        alias=alias.asname or alias.name,
-                    )
-                )
-            continue
-
-        if isinstance(node, ast.Assign):
-            for target in node.targets:
-                if isinstance(target, ast.Name) and target.id == "__all__":
-                    exports.extend(_parse_string_list(node.value))
-                elif (
-                    isinstance(target, ast.Name)
-                    and isinstance(node.value, ast.Name)
-                ):
-                    assignments.append(AssignmentSpec(target=target.id, source=node.value.id))
-
-    return PublicSurface(imports=imports, assignments=assignments, exports=exports)
-
-
-def _parse_string_list(node: ast.AST) -> list[str]:
-    if not isinstance(node, (ast.List, ast.Tuple)):
-        return []
-    values: list[str] = []
-    for item in node.elts:
-        if isinstance(item, ast.Constant) and isinstance(item.value, str):
-            values.append(item.value)
-    return values
-
-
-def render_stub(surface: PublicSurface) -> str:
-    exported = set(surface.exports)
-    import_lines = _collect(
-        rx.from_iterable(surface.imports).pipe(
-            ops.filter(lambda spec: spec.alias in exported),
-            ops.map(lambda spec: f"from .{spec.module} import {spec.name} as {spec.alias}"),
-            ops.distinct(),
-        )
-    )
-    assignment_lines = _collect(
-        rx.from_iterable(surface.assignments).pipe(
-            ops.filter(lambda spec: spec.target in exported and spec.source in exported),
-            ops.map(lambda spec: f"{spec.target} = {spec.source}"),
-        )
-    )
-    export_lines = _collect(
-        rx.from_iterable(surface.exports).pipe(
-            ops.map(lambda name: f'    "{name}",'),
-        )
-    )
-
-    lines = [*import_lines, ""]
-    if assignment_lines:
-        lines.extend([*assignment_lines, ""])
-    lines.append("__all__ = [")
-    lines.extend(export_lines)
-    lines.append("]")
-    lines.append("")
-    return "\n".join(lines)
 
 
 def parse_rfc_sections(rfc_path: Path = RFC_PATH) -> tuple[list[SectionStatus], list[AppendixStatus]]:
@@ -254,7 +159,7 @@ def render_checklist(sections: Iterable[SectionStatus], appendix_items: Iterable
     lines = [
         "# RFC Implementation Checklist",
         "",
-        "Generated from `docs/rfc/wiregraph_rfc_rev2.md` by `manyfold-stub-gen`.",
+        "Generated from `docs/rfc/wiregraph_rfc_rev2.md` by `manyfold-rfc-checklist`.",
         "",
         "## Core Sections",
         *section_lines,
@@ -266,35 +171,18 @@ def render_checklist(sections: Iterable[SectionStatus], appendix_items: Iterable
     return "\n".join(lines)
 
 
-def generate(stub_path: Path = STUB_PATH, checklist_path: Path = CHECKLIST_PATH) -> None:
-    surface = parse_public_surface()
-    sections, appendix_items = parse_rfc_sections()
-    stub_path.write_text(render_stub(surface))
-    checklist_path.write_text(render_checklist(sections, appendix_items))
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--check",
-        action="store_true",
-        help="validate generated files without rewriting them",
-    )
+    parser.add_argument("--check", action="store_true", help="validate generated file without rewriting it")
     args = parser.parse_args(argv)
 
-    surface = parse_public_surface()
     sections, appendix_items = parse_rfc_sections()
-    stub_content = render_stub(surface)
     checklist_content = render_checklist(sections, appendix_items)
 
     if args.check:
-        current_stub = STUB_PATH.read_text()
         current_checklist = CHECKLIST_PATH.read_text() if CHECKLIST_PATH.exists() else ""
-        if current_stub != stub_content or current_checklist != checklist_content:
-            return 1
-        return 0
+        return 0 if current_checklist == checklist_content else 1
 
-    STUB_PATH.write_text(stub_content)
     CHECKLIST_PATH.write_text(checklist_content)
     return 0
 

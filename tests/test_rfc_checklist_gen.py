@@ -8,12 +8,12 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-MODULE_PATH = REPO_ROOT / "python" / "manyfold" / "stub_gen.py"
+MODULE_PATH = REPO_ROOT / "python" / "manyfold" / "rfc_checklist_gen.py"
 
 
-def load_stub_gen():
+def load_generator():
     install_reactivex_stub()
-    spec = importlib.util.spec_from_file_location("manyfold_stub_gen", MODULE_PATH)
+    spec = importlib.util.spec_from_file_location("manyfold_rfc_checklist_gen", MODULE_PATH)
     module = importlib.util.module_from_spec(spec)
     assert spec is not None and spec.loader is not None
     sys.modules[spec.name] = module
@@ -69,17 +69,11 @@ def install_reactivex_stub() -> None:
     sys.modules["reactivex.operators"] = ops_module
 
 
-class StubGenTests(unittest.TestCase):
-    def test_stub_output_matches_repository(self) -> None:
-        stub_gen = load_stub_gen()
-        surface = stub_gen.parse_public_surface()
-        rendered = stub_gen.render_stub(surface)
-        self.assertEqual(rendered, (REPO_ROOT / "python" / "manyfold" / "__init__.pyi").read_text())
-
+class RfcChecklistGenTests(unittest.TestCase):
     def test_checklist_output_matches_repository(self) -> None:
-        stub_gen = load_stub_gen()
-        sections, appendix_items = stub_gen.parse_rfc_sections()
-        rendered = stub_gen.render_checklist(sections, appendix_items)
+        generator = load_generator()
+        sections, appendix_items = generator.parse_rfc_sections()
+        rendered = generator.render_checklist(sections, appendix_items)
         self.assertEqual(rendered, (REPO_ROOT / "docs" / "rfc" / "implementation_checklist.md").read_text())
 
 

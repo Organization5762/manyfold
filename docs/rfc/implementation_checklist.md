@@ -1,6 +1,6 @@
 # RFC Implementation Checklist
 
-Generated from `docs/rfc/wiregraph_rfc_rev2.md` by `manyfold-stub-gen`.
+Generated from `docs/rfc/wiregraph_rfc_rev2.md` by `manyfold-rfc-checklist`.
 
 ## Core Sections
 - [x] 6. Core vocabulary and object model (Typed identity objects, routes, ports, and producer/runtime refs are in the scaffold.)

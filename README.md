@@ -26,8 +26,12 @@ This is an RFC stub implementation, not a production runtime. The current code f
 
 Use `cargo test` for native verification.
 
-Regenerate Python stubs and the RFC implementation checklist with
-`manyfold-stub-gen` (or `python -m manyfold.stub_gen`).
+Generate PyO3 `.pyi` stubs with `cargo run --features stub-gen --bin stub_gen`.
+If the default interpreter is older than Python 3.10, set `PYO3_PYTHON` to a
+3.10+ interpreter first, for example
+`PYO3_PYTHON=/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/bin/python3.14 cargo run --features stub-gen --bin stub_gen`.
+Regenerate the RFC implementation checklist with
+`manyfold-rfc-checklist` (or `python -m manyfold.rfc_checklist_gen`).
 
 The Python package now targets Python 3.10+ because `reactivex==5.0.0a2`
 requires it.
