@@ -1,0 +1,41 @@
+# RFC Implementation Checklist
+
+Generated from `docs/rfc/wiregraph_rfc_rev2.md` by `manyfold-stub-gen`.
+
+## Core Sections
+- [x] 6. Core vocabulary and object model (Typed identity objects, routes, ports, and producer/runtime refs are in the scaffold.)
+- [ ] 7. Descriptor model (Descriptor shapes exist, but most RFC buckets still need semantic enforcement.)
+- [ ] 8. Envelope, metadata, and payload model (Closed/opened envelope scaffolding exists; lazy payload and audit behavior remain to implement.)
+- [ ] 9. Read and write namespace model (Read/write namespace and shadow-route scaffolding exist; coherence rules are still incomplete.)
+- [ ] 10. Time model, taints, and scheduling guards (Clock domains, taints, and schedule guard types exist; time semantics are still partial.)
+- [ ] 11. Write model, feedback loops, and shadow semantics (WriteBinding and shadow surfaces exist; closed-loop behavior is still a stub.)
+- [ ] 12. Execution model (In-memory graph, mailboxes, and control-loop ticking exist; scheduler semantics are still incomplete.)
+- [ ] 13. Backpressure and credit-based flow control (Credit and backpressure flow control are not implemented yet.)
+- [ ] 14. Stateful operators, windows, and joins (Stateful operators, windows, and joins are not implemented yet.)
+- [ ] 15. Cross-partition joins (Cross-partition joins are not implemented yet.)
+- [ ] 16. Middleware (Middleware is not implemented yet.)
+- [ ] 17. Transport and link model (Transport and link capabilities are not implemented yet.)
+- [ ] 18. Mesh primitives (Mesh primitives are not implemented yet.)
+- [ ] 19. Query plane and debug plane (Catalog/latest/topology/validation helpers exist; stream-shaped query/debug planes still need work.)
+- [ ] 20. Third-party consumption and security (Third-party export and capability security model are not implemented yet.)
+- [ ] 21. Embedded device profile (Embedded device profile rules are not implemented yet.)
+- [x] 22. API design constraints (The public API already prefers typed refs over ad hoc string identities.)
+- [ ] 23. Reference example suite (The reference example suite has not been added yet.)
+- [ ] 24. Recommended Python-facing SDK shape (Python wrapper ergonomics exist, but Rx-style composition still needs implementation.)
+
+## Appendix F Acceptance Criteria
+- [ ] Common framework for flashed devices over serial, BLE, radio, USB, shared memory, and IP links (Transport scaffolding is not implemented yet.)
+- [x] Raw and logical stream handling (Raw/logical route layers are modeled in the current API.)
+- [ ] Real-time debugging and coherent flow exposure (Debug/query helpers exist, but coherent debug streams are not implemented yet.)
+- [ ] Retry, filtering, backpressure, overflow, and rate matching (Overflow enums exist; runtime operators and flow control are still pending.)
+- [ ] Windows, aggregations, and streaming joins (Pending operator implementation.)
+- [ ] Middleware as a first-class composition surface (Pending middleware implementation.)
+- [ ] Transport-flexible mesh building blocks (Pending transport and mesh implementation.)
+- [ ] Explicit support for write-back loops and shadow semantics (WriteBinding and shadow routes exist, but loop semantics are still partial.)
+- [ ] Randomness and determinism explicitly modeled (Taint domains exist, but determinism propagation rules are still incomplete.)
+- [ ] Scheduling and out-of-order bugs made harder to express (Schedule guard/control-loop scaffolding exists, but semantics are incomplete.)
+- [ ] Metadata/payload split with lazy payload opening (Envelope split exists, but lazy payload demand is still pending.)
+- [ ] Query plane modeled as streams (Query helpers exist, but the query plane is not yet stream-native.)
+- [x] No ad hoc strings in the typed runtime API (Typed refs are already the primary runtime surface.)
+- [x] Protobuf wire schema appendix (The extracted schema scaffold is in the repository.)
+- [x] Glossary, examples, appendices, and normative language (The RFC document already includes these sections.)

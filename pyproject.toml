@@ -7,9 +7,15 @@ name = "manyfold"
 version = "0.1.0"
 description = "PyO3-backed Manyfold RFC scaffolding and in-memory runtime."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = { file = "LICENSE" }
 authors = [{ name = "Codex" }]
+dependencies = [
+    "reactivex==5.0.0a2",
+]
+
+[project.scripts]
+manyfold-stub-gen = "manyfold.stub_gen:main"
 
 [tool.maturin]
 features = ["python-extension"]

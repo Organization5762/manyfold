@@ -25,3 +25,9 @@ This is an RFC stub implementation, not a production runtime. The current code f
 ## Verification
 
 Use `cargo test` for native verification.
+
+Regenerate Python stubs and the RFC implementation checklist with
+`manyfold-stub-gen` (or `python -m manyfold.stub_gen`).
+
+The Python package now targets Python 3.10+ because `reactivex==5.0.0a2`
+requires it.
