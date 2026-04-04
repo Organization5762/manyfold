@@ -223,11 +223,33 @@ class DebugEvent:
 
 
 @dataclass(frozen=True)
+class LazyPayloadSource:
+    """Describe payload bytes that should only be opened on demand."""
+
+    open: Callable[[], bytes | bytearray | memoryview | Sequence[bytes | bytearray | memoryview]]
+    logical_length_bytes: int | None = None
+    codec_id: str = "identity"
+
+
+@dataclass(frozen=True)
 class QueryServiceRoutes:
     """The well-known request/response routes for one query service owner."""
 
     request: RouteRef
     response: RouteRef
+
+
+@dataclass(frozen=True)
+class ShadowSnapshot:
+    """Latest shadow-state view for one write binding."""
+
+    request: ClosedEnvelope | None
+    desired: ClosedEnvelope | None
+    reported: ClosedEnvelope | None
+    effective: ClosedEnvelope | None
+    ack: ClosedEnvelope | None
+    pending_write: bool
+    coherence_taints: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -467,6 +489,9 @@ class Graph:
         self._audit_events: list[DebugEvent] = []
         self._capability_grants: dict[tuple[str, str], CapabilityGrant] = {}
         self._route_visibility: dict[str, str] = {}
+        self._write_bindings: dict[str, WriteBinding] = {}
+        self._lazy_payload_sources: dict[str, LazyPayloadSource] = {}
+        self._materialized_payloads: dict[str, bytes] = {}
         self._query_sequence = 0
 
     def _coerce_route_ref(self, route_ref: RouteLike) -> RouteRef:
@@ -509,19 +534,51 @@ class Graph:
         self._subject_for(route_ref).on_next(envelope)
         return envelope
 
+    @staticmethod
+    def _normalize_payload_chunks(
+        payload: bytes | bytearray | memoryview | Sequence[bytes | bytearray | memoryview],
+    ) -> bytes:
+        if isinstance(payload, (bytes, bytearray, memoryview)):
+            return bytes(payload)
+        return b"".join(bytes(chunk) for chunk in payload)
+
+    def _resolve_payload_bytes(
+        self,
+        route_ref: RouteLike,
+        envelope: ClosedEnvelope,
+        *,
+        record_open: bool,
+    ) -> bytes:
+        payload_id = envelope.payload_ref.payload_id
+        if payload_id in self._materialized_payloads:
+            payload = self._materialized_payloads[payload_id]
+        elif payload_id in self._lazy_payload_sources:
+            payload = self._normalize_payload_chunks(self._lazy_payload_sources[payload_id].open())
+            self._materialized_payloads[payload_id] = payload
+        else:
+            inline_payload = bytes(envelope.payload_ref.inline_bytes)
+            if inline_payload:
+                payload = inline_payload
+            else:
+                opened = tuple(self._read_port(route_ref).open())
+                if not opened:
+                    payload = b""
+                else:
+                    payload = bytes(opened[-1].payload)
+        if record_open:
+            self._emit_debug_event(
+                "payload_open",
+                f"opened payload {payload_id}",
+                route_ref,
+            )
+        return payload
+
     def _decode_envelope(self, route_ref: TypedRoute[T], envelope: ClosedEnvelope) -> TypedEnvelope[T]:
         payload = self._payload_bytes(route_ref, envelope)
         return TypedEnvelope(route=route_ref, closed=envelope, value=route_ref.schema.decode(payload))
 
     def _payload_bytes(self, route_ref: TypedRoute[T], envelope: ClosedEnvelope) -> bytes:
-        # Some runtimes keep ClosedEnvelope metadata separate from payload bytes.
-        inline_payload = bytes(envelope.payload_ref.inline_bytes)
-        if inline_payload:
-            return inline_payload
-        opened = tuple(self._read_port(route_ref).open())
-        if not opened:
-            return b""
-        return bytes(opened[-1].payload)
+        return self._resolve_payload_bytes(route_ref, envelope, record_open=False)
 
     def _make_internal_route(
         self,
@@ -673,15 +730,33 @@ class Graph:
             if route_ref is None:
                 raise ValueError("open_payload requires a route")
             self._authorize(request.principal_id, route_ref, "payload_open")
-            latest = self.latest(route_ref)
-            if latest is None:
+            payload = self.open_payload(route_ref)
+            if payload is None:
                 return ()
-            return (bytes(latest.payload_ref.inline_bytes).decode("utf-8", errors="replace"),)
+            return (payload.decode("utf-8", errors="replace"),)
         if command == "audit":
             self._authorize(request.principal_id, route_ref, "debug_read")
             return tuple(
                 f"{event.event_type}:{event.detail}"
                 for event in self.audit(route_ref)
+            )
+        if command == "shadow":
+            if route_ref is None:
+                raise ValueError("shadow requires a write request route")
+            self._authorize(request.principal_id, route_ref, "metadata_read")
+            shadow = self.shadow_state(route_ref)
+            return tuple(
+                item
+                for item in (
+                    None if shadow.request is None else str(shadow.request.seq_source),
+                    None if shadow.desired is None else str(shadow.desired.seq_source),
+                    None if shadow.reported is None else str(shadow.reported.seq_source),
+                    None if shadow.effective is None else str(shadow.effective.seq_source),
+                    None if shadow.ack is None else str(shadow.ack.seq_source),
+                    "pending" if shadow.pending_write else "stable",
+                    *shadow.coherence_taints,
+                )
+                if item is not None
             )
         raise ValueError(f"unsupported query command: {request.command}")
 
@@ -695,6 +770,7 @@ class Graph:
 
     def _write_port(self, target: WriteTarget) -> WriteBinding | ReactiveWritablePort:
         if isinstance(target, WriteBinding):
+            self._write_bindings[target.request.display()] = target
             return self._graph.register_binding(target.request.display(), target)
         native_route = self._coerce_route_ref(target)
         return ReactiveWritablePort(self, native_route, self._graph.writable_port(native_route))
@@ -817,8 +893,18 @@ class Graph:
     ) -> TypedEnvelope[Any] | ClosedEnvelope:
         """Write one payload to a route and return the resulting envelope."""
         if isinstance(target, WriteBinding):
+            self._write_bindings[target.request.display()] = target
             self._graph.register_binding(target.request.display(), target)
             emitted = self._emit_native(target.request, bytes(payload), producer=producer, control_epoch=control_epoch)
+            if not any(envelope.route == target.desired for envelope in emitted):
+                emitted.extend(
+                    self._emit_native(
+                        target.desired,
+                        bytes(payload),
+                        producer=producer,
+                        control_epoch=control_epoch,
+                    )
+                )
             for envelope in emitted:
                 producer_id = "python" if producer is None else producer.producer_id
                 self._record_envelope(envelope.route, envelope, producer_id=producer_id)
@@ -840,6 +926,24 @@ class Graph:
             self._record_envelope(emitted_envelope.route, emitted_envelope, producer_id=producer_id)
         self._emit_debug_event("write", f"published {self._route_key(target)}", target)
         return envelope
+
+    def publish_lazy(
+        self,
+        target: RouteLike,
+        payload_source: LazyPayloadSource,
+        *,
+        producer: ProducerRef | None = None,
+        control_epoch: int | None = None,
+    ) -> ClosedEnvelope:
+        """Publish metadata now and defer payload materialization until opened."""
+        native_route = self._coerce_route_ref(target)
+        emitted = self._emit_native(native_route, b"", producer=producer, control_epoch=control_epoch)
+        producer_id = "python" if producer is None else producer.producer_id
+        for envelope in emitted:
+            self._lazy_payload_sources[envelope.payload_ref.payload_id] = payload_source
+            self._record_envelope(envelope.route, envelope, producer_id=producer_id)
+        self._emit_debug_event("write", f"published lazy payload for {native_route.display()}", native_route)
+        return emitted[0]
 
     def mailbox(
         self,
@@ -902,13 +1006,32 @@ class Graph:
             return self._decode_envelope(route_ref, latest)
         return latest
 
+    def open_payload(self, route_ref: RouteLike) -> bytes | None:
+        """Open the latest payload bytes for one route on demand."""
+        native_route = self._coerce_route_ref(route_ref)
+        latest = self._graph.latest(native_route)
+        if latest is None:
+            return None
+        return self._resolve_payload_bytes(native_route, latest, record_open=True)
+
     def topology(self) -> Iterator[tuple[str, str]]:
         """Return graph edges as `(source, sink)` display pairs."""
         return iter(tuple(self._graph.topology()))
 
     def validate_graph(self) -> Iterator[str]:
-        """Return graph validation issues detected by the native layer."""
-        return iter(tuple(self._graph.validate_graph()))
+        """Return graph validation issues detected by the native layer and wrapper semantics."""
+        issues = list(self._graph.validate_graph())
+        for route in self.catalog():
+            if (
+                route.namespace.plane == Plane.Write
+                and route.variant == Variant.Request
+                and route.namespace.layer != Layer.Internal
+                and route.display() not in self._write_bindings
+            ):
+                issues.append(
+                    f"Write request route {route.display()} lacks a shadow binding"
+                )
+        return iter(tuple(issues))
 
     def credit_snapshot(self) -> Iterator[CreditSnapshot]:
         """Expose the current credit/backpressure view for registered routes."""
@@ -946,6 +1069,69 @@ class Graph:
         )
         self._capability_grants[(normalized.principal_id, route_ref.display())] = normalized
         return normalized
+
+    def shadow_state(self, binding_or_request: WriteBinding | RouteLike) -> ShadowSnapshot:
+        """Return the current desired/reported/effective/ack view for one write binding."""
+        if isinstance(binding_or_request, WriteBinding):
+            binding = binding_or_request
+            self._write_bindings[binding.request.display()] = binding
+        else:
+            request = self._coerce_route_ref(binding_or_request)
+            if request.display() not in self._write_bindings:
+                raise KeyError(f"no write binding registered for {request.display()}")
+            binding = self._write_bindings[request.display()]
+        desired = self._graph.latest(binding.desired)
+        reported = self._graph.latest(binding.reported)
+        effective = self._graph.latest(binding.effective)
+        ack = None if binding.ack is None else self._graph.latest(binding.ack)
+        request = self._graph.latest(binding.request)
+        desired_seq = -1 if desired is None else desired.seq_source
+        effective_seq = -1 if effective is None else effective.seq_source
+        pending_write = desired_seq > effective_seq
+        coherence_taints = tuple(
+            getattr(taint, "value_id", str(taint))
+            for taint in getattr(effective if effective is not None else desired, "taints", ())
+            if getattr(taint, "domain", None) == "coherence"
+            or getattr(getattr(taint, "domain", None), "as_str", lambda: None)() == "coherence"
+        )
+        return ShadowSnapshot(
+            request=request,
+            desired=desired,
+            reported=reported,
+            effective=effective,
+            ack=ack,
+            pending_write=pending_write,
+            coherence_taints=coherence_taints,
+        )
+
+    def reconcile_write_binding(
+        self,
+        binding_or_request: WriteBinding | RouteLike,
+        *,
+        reported: bytes | None = None,
+        effective: bytes | None = None,
+        ack: bytes | None = None,
+        producer: ProducerRef | None = None,
+        control_epoch: int | None = None,
+    ) -> ShadowSnapshot:
+        """Publish observed shadow updates for a write binding and return the resulting snapshot."""
+        if isinstance(binding_or_request, WriteBinding):
+            binding = binding_or_request
+            self._write_bindings[binding.request.display()] = binding
+        else:
+            request = self._coerce_route_ref(binding_or_request)
+            if request.display() not in self._write_bindings:
+                raise KeyError(f"no write binding registered for {request.display()}")
+            binding = self._write_bindings[request.display()]
+        if reported is not None:
+            self.publish(binding.reported, reported, producer=producer, control_epoch=control_epoch)
+        if effective is not None:
+            self.publish(binding.effective, effective, producer=producer, control_epoch=control_epoch)
+        if ack is not None:
+            if binding.ack is None:
+                raise ValueError("write binding does not define an ack route")
+            self.publish(binding.ack, ack, producer=producer, control_epoch=control_epoch)
+        return self.shadow_state(binding)
 
     def stateful_map(
         self,

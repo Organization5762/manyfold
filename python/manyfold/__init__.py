@@ -32,9 +32,13 @@ from .embedded import FirmwareAgentProfile as FirmwareAgentProfile
 from ._manyfold_rust import bridge_version as bridge_version
 from .graph import ControlLoops as ControlLoops
 from .graph import Graph as Graph
+from .graph import LazyPayloadSource as LazyPayloadSource
+from .graph import ShadowSnapshot as ShadowSnapshot
 from .graph import WriteBindings as WriteBindings
 from .primitives import OwnerName as OwnerName
 from .primitives import ReadThenWriteNextEpochStep as ReadThenWriteNextEpochStep
+from .primitives import RouteIdentity as RouteIdentity
+from .primitives import RouteNamespace as RouteNamespace
 from .primitives import Schema as Schema
 from .primitives import StreamFamily as StreamFamily
 from .primitives import StreamName as StreamName
@@ -61,6 +65,7 @@ __all__ = [
     "FirmwareAgentProfile",
     "Graph",
     "Layer",
+    "LazyPayloadSource",
     "Mailbox",
     "MailboxDescriptor",
     "NamespaceRef",
@@ -73,6 +78,8 @@ __all__ = [
     "ProducerRef",
     "ReadablePort",
     "ReadThenWriteNextEpochStep",
+    "RouteIdentity",
+    "RouteNamespace",
     "RouteRef",
     "RuntimeRef",
     "ScheduleGuard",
@@ -80,6 +87,7 @@ __all__ = [
     "Schema",
     "StreamFamily",
     "StreamName",
+    "ShadowSnapshot",
     "TaintDomain",
     "TaintMark",
     "TypedEnvelope",

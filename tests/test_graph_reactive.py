@@ -216,7 +216,7 @@ def install_manyfold_rust_stub() -> None:
         def display(self) -> str:
             return (
                 f"{self.namespace.plane}.{self.namespace.layer}.{self.namespace.owner}."
-                f"{self.family}.{self.stream}.v{self.schema.version}"
+                f"{self.family}.{self.stream}.{self.variant}.v{self.schema.version}"
             )
 
     @dataclass
@@ -231,6 +231,15 @@ def install_manyfold_rust_stub() -> None:
         route: RouteRef
         payload_ref: PayloadRef
         seq_source: int
+
+    @dataclass(frozen=True)
+    class CreditSnapshot:
+        route_display: str
+        credit_class: str = "default"
+        available: int = 0
+        blocked_senders: int = 0
+        dropped_messages: int = 0
+        largest_queue_depth: int = 0
 
     @dataclass(frozen=True)
     class ProducerRef:
@@ -378,6 +387,7 @@ def install_manyfold_rust_stub() -> None:
 
     rust_module.ControlLoop = ControlLoop
     rust_module.ClosedEnvelope = ClosedEnvelope
+    rust_module.CreditSnapshot = CreditSnapshot
     rust_module.Graph = Graph
     rust_module.Layer = Layer
     rust_module.Mailbox = Mailbox
@@ -624,6 +634,157 @@ class GraphReactiveTests(unittest.TestCase):
         self.assertEqual(primitive.kind, "bridge")
         self.assertEqual(len(list(graph.middleware())), 1)
         self.assertEqual(len(list(graph.mesh_primitives())), 1)
+
+    def test_publish_lazy_defers_payload_open_until_demand(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Bulk,
+            owner=graph_module.OwnerName("lidar"),
+            family=graph_module.StreamFamily("scan"),
+            stream=graph_module.StreamName("frame"),
+            variant=graph_module.Variant.Meta,
+            schema=graph_module.Schema.bytes("LidarFrame"),
+        )
+        graph = graph_module.Graph()
+        opens = 0
+
+        def open_payload():
+            nonlocal opens
+            opens += 1
+            return b"point-cloud"
+
+        graph.publish_lazy(route, graph_module.LazyPayloadSource(open=open_payload, logical_length_bytes=11))
+
+        closed = graph.latest(route.route_ref)
+        self.assertIsNotNone(closed)
+        self.assertEqual(opens, 0)
+
+        graph.export_route(route)
+        graph.grant_access(
+            graph_module.CapabilityGrant(
+                principal_id="inspector",
+                route=route,
+                metadata_read=True,
+                payload_open=True,
+                debug_read=True,
+            )
+        )
+        response = graph.query(
+            graph_module.QueryRequest(command="open_payload", route=route),
+            requester_id="inspector",
+        )
+
+        self.assertEqual(response.items, ("point-cloud",))
+        self.assertEqual(opens, 1)
+        self.assertIn("payload_open", [event.event_type for event in graph.audit(route)])
+
+    def test_shadow_state_tracks_pending_and_reconciliation(self) -> None:
+        graph_module = load_graph_module()
+        binding = graph_module.WriteBindings.logical(
+            graph_module.OwnerName("counter"),
+            graph_module.StreamFamily("counter"),
+            graph_module.StreamName("value"),
+            graph_module.Schema.bytes("CounterValue"),
+        )
+        graph = graph_module.Graph()
+
+        graph.publish(binding, b"41")
+        initial = graph.shadow_state(binding.request)
+        self.assertTrue(initial.pending_write)
+        self.assertIsNotNone(initial.desired)
+        self.assertIsNone(initial.effective)
+
+        reconciled = graph.reconcile_write_binding(
+            binding.request,
+            reported=b"41",
+            effective=b"41",
+            ack=b"ok",
+        )
+        self.assertFalse(reconciled.pending_write)
+        self.assertIsNotNone(reconciled.reported)
+        self.assertIsNotNone(reconciled.effective)
+        self.assertIsNotNone(reconciled.ack)
+
+        graph.export_route(binding.request)
+        graph.grant_access(
+            graph_module.CapabilityGrant(
+                principal_id="dashboard",
+                route=binding.request,
+                metadata_read=True,
+            )
+        )
+        response = graph.query(
+            graph_module.QueryRequest(command="shadow", route=binding.request),
+            requester_id="dashboard",
+        )
+        self.assertIn("stable", response.items)
+
+    def test_validate_graph_reports_write_request_without_shadow_binding(self) -> None:
+        graph_module = load_graph_module()
+        request = graph_module.route(
+            plane=graph_module.Plane.Write,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("light"),
+            family=graph_module.StreamFamily("brightness"),
+            stream=graph_module.StreamName("set"),
+            variant=graph_module.Variant.Request,
+            schema=graph_module.Schema.bytes("Brightness"),
+        )
+        graph = graph_module.Graph()
+
+        graph.register_port(request)
+        issues = list(graph.validate_graph())
+
+        self.assertTrue(any("lacks a shadow binding" in issue for issue in issues))
+
+    def test_route_accepts_wrapped_identity_namespace_and_schema_class(self) -> None:
+        graph_module = load_graph_module()
+        primitives = sys.modules["manyfold.primitives"]
+
+        @dataclass(frozen=True)
+        class FakeProto:
+            payload: bytes
+
+            def SerializeToString(self) -> bytes:
+                return self.payload
+
+            @staticmethod
+            def FromString(payload: bytes) -> "FakeProto":
+                return FakeProto(payload)
+
+        raw_route = primitives.route(
+            namespace=primitives.RouteNamespace(
+                plane=graph_module.Plane.Write,
+                layer=graph_module.Layer.Raw,
+            ),
+            identity=primitives.RouteIdentity.of(
+                owner="led",
+                family="pwm",
+                stream="duty_cycle",
+                variant=graph_module.Variant.Request,
+            ),
+            schema=bytes,
+            schema_id="PwmDutyCycle",
+        )
+        proto_route = primitives.route(
+            namespace=primitives.RouteNamespace(
+                plane=graph_module.Plane.Read,
+                layer=graph_module.Layer.Logical,
+            ),
+            identity=primitives.RouteIdentity.of(
+                owner="imu",
+                family="sensor",
+                stream="accel",
+                variant=graph_module.Variant.Meta,
+            ),
+            schema=FakeProto,
+        )
+
+        self.assertEqual(raw_route.display(), "write.raw.led.pwm.duty_cycle.request.v1")
+        self.assertEqual(raw_route.schema.schema_id, "PwmDutyCycle")
+        self.assertEqual(proto_route.schema.schema_id, "FakeProto")
+        self.assertEqual(proto_route.schema.encode(FakeProto(b"x")), b"x")
 
 
 if __name__ == "__main__":

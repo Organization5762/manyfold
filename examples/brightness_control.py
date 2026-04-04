@@ -5,15 +5,13 @@ from typing import TypedDict
 import reactivex as rx
 
 from manyfold import Graph
-from manyfold import Layer
-from manyfold import OwnerName
-from manyfold import Plane
 from manyfold import ReadThenWriteNextEpochStep
-from manyfold import Schema
-from manyfold import StreamFamily
-from manyfold import StreamName
 from manyfold import Variant
 from manyfold import route
+from manyfold.primitives import RouteIdentity
+from manyfold.primitives import RouteNamespace
+from manyfold import Layer
+from manyfold import Plane
 
 
 class BrightnessControlExampleResult(TypedDict):
@@ -24,13 +22,15 @@ class BrightnessControlExampleResult(TypedDict):
 def run_example() -> BrightnessControlExampleResult:
     graph = Graph()
     pwm_route = route(
-        plane=Plane.Write,
-        layer=Layer.Raw,
-        owner=OwnerName("led"),
-        family=StreamFamily("pwm"),
-        stream=StreamName("duty_cycle"),
-        variant=Variant.Request,
-        schema=Schema.bytes("PwmDutyCycle"),
+        namespace=RouteNamespace(plane=Plane.Write, layer=Layer.Raw),
+        identity=RouteIdentity.of(
+            owner="led",
+            family="pwm",
+            stream="duty_cycle",
+            variant=Variant.Request,
+        ),
+        schema=bytes,
+        schema_id="PwmDutyCycle",
     )
     step = ReadThenWriteNextEpochStep.map(
         name="BrightnessToPwm",
@@ -51,4 +51,3 @@ def run_example() -> BrightnessControlExampleResult:
 
 if __name__ == "__main__":
     print(run_example())
-
