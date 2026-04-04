@@ -24,10 +24,10 @@ CHECKLIST_STATUS = {
     "8": ("x", "Closed envelopes stay metadata-only while payload bytes live in a separate store and are joined on demand with route audit events."),
     "9": ("x", "Route and write-binding validation now enforce read/write plane semantics and write.shadow coherence contracts."),
     "10": ("x", "Writes now carry clock-domain metadata plus determinism/coherence/scheduling taints, and control loops emit epoch guards."),
-    "11": (" ", "WriteBinding and shadow surfaces exist; closed-loop behavior is still a stub."),
-    "12": (" ", "In-memory graph, mailboxes, and control-loop ticking exist; scheduler semantics are still incomplete."),
-    "13": (" ", "Credit and backpressure flow control are not implemented yet."),
-    "14": (" ", "Stateful operators, windows, and joins are not implemented yet."),
+    "11": ("x", "WriteBinding writes now update desired shadow state and expose write-binding coherence through the runtime."),
+    "12": ("x", "The in-memory runtime now routes emitted envelopes across explicit mailbox boundaries and control-loop epochs."),
+    "13": ("x", "Mailbox capacity, overflow handling, and credit snapshots provide a minimal credit-based backpressure surface."),
+    "14": ("x", "The Python graph now exposes first-class stateful_map, window, join_latest, and materialize helpers."),
     "15": (" ", "Cross-partition joins are not implemented yet."),
     "16": (" ", "Middleware is not implemented yet."),
     "17": (" ", "Transport and link capabilities are not implemented yet."),
@@ -51,15 +51,18 @@ APPENDIX_STATUS = {
         "Debug/query helpers exist, but coherent debug streams are not implemented yet.",
     ),
     "Retry, filtering, backpressure, overflow, and rate matching": (
-        " ",
-        "Overflow enums exist; runtime operators and flow control are still pending.",
+        "x",
+        "Mailbox overflow handling and credit snapshots now make backpressure and rate matching observable in the runtime.",
     ),
-    "Windows, aggregations, and streaming joins": (" ", "Pending operator implementation."),
+    "Windows, aggregations, and streaming joins": (
+        "x",
+        "Windowing, stateful map, materialization, and latest-value joins are available from the Python API.",
+    ),
     "Middleware as a first-class composition surface": (" ", "Pending middleware implementation."),
     "Transport-flexible mesh building blocks": (" ", "Pending transport and mesh implementation."),
     "Explicit support for write-back loops and shadow semantics": (
         "x",
-        "Write bindings now validate the write.shadow desired/reported/effective/ack contract.",
+        "WriteBinding request writes now project into desired shadow state through the runtime.",
     ),
     "Randomness and determinism explicitly modeled": (
         "x",
@@ -67,7 +70,7 @@ APPENDIX_STATUS = {
     ),
     "Scheduling and out-of-order bugs made harder to express": (
         "x",
-        "Control-loop writes carry control-epoch metadata and not-before-next-epoch guards.",
+        "Control-loop epoch writes and explicit mailbox boundaries now make scheduling edges visible in the runtime.",
     ),
     "Metadata/payload split with lazy payload opening": (
         "x",

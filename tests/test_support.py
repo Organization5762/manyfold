@@ -373,6 +373,14 @@ def install_manyfold_rust_stub() -> None:
         ack: Optional[RouteRef] = None
 
     @dataclass
+    class CreditSnapshot:
+        route_display: str
+        credit_class: str = "default"
+        available: int = 2**63 - 1
+        blocked_senders: int = 0
+        dropped_messages: int = 0
+
+    @dataclass
     class MailboxDescriptor:
         capacity: int = 128
         delivery_mode: str = "mpsc_serial"
@@ -398,6 +406,7 @@ def install_manyfold_rust_stub() -> None:
             self._sequence = {}
             self._loops = {}
             self._edges = []
+            self._bindings = {}
 
         def register_port(self, route):
             return route
@@ -409,7 +418,27 @@ def install_manyfold_rust_stub() -> None:
             return WritablePort(self, route)
 
         def register_binding(self, name, binding):
+            self._bindings[binding.request] = binding
             return binding
+
+        def emit(self, route, payload, producer=None, control_epoch=None):
+            emitted = [
+                self.writable_port(route).write(
+                    payload,
+                    producer=producer,
+                    control_epoch=control_epoch,
+                )
+            ]
+            binding = self._bindings.get(route)
+            if binding is not None:
+                emitted.append(
+                    self.writable_port(binding.desired).write(
+                        payload,
+                        producer=producer,
+                        control_epoch=control_epoch,
+                    )
+                )
+            return emitted
 
         def mailbox(self, name, descriptor=None):
             ingress_route = RouteRef(
@@ -474,9 +503,13 @@ def install_manyfold_rust_stub() -> None:
         def validate_graph(self):
             return []
 
+        def credit_snapshot(self):
+            return [CreditSnapshot(route_display=route.display()) for route in self._latest]
+
     rust_module.ClockDomainRef = ClockDomainRef
     rust_module.ClosedEnvelope = ClosedEnvelope
     rust_module.ControlLoop = ControlLoop
+    rust_module.CreditSnapshot = CreditSnapshot
     rust_module.Graph = Graph
     rust_module.Layer = Layer
     rust_module.Mailbox = Mailbox
@@ -531,6 +564,7 @@ def load_manyfold_package():
         "ClosedEnvelope": rust.ClosedEnvelope,
         "ControlLoop": rust.ControlLoop,
         "ControlLoops": graph.ControlLoops,
+        "CreditSnapshot": rust.CreditSnapshot,
         "EmbeddedBulkSensor": embedded.EmbeddedBulkSensor,
         "EmbeddedDeviceProfile": embedded.EmbeddedDeviceProfile,
         "EmbeddedRuntimeRules": embedded.EmbeddedRuntimeRules,

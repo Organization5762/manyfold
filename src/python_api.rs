@@ -1,11 +1,11 @@
 use std::sync::{Arc, Mutex};
 
 use crate::core::{
-    ClockDomainRefCore, ClosedEnvelopeCore, ControlLoopCore, DeliveryMode, GraphCore, Layer,
-    MailboxCore, MailboxDescriptorCore, NamespaceRefCore, OpenedEnvelopeCore, OrderingPolicy,
-    OverflowPolicy, Plane, PortDescriptorCore, ProducerKind, ProducerRefCore, QueryKindCore,
-    QueryResultCore, RouteRefCore, RuntimeRefCore, ScheduleConditionCore, ScheduleGuardCore,
-    SchemaRefCore, TaintDomain, TaintMarkCore, Variant, WriteBindingCore,
+    ClockDomainRefCore, ClosedEnvelopeCore, ControlLoopCore, CreditSnapshotCore, DeliveryMode,
+    GraphCore, Layer, MailboxCore, MailboxDescriptorCore, NamespaceRefCore, OpenedEnvelopeCore,
+    OrderingPolicy, OverflowPolicy, Plane, PortDescriptorCore, ProducerKind, ProducerRefCore,
+    QueryKindCore, QueryResultCore, RouteRefCore, RuntimeRefCore, ScheduleConditionCore,
+    ScheduleGuardCore, SchemaRefCore, TaintDomain, TaintMarkCore, Variant, WriteBindingCore,
 };
 use pyo3::exceptions::{PyKeyError, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
@@ -939,7 +939,11 @@ impl WritablePort {
                 producer_id: "python".to_string(),
                 kind: ProducerKind::Application,
             });
-        let inner = graph.write(&self.route, payload, producer, control_epoch);
+        let inner = graph
+            .write(&self.route, payload, producer, control_epoch)
+            .into_iter()
+            .next()
+            .ok_or_else(|| PyRuntimeError::new_err("write emitted no envelopes"))?;
         Ok(ClosedEnvelope { inner })
     }
     fn describe(&self) -> PyResult<PortDescriptor> {
@@ -1079,6 +1083,58 @@ impl MailboxDescriptor {
     fn capacity(&self) -> usize {
         self.inner.capacity
     }
+
+    #[getter]
+    fn overflow_policy(&self) -> String {
+        match self.inner.overflow_policy {
+            OverflowPolicy::Block => "block",
+            OverflowPolicy::DropOldest => "drop_oldest",
+            OverflowPolicy::DropNewest => "drop_newest",
+            OverflowPolicy::CoalesceLatest => "coalesce_latest",
+            OverflowPolicy::DeadlineDrop => "deadline_drop",
+            OverflowPolicy::SpillToStore => "spill_to_store",
+            OverflowPolicy::RejectWrite => "reject_write",
+        }
+        .to_string()
+    }
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust", frozen, from_py_object)]
+#[derive(Clone)]
+pub struct CreditSnapshot {
+    inner: CreditSnapshotCore,
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pymethods]
+impl CreditSnapshot {
+    #[getter]
+    fn route_display(&self) -> String {
+        self.inner.route_display.clone()
+    }
+
+    #[getter]
+    fn credit_class(&self) -> String {
+        self.inner.credit_class.clone()
+    }
+
+    #[getter]
+    fn available(&self) -> u64 {
+        self.inner.available
+    }
+
+    #[getter]
+    fn blocked_senders(&self) -> u64 {
+        self.inner.blocked_senders
+    }
+
+    #[getter]
+    fn dropped_messages(&self) -> u64 {
+        self.inner.dropped_messages
+    }
 }
 
 #[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
@@ -1120,6 +1176,45 @@ impl Mailbox {
     }
     fn name(&self) -> String {
         self.name.clone()
+    }
+
+    fn depth(&self) -> PyResult<usize> {
+        let graph = lock_graph(&self.graph)?;
+        let mailbox = graph
+            .mailboxes
+            .get(&self.name)
+            .ok_or_else(|| PyKeyError::new_err("unknown mailbox"))?;
+        Ok(mailbox.queue.len())
+    }
+
+    fn available_credit(&self) -> PyResult<usize> {
+        let graph = lock_graph(&self.graph)?;
+        let mailbox = graph
+            .mailboxes
+            .get(&self.name)
+            .ok_or_else(|| PyKeyError::new_err("unknown mailbox"))?;
+        Ok(mailbox
+            .descriptor
+            .capacity
+            .saturating_sub(mailbox.queue.len()))
+    }
+
+    fn blocked_writes(&self) -> PyResult<u64> {
+        let graph = lock_graph(&self.graph)?;
+        let mailbox = graph
+            .mailboxes
+            .get(&self.name)
+            .ok_or_else(|| PyKeyError::new_err("unknown mailbox"))?;
+        Ok(mailbox.blocked_writes)
+    }
+
+    fn dropped_messages(&self) -> PyResult<u64> {
+        let graph = lock_graph(&self.graph)?;
+        let mailbox = graph
+            .mailboxes
+            .get(&self.name)
+            .ok_or_else(|| PyKeyError::new_err("unknown mailbox"))?;
+        Ok(mailbox.dropped_messages)
     }
 }
 
@@ -1198,6 +1293,28 @@ impl Graph {
         })
     }
 
+    #[pyo3(signature = (route, payload, producer=None, control_epoch=None))]
+    fn emit(
+        &self,
+        route: RouteRef,
+        payload: Vec<u8>,
+        producer: Option<ProducerRef>,
+        control_epoch: Option<u64>,
+    ) -> PyResult<Vec<ClosedEnvelope>> {
+        let mut graph = lock_graph(&self.state)?;
+        let producer = producer
+            .map(|producer| producer.inner)
+            .unwrap_or(ProducerRefCore {
+                producer_id: "python".to_string(),
+                kind: ProducerKind::Application,
+            });
+        Ok(graph
+            .write(&route.inner, payload, producer, control_epoch)
+            .into_iter()
+            .map(|inner| ClosedEnvelope { inner })
+            .collect())
+    }
+
     fn register_binding(&self, name: String, binding: WriteBinding) -> PyResult<WriteBinding> {
         let mut graph = lock_graph(&self.state)?;
         graph.register_binding(name, binding.inner.clone());
@@ -1247,6 +1364,10 @@ impl Graph {
             egress,
             descriptor: descriptor.inner,
             queue: Default::default(),
+            blocked_writes: 0,
+            dropped_messages: 0,
+            coalesced_messages: 0,
+            delivered_messages: 0,
         };
         let mut graph = lock_graph(&self.state)?;
         graph.register_mailbox(name.clone(), mailbox);
@@ -1351,6 +1472,15 @@ impl Graph {
         };
         Ok(issues)
     }
+
+    fn credit_snapshot(&self) -> PyResult<Vec<CreditSnapshot>> {
+        let graph = lock_graph(&self.state)?;
+        Ok(graph
+            .credit_snapshot()
+            .into_iter()
+            .map(|inner| CreditSnapshot { inner })
+            .collect())
+    }
 }
 
 #[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyfunction)]
@@ -1384,6 +1514,7 @@ fn _manyfold_rust(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()>
     module.add_class::<WritablePort>()?;
     module.add_class::<WriteBinding>()?;
     module.add_class::<MailboxDescriptor>()?;
+    module.add_class::<CreditSnapshot>()?;
     module.add_class::<Mailbox>()?;
     module.add_class::<ControlLoop>()?;
     module.add_class::<Graph>()?;
