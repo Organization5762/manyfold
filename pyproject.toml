@@ -15,7 +15,7 @@ dependencies = [
 ]
 
 [project.scripts]
-manyfold-stub-gen = "manyfold.stub_gen:main"
+manyfold-rfc-checklist = "manyfold.rfc_checklist_gen:main"
 
 [tool.maturin]
 features = ["python-extension"]
