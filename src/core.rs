@@ -191,12 +191,13 @@ pub struct RouteRefCore {
 impl RouteRefCore {
     pub fn display(&self) -> String {
         format!(
-            "{}.{}.{}.{}.{}.v{}",
+            "{}.{}.{}.{}.{}.{}.v{}",
             self.namespace.plane.as_str(),
             self.namespace.layer.as_str(),
             self.namespace.owner,
             self.family,
             self.stream,
+            self.variant.as_str(),
             self.schema.version
         )
     }
