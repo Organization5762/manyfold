@@ -53,6 +53,30 @@ the step is installed and started.
 The `examples/` directory demonstrates these calls directly, and the examples are
 validated by the regular `unittest` run so they do not drift away from the API.
 
+## Best Practices
+
+When extending this repository, prefer a narrow, explicit, well-documented API
+over a broad convenience surface.
+
+- Write tests for every meaningful behavior change. Keep the smallest,
+  easiest-to-understand examples close to the usage they demonstrate in
+  `examples/` and mirror them with straightforward assertions in
+  `tests/test_examples.py`. Put more complex integration, reactive, and
+  repository-level coverage in the rest of the `tests/` directory, where
+  `tests/test_graph_reactive.py` and `tests/test_rfc_checklist_gen.py` show the
+  expected level of depth.
+- Write extensive docstrings and supporting documentation for public modules,
+  classes, and functions. If a section of code is non-obvious, add a concise
+  comment that explains the invariant, constraint, or design reason behind it
+  instead of leaving future readers to infer intent from implementation details.
+- Always add types. Prefer signatures, return types, and data shapes that make
+  the code self-describing, and keep pushing the API toward something a new
+  reader can grok quickly without tracing through multiple layers of code.
+- Only elevate essential concepts into the primary API. Keep helper functions
+  and intermediate building blocks semi-private by default, and use a leading
+  underscore liberally for methods and functions that support the implementation
+  but should not become part of the stable surface area.
+
 ## Verification
 
 Use `cargo test` for native verification.
