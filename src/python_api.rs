@@ -1,11 +1,11 @@
 use std::sync::{Arc, Mutex};
 
 use crate::core::{
-    ClockDomainRefCore, ClosedEnvelopeCore, ControlLoopCore, DeliveryMode, GraphCore, Layer,
-    MailboxCore, MailboxDescriptorCore, NamespaceRefCore, OpenedEnvelopeCore, OrderingPolicy,
-    OverflowPolicy, Plane, PortDescriptorCore, ProducerKind, ProducerRefCore, QueryKindCore,
-    QueryResultCore, RouteRefCore, RuntimeRefCore, SchemaRefCore, ScheduleConditionCore,
-    ScheduleGuardCore, TaintDomain, TaintMarkCore, Variant, WriteBindingCore,
+    ClockDomainRefCore, ClosedEnvelopeCore, ControlLoopCore, CreditSnapshotCore, DeliveryMode,
+    GraphCore, Layer, MailboxCore, MailboxDescriptorCore, NamespaceRefCore, OpenedEnvelopeCore,
+    OrderingPolicy, OverflowPolicy, Plane, PortDescriptorCore, ProducerKind, ProducerRefCore,
+    QueryKindCore, QueryResultCore, RouteRefCore, RuntimeRefCore, ScheduleConditionCore,
+    ScheduleGuardCore, SchemaRefCore, TaintDomain, TaintMarkCore, Variant, WriteBindingCore,
 };
 use pyo3::exceptions::{PyKeyError, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
@@ -13,13 +13,70 @@ use pyo3::prelude::*;
 #[cfg(feature = "stub-gen")]
 use pyo3_stub_gen::define_stub_info_gatherer;
 
-fn lock_graph<'a>(state: &'a Arc<Mutex<GraphCore>>) -> PyResult<std::sync::MutexGuard<'a, GraphCore>> {
-    state.lock().map_err(|_| PyRuntimeError::new_err("graph mutex poisoned"))
+fn lock_graph<'a>(
+    state: &'a Arc<Mutex<GraphCore>>,
+) -> PyResult<std::sync::MutexGuard<'a, GraphCore>> {
+    state
+        .lock()
+        .map_err(|_| PyRuntimeError::new_err("graph mutex poisoned"))
+}
+
+fn validate_route(route: &RouteRefCore) -> PyResult<()> {
+    let valid = match route.namespace.plane {
+        Plane::Read => matches!(
+            route.variant,
+            Variant::Meta | Variant::Payload | Variant::State | Variant::Event | Variant::Health
+        ),
+        Plane::Write => matches!(
+            route.variant,
+            Variant::Request
+                | Variant::Desired
+                | Variant::Reported
+                | Variant::Effective
+                | Variant::Ack
+        ),
+        Plane::State => route.variant == Variant::State,
+        Plane::Query => matches!(
+            route.variant,
+            Variant::QueryRequest | Variant::QueryResponse
+        ),
+        Plane::Debug => matches!(
+            route.variant,
+            Variant::Meta | Variant::Event | Variant::Health
+        ),
+    };
+    if !valid {
+        return Err(PyValueError::new_err(format!(
+            "variant {} is not valid for plane {}",
+            route.variant.as_str(),
+            route.namespace.plane.as_str()
+        )));
+    }
+    if route.namespace.plane != Plane::Write && route.namespace.layer == Layer::Shadow {
+        return Err(PyValueError::new_err(
+            "shadow routes are only valid under the write plane",
+        ));
+    }
+    if route.namespace.plane == Plane::Write
+        && route.variant == Variant::Request
+        && route.namespace.layer == Layer::Shadow
+    {
+        return Err(PyValueError::new_err(
+            "write request routes must not use the shadow layer",
+        ));
+    }
+    Ok(())
 }
 
 #[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
 #[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
-#[pyclass(eq, frozen, module = "manyfold._manyfold_rust", name = "Plane", from_py_object)]
+#[pyclass(
+    eq,
+    frozen,
+    module = "manyfold._manyfold_rust",
+    name = "Plane",
+    from_py_object
+)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PyPlane {
     inner: Plane,
@@ -36,19 +93,27 @@ impl PyPlane {
     }
     #[classattr]
     fn Write() -> PyPlane {
-        Self { inner: Plane::Write }
+        Self {
+            inner: Plane::Write,
+        }
     }
     #[classattr]
     fn State() -> PyPlane {
-        Self { inner: Plane::State }
+        Self {
+            inner: Plane::State,
+        }
     }
     #[classattr]
     fn Query() -> PyPlane {
-        Self { inner: Plane::Query }
+        Self {
+            inner: Plane::Query,
+        }
     }
     #[classattr]
     fn Debug() -> PyPlane {
-        Self { inner: Plane::Debug }
+        Self {
+            inner: Plane::Debug,
+        }
     }
     #[getter]
     fn value(&self) -> &'static str {
@@ -61,7 +126,13 @@ impl PyPlane {
 
 #[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
 #[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
-#[pyclass(eq, frozen, module = "manyfold._manyfold_rust", name = "Layer", from_py_object)]
+#[pyclass(
+    eq,
+    frozen,
+    module = "manyfold._manyfold_rust",
+    name = "Layer",
+    from_py_object
+)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PyLayer {
     inner: Layer,
@@ -78,11 +149,15 @@ impl PyLayer {
     }
     #[classattr]
     fn Logical() -> PyLayer {
-        Self { inner: Layer::Logical }
+        Self {
+            inner: Layer::Logical,
+        }
     }
     #[classattr]
     fn Shadow() -> PyLayer {
-        Self { inner: Layer::Shadow }
+        Self {
+            inner: Layer::Shadow,
+        }
     }
     #[classattr]
     fn Bulk() -> PyLayer {
@@ -90,11 +165,15 @@ impl PyLayer {
     }
     #[classattr]
     fn Internal() -> PyLayer {
-        Self { inner: Layer::Internal }
+        Self {
+            inner: Layer::Internal,
+        }
     }
     #[classattr]
     fn Ephemeral() -> PyLayer {
-        Self { inner: Layer::Ephemeral }
+        Self {
+            inner: Layer::Ephemeral,
+        }
     }
     #[getter]
     fn value(&self) -> &'static str {
@@ -107,7 +186,13 @@ impl PyLayer {
 
 #[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
 #[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
-#[pyclass(eq, frozen, module = "manyfold._manyfold_rust", name = "Variant", from_py_object)]
+#[pyclass(
+    eq,
+    frozen,
+    module = "manyfold._manyfold_rust",
+    name = "Variant",
+    from_py_object
+)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PyVariant {
     inner: Variant,
@@ -120,35 +205,51 @@ pub struct PyVariant {
 impl PyVariant {
     #[classattr]
     fn Meta() -> PyVariant {
-        Self { inner: Variant::Meta }
+        Self {
+            inner: Variant::Meta,
+        }
     }
     #[classattr]
     fn Payload() -> PyVariant {
-        Self { inner: Variant::Payload }
+        Self {
+            inner: Variant::Payload,
+        }
     }
     #[classattr]
     fn Request() -> PyVariant {
-        Self { inner: Variant::Request }
+        Self {
+            inner: Variant::Request,
+        }
     }
     #[classattr]
     fn Desired() -> PyVariant {
-        Self { inner: Variant::Desired }
+        Self {
+            inner: Variant::Desired,
+        }
     }
     #[classattr]
     fn Reported() -> PyVariant {
-        Self { inner: Variant::Reported }
+        Self {
+            inner: Variant::Reported,
+        }
     }
     #[classattr]
     fn Effective() -> PyVariant {
-        Self { inner: Variant::Effective }
+        Self {
+            inner: Variant::Effective,
+        }
     }
     #[classattr]
     fn Ack() -> PyVariant {
-        Self { inner: Variant::Ack }
+        Self {
+            inner: Variant::Ack,
+        }
     }
     #[classattr]
     fn State() -> PyVariant {
-        Self { inner: Variant::State }
+        Self {
+            inner: Variant::State,
+        }
     }
     #[classattr]
     fn QueryRequest() -> PyVariant {
@@ -183,7 +284,13 @@ impl PyVariant {
 
 #[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
 #[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
-#[pyclass(eq, frozen, module = "manyfold._manyfold_rust", name = "ProducerKind", from_py_object)]
+#[pyclass(
+    eq,
+    frozen,
+    module = "manyfold._manyfold_rust",
+    name = "ProducerKind",
+    from_py_object
+)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PyProducerKind {
     inner: ProducerKind,
@@ -247,7 +354,13 @@ impl PyProducerKind {
 
 #[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
 #[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
-#[pyclass(eq, frozen, module = "manyfold._manyfold_rust", name = "TaintDomain", from_py_object)]
+#[pyclass(
+    eq,
+    frozen,
+    module = "manyfold._manyfold_rust",
+    name = "TaintDomain",
+    from_py_object
+)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PyTaintDomain {
     inner: TaintDomain,
@@ -402,16 +515,16 @@ impl RouteRef {
         variant: PyVariant,
         schema: Py<SchemaRef>,
         py: Python<'_>,
-    ) -> Self {
-        Self {
-            inner: RouteRefCore {
-                namespace: namespace.borrow(py).inner.clone(),
-                family,
-                stream,
-                variant: variant.inner,
-                schema: schema.borrow(py).inner.clone(),
-            },
-        }
+    ) -> PyResult<Self> {
+        let inner = RouteRefCore {
+            namespace: namespace.borrow(py).inner.clone(),
+            family,
+            stream,
+            variant: variant.inner,
+            schema: schema.borrow(py).inner.clone(),
+        };
+        validate_route(&inner)?;
+        Ok(Self { inner })
     }
     #[getter]
     fn namespace(&self) -> NamespaceRef {
@@ -795,18 +908,11 @@ impl ReadablePort {
             .collect())
     }
     fn open(&self) -> PyResult<Vec<OpenedEnvelope>> {
-        let graph = lock_graph(&self.graph)?;
+        let mut graph = lock_graph(&self.graph)?;
         Ok(graph
-            .latest
-            .get(&self.route)
-            .cloned()
+            .open_latest(&self.route)
             .into_iter()
-            .map(|closed| OpenedEnvelope {
-                inner: OpenedEnvelopeCore {
-                    payload: closed.payload_ref.inline_bytes.clone(),
-                    closed,
-                },
-            })
+            .map(|inner| OpenedEnvelope { inner })
             .collect())
     }
     fn latest(&self) -> PyResult<Option<ClosedEnvelope>> {
@@ -855,7 +961,11 @@ impl WritablePort {
                 producer_id: "python".to_string(),
                 kind: ProducerKind::Application,
             });
-        let inner = graph.write(&self.route, payload, producer, control_epoch);
+        let inner = graph
+            .write(&self.route, payload, producer, control_epoch)
+            .into_iter()
+            .next()
+            .ok_or_else(|| PyRuntimeError::new_err("write emitted no envelopes"))?;
         Ok(ClosedEnvelope { inner })
     }
     fn describe(&self) -> PyResult<PortDescriptor> {
@@ -891,17 +1001,19 @@ impl WriteBinding {
         ack: Option<RouteRef>,
     ) -> PyResult<Self> {
         if request.inner.variant != Variant::Request {
-            return Err(PyValueError::new_err("request route must use Variant.Request"));
+            return Err(PyValueError::new_err(
+                "request route must use Variant.Request",
+            ));
         }
-        Ok(Self {
-            inner: WriteBindingCore {
-                request: request.inner,
-                desired: desired.inner,
-                reported: reported.inner,
-                effective: effective.inner,
-                ack: ack.map(|route| route.inner),
-            },
-        })
+        let inner = WriteBindingCore {
+            request: request.inner,
+            desired: desired.inner,
+            reported: reported.inner,
+            effective: effective.inner,
+            ack: ack.map(|route| route.inner),
+        };
+        inner.validate().map_err(PyValueError::new_err)?;
+        Ok(Self { inner })
     }
     #[getter]
     fn request(&self) -> RouteRef {
@@ -993,6 +1105,58 @@ impl MailboxDescriptor {
     fn capacity(&self) -> usize {
         self.inner.capacity
     }
+
+    #[getter]
+    fn overflow_policy(&self) -> String {
+        match self.inner.overflow_policy {
+            OverflowPolicy::Block => "block",
+            OverflowPolicy::DropOldest => "drop_oldest",
+            OverflowPolicy::DropNewest => "drop_newest",
+            OverflowPolicy::CoalesceLatest => "coalesce_latest",
+            OverflowPolicy::DeadlineDrop => "deadline_drop",
+            OverflowPolicy::SpillToStore => "spill_to_store",
+            OverflowPolicy::RejectWrite => "reject_write",
+        }
+        .to_string()
+    }
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust", frozen, from_py_object)]
+#[derive(Clone)]
+pub struct CreditSnapshot {
+    inner: CreditSnapshotCore,
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pymethods]
+impl CreditSnapshot {
+    #[getter]
+    fn route_display(&self) -> String {
+        self.inner.route_display.clone()
+    }
+
+    #[getter]
+    fn credit_class(&self) -> String {
+        self.inner.credit_class.clone()
+    }
+
+    #[getter]
+    fn available(&self) -> u64 {
+        self.inner.available
+    }
+
+    #[getter]
+    fn blocked_senders(&self) -> u64 {
+        self.inner.blocked_senders
+    }
+
+    #[getter]
+    fn dropped_messages(&self) -> u64 {
+        self.inner.dropped_messages
+    }
 }
 
 #[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
@@ -1034,6 +1198,45 @@ impl Mailbox {
     }
     fn name(&self) -> String {
         self.name.clone()
+    }
+
+    fn depth(&self) -> PyResult<usize> {
+        let graph = lock_graph(&self.graph)?;
+        let mailbox = graph
+            .mailboxes
+            .get(&self.name)
+            .ok_or_else(|| PyKeyError::new_err("unknown mailbox"))?;
+        Ok(mailbox.queue.len())
+    }
+
+    fn available_credit(&self) -> PyResult<usize> {
+        let graph = lock_graph(&self.graph)?;
+        let mailbox = graph
+            .mailboxes
+            .get(&self.name)
+            .ok_or_else(|| PyKeyError::new_err("unknown mailbox"))?;
+        Ok(mailbox
+            .descriptor
+            .capacity
+            .saturating_sub(mailbox.queue.len()))
+    }
+
+    fn blocked_writes(&self) -> PyResult<u64> {
+        let graph = lock_graph(&self.graph)?;
+        let mailbox = graph
+            .mailboxes
+            .get(&self.name)
+            .ok_or_else(|| PyKeyError::new_err("unknown mailbox"))?;
+        Ok(mailbox.blocked_writes)
+    }
+
+    fn dropped_messages(&self) -> PyResult<u64> {
+        let graph = lock_graph(&self.graph)?;
+        let mailbox = graph
+            .mailboxes
+            .get(&self.name)
+            .ok_or_else(|| PyKeyError::new_err("unknown mailbox"))?;
+        Ok(mailbox.dropped_messages)
     }
 }
 
@@ -1112,6 +1315,28 @@ impl Graph {
         })
     }
 
+    #[pyo3(signature = (route, payload, producer=None, control_epoch=None))]
+    fn emit(
+        &self,
+        route: RouteRef,
+        payload: Vec<u8>,
+        producer: Option<ProducerRef>,
+        control_epoch: Option<u64>,
+    ) -> PyResult<Vec<ClosedEnvelope>> {
+        let mut graph = lock_graph(&self.state)?;
+        let producer = producer
+            .map(|producer| producer.inner)
+            .unwrap_or(ProducerRefCore {
+                producer_id: "python".to_string(),
+                kind: ProducerKind::Application,
+            });
+        Ok(graph
+            .write(&route.inner, payload, producer, control_epoch)
+            .into_iter()
+            .map(|inner| ClosedEnvelope { inner })
+            .collect())
+    }
+
     fn register_binding(&self, name: String, binding: WriteBinding) -> PyResult<WriteBinding> {
         let mut graph = lock_graph(&self.state)?;
         graph.register_binding(name, binding.inner.clone());
@@ -1161,6 +1386,10 @@ impl Graph {
             egress,
             descriptor: descriptor.inner,
             queue: Default::default(),
+            blocked_writes: 0,
+            dropped_messages: 0,
+            coalesced_messages: 0,
+            delivered_messages: 0,
         };
         let mut graph = lock_graph(&self.state)?;
         graph.register_mailbox(name.clone(), mailbox);
@@ -1175,7 +1404,8 @@ impl Graph {
             route.inner
         } else if let Ok(mailbox) = source.extract::<Mailbox>() {
             let graph = lock_graph(&self.state)?;
-            graph.mailboxes
+            graph
+                .mailboxes
                 .get(&mailbox.name)
                 .map(|mailbox| mailbox.egress.clone())
                 .ok_or_else(|| PyKeyError::new_err("unknown mailbox"))?
@@ -1186,7 +1416,8 @@ impl Graph {
             route.inner
         } else if let Ok(mailbox) = sink.extract::<Mailbox>() {
             let graph = lock_graph(&self.state)?;
-            graph.mailboxes
+            graph
+                .mailboxes
                 .get(&mailbox.name)
                 .map(|mailbox| mailbox.ingress.clone())
                 .ok_or_else(|| PyKeyError::new_err("unknown mailbox"))?
@@ -1230,7 +1461,9 @@ impl Graph {
         let QueryResultCore::DescribeRoute(inner) =
             graph.query(QueryKindCore::DescribeRoute(route.inner))
         else {
-            return Err(PyRuntimeError::new_err("unexpected describe_route response"));
+            return Err(PyRuntimeError::new_err(
+                "unexpected describe_route response",
+            ));
         };
         Ok(PortDescriptor { inner })
     }
@@ -1253,10 +1486,22 @@ impl Graph {
 
     fn validate_graph(&self) -> PyResult<Vec<String>> {
         let graph = lock_graph(&self.state)?;
-        let QueryResultCore::ValidateGraph(issues) = graph.query(QueryKindCore::ValidateGraph) else {
-            return Err(PyRuntimeError::new_err("unexpected validate_graph response"));
+        let QueryResultCore::ValidateGraph(issues) = graph.query(QueryKindCore::ValidateGraph)
+        else {
+            return Err(PyRuntimeError::new_err(
+                "unexpected validate_graph response",
+            ));
         };
         Ok(issues)
+    }
+
+    fn credit_snapshot(&self) -> PyResult<Vec<CreditSnapshot>> {
+        let graph = lock_graph(&self.state)?;
+        Ok(graph
+            .credit_snapshot()
+            .into_iter()
+            .map(|inner| CreditSnapshot { inner })
+            .collect())
     }
 }
 
@@ -1291,6 +1536,7 @@ fn _manyfold_rust(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()>
     module.add_class::<WritablePort>()?;
     module.add_class::<WriteBinding>()?;
     module.add_class::<MailboxDescriptor>()?;
+    module.add_class::<CreditSnapshot>()?;
     module.add_class::<Mailbox>()?;
     module.add_class::<ControlLoop>()?;
     module.add_class::<Graph>()?;

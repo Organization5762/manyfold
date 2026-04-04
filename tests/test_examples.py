@@ -32,6 +32,12 @@ class ExampleTests(unittest.TestCase):
         self.assertEqual(result["latest_payload"], b"FAST")
         self.assertEqual(result["latest_seq"], 2)
 
+    def test_write_binding_example(self) -> None:
+        result = load_example_module("write_binding").run_example()
+
+        self.assertEqual(result["request_payload"], b"42")
+        self.assertEqual(result["desired_payload"], b"42")
+
     def test_uart_temperature_sensor_example(self) -> None:
         result = load_example_module("uart_temperature_sensor").run_example()
 

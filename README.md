@@ -74,13 +74,10 @@ over a broad convenience surface.
   easiest-to-understand examples close to the usage they demonstrate in
   `examples/` and mirror them with straightforward assertions in
   `tests/test_examples.py`. Put more complex integration, reactive, and
-  repository-level coverage in the rest of the `tests/` directory, where
-  `tests/test_graph_reactive.py` and `tests/test_rfc_checklist_gen.py` show the
-  expected level of depth.
+  repository-level coverage in the rest of the `tests/` directory.
 - Write extensive docstrings and supporting documentation for public modules,
   classes, and functions. If a section of code is non-obvious, add a concise
-  comment that explains the invariant, constraint, or design reason behind it
-  instead of leaving future readers to infer intent from implementation details.
+  comment that explains the invariant, constraint, or design reason behind it.
 - Always add types. Prefer signatures, return types, and data shapes that make
   the code self-describing, and keep pushing the API toward something a new
   reader can grok quickly without tracing through multiple layers of code.

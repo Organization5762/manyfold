@@ -12,6 +12,7 @@ from collections import deque
 from dataclasses import dataclass
 from dataclasses import field
 import json
+from typing import cast
 from typing import Any
 from typing import Callable
 from typing import Generic
@@ -29,6 +30,7 @@ from reactivex.subject import Subject
 
 from ._manyfold_rust import ControlLoop as NativeControlLoop
 from ._manyfold_rust import ClosedEnvelope
+from ._manyfold_rust import CreditSnapshot
 from ._manyfold_rust import Graph as NativeGraph
 from ._manyfold_rust import Mailbox as NativeMailbox
 from ._manyfold_rust import MailboxDescriptor as NativeMailboxDescriptor
@@ -60,6 +62,8 @@ RouteLike = Union[AnyTypedRoute, RouteRef]
 WriteTarget = Union[WriteBinding, RouteLike]
 ConnectableTarget = Union[RouteLike, NativeMailbox]
 EnvelopeIterator = Iterator[ClosedEnvelope]
+StateT = TypeVar("StateT")
+TRight = TypeVar("TRight")
 
 
 @runtime_checkable
@@ -506,8 +510,18 @@ class Graph:
         return envelope
 
     def _decode_envelope(self, route_ref: TypedRoute[T], envelope: ClosedEnvelope) -> TypedEnvelope[T]:
-        payload = bytes(envelope.payload_ref.inline_bytes)
+        payload = self._payload_bytes(route_ref, envelope)
         return TypedEnvelope(route=route_ref, closed=envelope, value=route_ref.schema.decode(payload))
+
+    def _payload_bytes(self, route_ref: TypedRoute[T], envelope: ClosedEnvelope) -> bytes:
+        # Some runtimes keep ClosedEnvelope metadata separate from payload bytes.
+        inline_payload = bytes(envelope.payload_ref.inline_bytes)
+        if inline_payload:
+            return inline_payload
+        opened = tuple(self._read_port(route_ref).open())
+        if not opened:
+            return b""
+        return bytes(opened[-1].payload)
 
     def _make_internal_route(
         self,
@@ -685,6 +699,26 @@ class Graph:
         native_route = self._coerce_route_ref(target)
         return ReactiveWritablePort(self, native_route, self._graph.writable_port(native_route))
 
+    def _emit_native(
+        self,
+        route_ref: RouteRef,
+        payload: bytes,
+        *,
+        producer: ProducerRef | None = None,
+        control_epoch: int | None = None,
+    ) -> list[ClosedEnvelope]:
+        if hasattr(self._graph, "emit"):
+            return cast(
+                list[ClosedEnvelope],
+                self._graph.emit(route_ref, payload, producer=producer, control_epoch=control_epoch),
+            )
+        envelope = self._graph.writable_port(route_ref).write(
+            payload,
+            producer=producer,
+            control_epoch=control_epoch,
+        )
+        return [envelope]
+
     @overload
     def observe(self, route_ref: TypedRoute[T], *, replay_latest: bool = True) -> Observable[TypedEnvelope[T]]: ...
 
@@ -775,19 +809,35 @@ class Graph:
 
     def publish(
         self,
-        target: RouteLike,
+        target: WriteTarget,
         payload: Any,
         *,
         producer: ProducerRef | None = None,
         control_epoch: int | None = None,
     ) -> TypedEnvelope[Any] | ClosedEnvelope:
         """Write one payload to a route and return the resulting envelope."""
+        if isinstance(target, WriteBinding):
+            self._graph.register_binding(target.request.display(), target)
+            emitted = self._emit_native(target.request, bytes(payload), producer=producer, control_epoch=control_epoch)
+            for envelope in emitted:
+                producer_id = "python" if producer is None else producer.producer_id
+                self._record_envelope(envelope.route, envelope, producer_id=producer_id)
+            self._emit_debug_event("write", f"published {target.request.display()}", target.request)
+            return emitted[0]
         if isinstance(target, TypedRoute):
             encoded = target.schema.encode(payload)
-            envelope = self._write_port(target).write(encoded, producer=producer, control_epoch=control_epoch)  # type: ignore[union-attr]
+            emitted = self._emit_native(target.route_ref, encoded, producer=producer, control_epoch=control_epoch)
+            envelope = emitted[0]
+            producer_id = "python" if producer is None else producer.producer_id
+            for emitted_envelope in emitted:
+                self._record_envelope(emitted_envelope.route, emitted_envelope, producer_id=producer_id)
             self._emit_debug_event("write", f"published {target.display()}", target)
             return self._decode_envelope(target, envelope)
-        envelope = self._write_port(target).write(payload, producer=producer, control_epoch=control_epoch)  # type: ignore[union-attr]
+        emitted = self._emit_native(self._coerce_route_ref(target), payload, producer=producer, control_epoch=control_epoch)
+        envelope = emitted[0]
+        producer_id = "python" if producer is None else producer.producer_id
+        for emitted_envelope in emitted:
+            self._record_envelope(emitted_envelope.route, emitted_envelope, producer_id=producer_id)
         self._emit_debug_event("write", f"published {self._route_key(target)}", target)
         return envelope
 
@@ -860,6 +910,10 @@ class Graph:
         """Return graph validation issues detected by the native layer."""
         return iter(tuple(self._graph.validate_graph()))
 
+    def credit_snapshot(self) -> Iterator[CreditSnapshot]:
+        """Expose the current credit/backpressure view for registered routes."""
+        return iter(tuple(self._graph.credit_snapshot()))
+
     def replay(self, route_ref: RouteLike) -> Iterator[ClosedEnvelope]:
         """Return the retained in-memory history for one route."""
         return iter(tuple(self._history.get(self._route_key(route_ref), ())))
@@ -892,6 +946,102 @@ class Graph:
         )
         self._capability_grants[(normalized.principal_id, route_ref.display())] = normalized
         return normalized
+
+    def stateful_map(
+        self,
+        source: TypedRoute[TIn] | RouteRef,
+        *,
+        initial_state: StateT,
+        step: Callable[[StateT, TIn], tuple[StateT, TOut]],
+        output: TypedRoute[TOut],
+    ) -> SubscriptionLike:
+        """Apply a stateful step function and publish each emitted value to `output`."""
+        state = initial_state
+
+        def on_next(item: TypedEnvelope[TIn] | ClosedEnvelope) -> None:
+            nonlocal state
+            value = item.value if isinstance(item, TypedEnvelope) else cast(TIn, bytes(item.payload_ref.inline_bytes))
+            state, out = step(state, value)
+            self.publish(output, out)
+
+        return self.observe(source).subscribe(on_next)  # type: ignore[arg-type]
+
+    def window(
+        self,
+        source: TypedRoute[T] | RouteRef,
+        *,
+        size: int,
+    ) -> Observable[list[T] | list[bytes]]:
+        """Emit the most recent `size` values on each source update."""
+        buffer: deque[T | bytes] = deque(maxlen=size)
+
+        def subscribe(
+            observer: ObserverLike[list[T] | list[bytes]],
+            scheduler: object | None = None,
+        ) -> SubscriptionLike:
+            def on_next(item: TypedEnvelope[T] | ClosedEnvelope) -> None:
+                value = item.value if isinstance(item, TypedEnvelope) else bytes(item.payload_ref.inline_bytes)
+                buffer.append(value)
+                observer.on_next(list(buffer))
+
+            return self.observe(source, replay_latest=False).subscribe(on_next, scheduler=scheduler)  # type: ignore[arg-type]
+
+        return rx.create(subscribe)
+
+    def join_latest(
+        self,
+        left: TypedRoute[TIn] | RouteRef,
+        right: TypedRoute[TRight] | RouteRef,
+        *,
+        combine: Callable[[TIn, TRight], TOut],
+    ) -> Observable[TOut]:
+        """Combine each incoming side with the latest value from the other side."""
+        left_latest: TIn | None = None
+        right_latest: TRight | None = None
+
+        def subscribe(
+            observer: ObserverLike[TOut],
+            scheduler: object | None = None,
+        ) -> SubscriptionLike:
+            def on_left(item: TypedEnvelope[TIn] | ClosedEnvelope) -> None:
+                nonlocal left_latest
+                left_latest = item.value if isinstance(item, TypedEnvelope) else cast(TIn, bytes(item.payload_ref.inline_bytes))
+                if right_latest is not None:
+                    observer.on_next(combine(left_latest, right_latest))
+
+            def on_right(item: TypedEnvelope[TRight] | ClosedEnvelope) -> None:
+                nonlocal right_latest
+                right_latest = item.value if isinstance(item, TypedEnvelope) else cast(TRight, bytes(item.payload_ref.inline_bytes))
+                if left_latest is not None:
+                    observer.on_next(combine(left_latest, right_latest))
+
+            left_sub = self.observe(left, replay_latest=False).subscribe(on_left, scheduler=scheduler)  # type: ignore[arg-type]
+            right_sub = self.observe(right, replay_latest=False).subscribe(on_right, scheduler=scheduler)  # type: ignore[arg-type]
+
+            class _Subscription:
+                def dispose(self) -> None:
+                    left_sub.dispose()
+                    right_sub.dispose()
+
+            return _Subscription()
+
+        return rx.create(subscribe)
+
+    def materialize(
+        self,
+        source: TypedRoute[T] | RouteRef,
+        *,
+        state_route: TypedRoute[T] | RouteRef,
+    ) -> SubscriptionLike:
+        """Mirror source updates into a state route owned by the topology."""
+        def on_next(item: TypedEnvelope[T] | ClosedEnvelope) -> None:
+            if isinstance(state_route, TypedRoute):
+                value = item.value if isinstance(item, TypedEnvelope) else state_route.schema.decode(bytes(item.payload_ref.inline_bytes))
+                self.publish(state_route, value)
+            else:
+                self.publish(state_route, bytes(item.payload_ref.inline_bytes))
+
+        return self.observe(source).subscribe(on_next)  # type: ignore[arg-type]
 
     def plan_join(self, name: str, left: JoinInput, right: JoinInput) -> JoinPlan:
         """Plan a join and reject illegal cross-partition cases.
