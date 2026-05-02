@@ -8,11 +8,36 @@ version = "0.1.0"
 description = "PyO3-backed Manyfold RFC scaffolding and in-memory runtime."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { file = "LICENSE" }
-authors = [{ name = "Codex" }]
+license = "AGPL-3.0-only"
+license-files = ["LICENSE"]
+authors = [{ name = "Manyfold contributors" }]
+keywords = [
+    "reactive",
+    "runtime",
+    "streaming",
+    "pyo3",
+]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: GNU Affero General Public License v3",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Rust",
+    "Typing :: Typed",
+]
 dependencies = [
     "reactivex==5.0.0a2",
 ]
+
+[project.urls]
+Homepage = "https://github.com/Organization5762/manyfold"
+Repository = "https://github.com/Organization5762/manyfold"
+Issues = "https://github.com/Organization5762/manyfold/issues"
 
 [project.scripts]
 manyfold-rfc-checklist = "manyfold.rfc_checklist_gen:main"

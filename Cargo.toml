@@ -2,6 +2,10 @@
 name = "manyfold"
 version = "0.1.0"
 edition = "2021"
+description = "PyO3-backed Manyfold RFC scaffolding and in-memory runtime."
+license = "AGPL-3.0-only"
+repository = "https://github.com/Organization5762/manyfold"
+homepage = "https://github.com/Organization5762/manyfold"
 publish = false
 
 [lib]
