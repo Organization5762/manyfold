@@ -1,32 +1,23 @@
 from __future__ import annotations
 
+import reactivex as rx
 from typing import TypedDict
 
-import reactivex as rx
-
+from manyfold import EmbeddedDeviceProfile
 from manyfold import Graph
 from manyfold import Layer
 from manyfold import OwnerName
-from manyfold import Schema
 from manyfold import StreamFamily
 from manyfold import StreamName
-from manyfold import route
-from manyfold.embedded import EmbeddedDeviceProfile
+
+from ._shared import int_schema
+from ._shared import sibling_route
 
 
 class UartTemperatureSensorExampleResult(TypedDict):
     raw_latest: int
     smoothed_latest: int
     profile_issues: tuple[str, ...]
-
-
-def _int_schema(schema_id: str) -> Schema[int]:
-    return Schema(
-        schema_id=schema_id,
-        version=1,
-        encode=lambda value: str(value).encode("ascii"),
-        decode=lambda payload: int(payload.decode("ascii")),
-    )
 
 
 def run_example() -> UartTemperatureSensorExampleResult:
@@ -36,22 +27,22 @@ def run_example() -> UartTemperatureSensorExampleResult:
         owner=OwnerName("uart-temp"),
         family=StreamFamily("sensor"),
         stream=StreamName("temperature_raw"),
-        schema=_int_schema("Temperature"),
+        schema=int_schema("Temperature"),
     )
-    smoothed_route = route(
-        plane=raw_sensor.metadata_route.plane,
+    smoothed_route = sibling_route(
+        raw_sensor.metadata_route,
         layer=Layer.Logical,
-        owner=raw_sensor.metadata_route.owner,
-        family=raw_sensor.metadata_route.family,
-        stream=StreamName("temperature_smoothed"),
-        variant=raw_sensor.metadata_route.variant,
-        schema=raw_sensor.metadata_route.schema,
+        stream="temperature_smoothed",
     )
 
     raw_values = (21, 25, 24)
-    smoothed_values = (21, 23, 24)
+    graph.capacitor(
+        source=raw_sensor.metadata_route,
+        sink=smoothed_route,
+        capacity=1,
+        immediate=True,
+    )
     graph.pipe(rx.from_iterable(raw_values), raw_sensor.metadata_route)
-    graph.pipe(rx.from_iterable(smoothed_values), smoothed_route)
 
     raw_latest = graph.latest(raw_sensor.metadata_route)
     smoothed_latest = graph.latest(smoothed_route)
@@ -67,4 +58,3 @@ def run_example() -> UartTemperatureSensorExampleResult:
 
 if __name__ == "__main__":
     print(run_example())
-

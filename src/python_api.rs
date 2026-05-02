@@ -1107,6 +1107,31 @@ impl MailboxDescriptor {
     }
 
     #[getter]
+    fn delivery_mode(&self) -> String {
+        match self.inner.delivery_mode {
+            DeliveryMode::MpscSerial => "mpsc_serial",
+            DeliveryMode::MpmcUnique => "mpmc_unique",
+            DeliveryMode::MpmcReplicated => "mpmc_replicated",
+            DeliveryMode::KeyAffine => "key_affine",
+        }
+        .to_string()
+    }
+
+    #[getter]
+    fn ordering_policy(&self) -> String {
+        match self.inner.ordering_policy {
+            OrderingPolicy::Fifo => "fifo",
+            OrderingPolicy::PriorityStable => "priority_stable",
+            OrderingPolicy::WeightedFair => "weighted_fair",
+            OrderingPolicy::RoundRobinByProducer => "round_robin_by_producer",
+            OrderingPolicy::KeyedFifo => "keyed_fifo",
+            OrderingPolicy::LatestOnly => "latest_only",
+            OrderingPolicy::Unordered => "unordered",
+        }
+        .to_string()
+    }
+
+    #[getter]
     fn overflow_policy(&self) -> String {
         match self.inner.overflow_policy {
             OverflowPolicy::Block => "block",
@@ -1237,6 +1262,24 @@ impl Mailbox {
             .get(&self.name)
             .ok_or_else(|| PyKeyError::new_err("unknown mailbox"))?;
         Ok(mailbox.dropped_messages)
+    }
+
+    fn coalesced_messages(&self) -> PyResult<u64> {
+        let graph = lock_graph(&self.graph)?;
+        let mailbox = graph
+            .mailboxes
+            .get(&self.name)
+            .ok_or_else(|| PyKeyError::new_err("unknown mailbox"))?;
+        Ok(mailbox.coalesced_messages)
+    }
+
+    fn delivered_messages(&self) -> PyResult<u64> {
+        let graph = lock_graph(&self.graph)?;
+        let mailbox = graph
+            .mailboxes
+            .get(&self.name)
+            .ok_or_else(|| PyKeyError::new_err("unknown mailbox"))?;
+        Ok(mailbox.delivered_messages)
     }
 }
 

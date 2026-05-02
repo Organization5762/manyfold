@@ -1,19 +1,25 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import sys
+import tempfile
 import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
+from examples import REFERENCE_EXAMPLE_PROGRESS_DETAIL
+from tests.test_support import subprocess_test_env
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MODULE_PATH = REPO_ROOT / "python" / "manyfold" / "rfc_checklist_gen.py"
 
 
 def load_generator():
-    install_reactivex_stub()
-    spec = importlib.util.spec_from_file_location("manyfold_rfc_checklist_gen", MODULE_PATH)
+    spec = importlib.util.spec_from_file_location(
+        "manyfold_rfc_checklist_gen", MODULE_PATH
+    )
     module = importlib.util.module_from_spec(spec)
     assert spec is not None and spec.loader is not None
     sys.modules[spec.name] = module
@@ -21,60 +27,157 @@ def load_generator():
     return module
 
 
-def install_reactivex_stub() -> None:
-    if "reactivex" in sys.modules and "reactivex.operators" in sys.modules:
-        return
-
-    class Observable:
-        def __init__(self, items):
-            self._items = list(items)
-
-        def pipe(self, *transforms):
-            items = self._items
-            for transform in transforms:
-                items = transform(items)
-            return Observable(items)
-
-        def subscribe(self, on_next):
-            for item in self._items:
-                on_next(item)
-
-    def from_iterable(items):
-        return Observable(items)
-
-    def op_filter(predicate):
-        return lambda items: [item for item in items if predicate(item)]
-
-    def op_map(mapper):
-        return lambda items: [mapper(item) for item in items]
-
-    def op_distinct():
-        def transform(items):
-            seen = []
-            for item in items:
-                if item not in seen:
-                    seen.append(item)
-            return seen
-
-        return transform
-
-    rx_module = types.ModuleType("reactivex")
-    rx_module.from_iterable = from_iterable
-    ops_module = types.ModuleType("reactivex.operators")
-    ops_module.filter = op_filter
-    ops_module.map = op_map
-    ops_module.distinct = op_distinct
-    rx_module.operators = ops_module
-    sys.modules["reactivex"] = rx_module
-    sys.modules["reactivex.operators"] = ops_module
-
-
 class RfcChecklistGenTests(unittest.TestCase):
+    def test_generator_file_import_uses_repo_path_fallback(self) -> None:
+        spec = importlib.util.spec_from_file_location(
+            "manyfold_rfc_checklist_gen_file_test",
+            MODULE_PATH,
+        )
+        module = importlib.util.module_from_spec(spec)
+        assert spec is not None and spec.loader is not None
+        sys.modules[spec.name] = module
+
+        calls: list[str] = []
+        fake_manyfold = types.ModuleType("manyfold")
+        fake_manyfold.__path__ = []  # type: ignore[attr-defined]
+        fake_repo_paths = types.ModuleType("manyfold._repo_paths")
+        fake_repo_paths.ensure_repo_import_paths = lambda: calls.append("called")
+
+        with mock.patch.dict(
+            sys.modules,
+            {
+                "manyfold": fake_manyfold,
+                "manyfold._repo_paths": fake_repo_paths,
+            },
+        ):
+            spec.loader.exec_module(module)
+
+        self.assertEqual(calls, ["called"])
+        self.assertEqual(module.CHECKLIST_STATUS["23"][1], REFERENCE_EXAMPLE_PROGRESS_DETAIL)
+
+    def test_parse_helpers_ignore_appendix_headings_and_unknown_appendix_items(
+        self,
+    ) -> None:
+        generator = load_generator()
+
+        self.assertIsNone(
+            generator._parse_section_heading("## Appendix F. Acceptance Criteria")
+        )
+        self.assertIsNone(
+            generator._parse_section_heading("## Notes. Not a numbered section")
+        )
+        self.assertIsNone(generator._parse_appendix_item("- [ ] Unknown appendix item"))
+
+    def test_recent_operator_and_flow_control_statuses_are_descriptive(self) -> None:
+        generator = load_generator()
+
+        self.assertIn("rate matching now exist", generator.CHECKLIST_STATUS["13"][1])
+        self.assertIn(
+            "trigger-driven rolling window aggregation",
+            generator.CHECKLIST_STATUS["14"][1],
+        )
+        self.assertIn("lookup join", generator.CHECKLIST_STATUS["14"][1])
+        self.assertIn(
+            "route credit snapshots",
+            generator.APPENDIX_STATUS[
+                "Retry, filtering, backpressure, overflow, and rate matching"
+            ][1],
+        )
+        self.assertIn(
+            "bounded interval joins",
+            generator.APPENDIX_STATUS["Windows, aggregations, and streaming joins"][1],
+        )
+        self.assertIn(
+            "lookup joins",
+            generator.APPENDIX_STATUS["Windows, aggregations, and streaming joins"][1],
+        )
+        self.assertEqual(
+            generator.CHECKLIST_STATUS["23"][1],
+            REFERENCE_EXAMPLE_PROGRESS_DETAIL,
+        )
+
+    def test_parsed_rfc_sections_include_recent_partial_progress_details(self) -> None:
+        generator = load_generator()
+
+        sections, appendix_items = generator.parse_rfc_sections()
+        sections_by_number = {section.number: section for section in sections}
+        appendix_by_title = {item.title: item for item in appendix_items}
+
+        self.assertEqual(sections_by_number["13"].checkbox, " ")
+        self.assertIn("queue depth", sections_by_number["13"].detail)
+        self.assertEqual(sections_by_number["14"].checkbox, " ")
+        self.assertIn("latest-join", sections_by_number["14"].detail)
+        self.assertIn("lookup join", sections_by_number["14"].detail)
+        self.assertEqual(
+            appendix_by_title[
+                "Retry, filtering, backpressure, overflow, and rate matching"
+            ].checkbox,
+            " ",
+        )
+        self.assertIn(
+            "demand-driven rate matching",
+            appendix_by_title[
+                "Retry, filtering, backpressure, overflow, and rate matching"
+            ].detail,
+        )
+        self.assertEqual(
+            appendix_by_title["Windows, aggregations, and streaming joins"].checkbox,
+            " ",
+        )
+        self.assertIn(
+            "trigger-driven rolling window aggregation",
+            appendix_by_title["Windows, aggregations, and streaming joins"].detail,
+        )
+        self.assertIn(
+            "lookup joins",
+            appendix_by_title["Windows, aggregations, and streaming joins"].detail,
+        )
+
     def test_checklist_output_matches_repository(self) -> None:
         generator = load_generator()
         sections, appendix_items = generator.parse_rfc_sections()
         rendered = generator.render_checklist(sections, appendix_items)
-        self.assertEqual(rendered, (REPO_ROOT / "docs" / "rfc" / "implementation_checklist.md").read_text())
+        self.assertEqual(
+            rendered,
+            (REPO_ROOT / "docs" / "rfc" / "implementation_checklist.md").read_text(),
+        )
+
+    def test_checklist_main_check_and_write_modes_follow_generated_output(self) -> None:
+        generator = load_generator()
+        sections, appendix_items = generator.parse_rfc_sections()
+        rendered = generator.render_checklist(sections, appendix_items)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            checklist_path = Path(temp_dir) / "implementation_checklist.md"
+            original_path = generator.CHECKLIST_PATH
+            try:
+                generator.CHECKLIST_PATH = checklist_path
+
+                self.assertEqual(generator.main(["--check"]), 1)
+
+                self.assertEqual(generator.main([]), 0)
+                self.assertEqual(checklist_path.read_text(), rendered)
+
+                self.assertEqual(generator.main(["--check"]), 0)
+            finally:
+                generator.CHECKLIST_PATH = original_path
+
+    def test_script_entrypoint_check_runs(self) -> None:
+        result = subprocess.run(
+            [
+                "uv",
+                "run",
+                "manyfold-rfc-checklist",
+                "--check",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            cwd=REPO_ROOT,
+            env=subprocess_test_env(),
+        )
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
 
 
 if __name__ == "__main__":

@@ -1,11 +1,20 @@
 from __future__ import annotations
 
+import sys
 import unittest
 
-from test_support import load_manyfold_package
+from tests.test_support import load_manyfold_package
 
 
 class EmbeddedProfileTests(unittest.TestCase):
+    def test_load_manyfold_package_reloads_support_modules_cleanly(self) -> None:
+        load_manyfold_package()
+        setattr(sys.modules["manyfold.reference_examples"], "SENTINEL", object())
+
+        load_manyfold_package()
+
+        self.assertNotIn("SENTINEL", vars(sys.modules["manyfold.reference_examples"]))
+
     def test_scalar_sensor_profile_validates_without_issues(self) -> None:
         manyfold = load_manyfold_package()
         profile = manyfold.EmbeddedDeviceProfile()
@@ -32,7 +41,10 @@ class EmbeddedProfileTests(unittest.TestCase):
             payload_schema=manyfold.Schema.bytes("LidarPayload"),
         )
 
-        self.assertIn("bulk payload routes must use byte credits instead of count credits", sensor.validate())
+        self.assertIn(
+            "bulk payload routes must use byte credits instead of count credits",
+            sensor.validate(),
+        )
 
 
 if __name__ == "__main__":

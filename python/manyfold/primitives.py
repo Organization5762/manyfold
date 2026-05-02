@@ -161,11 +161,43 @@ class TypedRoute(Generic[T]):
             family=self.family.value,
             stream=self.stream.value,
             variant=self.variant,
-            schema=SchemaRef(schema_id=self.schema.schema_id, version=self.schema.version),
+            schema=SchemaRef(
+                schema_id=self.schema.schema_id, version=self.schema.version
+            ),
         )
 
     def display(self) -> str:
         return self.route_ref.display()
+
+
+@dataclass(frozen=True)
+class Source(Generic[T]):
+    """Signal source role for a route.
+
+    Sources represent latest-value signal potential by default. The wrapper is
+    intentionally lightweight: graph operations unwrap it to the underlying
+    typed route or native route ref.
+    """
+
+    route: TypedRoute[T] | RouteRef
+    replay_latest: bool = True
+
+    def display(self) -> str:
+        return self.route.display()
+
+
+@dataclass(frozen=True)
+class Sink(Generic[T]):
+    """Signal sink role for a route.
+
+    Sinks consume signal and make downstream demand explicit without adding a
+    separate runtime node.
+    """
+
+    route: TypedRoute[T] | RouteRef
+
+    def display(self) -> str:
+        return self.route.display()
 
 
 @dataclass(frozen=True)
@@ -177,6 +209,16 @@ class TypedEnvelope(Generic[T]):
     value: T
 
 
+def source(route: TypedRoute[T] | RouteRef, *, replay_latest: bool = True) -> Source[T]:
+    """Mark a route as a signal source."""
+    return Source(route=route, replay_latest=replay_latest)
+
+
+def sink(route: TypedRoute[T] | RouteRef) -> Sink[T]:
+    """Mark a route as a signal sink."""
+    return Sink(route=route)
+
+
 SchemaLike = Any
 
 
@@ -184,7 +226,7 @@ def _coerce_schema(
     schema: SchemaLike[T],
     *,
     schema_id: str | None = None,
-    version: int = 1,
+    version: int | None = None,
 ) -> Schema[T]:
     if isinstance(schema, Schema):
         if schema_id is not None and schema.schema_id != schema_id:
@@ -194,7 +236,7 @@ def _coerce_schema(
                 encode=schema.encode,
                 decode=schema.decode,
             )
-        if version != schema.version:
+        if version is not None and version != schema.version:
             return Schema(
                 schema_id=schema.schema_id,
                 version=version,
@@ -205,13 +247,18 @@ def _coerce_schema(
     if schema is bytes:
         if schema_id is None:
             raise ValueError("schema_id is required when schema=bytes")
-        return cast(Schema[T], Schema.bytes(schema_id=schema_id, version=version))
+        return cast(
+            Schema[T],
+            Schema.bytes(
+                schema_id=schema_id, version=1 if version is None else version
+            ),
+        )
     return cast(
         Schema[T],
         Schema.protobuf(
             cast(ProtobufMessageType[TProto], schema),
             schema_id=schema_id,
-            version=version,
+            version=1 if version is None else version,
         ),
     )
 
@@ -227,9 +274,8 @@ def route(
     variant: Variant,
     schema: SchemaLike[T],
     schema_id: str | None = None,
-    version: int = 1,
-) -> TypedRoute[T]:
-    ...
+    version: int | None = None,
+) -> TypedRoute[T]: ...
 
 
 @overload
@@ -239,9 +285,8 @@ def route(
     identity: RouteIdentity,
     schema: SchemaLike[T],
     schema_id: str | None = None,
-    version: int = 1,
-) -> TypedRoute[T]:
-    ...
+    version: int | None = None,
+) -> TypedRoute[T]: ...
 
 
 def route(
@@ -256,7 +301,7 @@ def route(
     identity: RouteIdentity | None = None,
     schema: SchemaLike[T],
     schema_id: str | None = None,
-    version: int = 1,
+    version: int | None = None,
 ) -> TypedRoute[T]:
     """Construct a typed route without exposing native identity plumbing."""
     if namespace is not None:
@@ -265,8 +310,15 @@ def route(
         plane = namespace.plane
         layer = namespace.layer
     if identity is not None:
-        if owner is not None or family is not None or stream is not None or variant is not None:
-            raise ValueError("pass either identity or owner/family/stream/variant, not both")
+        if (
+            owner is not None
+            or family is not None
+            or stream is not None
+            or variant is not None
+        ):
+            raise ValueError(
+                "pass either identity or owner/family/stream/variant, not both"
+            )
         owner = identity.owner
         family = identity.family
         stream = identity.stream

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import importlib
 import importlib.util
 import sys
@@ -11,6 +12,34 @@ from typing import Optional
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_DIR = REPO_ROOT / "python" / "manyfold"
+PYTHON_ROOT = REPO_ROOT / "python"
+MODULES_TO_RESET = (
+    "manyfold",
+    "manyfold.primitives",
+    "manyfold.graph",
+    "manyfold.embedded",
+    "manyfold.components",
+    "manyfold.lego_catalog",
+    "manyfold.sensor_io",
+    "manyfold.reference_examples",
+    "manyfold._manyfold_rust",
+    "reactivex",
+    "reactivex.subject",
+    "reactivex.operators",
+)
+
+
+def subprocess_test_env() -> dict[str, str]:
+    env = dict(os.environ)
+    python_root = str(PYTHON_ROOT)
+    current_pythonpath = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = (
+        python_root
+        if not current_pythonpath
+        else f"{python_root}{os.pathsep}{current_pythonpath}"
+    )
+    env.setdefault("UV_CACHE_DIR", str(REPO_ROOT / ".cache" / "uv"))
+    return env
 
 
 def install_reactivex_stub() -> None:
@@ -143,7 +172,9 @@ def install_reactivex_stub() -> None:
 
             def connect(self):
                 return self._source.subscribe(
-                    lambda item: [observer.on_next(item) for observer in list(self._observers)]
+                    lambda item: [
+                        observer.on_next(item) for observer in list(self._observers)
+                    ]
                 )
 
         def transform(source):
@@ -246,7 +277,7 @@ def install_manyfold_rust_stub() -> None:
         def display(self) -> str:
             return (
                 f"{self.namespace.plane}.{self.namespace.layer}.{self.namespace.owner}."
-                f"{self.family}.{self.stream}.v{self.schema.version}"
+                f"{self.family}.{self.stream}.{self.variant}.v{self.schema.version}"
             )
 
     @dataclass
@@ -334,7 +365,9 @@ def install_manyfold_rust_stub() -> None:
             latest = self.latest()
             if latest is None:
                 return []
-            return [OpenedEnvelope(closed=latest, payload=latest.payload_ref.inline_bytes)]
+            return [
+                OpenedEnvelope(closed=latest, payload=latest.payload_ref.inline_bytes)
+            ]
 
         def latest(self):
             return self._graph._latest.get(self._route)
@@ -350,6 +383,34 @@ def install_manyfold_rust_stub() -> None:
         def write(self, payload, producer=None, control_epoch=None):
             seq_source = self._graph._sequence.get(self._route, 0) + 1
             self._graph._sequence[self._route] = seq_source
+            taints = []
+            if (
+                self._route.namespace.plane == Plane.Write
+                and self._route.variant == Variant.Request
+            ):
+                taints.append(
+                    TaintMark(
+                        TaintDomain.Coherence,
+                        "COHERENCE_WRITE_PENDING",
+                        self._route.display(),
+                    )
+                )
+            if self._route.namespace.layer == Layer.Ephemeral:
+                taints.append(
+                    TaintMark(
+                        TaintDomain.Determinism,
+                        "DET_NONREPLAYABLE",
+                        self._route.display(),
+                    )
+                )
+            if control_epoch is not None:
+                taints.append(
+                    TaintMark(
+                        TaintDomain.Scheduling,
+                        "SCHED_READY",
+                        self._route.display(),
+                    )
+                )
             envelope = ClosedEnvelope(
                 route=self._route,
                 payload_ref=PayloadRef(
@@ -361,6 +422,7 @@ def install_manyfold_rust_stub() -> None:
                 seq_source=seq_source,
                 producer=producer,
                 control_epoch=control_epoch,
+                taints=taints,
             )
             self._graph._latest[self._route] = envelope
             return envelope
@@ -383,6 +445,7 @@ def install_manyfold_rust_stub() -> None:
         available: int = 2**63 - 1
         blocked_senders: int = 0
         dropped_messages: int = 0
+        largest_queue_depth: int = 0
 
     @dataclass
     class MailboxDescriptor:
@@ -396,6 +459,19 @@ def install_manyfold_rust_stub() -> None:
         name: str
         ingress: WritablePort
         egress: ReadablePort
+        descriptor: "MailboxDescriptor"
+        queue: list[tuple[bytes, Optional[ProducerRef], Optional[int]]]
+        blocked_writes: int = 0
+        dropped_messages: int = 0
+        coalesced_messages: int = 0
+        delivered_messages: int = 0
+        largest_queue_depth: int = 0
+
+        def depth(self):
+            return len(self.queue)
+
+        def available_credit(self):
+            return max(self.descriptor.capacity - len(self.queue), 0)
 
     @dataclass
     class ControlLoop:
@@ -411,26 +487,35 @@ def install_manyfold_rust_stub() -> None:
             self._loops = {}
             self._edges = []
             self._bindings = {}
+            self._catalog = {}
+            self._mailboxes = {}
 
         def register_port(self, route):
+            self._catalog[route.display()] = route
             return route
 
         def read(self, route):
+            self.register_port(route)
             return ReadablePort(self, route)
 
         def writable_port(self, route):
+            self.register_port(route)
             return WritablePort(self, route)
 
         def register_binding(self, name, binding):
             self._bindings[binding.request] = binding
+            self.register_port(binding.request)
+            self.register_port(binding.desired)
+            self.register_port(binding.reported)
+            self.register_port(binding.effective)
+            if binding.ack is not None:
+                self.register_port(binding.ack)
             return binding
 
         def emit(self, route, payload, producer=None, control_epoch=None):
             emitted = [
                 self.writable_port(route).write(
-                    payload,
-                    producer=producer,
-                    control_epoch=control_epoch,
+                    payload, producer=producer, control_epoch=control_epoch
                 )
             ]
             binding = self._bindings.get(route)
@@ -442,34 +527,51 @@ def install_manyfold_rust_stub() -> None:
                         control_epoch=control_epoch,
                     )
                 )
+            fanout = []
+            for envelope in tuple(emitted):
+                fanout.extend(self._fanout(envelope))
+            emitted.extend(fanout)
             return emitted
 
         def mailbox(self, name, descriptor=None):
+            descriptor = descriptor or MailboxDescriptor()
             ingress_route = RouteRef(
-                namespace=NamespaceRef(plane=Plane.Write, layer=Layer.Internal, owner=name),
+                namespace=NamespaceRef(
+                    plane=Plane.Write, layer=Layer.Internal, owner=name
+                ),
                 family="mailbox",
                 stream=name,
                 variant=Variant.Request,
                 schema=SchemaRef("MailboxIngress", 1),
             )
             egress_route = RouteRef(
-                namespace=NamespaceRef(plane=Plane.Read, layer=Layer.Internal, owner=name),
+                namespace=NamespaceRef(
+                    plane=Plane.Read, layer=Layer.Internal, owner=name
+                ),
                 family="mailbox",
                 stream=name,
                 variant=Variant.Meta,
                 schema=SchemaRef("MailboxEgress", 1),
             )
-            return Mailbox(
+            self.register_port(ingress_route)
+            self.register_port(egress_route)
+            mailbox = Mailbox(
                 name=name,
                 ingress=WritablePort(self, ingress_route),
                 egress=ReadablePort(self, egress_route),
+                descriptor=descriptor,
+                queue=[],
             )
+            self._mailboxes[name] = mailbox
+            return mailbox
 
         def connect(self, source, sink):
             if hasattr(source, "egress"):
                 source = source.egress._route
             if hasattr(sink, "ingress"):
                 sink = sink.ingress._route
+            self.register_port(source)
+            self.register_port(sink)
             self._edges.append((source.display(), sink.display()))
             return None
 
@@ -493,7 +595,7 @@ def install_manyfold_rust_stub() -> None:
             return envelope
 
         def catalog(self):
-            return []
+            return list(self._catalog.values())
 
         def describe_route(self, route):
             return PortDescriptor(route_display=route.display())
@@ -508,7 +610,105 @@ def install_manyfold_rust_stub() -> None:
             return []
 
         def credit_snapshot(self):
-            return [CreditSnapshot(route_display=route.display()) for route in self._latest]
+            snapshots = []
+            for route in self._catalog.values():
+                mailbox = None
+                for candidate in self._mailboxes.values():
+                    if route in (candidate.ingress._route, candidate.egress._route):
+                        mailbox = candidate
+                        break
+                if mailbox is None:
+                    snapshots.append(CreditSnapshot(route_display=route.display()))
+                else:
+                    snapshots.append(
+                        CreditSnapshot(
+                            route_display=route.display(),
+                            available=mailbox.available_credit(),
+                            blocked_senders=mailbox.blocked_writes,
+                            dropped_messages=mailbox.dropped_messages,
+                            largest_queue_depth=mailbox.descriptor.capacity,
+                        )
+                    )
+            return snapshots
+
+        def _fanout(self, envelope):
+            emitted = []
+            for source_display, sink_display in self._edges:
+                if source_display != envelope.route.display():
+                    continue
+                sink = self._catalog[sink_display]
+                mailbox = self._mailbox_for_ingress(sink)
+                if mailbox is not None:
+                    emitted.extend(
+                        self._enqueue_mailbox(
+                            mailbox,
+                            envelope.payload_ref.inline_bytes,
+                            envelope.producer,
+                            envelope.control_epoch,
+                        )
+                    )
+                    continue
+                forwarded = self.writable_port(sink).write(
+                    envelope.payload_ref.inline_bytes,
+                    producer=envelope.producer,
+                    control_epoch=envelope.control_epoch,
+                )
+                emitted.append(forwarded)
+                emitted.extend(self._fanout(forwarded))
+            return emitted
+
+        def _mailbox_for_ingress(self, route):
+            for mailbox in self._mailboxes.values():
+                if mailbox.ingress._route == route:
+                    return mailbox
+            return None
+
+        def _enqueue_mailbox(self, mailbox, payload, producer, control_epoch):
+            emitted = []
+            if len(mailbox.queue) >= mailbox.descriptor.capacity:
+                if mailbox.descriptor.overflow_policy in {"block", "reject_write"}:
+                    mailbox.blocked_writes += 1
+                    return emitted
+                if mailbox.descriptor.overflow_policy in {
+                    "drop_newest",
+                    "deadline_drop",
+                    "spill_to_store",
+                }:
+                    mailbox.dropped_messages += 1
+                    return emitted
+                if mailbox.descriptor.overflow_policy == "drop_oldest":
+                    mailbox.queue.pop(0)
+                    mailbox.dropped_messages += 1
+                elif (
+                    mailbox.descriptor.overflow_policy == "coalesce_latest"
+                    and mailbox.queue
+                ):
+                    mailbox.queue[-1] = (bytes(payload), producer, control_epoch)
+                    mailbox.coalesced_messages += 1
+                    return self._drain_mailbox(mailbox)
+            mailbox.queue.append((bytes(payload), producer, control_epoch))
+            mailbox.largest_queue_depth = max(
+                mailbox.largest_queue_depth, len(mailbox.queue)
+            )
+            return self._drain_mailbox(mailbox)
+
+        def _drain_mailbox(self, mailbox):
+            if not any(
+                source == mailbox.egress._route.display() for source, _ in self._edges
+            ):
+                return []
+            emitted = []
+            while mailbox.queue:
+                payload, producer, control_epoch = mailbox.queue.pop(0)
+                mailbox.delivered_messages += 1
+                egress_envelope = self.writable_port(mailbox.egress._route).write(
+                    payload,
+                    producer=producer,
+                    control_epoch=control_epoch,
+                )
+                emitted.append(egress_envelope)
+                emitted.extend(self._fanout(egress_envelope))
+            return emitted
 
     rust_module.ClockDomainRef = ClockDomainRef
     rust_module.ClosedEnvelope = ClosedEnvelope
@@ -548,7 +748,16 @@ def _load_module(name: str, path: Path):
     return module
 
 
+def reset_test_modules() -> None:
+    for module_name in MODULES_TO_RESET:
+        sys.modules.pop(module_name, None)
+    for module_name in tuple(sys.modules):
+        if module_name.startswith("examples."):
+            sys.modules.pop(module_name, None)
+
+
 def load_manyfold_package():
+    reset_test_modules()
     install_reactivex_stub()
     install_manyfold_rust_stub()
     if str(REPO_ROOT) not in sys.path:
@@ -561,11 +770,23 @@ def load_manyfold_package():
     primitives = _load_module("manyfold.primitives", PACKAGE_DIR / "primitives.py")
     graph = _load_module("manyfold.graph", PACKAGE_DIR / "graph.py")
     embedded = _load_module("manyfold.embedded", PACKAGE_DIR / "embedded.py")
+    components = _load_module("manyfold.components", PACKAGE_DIR / "components.py")
+    lego_catalog = _load_module(
+        "manyfold.lego_catalog", PACKAGE_DIR / "lego_catalog.py"
+    )
+    sensor_io = _load_module("manyfold.sensor_io", PACKAGE_DIR / "sensor_io.py")
     rust = sys.modules["manyfold._manyfold_rust"]
 
     exports = {
+        "all_legos": lego_catalog.all_legos,
+        "BackoffPolicy": sensor_io.BackoffPolicy,
+        "BoundedRingBuffer": sensor_io.BoundedRingBuffer,
+        "ChangeFilter": sensor_io.ChangeFilter,
+        "Clock": sensor_io.Clock,
         "ClockDomainRef": rust.ClockDomainRef,
         "ClosedEnvelope": rust.ClosedEnvelope,
+        "Consensus": components.Consensus,
+        "ConsensusRoutes": components.ConsensusRoutes,
         "ControlLoop": rust.ControlLoop,
         "ControlLoops": graph.ControlLoops,
         "CreditSnapshot": rust.CreditSnapshot,
@@ -573,46 +794,135 @@ def load_manyfold_package():
         "EmbeddedDeviceProfile": embedded.EmbeddedDeviceProfile,
         "EmbeddedRuntimeRules": embedded.EmbeddedRuntimeRules,
         "EmbeddedScalarSensor": embedded.EmbeddedScalarSensor,
+        "EventLog": components.EventLog,
+        "EventLogRecord": components.EventLogRecord,
+        "EventLogRoutes": components.EventLogRoutes,
+        "FileStore": components.FileStore,
         "FirmwareAgentProfile": embedded.FirmwareAgentProfile,
+        "Capacitor": graph.Capacitor,
+        "DelimitedMessageBuffer": sensor_io.DelimitedMessageBuffer,
+        "DoubleBuffer": sensor_io.DoubleBuffer,
+        "DuplexSensorPeripheral": sensor_io.DuplexSensorPeripheral,
+        "FlowPolicy": graph.FlowPolicy,
+        "FlowSnapshot": graph.FlowSnapshot,
+        "FrameAssembler": sensor_io.FrameAssembler,
         "Graph": graph.Graph,
+        "HealthStatus": sensor_io.HealthStatus,
+        "JoinInput": graph.JoinInput,
+        "JsonEventDecoder": sensor_io.JsonEventDecoder,
+        "Keyspace": components.Keyspace,
         "Layer": rust.Layer,
+        "LazyPayloadSource": graph.LazyPayloadSource,
+        "LifecycleBinding": graph.LifecycleBinding,
+        "LineageRecord": graph.LineageRecord,
+        "LocalDurableSpool": sensor_io.LocalDurableSpool,
+        "LocalSensorSource": sensor_io.LocalSensorSource,
+        "Lego": lego_catalog.Lego,
         "Mailbox": rust.Mailbox,
         "MailboxDescriptor": rust.MailboxDescriptor,
+        "MailboxSnapshot": graph.MailboxSnapshot,
+        "ManualClock": sensor_io.ManualClock,
+        "Memory": components.Memory,
+        "MemoryRecord": components.MemoryRecord,
         "NamespaceRef": rust.NamespaceRef,
         "OpenedEnvelope": rust.OpenedEnvelope,
         "OwnerName": primitives.OwnerName,
+        "PayloadDemandSnapshot": graph.PayloadDemandSnapshot,
         "PayloadRef": rust.PayloadRef,
+        "PeripheralAdapter": sensor_io.PeripheralAdapter,
+        "PeripheralAdapterHandle": sensor_io.PeripheralAdapterHandle,
         "Plane": rust.Plane,
         "PortDescriptor": rust.PortDescriptor,
         "ProducerKind": rust.ProducerKind,
         "ProducerRef": rust.ProducerRef,
         "ReadablePort": rust.ReadablePort,
         "ReadThenWriteNextEpochStep": primitives.ReadThenWriteNextEpochStep,
+        "RateMatchedSensor": sensor_io.RateMatchedSensor,
+        "ReactiveSensorHandle": sensor_io.ReactiveSensorHandle,
+        "ReactiveSensorSource": sensor_io.ReactiveSensorSource,
+        "Resistor": graph.Resistor,
+        "RetryLoop": sensor_io.RetryLoop,
+        "RetryPolicy": graph.RetryPolicy,
+        "RouteIdentity": primitives.RouteIdentity,
+        "RouteNamespace": primitives.RouteNamespace,
         "RouteRef": rust.RouteRef,
+        "RouteAuditSnapshot": graph.RouteAuditSnapshot,
+        "RouteRetentionPolicy": graph.RouteRetentionPolicy,
         "RuntimeRef": rust.RuntimeRef,
+        "ScheduledWriteSnapshot": graph.ScheduledWriteSnapshot,
         "ScheduleGuard": rust.ScheduleGuard,
         "Schema": primitives.Schema,
         "SchemaRef": rust.SchemaRef,
+        "SequenceCounter": sensor_io.SequenceCounter,
+        "SensorBackoffPolicy": sensor_io.BackoffPolicy,
+        "SensorDebugEnvelope": sensor_io.SensorDebugEnvelope,
+        "SensorDebugStage": sensor_io.SensorDebugStage,
+        "SensorDebugTap": sensor_io.SensorDebugTap,
+        "SensorEvent": sensor_io.SensorEvent,
+        "SensorFrame": sensor_io.SensorFrame,
+        "SensorHealthHandle": sensor_io.SensorHealthHandle,
+        "SensorHealthWatchdog": sensor_io.SensorHealthWatchdog,
+        "SensorIdentity": sensor_io.SensorIdentity,
+        "SensorLocation": sensor_io.SensorLocation,
+        "SensorRetryPolicy": sensor_io.RetryPolicy,
+        "SensorSample": sensor_io.SensorSample,
+        "SensorSourceHandle": sensor_io.SensorSourceHandle,
+        "SensorTag": sensor_io.SensorTag,
+        "ShadowSnapshot": graph.ShadowSnapshot,
+        "Sink": primitives.Sink,
+        "SnapshotStore": components.SnapshotStore,
+        "SnapshotStoreRoutes": components.SnapshotStoreRoutes,
+        "Source": primitives.Source,
+        "StoreEntry": components.StoreEntry,
         "StreamFamily": primitives.StreamFamily,
         "StreamName": primitives.StreamName,
         "TaintDomain": rust.TaintDomain,
         "TaintMark": rust.TaintMark,
+        "TaintRepair": graph.TaintRepair,
         "TypedEnvelope": primitives.TypedEnvelope,
         "TypedRoute": primitives.TypedRoute,
         "Variant": rust.Variant,
+        "WatermarkSnapshot": graph.WatermarkSnapshot,
+        "Watchdog": graph.Watchdog,
         "WritablePort": rust.WritablePort,
         "WriteBinding": rust.WriteBinding,
         "WriteBindings": graph.WriteBindings,
         "bridge_version": rust.bridge_version,
+        "dependencies_of": lego_catalog.dependencies_of,
+        "dependents_of": lego_catalog.dependents_of,
+        "get_lego": lego_catalog.get_lego,
+        "health_status_schema": sensor_io.health_status_schema,
         "route": primitives.route,
+        "legos_by_layer": lego_catalog.legos_by_layer,
+        "legos_by_role": lego_catalog.legos_by_role,
+        "sensor_event_schema": sensor_io.sensor_event_schema,
+        "sensor_sample_schema": sensor_io.sensor_sample_schema,
+        "sink": primitives.sink,
+        "source": primitives.source,
+        "SystemClock": sensor_io.SystemClock,
+        "ThresholdFilter": sensor_io.ThresholdFilter,
+        "xor_checksum": sensor_io.xor_checksum,
     }
     for name, value in exports.items():
         setattr(package, name, value)
 
-    reference_examples = _load_module("manyfold.reference_examples", PACKAGE_DIR / "reference_examples.py")
+    reference_examples = _load_module(
+        "manyfold.reference_examples", PACKAGE_DIR / "reference_examples.py"
+    )
     package.REFERENCE_EXAMPLE_SUITE = reference_examples.REFERENCE_EXAMPLE_SUITE
     package.ReferenceExample = reference_examples.ReferenceExample
-    package.implemented_reference_examples = reference_examples.implemented_reference_examples
+    package.__all__ = tuple(
+        (
+            *exports.keys(),
+            "REFERENCE_EXAMPLE_SUITE",
+            "ReferenceExample",
+            "implemented_reference_examples",
+            "reference_example_suite",
+        )
+    )
+    package.implemented_reference_examples = (
+        reference_examples.implemented_reference_examples
+    )
     package.reference_example_suite = reference_examples.reference_example_suite
     return package
 
@@ -623,3 +933,8 @@ def load_example_module(name: str):
     if full_name in sys.modules:
         del sys.modules[full_name]
     return importlib.import_module(full_name)
+
+
+def load_manyfold_graph_module():
+    load_manyfold_package()
+    return sys.modules["manyfold.graph"]

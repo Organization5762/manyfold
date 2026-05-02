@@ -30,11 +30,45 @@ def run_example() -> BroadcastMirrorExampleResult:
         variant=Variant.State,
         schema=Schema.bytes("MirrorState"),
     )
+    mirror_a_route = route(
+        plane=Plane.State,
+        layer=Layer.Logical,
+        owner=OwnerName("cluster"),
+        family=StreamFamily("mirror"),
+        stream=StreamName("mirror_a"),
+        variant=Variant.State,
+        schema=Schema.bytes("MirrorState"),
+    )
+    mirror_b_route = route(
+        plane=Plane.State,
+        layer=Layer.Logical,
+        owner=OwnerName("cluster"),
+        family=StreamFamily("mirror"),
+        stream=StreamName("mirror_b"),
+        variant=Variant.State,
+        schema=Schema.bytes("MirrorState"),
+    )
 
     mirror_a: deque[bytes] = deque()
     mirror_b: deque[bytes] = deque()
-    sub_a = graph.observe(state_route, replay_latest=False).subscribe(lambda envelope: mirror_a.append(envelope.value))
-    sub_b = graph.observe(state_route, replay_latest=False).subscribe(lambda envelope: mirror_b.append(envelope.value))
+    graph.capacitor(
+        source=state_route,
+        sink=mirror_a_route,
+        capacity=1,
+        immediate=True,
+    )
+    graph.capacitor(
+        source=state_route,
+        sink=mirror_b_route,
+        capacity=1,
+        immediate=True,
+    )
+    sub_a = graph.observe(mirror_a_route, replay_latest=False).subscribe(
+        lambda envelope: mirror_a.append(envelope.value)
+    )
+    sub_b = graph.observe(mirror_b_route, replay_latest=False).subscribe(
+        lambda envelope: mirror_b.append(envelope.value)
+    )
     graph.publish(state_route, b"v1")
     graph.publish(state_route, b"v2")
     sub_a.dispose()
@@ -48,4 +82,3 @@ def run_example() -> BroadcastMirrorExampleResult:
 
 if __name__ == "__main__":
     print(run_example())
-

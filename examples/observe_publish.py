@@ -32,14 +32,30 @@ def run_example() -> ObservePublishExampleResult:
         variant=Variant.Meta,
         schema=Schema.bytes("Accel"),
     )
+    observed_route = route(
+        plane=Plane.Read,
+        layer=Layer.Logical,
+        owner=OwnerName("imu"),
+        family=StreamFamily("sensor"),
+        stream=StreamName("accel_observed"),
+        variant=Variant.Meta,
+        schema=Schema.bytes("Accel"),
+    )
+    graph.capacitor(
+        source=accel_route,
+        sink=observed_route,
+        capacity=1,
+        immediate=True,
+    )
 
     graph.publish(accel_route, b"first")
 
     observed_payloads: deque[bytes] = deque()
+
     def on_next(envelope) -> None:
         observed_payloads.append(envelope.value)
 
-    subscription = graph.observe(accel_route).subscribe(on_next)
+    subscription = graph.observe(observed_route).subscribe(on_next)
     graph.publish(accel_route, b"second")
     subscription.dispose()
 

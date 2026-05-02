@@ -35,17 +35,33 @@ def run_example() -> ReadThenWriteNextEpochStepExampleResult:
         variant=Variant.Request,
         schema=Schema.bytes("SpeedCommand"),
     )
+    staged_route = route(
+        plane=Plane.Read,
+        layer=Layer.Logical,
+        owner=OwnerName("motor"),
+        family=StreamFamily("speed"),
+        stream=StreamName("staged_next_epoch_command"),
+        variant=Variant.Meta,
+        schema=Schema.bytes("SpeedCommand"),
+    )
     step = ReadThenWriteNextEpochStep.map(
         name="ReadThenWriteNextEpochSpeedStep",
         read=rx.from_iterable([b"slow", b"fast"]),
-        output=command_route,
+        output=staged_route,
         transform=bytes.upper,
     )
 
     mirrored_writes: deque[bytes] = deque()
+
     def on_write(value: bytes) -> None:
         mirrored_writes.append(value)
 
+    graph.capacitor(
+        source=staged_route,
+        sink=command_route,
+        capacity=1,
+        immediate=True,
+    )
     step_subscription = step.write.subscribe(on_write)
     graph.install(step)
 

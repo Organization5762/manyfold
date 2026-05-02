@@ -32,8 +32,23 @@ def run_example() -> PipeRouteExampleResult:
         variant=Variant.Request,
         schema=Schema.bytes("SpeedCommand"),
     )
+    staged_route = route(
+        plane=Plane.Read,
+        layer=Layer.Logical,
+        owner=OwnerName("motor"),
+        family=StreamFamily("speed"),
+        stream=StreamName("staged_command"),
+        variant=Variant.Meta,
+        schema=Schema.bytes("SpeedCommand"),
+    )
 
-    graph.pipe(rx.from_iterable([b"slow", b"fast"]), command_route)
+    graph.capacitor(
+        source=staged_route,
+        sink=command_route,
+        capacity=1,
+        immediate=True,
+    )
+    graph.pipe(rx.from_iterable([b"slow", b"fast"]), staged_route)
 
     latest = graph.latest(command_route)
     assert latest is not None

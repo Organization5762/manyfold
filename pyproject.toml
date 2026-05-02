@@ -41,6 +41,7 @@ Issues = "https://github.com/Organization5762/manyfold/issues"
 
 [project.scripts]
 manyfold-rfc-checklist = "manyfold.rfc_checklist_gen:main"
+manyfold-example-catalog = "manyfold_example_catalog:main"
 
 [tool.maturin]
 features = ["python-extension"]

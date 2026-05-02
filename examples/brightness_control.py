@@ -5,12 +5,12 @@ from typing import TypedDict
 import reactivex as rx
 
 from manyfold import Graph
+from manyfold import Layer
 from manyfold import ReadThenWriteNextEpochStep
+from manyfold import RouteIdentity
+from manyfold import RouteNamespace
 from manyfold import Variant
 from manyfold import route
-from manyfold.primitives import RouteIdentity
-from manyfold.primitives import RouteNamespace
-from manyfold import Layer
 from manyfold import Plane
 
 
@@ -32,13 +32,30 @@ def run_example() -> BrightnessControlExampleResult:
         schema=bytes,
         schema_id="PwmDutyCycle",
     )
+    staged_pwm_route = route(
+        namespace=RouteNamespace(plane=Plane.Write, layer=Layer.Logical),
+        identity=RouteIdentity.of(
+            owner="led",
+            family="pwm",
+            stream="staged_duty_cycle",
+            variant=Variant.Request,
+        ),
+        schema=bytes,
+        schema_id="PwmDutyCycle",
+    )
     step = ReadThenWriteNextEpochStep.map(
         name="BrightnessToPwm",
         read=rx.from_iterable([0, 32, 255]),
-        output=pwm_route,
+        output=staged_pwm_route,
         transform=lambda value: bytes([value]),
     )
 
+    graph.capacitor(
+        source=staged_pwm_route,
+        sink=pwm_route,
+        capacity=1,
+        immediate=True,
+    )
     graph.install(step)
     latest = graph.latest(pwm_route)
     assert latest is not None

@@ -11,13 +11,15 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 from dataclasses import field
+from dataclasses import replace
 import json
 from typing import cast
 from typing import Any
 from typing import Callable
-from typing import Generic
+from typing import Hashable
 from typing import Iterator
 from typing import Protocol
+from typing import Sequence as TypingSequence
 from typing import Sequence
 from typing import TypeVar
 from typing import Union
@@ -37,10 +39,13 @@ from ._manyfold_rust import MailboxDescriptor as NativeMailboxDescriptor
 from ._manyfold_rust import NamespaceRef
 from ._manyfold_rust import Plane
 from ._manyfold_rust import PortDescriptor
+from ._manyfold_rust import ProducerKind
 from ._manyfold_rust import ProducerRef
 from ._manyfold_rust import ReadablePort as NativeReadablePort
 from ._manyfold_rust import RouteRef
 from ._manyfold_rust import SchemaRef
+from ._manyfold_rust import TaintDomain
+from ._manyfold_rust import TaintMark
 from ._manyfold_rust import Variant
 from ._manyfold_rust import WritablePort as NativeWritablePort
 from ._manyfold_rust import WriteBinding
@@ -48,19 +53,25 @@ from ._manyfold_rust import Layer
 from .primitives import OwnerName
 from .primitives import ReadThenWriteNextEpochStep
 from .primitives import Schema
+from .primitives import Sink
+from .primitives import Source
 from .primitives import StreamFamily
 from .primitives import StreamName
 from .primitives import TypedEnvelope
 from .primitives import TypedRoute
 from .primitives import route
+from .primitives import sink
+from .primitives import source
 
 T = TypeVar("T")
 TIn = TypeVar("TIn")
 TOut = TypeVar("TOut")
 AnyTypedRoute = TypedRoute[Any]
-RouteLike = Union[AnyTypedRoute, RouteRef]
-WriteTarget = Union[WriteBinding, RouteLike]
+AnySource = Source[Any]
+AnySink = Sink[Any]
+RouteLike = Union[AnyTypedRoute, RouteRef, AnySource, AnySink]
 ConnectableTarget = Union[RouteLike, NativeMailbox]
+InspectableRoute = Union[RouteLike, NativeReadablePort, NativeWritablePort]
 EnvelopeIterator = Iterator[ClosedEnvelope]
 StateT = TypeVar("StateT")
 TRight = TypeVar("TRight")
@@ -201,6 +212,9 @@ class QueryRequest:
     join_name: str | None = None
     principal_id: str | None = None
     correlation_id: str | None = None
+    lineage_trace_id: str | None = None
+    lineage_causality_id: str | None = None
+    lineage_correlation_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -210,6 +224,58 @@ class QueryResponse:
     command: str
     correlation_id: str
     items: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class EventRef:
+    """Stable identity for one retained event in the in-memory graph."""
+
+    route_display: str
+    seq_source: int
+
+    def display(self) -> str:
+        return f"{self.route_display}@{self.seq_source}"
+
+
+@dataclass(frozen=True)
+class LineageRecord:
+    """Causality/correlation metadata retained alongside one event."""
+
+    event: EventRef
+    producer_id: str | None
+    trace_id: str
+    causality_id: str
+    correlation_id: str | None = None
+    parent_events: tuple[EventRef, ...] = ()
+
+    def display(self) -> str:
+        parents = ",".join(parent.display() for parent in self.parent_events)
+        return (
+            f"{self.event.display()}|trace={self.trace_id}"
+            f"|causality={self.causality_id}"
+            f"|correlation={self.correlation_id}"
+            f"|producer={self.producer_id}"
+            f"|parents={parents}"
+        )
+
+
+@dataclass(frozen=True)
+class TaintRepair:
+    """Declare an explicit taint repair with a proof note.
+
+    Repairs are the only supported way to clear taints in downstream outputs.
+    The caller must name the taint domain, the value ids to clear, and a short
+    proof string describing why the repair is valid.
+    """
+
+    domain: Any
+    cleared: tuple[str, ...] = ()
+    added: tuple[Any, ...] = ()
+    proof: str = ""
+
+    def __post_init__(self) -> None:
+        if self.cleared and not self.proof.strip():
+            raise ValueError("taint repairs that clear marks require a proof")
 
 
 @dataclass(frozen=True)
@@ -223,12 +289,64 @@ class DebugEvent:
 
 
 @dataclass(frozen=True)
+class RouteAuditSnapshot:
+    """Route-local audit summary for one route or write-binding scope."""
+
+    route_display: str
+    scope_routes: tuple[str, ...]
+    recent_producers: tuple[str, ...]
+    active_subscribers: tuple[str, ...]
+    related_write_requests: tuple[str, ...]
+    taint_upper_bounds: tuple[str, ...]
+    repair_notes: tuple[str, ...]
+    recent_debug_events: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class LazyPayloadSource:
     """Describe payload bytes that should only be opened on demand."""
 
-    open: Callable[[], bytes | bytearray | memoryview | Sequence[bytes | bytearray | memoryview]]
+    open: Callable[
+        [], bytes | bytearray | memoryview | Sequence[bytes | bytearray | memoryview]
+    ]
     logical_length_bytes: int | None = None
     codec_id: str = "identity"
+
+
+@dataclass(frozen=True)
+class Capacitor:
+    """Graph-visible active storage between a source and sink."""
+
+    name: str
+    source: RouteLike
+    sink: RouteLike
+    capacity: int
+    demand: RouteLike | None
+    immediate: bool
+    overflow: str
+
+
+@dataclass(frozen=True)
+class Resistor:
+    """Graph-visible flow shaper between a source and sink."""
+
+    name: str
+    source: RouteLike
+    sink: RouteLike
+    gate: Callable[[Any], bool] | None
+    release: RouteLike | None
+
+
+@dataclass(frozen=True)
+class Watchdog:
+    """Graph-visible missing-flow detector."""
+
+    name: str
+    reset_by: RouteLike
+    output: RouteLike
+    after: int
+    clock: RouteLike
+    pulse: Any = b"timeout"
 
 
 @dataclass(frozen=True)
@@ -237,6 +355,35 @@ class QueryServiceRoutes:
 
     request: RouteRef
     response: RouteRef
+
+
+@dataclass(frozen=True)
+class LifecycleBinding:
+    """Specialized write-binding bundle for RFC lifecycle supervision."""
+
+    binding: WriteBinding
+    request: RouteRef
+    desired: RouteRef
+    reported: RouteRef
+    effective: RouteRef
+    event: RouteRef
+    ack: RouteRef | None = None
+    health: RouteRef | None = None
+
+    def scope_routes(self) -> tuple[RouteRef, ...]:
+        return tuple(
+            route
+            for route in (
+                self.request,
+                self.desired,
+                self.reported,
+                self.effective,
+                self.ack,
+                self.event,
+                self.health,
+            )
+            if route is not None
+        )
 
 
 @dataclass(frozen=True)
@@ -250,6 +397,123 @@ class ShadowSnapshot:
     ack: ClosedEnvelope | None
     pending_write: bool
     coherence_taints: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class FlowSnapshot:
+    """Current route-level credit/backpressure view."""
+
+    route_display: str
+    credit_class: str
+    backpressure_policy: str
+    available: int
+    blocked_senders: int
+    dropped_messages: int
+    largest_queue_depth: int
+
+
+@dataclass(frozen=True)
+class FlowPolicy:
+    """Partial flow-policy override used when composing edge descriptors."""
+
+    backpressure_policy: str | None = None
+    credit_class: str | None = None
+    mailbox_policy: str | None = None
+    async_boundary_kind: str | None = None
+    overflow_policy: str | None = None
+
+    def merged(self, override: FlowPolicy | None) -> FlowPolicy:
+        if override is None:
+            return self
+        return FlowPolicy(
+            backpressure_policy=override.backpressure_policy
+            if override.backpressure_policy is not None
+            else self.backpressure_policy,
+            credit_class=override.credit_class
+            if override.credit_class is not None
+            else self.credit_class,
+            mailbox_policy=override.mailbox_policy
+            if override.mailbox_policy is not None
+            else self.mailbox_policy,
+            async_boundary_kind=override.async_boundary_kind
+            if override.async_boundary_kind is not None
+            else self.async_boundary_kind,
+            overflow_policy=override.overflow_policy
+            if override.overflow_policy is not None
+            else self.overflow_policy,
+        )
+
+    def resolve(self) -> DescriptorFlowBlock:
+        return DescriptorFlowBlock(
+            backpressure_policy=self.backpressure_policy or "propagate",
+            credit_class=self.credit_class or "default",
+            mailbox_policy=self.mailbox_policy or "none",
+            async_boundary_kind=self.async_boundary_kind or "inline",
+            overflow_policy=self.overflow_policy or "reject_write",
+        )
+
+
+@dataclass(frozen=True)
+class MailboxSnapshot:
+    """Current mailbox queue and overflow view."""
+
+    name: str
+    ingress_route: str
+    egress_route: str
+    capacity: int
+    delivery_mode: str
+    ordering_policy: str
+    overflow_policy: str
+    depth: int
+    available_credit: int
+    blocked_writes: int
+    dropped_messages: int
+    coalesced_messages: int
+    delivered_messages: int
+
+
+@dataclass(frozen=True)
+class PayloadDemandSnapshot:
+    """Current metadata-versus-payload demand accounting for one route."""
+
+    route_display: str
+    metadata_events: int
+    payload_open_requests: int
+    lazy_source_opens: int
+    materialized_payload_bytes: int
+    cache_hits: int
+    unopened_lazy_payloads: int
+
+
+@dataclass(frozen=True)
+class WatermarkSnapshot:
+    """Current event-time or progress watermark view for one route."""
+
+    route_display: str
+    partition_spec: str
+    clock_domain: str
+    event_time_policy: str
+    watermark_policy: str
+    latest_seq_source: int | None
+    latest_control_epoch: int | None
+    current_watermark: int | None
+
+
+@dataclass(frozen=True)
+class ScheduledWriteSnapshot:
+    """Current scheduler guard state for one queued write."""
+
+    route_display: str
+    scheduler_epoch: int
+    not_before_epoch: int | None
+    wait_for_ack_route: str | None
+    expires_at_epoch: int | None
+    ack_route: str | None
+    ack_observed: bool
+    attempt_count: int
+    last_attempt_epoch: int | None
+    next_retry_epoch: int | None
+    ready_now: bool
 
 
 @dataclass(frozen=True)
@@ -307,6 +571,39 @@ class DescriptorRetentionBlock:
     durability_class: str
     replay_window: str
     payload_retention_policy: str
+
+
+@dataclass(frozen=True)
+class RouteRetentionPolicy:
+    """Retention and replay policy override for one route."""
+
+    latest_replay_policy: str
+    durability_class: str = "memory"
+    replay_window: str = "memory"
+    payload_retention_policy: str | None = None
+    history_limit: int | None = None
+
+    def __post_init__(self) -> None:
+        allowed = {"none", "latest_only", "bounded_history"}
+        if self.latest_replay_policy not in allowed:
+            raise ValueError(
+                "latest_replay_policy must be one of "
+                "'none', 'latest_only', or 'bounded_history'"
+            )
+        allowed_payload = {
+            None,
+            "inline",
+            "separate_store",
+            "external_store",
+            "non_replayable",
+        }
+        if self.payload_retention_policy not in allowed_payload:
+            raise ValueError(
+                "payload_retention_policy must be one of "
+                "'inline', 'separate_store', 'external_store', or 'non_replayable'"
+            )
+        if self.history_limit is not None and self.history_limit <= 0:
+            raise ValueError("history_limit must be positive when provided")
 
 
 @dataclass(frozen=True)
@@ -387,6 +684,47 @@ class ScheduledWrite:
     expires_at_epoch: int | None = None
     producer: ProducerRef | None = None
     control_epoch: int | None = None
+    retry_policy: RetryPolicy | None = None
+    ack_route: RouteLike | None = None
+    ack_baseline_seq: int = -1
+    trace_id: str | None = None
+    causality_id: str | None = None
+    correlation_id: str | None = None
+    parent_events: tuple[EventRef, ...] = ()
+    attempt_count: int = 0
+    last_attempt_epoch: int | None = None
+
+
+@dataclass(frozen=True)
+class RetryPolicy:
+    """Typed retry/backoff policy for guarded write scheduling."""
+
+    max_attempts: int
+    backoff_epochs: int = 0
+
+    def __post_init__(self) -> None:
+        if self.max_attempts <= 0:
+            raise ValueError("max_attempts must be positive")
+        if self.backoff_epochs < 0:
+            raise ValueError("backoff_epochs must be non-negative")
+
+    @classmethod
+    def never(cls) -> RetryPolicy:
+        """Disable automatic retries after the initial attempt."""
+        return cls(max_attempts=1, backoff_epochs=0)
+
+    @classmethod
+    def immediate(cls, *, max_attempts: int) -> RetryPolicy:
+        """Retry on the next scheduler tick until the attempt budget is exhausted."""
+        return cls(max_attempts=max_attempts, backoff_epochs=0)
+
+    @classmethod
+    def fixed_backoff(cls, *, max_attempts: int, backoff_epochs: int) -> RetryPolicy:
+        """Retry with a fixed scheduler-epoch delay between attempts."""
+        return cls(max_attempts=max_attempts, backoff_epochs=backoff_epochs)
+
+
+WriteTarget = Union[WriteBinding, LifecycleBinding, RouteLike]
 
 
 @dataclass(frozen=True)
@@ -453,6 +791,113 @@ class WriteBindings:
             ack=ack.route_ref,
         )
 
+    @staticmethod
+    def lifecycle(
+        owner: OwnerName,
+        family: StreamFamily,
+        *,
+        intent_schema: Schema[bytes],
+        observation_schema: Schema[bytes] | None = None,
+        layer: Layer = Layer.Raw,
+        stream: StreamName | None = None,
+        event_schema: Schema[bytes] | None = None,
+        ack_schema: Schema[bytes] | None = None,
+        health_schema: Schema[bytes] | None = None,
+    ) -> LifecycleBinding:
+        lifecycle_stream = stream or StreamName("lifecycle")
+        observation = observation_schema or intent_schema
+        request = route(
+            plane=Plane.Write,
+            layer=layer,
+            owner=owner,
+            family=family,
+            stream=lifecycle_stream,
+            variant=Variant.Request,
+            schema=intent_schema,
+        )
+        desired = route(
+            plane=Plane.Write,
+            layer=Layer.Shadow,
+            owner=owner,
+            family=family,
+            stream=lifecycle_stream,
+            variant=Variant.Desired,
+            schema=intent_schema,
+        )
+        reported = route(
+            plane=Plane.Write,
+            layer=Layer.Shadow,
+            owner=owner,
+            family=family,
+            stream=lifecycle_stream,
+            variant=Variant.Reported,
+            schema=observation,
+        )
+        effective = route(
+            plane=Plane.Write,
+            layer=Layer.Shadow,
+            owner=owner,
+            family=family,
+            stream=lifecycle_stream,
+            variant=Variant.Effective,
+            schema=observation,
+        )
+        event = route(
+            plane=Plane.Read,
+            layer=Layer.Internal,
+            owner=owner,
+            family=family,
+            stream=lifecycle_stream,
+            variant=Variant.Event,
+            schema=event_schema
+            or Schema.bytes(
+                f"{observation.schema_id}Event", version=observation.version
+            ),
+        )
+        ack = (
+            None
+            if ack_schema is None
+            else route(
+                plane=Plane.Write,
+                layer=Layer.Shadow,
+                owner=owner,
+                family=family,
+                stream=lifecycle_stream,
+                variant=Variant.Ack,
+                schema=ack_schema,
+            )
+        )
+        health = (
+            None
+            if health_schema is None
+            else route(
+                plane=Plane.Read,
+                layer=Layer.Internal,
+                owner=owner,
+                family=family,
+                stream=lifecycle_stream,
+                variant=Variant.Health,
+                schema=health_schema,
+            )
+        )
+        binding = WriteBinding(
+            request=request.route_ref,
+            desired=desired.route_ref,
+            reported=reported.route_ref,
+            effective=effective.route_ref,
+            ack=None if ack is None else ack.route_ref,
+        )
+        return LifecycleBinding(
+            binding=binding,
+            request=binding.request,
+            desired=binding.desired,
+            reported=binding.reported,
+            effective=binding.effective,
+            event=event.route_ref,
+            ack=binding.ack,
+            health=None if health is None else health.route_ref,
+        )
+
 
 @dataclass(frozen=True)
 class ControlLoops:
@@ -485,7 +930,9 @@ class ControlLoops:
         )
 
     @staticmethod
-    def counter_accumulate(*, read_state: TypedRoute[Any], write_request: TypedRoute[Any]) -> NativeControlLoop:
+    def counter_accumulate(
+        *, read_state: TypedRoute[Any], write_request: TypedRoute[Any]
+    ) -> NativeControlLoop:
         return ControlLoops.with_routes(
             "CounterAccumulate",
             read_routes=[read_state],
@@ -496,7 +943,9 @@ class ControlLoops:
 class ReactiveReadablePort:
     """Readable port facade with a live Rx stream for route updates."""
 
-    def __init__(self, graph: Graph, route_ref: RouteRef, native: NativeReadablePort) -> None:
+    def __init__(
+        self, graph: Graph, route_ref: RouteRef, native: NativeReadablePort
+    ) -> None:
         self._graph = graph
         self._route_ref = route_ref
         self._native = native
@@ -522,7 +971,9 @@ class ReactiveReadablePort:
                 latest = self.latest()
                 if latest is not None:
                     observer.on_next(latest)
-            return self._graph._subject_for(self._route_ref).subscribe(observer, scheduler=scheduler)
+            return self._graph._subject_for(self._route_ref).subscribe(
+                observer, scheduler=scheduler
+            )
 
         return rx.create(subscribe)
 
@@ -530,7 +981,9 @@ class ReactiveReadablePort:
 class ReactiveWritablePort:
     """Writable port facade that can act as an Rx observer."""
 
-    def __init__(self, graph: Graph, route_ref: RouteRef, native: NativeWritablePort) -> None:
+    def __init__(
+        self, graph: Graph, route_ref: RouteRef, native: NativeWritablePort
+    ) -> None:
         self._graph = graph
         self._route_ref = route_ref
         self._native = native
@@ -541,7 +994,9 @@ class ReactiveWritablePort:
         producer: ProducerRef | None = None,
         control_epoch: int | None = None,
     ) -> ClosedEnvelope:
-        envelope = self._native.write(payload, producer=producer, control_epoch=control_epoch)
+        envelope = self._native.write(
+            payload, producer=producer, control_epoch=control_epoch
+        )
         producer_id = "python" if producer is None else producer.producer_id
         self._graph._record_envelope(self._route_ref, envelope, producer_id=producer_id)
         return envelope
@@ -576,21 +1031,34 @@ class ReactiveWritablePort:
         producer: ProducerRef | None = None,
         control_epoch: int | None = None,
     ) -> SubscriptionLike:
-        return source.subscribe(self.as_observer(producer=producer, control_epoch=control_epoch))
+        return source.subscribe(
+            self.as_observer(producer=producer, control_epoch=control_epoch)
+        )
 
 
 class _TrackedSubscription:
-    def __init__(self, graph: Graph, route_ref: RouteRef, inner: SubscriptionLike) -> None:
+    def __init__(
+        self,
+        graph: Graph,
+        route_ref: RouteRef,
+        inner: SubscriptionLike,
+        subscriber_id: str,
+    ) -> None:
         self._graph = graph
         self._route_ref = route_ref
         self._inner = inner
+        self._subscriber_id = subscriber_id
         self._disposed = False
 
     def dispose(self) -> None:
         if self._disposed:
             return
         self._disposed = True
-        self._graph._subscriber_count[self._graph._route_key(self._route_ref)] -= 1
+        route_key = self._graph._route_key(self._route_ref)
+        self._graph._subscriber_count[route_key] -= 1
+        subscribers = self._graph._route_subscribers.get(route_key)
+        if subscribers is not None:
+            subscribers.discard(self._subscriber_id)
         self._inner.dispose()
 
 
@@ -605,7 +1073,7 @@ class Graph:
     - pipe(source, route_ref)
     - run_control_loop(name)
     - install(control_loop)
-    - connect(source, sink)
+    - connect(source=..., sink=...)
     More specialized planning and inspection helpers also live here, but they
     stay off the top-level package namespace so the primary API remains small.
     """
@@ -617,6 +1085,7 @@ class Graph:
         self._history: dict[str, list[ClosedEnvelope]] = {}
         self._writers: dict[str, set[str]] = {}
         self._subscriber_count: dict[str, int] = {}
+        self._route_subscribers: dict[str, set[str]] = {}
         self._join_plans: dict[str, JoinPlan] = {}
         self._middlewares: list[Middleware] = []
         self._links: dict[str, Link] = {}
@@ -626,17 +1095,54 @@ class Graph:
         self._audit_events: list[DebugEvent] = []
         self._capability_grants: dict[tuple[str, str], CapabilityGrant] = {}
         self._route_visibility: dict[str, str] = {}
+        self._retention_policies: dict[str, RouteRetentionPolicy] = {}
         self._write_bindings: dict[str, WriteBinding] = {}
+        self._lifecycle_bindings: dict[str, LifecycleBinding] = {}
         self._lazy_payload_sources: dict[str, LazyPayloadSource] = {}
         self._materialized_payloads: dict[str, bytes] = {}
+        self._payload_route_by_id: dict[str, str] = {}
+        self._opened_payload_ids: set[str] = set()
+        self._payload_demand_stats: dict[str, dict[str, int]] = {}
+        self._stream_taint_upper_bounds: dict[str, dict[tuple[str, str], Any]] = {}
+        self._route_repair_notes: dict[str, list[str]] = {}
+        self._lineage_by_event: dict[tuple[str, int], LineageRecord] = {}
+        self._lineage_events_by_trace: dict[str, list[tuple[str, int]]] = {}
+        self._lineage_events_by_causality: dict[str, list[tuple[str, int]]] = {}
+        self._lineage_events_by_correlation: dict[str, list[tuple[str, int]]] = {}
+        self._mailbox_descriptors: dict[str, NativeMailboxDescriptor] = {}
+        self._capacitors: dict[str, Capacitor] = {}
+        self._resistors: dict[str, Resistor] = {}
+        self._watchdogs: dict[str, Watchdog] = {}
+        self._graph_flow_defaults = FlowPolicy()
+        self._source_flow_defaults: dict[str, FlowPolicy] = {}
+        self._sink_flow_requirements: dict[str, FlowPolicy] = {}
+        self._edge_flow_overrides: dict[tuple[str, str], FlowPolicy] = {}
+        self._mailbox_flow_policies: dict[str, FlowPolicy] = {}
         self._pending_writes: list[ScheduledWrite] = []
         self._scheduler_epoch = 0
         self._query_sequence = 0
+        self._subscriber_sequence = 0
 
     def _coerce_route_ref(self, route_ref: RouteLike) -> RouteRef:
+        if isinstance(route_ref, (Source, Sink)):
+            return self._coerce_route_ref(route_ref.route)
         if isinstance(route_ref, TypedRoute):
             return route_ref.route_ref
         return route_ref
+
+    @staticmethod
+    def _typed_route(route_ref: RouteLike) -> TypedRoute[Any] | None:
+        if isinstance(route_ref, (Source, Sink)):
+            route_ref = route_ref.route
+        if isinstance(route_ref, TypedRoute):
+            return route_ref
+        return None
+
+    @staticmethod
+    def _source_replay_latest(route_ref: RouteLike) -> bool:
+        if isinstance(route_ref, Source):
+            return route_ref.replay_latest
+        return True
 
     def _connectable_key(self, target: ConnectableTarget, *, edge_role: str) -> str:
         if isinstance(target, NativeMailbox):
@@ -648,11 +1154,177 @@ class Graph:
     def _route_key(self, route_ref: RouteLike) -> str:
         return self._coerce_route_ref(route_ref).display()
 
+    def _auto_node_name(
+        self,
+        kind: str,
+        source: RouteLike,
+        sink: RouteLike,
+        *policy_parts: str,
+    ) -> str:
+        policy = ":".join(part for part in policy_parts if part)
+        base = f"{kind}:{self._route_key(source)}->{self._route_key(sink)}"
+        return f"{base}:{policy}" if policy else base
+
+    @staticmethod
+    def _closed_item(item: TypedEnvelope[Any] | ClosedEnvelope) -> ClosedEnvelope:
+        return item.closed if isinstance(item, TypedEnvelope) else item
+
+    def _event_ref(self, envelope: ClosedEnvelope) -> EventRef:
+        return EventRef(
+            route_display=envelope.route.display(),
+            seq_source=envelope.seq_source,
+        )
+
+    @staticmethod
+    def _event_index_key(event: EventRef) -> tuple[str, int]:
+        return (event.route_display, event.seq_source)
+
+    def _next_subscriber_id(self) -> str:
+        self._subscriber_sequence += 1
+        return f"subscriber-{self._subscriber_sequence}"
+
+    @staticmethod
+    def _mailbox_value(mailbox: NativeMailbox, name: str) -> Any:
+        value = getattr(mailbox, name)
+        return value() if callable(value) else value
+
     def _subject_for(self, route_ref: RouteLike) -> Subject[ClosedEnvelope]:
         key = self._route_key(route_ref)
         if key not in self._subjects:
             self._subjects[key] = Subject()
         return self._subjects[key]
+
+    def _payload_stats(self, route_ref: RouteLike) -> dict[str, int]:
+        key = self._route_key(route_ref)
+        return self._payload_demand_stats.setdefault(
+            key,
+            {
+                "metadata_events": 0,
+                "payload_open_requests": 0,
+                "lazy_source_opens": 0,
+                "materialized_payload_bytes": 0,
+                "cache_hits": 0,
+            },
+        )
+
+    def _default_flow_policy_for_route(
+        self,
+        route_ref: RouteRef,
+        native: PortDescriptor | None = None,
+    ) -> FlowPolicy:
+        return FlowPolicy(
+            backpressure_policy=getattr(native, "backpressure_policy", None)
+            or "propagate",
+            credit_class=(
+                "bulk_payload"
+                if route_ref.namespace.layer == Layer.Bulk
+                else "control"
+                if route_ref.namespace.plane == Plane.Write
+                else "default"
+            ),
+            mailbox_policy="none",
+            async_boundary_kind="inline",
+            overflow_policy="reject_write",
+        )
+
+    def _resolved_route_flow_policy(
+        self,
+        route_ref: RouteRef,
+        native: PortDescriptor | None = None,
+    ) -> DescriptorFlowBlock:
+        key = self._route_key(route_ref)
+        policy = self._default_flow_policy_for_route(route_ref, native)
+        policy = policy.merged(self._graph_flow_defaults)
+        policy = policy.merged(self._mailbox_flow_policies.get(key))
+        policy = policy.merged(self._source_flow_defaults.get(key))
+        policy = policy.merged(self._sink_flow_requirements.get(key))
+        return policy.resolve()
+
+    def _resolved_edge_flow_policy(
+        self,
+        source: ConnectableTarget,
+        sink: ConnectableTarget,
+    ) -> DescriptorFlowBlock:
+        source_key = self._connectable_key(source, edge_role="source")
+        sink_key = self._connectable_key(sink, edge_role="sink")
+        source_route = (
+            None if isinstance(source, NativeMailbox) else self._coerce_route_ref(source)
+        )
+        policy = (
+            self._default_flow_policy_for_route(source_route)
+            if source_route is not None
+            else FlowPolicy()
+        )
+        policy = policy.merged(self._graph_flow_defaults)
+        policy = policy.merged(self._mailbox_flow_policies.get(source_key))
+        policy = policy.merged(self._mailbox_flow_policies.get(sink_key))
+        policy = policy.merged(self._source_flow_defaults.get(source_key))
+        policy = policy.merged(self._sink_flow_requirements.get(sink_key))
+        policy = policy.merged(self._edge_flow_overrides.get((source_key, sink_key)))
+        return policy.resolve()
+
+    def _default_retention_policy(self, route_ref: RouteRef) -> RouteRetentionPolicy:
+        if route_ref.namespace.layer == Layer.Ephemeral:
+            return RouteRetentionPolicy(
+                latest_replay_policy="none",
+                replay_window="none",
+                payload_retention_policy="non_replayable",
+                history_limit=1,
+            )
+        if route_ref.namespace.layer == Layer.Internal:
+            return RouteRetentionPolicy(
+                latest_replay_policy="latest_only",
+                replay_window="latest",
+                payload_retention_policy="separate_store",
+                history_limit=1,
+            )
+        return RouteRetentionPolicy(
+            latest_replay_policy="bounded_history",
+            replay_window="memory",
+            payload_retention_policy=(
+                "external_store"
+                if route_ref.namespace.layer == Layer.Bulk
+                else "separate_store"
+            ),
+        )
+
+    def _retention_policy_for(self, route_ref: RouteLike) -> RouteRetentionPolicy:
+        native_route = self._coerce_route_ref(route_ref)
+        key = native_route.display()
+        return self._retention_policies.get(
+            key, self._default_retention_policy(native_route)
+        )
+
+    def _payload_retention_policy_for(self, route_ref: RouteLike) -> str:
+        return cast(
+            str,
+            self._retention_policy_for(route_ref).payload_retention_policy,
+        )
+
+    def _purge_payload_ref(self, payload_id: str) -> None:
+        self._lazy_payload_sources.pop(payload_id, None)
+        self._materialized_payloads.pop(payload_id, None)
+        self._payload_route_by_id.pop(payload_id, None)
+        self._opened_payload_ids.discard(payload_id)
+
+    def _enforce_payload_retention(self, route_ref: RouteLike) -> None:
+        key = self._route_key(route_ref)
+        retained_payload_ids = {
+            envelope.payload_ref.payload_id for envelope in self._history.get(key, ())
+        }
+        payload_policy = self._payload_retention_policy_for(route_ref)
+        if payload_policy == "non_replayable" and retained_payload_ids:
+            latest_payload_id = self._history[key][-1].payload_ref.payload_id
+            retained_payload_ids = {latest_payload_id}
+        for payload_id, payload_route in tuple(self._payload_route_by_id.items()):
+            if payload_route != key:
+                continue
+            if payload_id not in retained_payload_ids:
+                self._purge_payload_ref(payload_id)
+        if payload_policy in {"external_store", "non_replayable"}:
+            for payload_id in tuple(self._materialized_payloads):
+                if self._payload_route_by_id.get(payload_id) == key:
+                    del self._materialized_payloads[payload_id]
 
     def _record_envelope(
         self,
@@ -660,26 +1332,107 @@ class Graph:
         envelope: ClosedEnvelope,
         *,
         producer_id: str | None = None,
+        trace_id: str | None = None,
+        causality_id: str | None = None,
+        correlation_id: str | None = None,
+        parent_events: Sequence[EventRef] = (),
     ) -> ClosedEnvelope:
         """Persist envelope-derived bookkeeping before notifying observers."""
         key = self._route_key(route_ref)
-        self._history.setdefault(key, []).append(envelope)
+        history = self._history.setdefault(key, [])
+        history.append(envelope)
+        retention = self._retention_policy_for(route_ref)
+        if retention.history_limit is not None and len(history) > retention.history_limit:
+            del history[: len(history) - retention.history_limit]
+        self._payload_route_by_id[envelope.payload_ref.payload_id] = key
+        self._payload_stats(route_ref)["metadata_events"] += 1
+        self._enforce_payload_retention(route_ref)
+        self._remember_stream_taints(route_ref, envelope)
         if producer_id is not None:
             self._writers.setdefault(key, set()).add(producer_id)
+        event = self._event_ref(envelope)
+        resolved_trace_id = trace_id or event.display()
+        resolved_causality_id = causality_id or event.display()
+        record = LineageRecord(
+            event=event,
+            producer_id=producer_id,
+            trace_id=resolved_trace_id,
+            causality_id=resolved_causality_id,
+            correlation_id=correlation_id,
+            parent_events=tuple(parent_events),
+        )
+        self._lineage_by_event[self._event_index_key(event)] = record
+        self._lineage_events_by_trace.setdefault(resolved_trace_id, []).append(
+            self._event_index_key(event)
+        )
+        self._lineage_events_by_causality.setdefault(
+            resolved_causality_id, []
+        ).append(self._event_index_key(event))
+        if correlation_id is not None:
+            self._lineage_events_by_correlation.setdefault(correlation_id, []).append(
+                self._event_index_key(event)
+            )
         self._publish(route_ref, envelope)
         return envelope
 
-    def _publish(self, route_ref: RouteLike, envelope: ClosedEnvelope) -> ClosedEnvelope:
+    def _publish(
+        self, route_ref: RouteLike, envelope: ClosedEnvelope
+    ) -> ClosedEnvelope:
         self._subject_for(route_ref).on_next(envelope)
         return envelope
 
     @staticmethod
     def _normalize_payload_chunks(
-        payload: bytes | bytearray | memoryview | Sequence[bytes | bytearray | memoryview],
+        payload: bytes
+        | bytearray
+        | memoryview
+        | Sequence[bytes | bytearray | memoryview],
     ) -> bytes:
         if isinstance(payload, (bytes, bytearray, memoryview)):
             return bytes(payload)
         return b"".join(bytes(chunk) for chunk in payload)
+
+    def _known_payload_bytes(
+        self,
+        route_ref: RouteLike,
+        envelope: ClosedEnvelope,
+        *,
+        record_open: bool,
+    ) -> bytes | None:
+        payload_id = envelope.payload_ref.payload_id
+        stats = self._payload_stats(route_ref)
+        if record_open:
+            stats["payload_open_requests"] += 1
+        if payload_id in self._materialized_payloads:
+            payload = self._materialized_payloads[payload_id]
+            if record_open:
+                stats["cache_hits"] += 1
+        elif payload_id in self._lazy_payload_sources:
+            payload = self._normalize_payload_chunks(
+                self._lazy_payload_sources[payload_id].open()
+            )
+            if self._payload_retention_policy_for(route_ref) in {
+                "inline",
+                "separate_store",
+            }:
+                self._materialized_payloads[payload_id] = payload
+            stats["lazy_source_opens"] += 1
+            stats["materialized_payload_bytes"] += len(payload)
+        else:
+            inline_payload = bytes(envelope.payload_ref.inline_bytes)
+            if inline_payload:
+                payload = inline_payload
+            else:
+                payload = None
+        if record_open:
+            if payload is not None:
+                self._opened_payload_ids.add(payload_id)
+            self._emit_debug_event(
+                "payload_open",
+                f"opened payload {payload_id}",
+                route_ref,
+            )
+        return payload
 
     def _resolve_payload_bytes(
         self,
@@ -688,39 +1441,400 @@ class Graph:
         *,
         record_open: bool,
     ) -> bytes:
-        payload_id = envelope.payload_ref.payload_id
-        if payload_id in self._materialized_payloads:
-            payload = self._materialized_payloads[payload_id]
-        elif payload_id in self._lazy_payload_sources:
-            payload = self._normalize_payload_chunks(self._lazy_payload_sources[payload_id].open())
-            self._materialized_payloads[payload_id] = payload
-        else:
-            inline_payload = bytes(envelope.payload_ref.inline_bytes)
-            if inline_payload:
-                payload = inline_payload
-            else:
-                opened = tuple(self._read_port(route_ref).open())
-                if not opened:
-                    payload = b""
-                else:
-                    payload = bytes(opened[-1].payload)
-        if record_open:
-            self._emit_debug_event(
-                "payload_open",
-                f"opened payload {payload_id}",
-                route_ref,
-            )
-        return payload
+        payload = self._known_payload_bytes(route_ref, envelope, record_open=record_open)
+        if payload is not None:
+            return payload
+        opened = tuple(self._read_port(route_ref).open())
+        if not opened:
+            return b""
+        return bytes(opened[-1].payload)
 
-    def _decode_envelope(self, route_ref: TypedRoute[T], envelope: ClosedEnvelope) -> TypedEnvelope[T]:
+    def _decode_envelope(
+        self, route_ref: TypedRoute[T], envelope: ClosedEnvelope
+    ) -> TypedEnvelope[T]:
         payload = self._payload_bytes(route_ref, envelope)
-        return TypedEnvelope(route=route_ref, closed=envelope, value=route_ref.schema.decode(payload))
+        return TypedEnvelope(
+            route=route_ref, closed=envelope, value=route_ref.schema.decode(payload)
+        )
 
-    def _payload_bytes(self, route_ref: TypedRoute[T], envelope: ClosedEnvelope) -> bytes:
+    def _payload_bytes(
+        self, route_ref: TypedRoute[T], envelope: ClosedEnvelope
+    ) -> bytes:
         return self._resolve_payload_bytes(route_ref, envelope, record_open=False)
 
-    def _descriptor_defaults(self, route_ref: RouteRef, native: PortDescriptor | None = None) -> RouteDescriptor:
+    def _operator_value(
+        self,
+        route_ref: RouteLike,
+        native_route: RouteRef,
+        item: TypedEnvelope[T] | ClosedEnvelope,
+    ) -> T | bytes:
+        if isinstance(item, TypedEnvelope):
+            return item.value
+        payload = self._resolve_payload_bytes(native_route, item, record_open=False)
+        typed_route = self._typed_route(route_ref)
+        if typed_route is not None:
+            return typed_route.schema.decode(payload)
+        return payload
+
+    def _progress_value(
+        self,
+        route_ref: RouteLike,
+        native_route: RouteRef,
+        item: TypedEnvelope[T] | ClosedEnvelope,
+        *,
+        extractor: Callable[[T | bytes], int] | None = None,
+    ) -> int:
+        """Resolve event-time or watermark progress for one observed item."""
+        value = self._operator_value(route_ref, native_route, item)
+        if extractor is not None:
+            return extractor(value)
+        closed = item.closed if isinstance(item, TypedEnvelope) else item
+        if closed.control_epoch is not None:
+            return closed.control_epoch
+        return closed.seq_source
+
+    @staticmethod
+    def _taint_key(taint: Any) -> tuple[Any, Any]:
+        domain = getattr(taint, "domain", None)
+        if hasattr(domain, "as_str"):
+            domain_key = domain.as_str()
+        elif hasattr(domain, "value"):
+            domain_key = domain.value
+        else:
+            domain_key = str(domain)
+        return (
+            domain_key,
+            getattr(taint, "value_id", None),
+        )
+
+    @staticmethod
+    def _taint_domain_name(domain: Any) -> str:
+        if hasattr(domain, "as_str"):
+            return cast(str, domain.as_str())
+        if hasattr(domain, "value"):
+            return cast(str, domain.value)
+        return str(domain)
+
+    def _item_taints(
+        self, item: TypedEnvelope[Any] | ClosedEnvelope
+    ) -> tuple[Any, ...]:
+        closed = item.closed if isinstance(item, TypedEnvelope) else item
+        return tuple(getattr(closed, "taints", ()))
+
+    def _lineage_for_item(
+        self,
+        item: TypedEnvelope[Any] | ClosedEnvelope,
+    ) -> LineageRecord:
+        closed = item.closed if isinstance(item, TypedEnvelope) else item
+        event = self._event_ref(closed)
+        record = self._lineage_by_event.get(self._event_index_key(event))
+        if record is not None:
+            return record
+        return LineageRecord(
+            event=event,
+            producer_id=getattr(getattr(closed, "producer", None), "producer_id", None),
+            trace_id=event.display(),
+            causality_id=event.display(),
+        )
+
+    def _remember_stream_taints(
+        self,
+        route_ref: RouteLike,
+        envelope: ClosedEnvelope,
+    ) -> None:
+        key = self._route_key(route_ref)
+        remembered = self._stream_taint_upper_bounds.setdefault(key, {})
+        for taint in getattr(envelope, "taints", ()):
+            domain_name = self._taint_domain_name(getattr(taint, "domain", None))
+            value_id = getattr(taint, "value_id", None)
+            if value_id is None:
+                continue
+            remembered.setdefault((domain_name, value_id), taint)
+
+    @staticmethod
+    def _taint_domain_matches(taint: Any, domain_name: str) -> bool:
+        domain = getattr(taint, "domain", None)
+        if domain == domain_name:
+            return True
+        if hasattr(domain, "as_str"):
+            return cast(str, domain.as_str()) == domain_name
+        if hasattr(domain, "value"):
+            return cast(str, domain.value) == domain_name
+        return False
+
+    def _set_domain_taints(
+        self,
+        envelope: ClosedEnvelope | None,
+        *,
+        domain_name: str,
+        values: Sequence[str],
+    ) -> None:
+        if envelope is None:
+            return
+        retained = [
+            taint
+            for taint in getattr(envelope, "taints", ())
+            if not self._taint_domain_matches(taint, domain_name)
+        ]
+        retained.extend(
+            TaintMark(TaintDomain.Coherence, value, envelope.route.display())
+            for value in values
+        )
+        try:
+            envelope.taints = retained
+        except AttributeError:
+            return
+
+    def _envelope_payload_bytes(self, envelope: ClosedEnvelope | None) -> bytes | None:
+        if envelope is None:
+            return None
+        return self._resolve_payload_bytes(envelope.route, envelope, record_open=False)
+
+    def _coherence_taints_for_binding(self, binding: WriteBinding) -> tuple[str, ...]:
+        desired = self._graph.latest(binding.desired)
+        reported = self._graph.latest(binding.reported)
+        effective = self._graph.latest(binding.effective)
+
+        desired_payload = self._envelope_payload_bytes(desired)
+        reported_payload = self._envelope_payload_bytes(reported)
+        effective_payload = self._envelope_payload_bytes(effective)
+
+        taints: list[str] = []
+        if desired_payload is None:
+            if effective_payload is not None:
+                taints.append("COHERENCE_STABLE")
+        else:
+            if effective_payload != desired_payload:
+                taints.append("COHERENCE_WRITE_PENDING")
+            if reported_payload is not None and reported_payload != desired_payload:
+                taints.append("COHERENCE_STALE_REPORTED")
+            if (
+                effective_payload is not None
+                and reported_payload is not None
+                and effective_payload != reported_payload
+            ):
+                taints.append("COHERENCE_ECHO_UNMATCHED")
+            if not taints:
+                taints.append("COHERENCE_STABLE")
+        return tuple(taints)
+
+    def _refresh_binding_coherence(self, binding: WriteBinding) -> tuple[str, ...]:
+        taints = self._coherence_taints_for_binding(binding)
+        for binding_route in (
+            binding.request,
+            binding.desired,
+            binding.reported,
+            binding.effective,
+        ):
+            self._set_domain_taints(
+                self._graph.latest(binding_route),
+                domain_name="coherence",
+                values=taints,
+            )
+            latest = self._graph.latest(binding_route)
+            if latest is not None:
+                self._remember_stream_taints(binding_route, latest)
+        return taints
+
+    def _resolve_write_binding(
+        self, binding_or_request: WriteBinding | LifecycleBinding | RouteLike
+    ) -> WriteBinding:
+        if isinstance(binding_or_request, LifecycleBinding):
+            self._write_bindings[binding_or_request.request.display()] = (
+                binding_or_request.binding
+            )
+            self._lifecycle_bindings[binding_or_request.request.display()] = (
+                binding_or_request
+            )
+            return binding_or_request.binding
+        if isinstance(binding_or_request, WriteBinding):
+            self._write_bindings[binding_or_request.request.display()] = (
+                binding_or_request
+            )
+            return binding_or_request
+        request = self._coerce_route_ref(binding_or_request)
+        if request.display() not in self._write_bindings:
+            raise KeyError(f"no write binding registered for {request.display()}")
+        return self._write_bindings[request.display()]
+
+    def _binding_for_route(self, route_ref: RouteLike) -> WriteBinding | None:
+        route_display = self._route_key(route_ref)
+        for lifecycle in self._lifecycle_bindings.values():
+            if any(route.display() == route_display for route in lifecycle.scope_routes()):
+                return lifecycle.binding
+        for binding in self._write_bindings.values():
+            for candidate in (
+                binding.request,
+                binding.desired,
+                binding.reported,
+                binding.effective,
+                binding.ack,
+            ):
+                if candidate is not None and candidate.display() == route_display:
+                    return binding
+        return None
+
+    def _lifecycle_binding_for_request(
+        self, binding_or_request: WriteBinding | LifecycleBinding | RouteLike
+    ) -> LifecycleBinding | None:
+        if isinstance(binding_or_request, LifecycleBinding):
+            self._lifecycle_bindings[binding_or_request.request.display()] = (
+                binding_or_request
+            )
+            return binding_or_request
+        if isinstance(binding_or_request, WriteBinding):
+            return self._lifecycle_bindings.get(binding_or_request.request.display())
+        native_route = self._coerce_route_ref(binding_or_request)
+        if native_route.variant != Variant.Request:
+            binding = self._binding_for_route(native_route)
+            if binding is None:
+                return None
+            native_route = binding.request
+        return self._lifecycle_bindings.get(native_route.display())
+
+    def _audit_scope_routes(self, route_ref: RouteLike) -> tuple[RouteRef, ...]:
+        binding = self._binding_for_route(route_ref)
+        if binding is None:
+            return (self._coerce_route_ref(route_ref),)
+        lifecycle = self._lifecycle_binding_for_request(binding)
+        if lifecycle is not None:
+            return lifecycle.scope_routes()
+        return tuple(
+            route
+            for route in (
+                binding.request,
+                binding.desired,
+                binding.reported,
+                binding.effective,
+                binding.ack,
+            )
+            if route is not None
+        )
+
+    def _extend_taints(
+        self,
+        emitted: TypedEnvelope[Any] | ClosedEnvelope,
+        source_taints: Sequence[Any],
+    ) -> TypedEnvelope[Any] | ClosedEnvelope:
+        if not source_taints:
+            return emitted
+        closed = emitted.closed if isinstance(emitted, TypedEnvelope) else emitted
+        existing = list(getattr(closed, "taints", ()))
+        existing_keys = {self._taint_key(taint) for taint in existing}
+        for taint in source_taints:
+            key = self._taint_key(taint)
+            if key in existing_keys:
+                continue
+            existing.append(taint)
+            existing_keys.add(key)
+        try:
+            closed.taints = existing
+        except AttributeError:
+            return emitted
+        self._remember_stream_taints(closed.route, closed)
+        return emitted
+
+    def _apply_taint_repair(
+        self,
+        emitted: TypedEnvelope[Any] | ClosedEnvelope,
+        source_taints: Sequence[Any],
+        *,
+        repair: TaintRepair | None = None,
+    ) -> TypedEnvelope[Any] | ClosedEnvelope:
+        emitted = self._extend_taints(emitted, source_taints)
+        if repair is None:
+            return emitted
+        closed = emitted.closed if isinstance(emitted, TypedEnvelope) else emitted
+        domain_name = self._taint_domain_name(repair.domain)
+        cleared = set(repair.cleared)
+        if cleared:
+            absorbing = {
+                "determinism": {"DET_NONREPLAYABLE"},
+            }
+            for taint in getattr(closed, "taints", ()):
+                if (
+                    self._taint_domain_name(getattr(taint, "domain", None))
+                    != domain_name
+                ):
+                    continue
+                if getattr(taint, "value_id", None) not in cleared:
+                    continue
+                if getattr(taint, "value_id", None) in absorbing.get(
+                    domain_name, set()
+                ):
+                    raise ValueError(
+                        f"cannot clear absorbing taint {getattr(taint, 'value_id', None)}"
+                    )
+            repaired_taints = [
+                taint
+                for taint in getattr(closed, "taints", ())
+                if not (
+                    self._taint_domain_name(getattr(taint, "domain", None))
+                    == domain_name
+                    and getattr(taint, "value_id", None) in cleared
+                )
+            ]
+            try:
+                closed.taints = repaired_taints
+            except AttributeError:
+                return emitted
+        existing = list(getattr(closed, "taints", ()))
+        existing_keys = {self._taint_key(taint) for taint in existing}
+        for taint in repair.added:
+            key = self._taint_key(taint)
+            if key in existing_keys:
+                continue
+            existing.append(taint)
+            existing_keys.add(key)
+        try:
+            closed.taints = existing
+        except AttributeError:
+            return emitted
+        self._remember_stream_taints(closed.route, closed)
+        return emitted
+
+    def _taint_query_items(self, route_ref: RouteLike) -> tuple[str, ...]:
+        key = self._route_key(route_ref)
+        upper_bound = self._stream_taint_upper_bounds.get(key, {})
+        stream_items = tuple(
+            f"stream:{domain}:{value_id}:{getattr(taint, 'origin_id', '')}"
+            for (domain, value_id), taint in sorted(upper_bound.items())
+        )
+
+        event_items: list[str] = []
+        for envelope in self._history.get(key, ()):
+            for taint in getattr(envelope, "taints", ()):
+                event_items.append(
+                    ":".join(
+                        (
+                            "event",
+                            str(envelope.seq_source),
+                            self._taint_domain_name(taint.domain),
+                            taint.value_id,
+                            taint.origin_id,
+                        )
+                    )
+                )
+
+        repair_items = tuple(
+            f"repair:{note}" for note in self._route_repair_notes.get(key, ())
+        )
+        return (*stream_items, *tuple(event_items), *repair_items)
+
+    def _replay_latest_value(
+        self,
+        route_ref: RouteLike,
+        on_next: Callable[[TypedEnvelope[T] | ClosedEnvelope], None],
+    ) -> None:
+        latest = self.latest(route_ref)
+        if latest is not None:
+            on_next(latest)
+
+    def _descriptor_defaults(
+        self, route_ref: RouteRef, native: PortDescriptor | None = None
+    ) -> RouteDescriptor:
         route_display = route_ref.display()
+        retention = self._retention_policy_for(route_ref)
         payload_open_policy = (
             "lazy_external"
             if route_ref.namespace.layer == Layer.Bulk
@@ -728,31 +1842,42 @@ class Graph:
             if route_ref.namespace.layer == Layer.Internal
             else getattr(native, "payload_open_policy", None) or "lazy"
         )
-        backpressure_policy = getattr(native, "backpressure_policy", None) or "propagate"
         debug_enabled = bool(getattr(native, "debug_enabled", True))
         visibility = self._route_visibility.get(route_display, "private")
         third_party_subscription_allowed = visibility == "exported"
+
+        if route_ref.namespace.plane in (Plane.Query, Plane.Debug):
+            producer_kind = getattr(ProducerKind, "QueryService", "query_service")
+        elif (
+            route_ref.namespace.plane == Plane.Write
+            and route_ref.namespace.layer == Layer.Shadow
+        ):
+            producer_kind = getattr(ProducerKind, "Transform", "reconciler")
+        elif (
+            route_ref.namespace.plane == Plane.Read
+            and route_ref.namespace.layer == Layer.Raw
+        ):
+            producer_kind = getattr(ProducerKind, "Device", "device")
+        else:
+            producer_kind = getattr(ProducerKind, "Application", "application")
+
         return RouteDescriptor(
             identity=DescriptorIdentityBlock(
                 route_ref=route_ref,
                 namespace_ref=route_ref.namespace,
                 producer_ref=ProducerRef(
                     producer_id=route_ref.namespace.owner,
-                    kind=(
-                        "query_service"
-                        if route_ref.namespace.plane in (Plane.Query, Plane.Debug)
-                        else "reconciler"
-                        if route_ref.namespace.plane == Plane.Write and route_ref.namespace.layer == Layer.Shadow
-                        else "device"
-                        if route_ref.namespace.plane == Plane.Read and route_ref.namespace.layer == Layer.Raw
-                        else "application"
-                    ),
+                    kind=producer_kind,
                 ),
                 owning_runtime_kind="in_memory",
                 stream_family=route_ref.family,
-                stream_variant=getattr(route_ref.variant, "value", str(route_ref.variant)).lower(),
+                stream_variant=getattr(
+                    route_ref.variant, "value", str(route_ref.variant)
+                ).lower(),
                 aliases=(route_display,),
-                human_description=getattr(native, "human_description", f"Manyfold port for {route_display}"),
+                human_description=getattr(
+                    native, "human_description", f"Manyfold port for {route_display}"
+                ),
             ),
             schema=DescriptorSchemaBlock(
                 schema_ref=route_ref.schema,
@@ -769,11 +1894,19 @@ class Graph:
                     if route_ref.namespace.plane == Plane.Write
                     else "monotonic"
                 ),
-                event_time_policy="control_epoch_or_ingest" if route_ref.namespace.plane == Plane.Write else "ingest",
+                event_time_policy="control_epoch_or_ingest"
+                if route_ref.namespace.plane == Plane.Write
+                else "ingest",
                 processing_time_allowed=True,
-                watermark_policy="recommended" if route_ref.namespace.layer == Layer.Bulk else "none",
-                control_epoch_policy="allowed" if route_ref.namespace.plane == Plane.Write else "optional",
-                ttl_policy="ttl_required" if route_ref.namespace.layer == Layer.Ephemeral else "retain_latest",
+                watermark_policy="recommended"
+                if route_ref.namespace.layer == Layer.Bulk
+                else "none",
+                control_epoch_policy="allowed"
+                if route_ref.namespace.plane == Plane.Write
+                else "optional",
+                ttl_policy="ttl_required"
+                if route_ref.namespace.layer == Layer.Ephemeral
+                else "retain_latest",
             ),
             ordering=DescriptorOrderingBlock(
                 partition_spec="unpartitioned",
@@ -782,29 +1915,13 @@ class Graph:
                 dedupe_policy="none",
                 causality_policy="opaque",
             ),
-            flow=DescriptorFlowBlock(
-                backpressure_policy=backpressure_policy,
-                credit_class=(
-                    "bulk_payload"
-                    if route_ref.namespace.layer == Layer.Bulk
-                    else "control"
-                    if route_ref.namespace.plane == Plane.Write
-                    else "default"
-                ),
-                mailbox_policy="none",
-                async_boundary_kind="inline",
-                overflow_policy="reject_write",
-            ),
+            flow=self._resolved_route_flow_policy(route_ref, native),
             retention=DescriptorRetentionBlock(
-                latest_replay_policy="none" if route_ref.namespace.layer == Layer.Ephemeral else "latest_only",
-                durability_class="memory",
-                replay_window="none",
-                payload_retention_policy=(
-                    "external_store"
-                    if route_ref.namespace.layer == Layer.Bulk
-                    else "non_replayable"
-                    if route_ref.namespace.layer == Layer.Ephemeral
-                    else "separate_store"
+                latest_replay_policy=retention.latest_replay_policy,
+                durability_class=retention.durability_class,
+                replay_window=retention.replay_window,
+                payload_retention_policy=cast(
+                    str, retention.payload_retention_policy
                 ),
             ),
             security=DescriptorSecurityBlock(
@@ -817,8 +1934,12 @@ class Graph:
             visibility=DescriptorVisibilityBlock(
                 private_or_exported=visibility,
                 third_party_subscription_allowed=third_party_subscription_allowed,
-                query_plane_visibility="exported" if third_party_subscription_allowed else "owner",
-                debug_plane_visibility="exported" if third_party_subscription_allowed else "owner",
+                query_plane_visibility="exported"
+                if third_party_subscription_allowed
+                else "owner",
+                debug_plane_visibility="exported"
+                if third_party_subscription_allowed
+                else "owner",
             ),
             environment=DescriptorEnvironmentBlock(
                 locality="process",
@@ -829,7 +1950,9 @@ class Graph:
                 ),
                 device_class="generic",
                 resource_class="standard",
-                ephemeral_scope=route_ref.namespace.owner if route_ref.namespace.layer == Layer.Ephemeral else None,
+                ephemeral_scope=route_ref.namespace.owner
+                if route_ref.namespace.layer == Layer.Ephemeral
+                else None,
             ),
             debug=DescriptorDebugBlock(
                 audit_enabled=debug_enabled,
@@ -838,6 +1961,92 @@ class Graph:
                 payload_peek_allowed=route_ref.namespace.layer != Layer.Bulk,
                 explain_enabled=True,
             ),
+        )
+
+    def _watermark_snapshot_for_route(self, route_ref: RouteRef) -> WatermarkSnapshot:
+        descriptor = self.describe_route(route_ref)
+        latest = self._graph.latest(route_ref)
+        latest_seq_source = None if latest is None else latest.seq_source
+        latest_control_epoch = None if latest is None else latest.control_epoch
+        current_watermark = latest_control_epoch
+        if current_watermark is None and descriptor.time.watermark_policy != "none":
+            current_watermark = latest_seq_source
+        return WatermarkSnapshot(
+            route_display=route_ref.display(),
+            partition_spec=descriptor.ordering.partition_spec,
+            clock_domain=descriptor.time.clock_domain,
+            event_time_policy=descriptor.time.event_time_policy,
+            watermark_policy=descriptor.time.watermark_policy,
+            latest_seq_source=latest_seq_source,
+            latest_control_epoch=latest_control_epoch,
+            current_watermark=current_watermark,
+        )
+
+    def _scheduled_target_route(self, scheduled: ScheduledWrite) -> RouteRef:
+        if isinstance(scheduled.target, WriteBinding):
+            return scheduled.target.request
+        return self._coerce_route_ref(scheduled.target)
+
+    def _scheduled_write_snapshot(
+        self,
+        scheduled: ScheduledWrite,
+    ) -> ScheduledWriteSnapshot | None:
+        target_route = self._scheduled_target_route(scheduled)
+        if (
+            scheduled.expires_at_epoch is not None
+            and self._scheduler_epoch > scheduled.expires_at_epoch
+        ):
+            return None
+        ack_observed = False
+        next_retry_epoch = None
+        if scheduled.attempt_count > 0 and scheduled.ack_route is not None:
+            latest_ack = self.latest(scheduled.ack_route)
+            ack_closed = (
+                None
+                if latest_ack is None
+                else latest_ack.closed
+                if isinstance(latest_ack, TypedEnvelope)
+                else latest_ack
+            )
+            latest_ack_seq = -1 if ack_closed is None else ack_closed.seq_source
+            ack_observed = latest_ack_seq > scheduled.ack_baseline_seq
+            if scheduled.retry_policy is not None:
+                next_retry_epoch = (
+                    self._scheduler_epoch
+                    if scheduled.last_attempt_epoch is None
+                    else scheduled.last_attempt_epoch
+                    + scheduled.retry_policy.backoff_epochs
+                    + 1
+                )
+        else:
+            ack_observed = (
+                scheduled.wait_for_ack is None
+                or self.latest(scheduled.wait_for_ack) is not None
+            )
+        epoch_ready = (
+            scheduled.not_before_epoch is None
+            or self._scheduler_epoch >= scheduled.not_before_epoch
+        )
+        retry_ready = (
+            next_retry_epoch is None or self._scheduler_epoch >= next_retry_epoch
+        )
+        ready_now = epoch_ready and ack_observed and retry_ready
+        return ScheduledWriteSnapshot(
+            route_display=target_route.display(),
+            scheduler_epoch=self._scheduler_epoch,
+            not_before_epoch=scheduled.not_before_epoch,
+            wait_for_ack_route=None
+            if scheduled.wait_for_ack is None
+            else self._route_key(scheduled.wait_for_ack),
+            expires_at_epoch=scheduled.expires_at_epoch,
+            ack_route=None
+            if scheduled.ack_route is None
+            else self._route_key(scheduled.ack_route),
+            ack_observed=ack_observed,
+            attempt_count=scheduled.attempt_count,
+            last_attempt_epoch=scheduled.last_attempt_epoch,
+            next_retry_epoch=next_retry_epoch,
+            ready_now=ready_now,
         )
 
     def _make_internal_route(
@@ -876,14 +2085,18 @@ class Graph:
             )
         return self._debug_routes[event_type]
 
-    def _emit_debug_event(self, event_type: str, detail: str, route_ref: RouteLike | None = None) -> DebugEvent:
+    def _emit_debug_event(
+        self, event_type: str, detail: str, route_ref: RouteLike | None = None
+    ) -> DebugEvent:
         """Emit a debug event on both the in-memory audit log and a debug route."""
         debug_route = self._debug_route(event_type)
         payload = json.dumps(
             {
                 "event_type": event_type,
                 "detail": detail,
-                "route_display": None if route_ref is None else self._route_key(route_ref),
+                "route_display": None
+                if route_ref is None
+                else self._route_key(route_ref),
             },
             sort_keys=True,
         ).encode()
@@ -902,7 +2115,9 @@ class Graph:
         self._query_sequence += 1
         return f"query-{self._query_sequence}"
 
-    def _authorize(self, principal_id: str | None, route_ref: RouteLike | None, capability: str) -> None:
+    def _authorize(
+        self, principal_id: str | None, route_ref: RouteLike | None, capability: str
+    ) -> None:
         """Enforce per-route capability checks for third-party access."""
         if principal_id in (None, "", "python", "internal"):
             return
@@ -916,16 +2131,25 @@ class Graph:
         key = (principal_id, self._route_key(route_ref))
         grant = self._capability_grants.get(key)
         if grant is None:
-            if capability == "metadata_read" and self._route_visibility.get(key[1]) == "exported":
+            if (
+                capability == "metadata_read"
+                and self._route_visibility.get(key[1]) == "exported"
+            ):
                 return
-            raise PermissionError(f"{principal_id} lacks {capability} capability for {key[1]}")
+            raise PermissionError(
+                f"{principal_id} lacks {capability} capability for {key[1]}"
+            )
         if not getattr(grant, capability):
-            raise PermissionError(f"{principal_id} lacks {capability} capability for {key[1]}")
+            raise PermissionError(
+                f"{principal_id} lacks {capability} capability for {key[1]}"
+            )
 
     def _execute_query(self, request: QueryRequest) -> tuple[str, ...]:
         """Resolve query commands against the current in-memory graph state."""
         command = request.command.lower()
-        route_ref = None if request.route is None else self._coerce_route_ref(request.route)
+        route_ref = (
+            None if request.route is None else self._coerce_route_ref(request.route)
+        )
         if command == "catalog":
             return tuple(route.display() for route in self.catalog())
         if command == "describe_route":
@@ -957,11 +2181,8 @@ class Graph:
             if route_ref is None:
                 raise ValueError("replay requires a route")
             self._authorize(request.principal_id, route_ref, "replay_read")
-            return tuple(str(envelope.seq_source) for envelope in self.replay(route_ref))
-        if command == "trace":
             return tuple(
-                f"{event.event_type}:{event.detail}"
-                for event in self.audit(route_ref)
+                str(envelope.seq_source) for envelope in self.replay(route_ref)
             )
         if command == "subscribers":
             if route_ref is None:
@@ -994,11 +2215,71 @@ class Graph:
             if payload is None:
                 return ()
             return (payload.decode("utf-8", errors="replace"),)
+        if command == "payload_demand":
+            if route_ref is None:
+                raise ValueError("payload_demand requires a route")
+            self._authorize(request.principal_id, route_ref, "metadata_read")
+            snapshot = self.payload_demand_snapshot(route_ref)
+            return (
+                snapshot.route_display,
+                str(snapshot.metadata_events),
+                str(snapshot.payload_open_requests),
+                str(snapshot.lazy_source_opens),
+                str(snapshot.materialized_payload_bytes),
+                str(snapshot.cache_hits),
+                str(snapshot.unopened_lazy_payloads),
+            )
+        if command == "watermark":
+            if route_ref is None:
+                return tuple(
+                    f"{snapshot.route_display}|{snapshot.current_watermark}|{snapshot.latest_seq_source}|{snapshot.latest_control_epoch}"
+                    for snapshot in self.watermark_snapshot()
+                )
+            self._authorize(request.principal_id, route_ref, "metadata_read")
+            snapshot = self.watermark_snapshot(route_ref)
+            return (
+                snapshot.route_display,
+                snapshot.partition_spec,
+                snapshot.clock_domain,
+                snapshot.event_time_policy,
+                snapshot.watermark_policy,
+                str(snapshot.latest_seq_source),
+                str(snapshot.latest_control_epoch),
+                str(snapshot.current_watermark),
+            )
         if command == "audit":
             self._authorize(request.principal_id, route_ref, "debug_read")
             return tuple(
-                f"{event.event_type}:{event.detail}"
-                for event in self.audit(route_ref)
+                f"{event.event_type}:{event.detail}" for event in self.audit(route_ref)
+            )
+        if command == "route_audit":
+            if route_ref is None:
+                raise ValueError("route_audit requires a route")
+            self._authorize(request.principal_id, route_ref, "debug_read")
+            snapshot = self.route_audit(route_ref)
+            return (
+                snapshot.route_display,
+                f"scope={','.join(snapshot.scope_routes)}",
+                f"producers={','.join(snapshot.recent_producers)}",
+                f"subscribers={','.join(snapshot.active_subscribers)}",
+                f"writes={','.join(snapshot.related_write_requests)}",
+                f"taints={','.join(snapshot.taint_upper_bounds)}",
+                f"repairs={','.join(snapshot.repair_notes)}",
+                f"events={','.join(snapshot.recent_debug_events)}",
+            )
+        if command in {"lineage", "trace"}:
+            if route_ref is not None:
+                self._authorize(request.principal_id, route_ref, "debug_read")
+            else:
+                self._authorize(request.principal_id, None, "graph_validation")
+            return tuple(
+                record.display()
+                for record in self.lineage(
+                    route_ref,
+                    trace_id=request.lineage_trace_id,
+                    causality_id=request.lineage_causality_id,
+                    correlation_id=request.lineage_correlation_id,
+                )
             )
         if command == "shadow":
             if route_ref is None:
@@ -1010,13 +2291,69 @@ class Graph:
                 for item in (
                     None if shadow.request is None else str(shadow.request.seq_source),
                     None if shadow.desired is None else str(shadow.desired.seq_source),
-                    None if shadow.reported is None else str(shadow.reported.seq_source),
-                    None if shadow.effective is None else str(shadow.effective.seq_source),
+                    None
+                    if shadow.reported is None
+                    else str(shadow.reported.seq_source),
+                    None
+                    if shadow.effective is None
+                    else str(shadow.effective.seq_source),
                     None if shadow.ack is None else str(shadow.ack.seq_source),
                     "pending" if shadow.pending_write else "stable",
                     *shadow.coherence_taints,
                 )
                 if item is not None
+            )
+        if command == "taints":
+            if route_ref is None:
+                raise ValueError("taints requires a route")
+            self._authorize(request.principal_id, route_ref, "metadata_read")
+            return self._taint_query_items(route_ref)
+        if command == "credit_snapshot":
+            if route_ref is None:
+                return tuple(
+                    f"{snapshot.route_display}|{snapshot.available}|{snapshot.blocked_senders}|{snapshot.dropped_messages}"
+                    for snapshot in self.credit_snapshot()
+                )
+            self._authorize(request.principal_id, route_ref, "metadata_read")
+            snapshot = self.flow_snapshot(route_ref)
+            return (
+                snapshot.route_display,
+                str(snapshot.available),
+                str(snapshot.blocked_senders),
+                str(snapshot.dropped_messages),
+                snapshot.backpressure_policy,
+            )
+        if command == "scheduler":
+            if route_ref is None:
+                self._authorize(request.principal_id, None, "graph_validation")
+                return tuple(
+                    "|".join(
+                        (
+                            snapshot.route_display,
+                            str(snapshot.scheduler_epoch),
+                            str(snapshot.attempt_count),
+                            str(snapshot.ready_now),
+                            str(snapshot.ack_observed),
+                            str(snapshot.not_before_epoch),
+                            str(snapshot.next_retry_epoch),
+                        )
+                    )
+                    for snapshot in self.scheduler_snapshot()
+                )
+            self._authorize(request.principal_id, route_ref, "metadata_read")
+            return tuple(
+                "|".join(
+                    (
+                        snapshot.route_display,
+                        str(snapshot.scheduler_epoch),
+                        str(snapshot.attempt_count),
+                        str(snapshot.ready_now),
+                        str(snapshot.ack_observed),
+                        str(snapshot.not_before_epoch),
+                        str(snapshot.next_retry_epoch),
+                    )
+                )
+                for snapshot in self.scheduler_snapshot(route_ref)
             )
         raise ValueError(f"unsupported query command: {request.command}")
 
@@ -1024,16 +2361,51 @@ class Graph:
         """Register a route in the native graph and return its concrete ref."""
         return self._graph.register_port(self._coerce_route_ref(route_ref))
 
+    def configure_retention(
+        self,
+        route_ref: RouteLike,
+        policy: RouteRetentionPolicy,
+    ) -> RouteRetentionPolicy:
+        """Override replay and retention semantics for one route."""
+        native_route = self.register_port(route_ref)
+        key = native_route.display()
+        default = self._default_retention_policy(native_route)
+        resolved = RouteRetentionPolicy(
+            latest_replay_policy=policy.latest_replay_policy,
+            durability_class=policy.durability_class,
+            replay_window=policy.replay_window,
+            payload_retention_policy=(
+                default.payload_retention_policy
+                if policy.payload_retention_policy is None
+                else policy.payload_retention_policy
+            ),
+            history_limit=policy.history_limit,
+        )
+        self._retention_policies[key] = resolved
+        history = self._history.get(key)
+        if history is not None and resolved.history_limit is not None:
+            del history[: max(0, len(history) - resolved.history_limit)]
+        self._enforce_payload_retention(native_route)
+        return resolved
+
     def _read_port(self, route_ref: RouteLike) -> ReactiveReadablePort:
         native_route = self._coerce_route_ref(route_ref)
         return ReactiveReadablePort(self, native_route, self._graph.read(native_route))
 
     def _write_port(self, target: WriteTarget) -> WriteBinding | ReactiveWritablePort:
+        if isinstance(target, LifecycleBinding):
+            self._write_bindings[target.request.display()] = target.binding
+            self._lifecycle_bindings[target.request.display()] = target
+            return self._graph.register_binding(
+                target.request.display(), target.binding
+            )
         if isinstance(target, WriteBinding):
             self._write_bindings[target.request.display()] = target
             return self._graph.register_binding(target.request.display(), target)
         native_route = self._coerce_route_ref(target)
-        return ReactiveWritablePort(self, native_route, self._graph.writable_port(native_route))
+        return ReactiveWritablePort(
+            self, native_route, self._graph.writable_port(native_route)
+        )
 
     def _emit_native(
         self,
@@ -1046,7 +2418,9 @@ class Graph:
         if hasattr(self._graph, "emit"):
             return cast(
                 list[ClosedEnvelope],
-                self._graph.emit(route_ref, payload, producer=producer, control_epoch=control_epoch),
+                self._graph.emit(
+                    route_ref, payload, producer=producer, control_epoch=control_epoch
+                ),
             )
         envelope = self._graph.writable_port(route_ref).write(
             payload,
@@ -1056,36 +2430,57 @@ class Graph:
         return [envelope]
 
     @overload
-    def observe(self, route_ref: TypedRoute[T], *, replay_latest: bool = True) -> Observable[TypedEnvelope[T]]: ...
+    def observe(
+        self,
+        route_ref: TypedRoute[T],
+        *,
+        replay_latest: bool = True,
+        subscriber_id: str | None = None,
+    ) -> Observable[TypedEnvelope[T]]: ...
 
     @overload
-    def observe(self, route_ref: RouteRef, *, replay_latest: bool = True) -> Observable[ClosedEnvelope]: ...
+    def observe(
+        self,
+        route_ref: RouteRef,
+        *,
+        replay_latest: bool = True,
+        subscriber_id: str | None = None,
+    ) -> Observable[ClosedEnvelope]: ...
 
-    def observe(self, route_ref: RouteLike, *, replay_latest: bool = True) -> Observable[Any]:
+    def observe(
+        self,
+        route_ref: RouteLike,
+        *,
+        replay_latest: bool = True,
+        subscriber_id: str | None = None,
+    ) -> Observable[Any]:
         """Observe route updates as an Rx stream.
 
         Typed routes decode payloads before delivery; raw route refs expose the
         underlying closed envelopes.
         """
         native_route = self._coerce_route_ref(route_ref)
+        typed_route = self._typed_route(route_ref)
 
         def subscribe(
             observer: ObserverLike[Any],
             scheduler: object | None = None,
         ) -> SubscriptionLike:
             key = self._route_key(native_route)
+            resolved_subscriber_id = subscriber_id or self._next_subscriber_id()
             self._subscriber_count[key] = self._subscriber_count.get(key, 0) + 1
+            self._route_subscribers.setdefault(key, set()).add(resolved_subscriber_id)
             if replay_latest:
                 latest = self.latest(route_ref)
                 if latest is not None:
                     observer.on_next(latest)
 
-            if isinstance(route_ref, TypedRoute):
+            if typed_route is not None:
                 # Typed observers see decoded values, but the graph internally
                 # continues to fan out closed envelopes on one shared subject.
                 class _Observer:
                     def on_next(_, envelope) -> None:
-                        observer.on_next(self._decode_envelope(route_ref, envelope))
+                        observer.on_next(self._decode_envelope(typed_route, envelope))
 
                     def on_error(_, error: Exception) -> None:
                         observer.on_error(error)
@@ -1093,26 +2488,42 @@ class Graph:
                     def on_completed(_) -> None:
                         observer.on_completed()
 
-                inner = self._subject_for(native_route).subscribe(_Observer(), scheduler=scheduler)
+                inner = self._subject_for(native_route).subscribe(
+                    _Observer(), scheduler=scheduler
+                )
             else:
-                inner = self._subject_for(native_route).subscribe(observer, scheduler=scheduler)
-            return _TrackedSubscription(self, native_route, inner)
+                inner = self._subject_for(native_route).subscribe(
+                    observer, scheduler=scheduler
+                )
+            return _TrackedSubscription(
+                self,
+                native_route,
+                inner,
+                resolved_subscriber_id,
+            )
 
         return rx.create(subscribe)
 
     def pipe(
         self,
         source: ObservableLike[TIn] | ObservableLike[bytes],
-        target: TypedRoute[TIn] | RouteRef,
+        target: RouteLike,
         *,
         producer: ProducerRef | None = None,
         control_epoch: int | None = None,
     ) -> SubscriptionLike:
         """Bind an observable source into a route."""
-        if isinstance(target, TypedRoute):
+        typed_target = self._typed_route(target)
+        if typed_target is not None:
+
             class _Observer:
                 def on_next(_, value: TIn) -> None:
-                    self.publish(target, value, producer=producer, control_epoch=control_epoch)
+                    self.publish(
+                        typed_target,
+                        value,
+                        producer=producer,
+                        control_epoch=control_epoch,
+                    )
 
                 def on_error(_, error: Exception) -> None:
                     raise error
@@ -1121,7 +2532,9 @@ class Graph:
                     return None
 
             return source.subscribe(_Observer())
-        return self._write_port(target).bind(source, producer=producer, control_epoch=control_epoch)  # type: ignore[union-attr]
+        return self._write_port(target).bind(
+            source, producer=producer, control_epoch=control_epoch
+        )  # type: ignore[union-attr]
 
     @overload
     def publish(
@@ -1131,6 +2544,10 @@ class Graph:
         *,
         producer: ProducerRef | None = None,
         control_epoch: int | None = None,
+        trace_id: str | None = None,
+        causality_id: str | None = None,
+        correlation_id: str | None = None,
+        parent_events: Sequence[EventRef] = (),
     ) -> TypedEnvelope[T]: ...
 
     @overload
@@ -1141,6 +2558,10 @@ class Graph:
         *,
         producer: ProducerRef | None = None,
         control_epoch: int | None = None,
+        trace_id: str | None = None,
+        causality_id: str | None = None,
+        correlation_id: str | None = None,
+        parent_events: Sequence[EventRef] = (),
     ) -> ClosedEnvelope: ...
 
     def publish(
@@ -1150,16 +2571,29 @@ class Graph:
         *,
         producer: ProducerRef | None = None,
         control_epoch: int | None = None,
+        trace_id: str | None = None,
+        causality_id: str | None = None,
+        correlation_id: str | None = None,
+        parent_events: Sequence[EventRef] = (),
     ) -> TypedEnvelope[Any] | ClosedEnvelope:
         """Write one payload to a route and return the resulting envelope."""
+        if isinstance(target, LifecycleBinding):
+            self._write_bindings[target.request.display()] = target.binding
+            self._lifecycle_bindings[target.request.display()] = target
+            target = target.binding
         if isinstance(target, WriteBinding):
-            self._write_bindings[target.request.display()] = target
-            self._graph.register_binding(target.request.display(), target)
-            emitted = self._emit_native(target.request, bytes(payload), producer=producer, control_epoch=control_epoch)
-            if not any(envelope.route == target.desired for envelope in emitted):
+            binding = self._resolve_write_binding(target)
+            self._graph.register_binding(binding.request.display(), binding)
+            emitted = self._emit_native(
+                target.request,
+                bytes(payload),
+                producer=producer,
+                control_epoch=control_epoch,
+            )
+            if not any(envelope.route == binding.desired for envelope in emitted):
                 emitted.extend(
                     self._emit_native(
-                        target.desired,
+                        binding.desired,
                         bytes(payload),
                         producer=producer,
                         control_epoch=control_epoch,
@@ -1167,23 +2601,63 @@ class Graph:
                 )
             for envelope in emitted:
                 producer_id = "python" if producer is None else producer.producer_id
-                self._record_envelope(envelope.route, envelope, producer_id=producer_id)
-            self._emit_debug_event("write", f"published {target.request.display()}", target.request)
+                self._record_envelope(
+                    envelope.route,
+                    envelope,
+                    producer_id=producer_id,
+                    trace_id=trace_id,
+                    causality_id=causality_id,
+                    correlation_id=correlation_id,
+                    parent_events=parent_events,
+                )
+            self._refresh_binding_coherence(binding)
+            self._emit_debug_event(
+                "write", f"published {binding.request.display()}", binding.request
+            )
             return emitted[0]
-        if isinstance(target, TypedRoute):
-            encoded = target.schema.encode(payload)
-            emitted = self._emit_native(target.route_ref, encoded, producer=producer, control_epoch=control_epoch)
+        typed_target = self._typed_route(target)
+        if typed_target is not None:
+            encoded = typed_target.schema.encode(payload)
+            emitted = self._emit_native(
+                typed_target.route_ref,
+                encoded,
+                producer=producer,
+                control_epoch=control_epoch,
+            )
             envelope = emitted[0]
             producer_id = "python" if producer is None else producer.producer_id
             for emitted_envelope in emitted:
-                self._record_envelope(emitted_envelope.route, emitted_envelope, producer_id=producer_id)
-            self._emit_debug_event("write", f"published {target.display()}", target)
-            return self._decode_envelope(target, envelope)
-        emitted = self._emit_native(self._coerce_route_ref(target), payload, producer=producer, control_epoch=control_epoch)
+                self._record_envelope(
+                    emitted_envelope.route,
+                    emitted_envelope,
+                    producer_id=producer_id,
+                    trace_id=trace_id,
+                    causality_id=causality_id,
+                    correlation_id=correlation_id,
+                    parent_events=parent_events,
+                )
+            self._emit_debug_event(
+                "write", f"published {typed_target.display()}", typed_target
+            )
+            return self._decode_envelope(typed_target, envelope)
+        emitted = self._emit_native(
+            self._coerce_route_ref(target),
+            payload,
+            producer=producer,
+            control_epoch=control_epoch,
+        )
         envelope = emitted[0]
         producer_id = "python" if producer is None else producer.producer_id
         for emitted_envelope in emitted:
-            self._record_envelope(emitted_envelope.route, emitted_envelope, producer_id=producer_id)
+            self._record_envelope(
+                emitted_envelope.route,
+                emitted_envelope,
+                producer_id=producer_id,
+                trace_id=trace_id,
+                causality_id=causality_id,
+                correlation_id=correlation_id,
+                parent_events=parent_events,
+            )
         self._emit_debug_event("write", f"published {self._route_key(target)}", target)
         return envelope
 
@@ -1194,15 +2668,33 @@ class Graph:
         *,
         producer: ProducerRef | None = None,
         control_epoch: int | None = None,
+        trace_id: str | None = None,
+        causality_id: str | None = None,
+        correlation_id: str | None = None,
+        parent_events: Sequence[EventRef] = (),
     ) -> ClosedEnvelope:
         """Publish metadata now and defer payload materialization until opened."""
         native_route = self._coerce_route_ref(target)
-        emitted = self._emit_native(native_route, b"", producer=producer, control_epoch=control_epoch)
+        emitted = self._emit_native(
+            native_route, b"", producer=producer, control_epoch=control_epoch
+        )
         producer_id = "python" if producer is None else producer.producer_id
         for envelope in emitted:
             self._lazy_payload_sources[envelope.payload_ref.payload_id] = payload_source
-            self._record_envelope(envelope.route, envelope, producer_id=producer_id)
-        self._emit_debug_event("write", f"published lazy payload for {native_route.display()}", native_route)
+            self._record_envelope(
+                envelope.route,
+                envelope,
+                producer_id=producer_id,
+                trace_id=trace_id,
+                causality_id=causality_id,
+                correlation_id=correlation_id,
+                parent_events=parent_events,
+            )
+        self._emit_debug_event(
+            "write",
+            f"published lazy payload for {native_route.display()}",
+            native_route,
+        )
         return emitted[0]
 
     def mailbox(
@@ -1211,20 +2703,308 @@ class Graph:
         descriptor: NativeMailboxDescriptor | None = None,
     ) -> NativeMailbox:
         """Create or return a named mailbox from the native graph."""
-        return self._graph.mailbox(name, descriptor)
+        resolved = descriptor if descriptor is not None else NativeMailboxDescriptor()
+        self._mailbox_descriptors[name] = resolved
+        mailbox = self._graph.mailbox(name, resolved)
+        mailbox_policy = FlowPolicy(
+            backpressure_policy="propagate",
+            credit_class="mailbox",
+            mailbox_policy="queue",
+            async_boundary_kind="mailbox",
+            overflow_policy=resolved.overflow_policy,
+        )
+        self._mailbox_flow_policies[
+            mailbox.ingress.describe().route_display
+        ] = mailbox_policy
+        self._mailbox_flow_policies[
+            mailbox.egress.describe().route_display
+        ] = mailbox_policy
+        return mailbox
 
-    def connect(self, source: ConnectableTarget, sink: ConnectableTarget) -> None:
+    def connect(
+        self,
+        *,
+        source: ConnectableTarget,
+        sink: ConnectableTarget,
+        flow_policy: FlowPolicy | None = None,
+    ) -> None:
         """Connect two routes in topology metadata."""
-        native_source = source if isinstance(source, NativeMailbox) else self._coerce_route_ref(source)
-        native_sink = sink if isinstance(sink, NativeMailbox) else self._coerce_route_ref(sink)
+        native_source = (
+            source
+            if isinstance(source, NativeMailbox)
+            else self._coerce_route_ref(source)
+        )
+        native_sink = (
+            sink if isinstance(sink, NativeMailbox) else self._coerce_route_ref(sink)
+        )
         self._graph.connect(native_source, native_sink)
+        if flow_policy is not None:
+            self._edge_flow_overrides[
+                (
+                    self._connectable_key(source, edge_role="source"),
+                    self._connectable_key(sink, edge_role="sink"),
+                )
+            ] = flow_policy
         self._emit_debug_event(
             "topology",
             f"connected {self._connectable_key(source, edge_role='source')} -> {self._connectable_key(sink, edge_role='sink')}",
-            None if isinstance(source, NativeMailbox) else self._coerce_route_ref(source),
+            None
+            if isinstance(source, NativeMailbox)
+            else self._coerce_route_ref(source),
         )
 
-    def install(self, control_loop: NativeControlLoop | ReadThenWriteNextEpochStep[Any, Any]) -> None:
+    def capacitor(
+        self,
+        *,
+        source: RouteLike,
+        sink: RouteLike,
+        capacity: int = 1,
+        demand: RouteLike | None = None,
+        immediate: bool = False,
+        overflow: str = "latest",
+        name: str | None = None,
+    ) -> Capacitor:
+        """Install active bounded storage between source and sink."""
+        if capacity <= 0:
+            raise ValueError("capacitor capacity must be positive")
+        if overflow not in {"latest", "drop_oldest", "reject"}:
+            raise ValueError(
+                "overflow must be one of 'latest', 'drop_oldest', or 'reject'"
+            )
+        if immediate and demand is not None:
+            raise ValueError("pass either immediate=True or demand, not both")
+        resolved_name = name or self._auto_node_name(
+            "capacitor",
+            source,
+            sink,
+            f"cap={capacity}",
+            "immediate" if immediate else "demand" if demand is not None else "",
+            f"overflow={overflow}",
+        )
+        capacitor = Capacitor(
+            name=resolved_name,
+            source=source,
+            sink=sink,
+            capacity=capacity,
+            demand=demand,
+            immediate=immediate,
+            overflow=overflow,
+        )
+        self._capacitors[resolved_name] = capacitor
+
+        source_route = self._coerce_route_ref(source)
+        buffer: deque[
+            tuple[T | bytes, ClosedEnvelope, LineageRecord, tuple[Any, ...]]
+        ] = deque()
+
+        def retain(item: TypedEnvelope[T] | ClosedEnvelope) -> None:
+            if len(buffer) >= capacity:
+                if overflow == "reject":
+                    return
+                buffer.popleft()
+            closed = self._closed_item(item)
+            buffer.append(
+                (
+                    self._operator_value(source, source_route, item),
+                    closed,
+                    self._lineage_for_item(item),
+                    self._item_taints(item),
+                )
+            )
+            if immediate:
+                discharge_one()
+
+        def discharge_one() -> None:
+            if not buffer:
+                return
+            value, closed, lineage, taints = buffer.popleft()
+            emitted = self.publish(
+                sink,
+                cast(Any, value),
+                control_epoch=closed.control_epoch,
+                trace_id=lineage.trace_id,
+                causality_id=lineage.causality_id,
+                correlation_id=lineage.correlation_id,
+                parent_events=(lineage.event,),
+            )
+            self._extend_taints(emitted, taints)
+
+        source_sub = self.observe(
+            source, replay_latest=self._source_replay_latest(source)
+        ).subscribe(retain)
+        self._subscriptions.append(source_sub)
+        if demand is not None:
+            signal_sub = self.observe(demand, replay_latest=False).subscribe(
+                lambda _item: discharge_one()
+            )
+            self._subscriptions.append(signal_sub)
+        return capacitor
+
+    def resistor(
+        self,
+        *,
+        source: RouteLike,
+        sink: RouteLike,
+        gate: Callable[[Any], bool] | None = None,
+        release: RouteLike | None = None,
+        name: str | None = None,
+    ) -> Resistor:
+        """Install a graph-visible flow shaper between source and sink."""
+        resolved_name = name or self._auto_node_name(
+            "resistor",
+            source,
+            sink,
+            "gated" if gate is not None else "pass",
+            "release" if release is not None else "",
+        )
+        resistor = Resistor(
+            name=resolved_name,
+            source=source,
+            sink=sink,
+            gate=gate,
+            release=release,
+        )
+        self._resistors[resolved_name] = resistor
+        source_route = self._coerce_route_ref(source)
+        latest: tuple[
+            T | bytes, ClosedEnvelope, LineageRecord, tuple[Any, ...]
+        ] | None = None
+
+        def emit(
+            value: T | bytes,
+            closed: ClosedEnvelope,
+            lineage: LineageRecord,
+            taints: tuple[Any, ...],
+        ) -> None:
+            emitted = self.publish(
+                sink,
+                cast(Any, value),
+                control_epoch=closed.control_epoch,
+                trace_id=lineage.trace_id,
+                causality_id=lineage.causality_id,
+                correlation_id=lineage.correlation_id,
+                parent_events=(lineage.event,),
+            )
+            self._extend_taints(emitted, taints)
+
+        def on_source(item: TypedEnvelope[T] | ClosedEnvelope) -> None:
+            nonlocal latest
+            value = self._operator_value(source, source_route, item)
+            if gate is not None and not gate(value):
+                return
+            closed = self._closed_item(item)
+            lineage = self._lineage_for_item(item)
+            taints = self._item_taints(item)
+            latest = (value, closed, lineage, taints)
+            if release is not None:
+                return
+            emit(value, closed, lineage, taints)
+
+        source_sub = self.observe(
+            source, replay_latest=self._source_replay_latest(source)
+        ).subscribe(on_source)
+        self._subscriptions.append(source_sub)
+        if release is not None:
+
+            def on_signal(_item: TypedEnvelope[Any] | ClosedEnvelope) -> None:
+                if latest is not None:
+                    emit(*latest)
+
+            signal_sub = self.observe(release, replay_latest=False).subscribe(
+                on_signal
+            )
+            self._subscriptions.append(signal_sub)
+        return resistor
+
+    def watchdog(
+        self,
+        *,
+        reset_by: RouteLike,
+        output: RouteLike,
+        after: int,
+        clock: RouteLike,
+        pulse: Any = b"timeout",
+        name: str | None = None,
+    ) -> Watchdog:
+        """Emit a timeout pulse when reset signal is absent for too long."""
+        if after <= 0:
+            raise ValueError("watchdog timeout must be positive")
+        resolved_name = name or self._auto_node_name(
+            "watchdog",
+            reset_by,
+            output,
+            f"after={after}",
+            f"clock={self._route_key(clock)}",
+        )
+        watchdog = Watchdog(
+            name=resolved_name,
+            reset_by=reset_by,
+            output=output,
+            after=after,
+            clock=clock,
+            pulse=pulse,
+        )
+        self._watchdogs[resolved_name] = watchdog
+        reset_route = self._coerce_route_ref(reset_by)
+        clock_route = self._coerce_route_ref(clock)
+        last_reset_progress = 0
+        emitted_since_reset = False
+
+        def on_reset(item: TypedEnvelope[Any] | ClosedEnvelope) -> None:
+            nonlocal last_reset_progress, emitted_since_reset
+            last_reset_progress = self._progress_value(reset_by, reset_route, item)
+            emitted_since_reset = False
+
+        def on_clock(item: TypedEnvelope[Any] | ClosedEnvelope) -> None:
+            nonlocal emitted_since_reset
+            progress = self._progress_value(clock, clock_route, item)
+            if emitted_since_reset or progress - last_reset_progress < after:
+                return
+            self.publish(output, pulse, control_epoch=progress)
+            emitted_since_reset = True
+
+        reset_sub = self.observe(reset_by, replay_latest=True).subscribe(on_reset)
+        clock_sub = self.observe(clock, replay_latest=False).subscribe(on_clock)
+        self._subscriptions.append(reset_sub)
+        self._subscriptions.append(clock_sub)
+        return watchdog
+
+    def lifecycle(
+        self,
+        owner: OwnerName,
+        family: StreamFamily,
+        *,
+        intent_schema: Schema[bytes],
+        observation_schema: Schema[bytes] | None = None,
+        layer: Layer = Layer.Raw,
+        stream: StreamName | None = None,
+        event_schema: Schema[bytes] | None = None,
+        ack_schema: Schema[bytes] | None = None,
+        health_schema: Schema[bytes] | None = None,
+    ) -> LifecycleBinding:
+        """Build and register an RFC-shaped lifecycle binding."""
+        binding = WriteBindings.lifecycle(
+            owner,
+            family,
+            intent_schema=intent_schema,
+            observation_schema=observation_schema,
+            layer=layer,
+            stream=stream,
+            event_schema=event_schema,
+            ack_schema=ack_schema,
+            health_schema=health_schema,
+        )
+        self._write_bindings[binding.request.display()] = binding.binding
+        self._lifecycle_bindings[binding.request.display()] = binding
+        self._graph.register_binding(binding.request.display(), binding.binding)
+        self.register_port(binding.event)
+        if binding.health is not None:
+            self.register_port(binding.health)
+        return binding
+
+    def install(
+        self, control_loop: NativeControlLoop | ReadThenWriteNextEpochStep[Any, Any]
+    ) -> None:
         """Install a native control loop or a shared-stream Python step."""
         if isinstance(control_loop, ReadThenWriteNextEpochStep):
             subscription = control_loop.write.subscribe(
@@ -1242,7 +3022,9 @@ class Graph:
         """Advance one installed control loop once."""
         envelope = self._tick_control_loop(name)
         self._record_envelope(envelope.route, envelope, producer_id=name)
-        self._emit_debug_event("scheduler", f"ticked control loop {name}", envelope.route)
+        self._emit_debug_event(
+            "scheduler", f"ticked control loop {name}", envelope.route
+        )
         return envelope
 
     def catalog(self) -> Iterator[RouteRef]:
@@ -1255,28 +3037,122 @@ class Graph:
         native = self._graph.describe_route(native_route)
         return self._descriptor_defaults(native_route, native)
 
+    def configure_flow_defaults(self, policy: FlowPolicy) -> None:
+        """Overlay graph-wide flow defaults used by describe_edge()."""
+        self._graph_flow_defaults = self._graph_flow_defaults.merged(policy)
+
+    def configure_source_flow(self, route_ref: RouteLike, policy: FlowPolicy) -> None:
+        """Register flow defaults that apply when a route is the edge source."""
+        key = self._route_key(route_ref)
+        current = self._source_flow_defaults.get(key, FlowPolicy())
+        self._source_flow_defaults[key] = current.merged(policy)
+
+    def configure_sink_flow(self, route_ref: RouteLike, policy: FlowPolicy) -> None:
+        """Register flow requirements that apply when a route is the edge sink."""
+        key = self._route_key(route_ref)
+        current = self._sink_flow_requirements.get(key, FlowPolicy())
+        self._sink_flow_requirements[key] = current.merged(policy)
+
+    def describe_edge(
+        self,
+        *,
+        source: ConnectableTarget,
+        sink: ConnectableTarget,
+    ) -> DescriptorFlowBlock:
+        """Resolve the RFC flow descriptor for one source->sink edge."""
+        return self._resolved_edge_flow_policy(source, sink)
+
     @overload
     def latest(self, route_ref: TypedRoute[T]) -> TypedEnvelope[T] | None: ...
 
     @overload
     def latest(self, route_ref: RouteRef) -> ClosedEnvelope | None: ...
 
-    def latest(self, route_ref: RouteLike) -> TypedEnvelope[Any] | ClosedEnvelope | None:
+    def latest(
+        self, route_ref: RouteLike
+    ) -> TypedEnvelope[Any] | ClosedEnvelope | None:
         """Return the latest envelope seen for one route."""
         latest = self._graph.latest(self._coerce_route_ref(route_ref))
         if latest is None:
             return None
-        if isinstance(route_ref, TypedRoute):
-            return self._decode_envelope(route_ref, latest)
+        typed_route = self._typed_route(route_ref)
+        if typed_route is not None:
+            return self._decode_envelope(typed_route, latest)
         return latest
 
-    def open_payload(self, route_ref: RouteLike) -> bytes | None:
-        """Open the latest payload bytes for one route on demand."""
+    def open_payload(self, route_ref: RouteLike | ClosedEnvelope) -> bytes | None:
+        """Open payload bytes for the latest route event or one specific envelope."""
+        if isinstance(route_ref, ClosedEnvelope):
+            return self._known_payload_bytes(
+                route_ref.route,
+                route_ref,
+                record_open=True,
+            )
         native_route = self._coerce_route_ref(route_ref)
         latest = self._graph.latest(native_route)
         if latest is None:
             return None
         return self._resolve_payload_bytes(native_route, latest, record_open=True)
+
+    def payload_demand_snapshot(self, route_ref: RouteLike) -> PayloadDemandSnapshot:
+        """Return metadata-versus-payload demand accounting for one route."""
+        native_route = self._coerce_route_ref(route_ref)
+        key = self._route_key(native_route)
+        stats = self._payload_stats(native_route)
+        unopened_lazy_payloads = 0
+        for payload_id, payload_route in self._payload_route_by_id.items():
+            if payload_route != key:
+                continue
+            if (
+                payload_id in self._lazy_payload_sources
+                and payload_id not in self._opened_payload_ids
+            ):
+                unopened_lazy_payloads += 1
+        return PayloadDemandSnapshot(
+            route_display=key,
+            metadata_events=stats["metadata_events"],
+            payload_open_requests=stats["payload_open_requests"],
+            lazy_source_opens=stats["lazy_source_opens"],
+            materialized_payload_bytes=stats["materialized_payload_bytes"],
+            cache_hits=stats["cache_hits"],
+            unopened_lazy_payloads=unopened_lazy_payloads,
+        )
+
+    @overload
+    def watermark_snapshot(self) -> Iterator[WatermarkSnapshot]: ...
+
+    @overload
+    def watermark_snapshot(self, route_ref: RouteLike) -> WatermarkSnapshot: ...
+
+    def watermark_snapshot(
+        self,
+        route_ref: RouteLike | None = None,
+    ) -> WatermarkSnapshot | Iterator[WatermarkSnapshot]:
+        """Return watermark progress for one route or the whole catalog."""
+        if route_ref is None:
+            return iter(
+                tuple(
+                    self._watermark_snapshot_for_route(route)
+                    for route in self.catalog()
+                )
+            )
+        return self._watermark_snapshot_for_route(self._coerce_route_ref(route_ref))
+
+    def scheduler_snapshot(
+        self,
+        route_ref: RouteLike | None = None,
+    ) -> Iterator[ScheduledWriteSnapshot]:
+        """Return queued guarded-write state, optionally filtered to one route."""
+        route_display = None if route_ref is None else self._route_key(route_ref)
+        snapshots: list[ScheduledWriteSnapshot] = []
+        for scheduled in self._pending_writes:
+            snapshot = self._scheduled_write_snapshot(scheduled)
+            if snapshot is None:
+                continue
+            if route_display is not None and snapshot.route_display != route_display:
+                continue
+            snapshots.append(snapshot)
+        return iter(tuple(snapshots))
 
     def topology(self) -> Iterator[tuple[str, str]]:
         """Return graph edges as `(source, sink)` display pairs."""
@@ -1285,8 +3161,8 @@ class Graph:
     def validate_graph(self) -> Iterator[str]:
         """Return graph validation issues detected by the native layer and wrapper semantics."""
         issues = list(self._graph.validate_graph())
-        for route in self.catalog():
-            route = self._coerce_route_ref(route)
+        for catalog_route in self.catalog():
+            route = self._coerce_route_ref(catalog_route)
             if (
                 route.namespace.plane == Plane.Write
                 and route.variant == Variant.Request
@@ -1304,8 +3180,8 @@ class Graph:
         route_refs: dict[str, RouteRef] = {}
         for left, right in self.topology():
             adjacency.setdefault(left, set()).add(right)
-        for route in self.catalog():
-            route_refs[route.display()] = route
+        for catalog_route in self.catalog():
+            route_refs[catalog_route.display()] = catalog_route
 
         issues: list[str] = []
         for binding in self._write_bindings.values():
@@ -1319,7 +3195,9 @@ class Graph:
                     continue
                 if self._path_has_boundary(adjacency, route_refs, source, request):
                     continue
-                ack_seen = binding.ack is not None and self.latest(binding.ack) is not None
+                ack_seen = (
+                    binding.ack is not None and self.latest(binding.ack) is not None
+                )
                 if ack_seen:
                     continue
                 issues.append(
@@ -1372,19 +3250,161 @@ class Graph:
         """Expose the current credit/backpressure view for registered routes."""
         return iter(tuple(self._graph.credit_snapshot()))
 
+    def flow_snapshot(self, route_ref: InspectableRoute) -> FlowSnapshot:
+        """Return one enriched credit snapshot for a route."""
+        if isinstance(route_ref, (NativeReadablePort, NativeWritablePort)):
+            descriptor = route_ref.describe()
+            route_display = descriptor.route_display
+        else:
+            native_route = self._coerce_route_ref(route_ref)
+            route_display = native_route.display()
+            descriptor = self.describe_route(native_route)
+        for snapshot in self.credit_snapshot():
+            if snapshot.route_display == route_display:
+                return FlowSnapshot(
+                    route_display=snapshot.route_display,
+                    credit_class=snapshot.credit_class,
+                    backpressure_policy=descriptor.backpressure_policy,
+                    available=snapshot.available,
+                    blocked_senders=snapshot.blocked_senders,
+                    dropped_messages=snapshot.dropped_messages,
+                    largest_queue_depth=getattr(snapshot, "largest_queue_depth", 0),
+                )
+        raise KeyError(f"no credit snapshot registered for {route_display}")
+
+    def mailbox_snapshot(self, mailbox: NativeMailbox) -> MailboxSnapshot:
+        """Return the current queue and overflow state for one mailbox."""
+        mailbox_name = cast(str, self._mailbox_value(mailbox, "name"))
+        descriptor = self._mailbox_descriptors.get(mailbox_name)
+        if descriptor is None:
+            raise KeyError(f"unknown mailbox {mailbox_name}")
+        ingress = cast(Any, self._mailbox_value(mailbox, "ingress"))
+        egress = cast(Any, self._mailbox_value(mailbox, "egress"))
+
+        def descriptor_value(name: str, default: str | int) -> str | int:
+            if not hasattr(descriptor, name):
+                return default
+            return cast(str | int, self._mailbox_value(descriptor, name))
+
+        def mailbox_stat(name: str, default: int = 0) -> int:
+            if not hasattr(mailbox, name):
+                return default
+            return cast(int, self._mailbox_value(mailbox, name))
+
+        return MailboxSnapshot(
+            name=mailbox_name,
+            ingress_route=ingress.describe().route_display,
+            egress_route=egress.describe().route_display,
+            capacity=cast(int, descriptor_value("capacity", 128)),
+            delivery_mode=cast(str, descriptor_value("delivery_mode", "mpsc_serial")),
+            ordering_policy=cast(str, descriptor_value("ordering_policy", "fifo")),
+            overflow_policy=cast(str, descriptor_value("overflow_policy", "block")),
+            depth=mailbox_stat("depth"),
+            available_credit=mailbox_stat("available_credit"),
+            blocked_writes=mailbox_stat("blocked_writes"),
+            dropped_messages=mailbox_stat("dropped_messages"),
+            coalesced_messages=mailbox_stat("coalesced_messages"),
+            delivered_messages=mailbox_stat("delivered_messages"),
+        )
+
     def replay(self, route_ref: RouteLike) -> Iterator[ClosedEnvelope]:
         """Return the retained in-memory history for one route."""
-        return iter(tuple(self._history.get(self._route_key(route_ref), ())))
+        retention = self._retention_policy_for(route_ref)
+        if retention.latest_replay_policy == "none":
+            return iter(())
+        history = tuple(self._history.get(self._route_key(route_ref), ()))
+        if retention.latest_replay_policy == "latest_only":
+            return iter(history[-1:] if history else ())
+        return iter(history)
+
+    def lineage(
+        self,
+        route_ref: RouteLike | None = None,
+        *,
+        trace_id: str | None = None,
+        causality_id: str | None = None,
+        correlation_id: str | None = None,
+    ) -> Iterator[LineageRecord]:
+        """Return retained lineage records filtered by route or lineage ids."""
+        if trace_id is not None:
+            keys = tuple(self._lineage_events_by_trace.get(trace_id, ()))
+        elif causality_id is not None:
+            keys = tuple(self._lineage_events_by_causality.get(causality_id, ()))
+        elif correlation_id is not None:
+            keys = tuple(self._lineage_events_by_correlation.get(correlation_id, ()))
+        elif route_ref is not None:
+            keys = tuple(
+                self._event_index_key(self._event_ref(envelope))
+                for envelope in self.replay(route_ref)
+            )
+        else:
+            keys = tuple(self._lineage_by_event)
+        records = tuple(
+            self._lineage_by_event[key]
+            for key in keys
+            if key in self._lineage_by_event
+            and (
+                route_ref is None
+                or self._lineage_by_event[key].event.route_display
+                == self._route_key(route_ref)
+            )
+        )
+        return iter(records)
 
     def subscribers(self, route_ref: RouteLike) -> int:
         """Return the number of active observers on a route."""
         return self._subscriber_count.get(self._route_key(route_ref), 0)
 
+    def route_audit(self, route_ref: RouteLike) -> RouteAuditSnapshot:
+        """Summarize producers, subscribers, writes, and taint state for a route."""
+        scope_routes = self._audit_scope_routes(route_ref)
+        scope_keys = tuple(route.display() for route in scope_routes)
+        producers: set[str] = set()
+        active_subscribers: set[str] = set()
+        taint_upper_bounds: set[str] = set()
+        repair_notes: set[str] = set()
+        recent_debug_events: list[str] = []
+
+        for scope_route in scope_routes:
+            route_display = scope_route.display()
+            producers.update(self._writers.get(route_display, ()))
+            active_subscribers.update(self._route_subscribers.get(route_display, ()))
+            for item in self._taint_query_items(scope_route):
+                if item.startswith("stream:"):
+                    taint_upper_bounds.add(item)
+                elif item.startswith("repair:"):
+                    repair_notes.add(item.removeprefix("repair:"))
+            recent_debug_events.extend(
+                f"{event.event_type}:{event.detail}"
+                for event in self.audit(scope_route)
+            )
+
+        binding = self._binding_for_route(route_ref)
+        related_write_requests = ()
+        if binding is not None:
+            related_write_requests = tuple(
+                f"{binding.request.display()}@{envelope.seq_source}"
+                for envelope in self.replay(binding.request)
+            )
+
+        return RouteAuditSnapshot(
+            route_display=self._route_key(route_ref),
+            scope_routes=scope_keys,
+            recent_producers=tuple(sorted(producers)),
+            active_subscribers=tuple(sorted(active_subscribers)),
+            related_write_requests=related_write_requests,
+            taint_upper_bounds=tuple(sorted(taint_upper_bounds)),
+            repair_notes=tuple(sorted(repair_notes)),
+            recent_debug_events=tuple(recent_debug_events),
+        )
+
     def writers(self, route_ref: RouteLike) -> Iterator[str]:
         """Return distinct producer ids that have written to a route."""
         return iter(tuple(sorted(self._writers.get(self._route_key(route_ref), ()))))
 
-    def export_route(self, route_ref: RouteLike, *, visibility: str = "exported") -> None:
+    def export_route(
+        self, route_ref: RouteLike, *, visibility: str = "exported"
+    ) -> None:
         """Mark a route as visible to third-party metadata readers."""
         self.register_port(route_ref)
         self._route_visibility[self._route_key(route_ref)] = visibility
@@ -1402,33 +3422,23 @@ class Graph:
             debug_read=grant.debug_read,
             graph_validation=grant.graph_validation,
         )
-        self._capability_grants[(normalized.principal_id, route_ref.display())] = normalized
+        self._capability_grants[(normalized.principal_id, route_ref.display())] = (
+            normalized
+        )
         return normalized
 
-    def shadow_state(self, binding_or_request: WriteBinding | RouteLike) -> ShadowSnapshot:
+    def shadow_state(
+        self, binding_or_request: WriteBinding | LifecycleBinding | RouteLike
+    ) -> ShadowSnapshot:
         """Return the current desired/reported/effective/ack view for one write binding."""
-        if isinstance(binding_or_request, WriteBinding):
-            binding = binding_or_request
-            self._write_bindings[binding.request.display()] = binding
-        else:
-            request = self._coerce_route_ref(binding_or_request)
-            if request.display() not in self._write_bindings:
-                raise KeyError(f"no write binding registered for {request.display()}")
-            binding = self._write_bindings[request.display()]
+        binding = self._resolve_write_binding(binding_or_request)
         desired = self._graph.latest(binding.desired)
         reported = self._graph.latest(binding.reported)
         effective = self._graph.latest(binding.effective)
         ack = None if binding.ack is None else self._graph.latest(binding.ack)
         request = self._graph.latest(binding.request)
-        desired_seq = -1 if desired is None else desired.seq_source
-        effective_seq = -1 if effective is None else effective.seq_source
-        pending_write = desired_seq > effective_seq
-        coherence_taints = tuple(
-            getattr(taint, "value_id", str(taint))
-            for taint in getattr(effective if effective is not None else desired, "taints", ())
-            if getattr(taint, "domain", None) == "coherence"
-            or getattr(getattr(taint, "domain", None), "as_str", lambda: None)() == "coherence"
-        )
+        coherence_taints = self._refresh_binding_coherence(binding)
+        pending_write = "COHERENCE_WRITE_PENDING" in coherence_taints
         return ShadowSnapshot(
             request=request,
             desired=desired,
@@ -1441,7 +3451,7 @@ class Graph:
 
     def reconcile_write_binding(
         self,
-        binding_or_request: WriteBinding | RouteLike,
+        binding_or_request: WriteBinding | LifecycleBinding | RouteLike,
         *,
         reported: bytes | None = None,
         effective: bytes | None = None,
@@ -1450,22 +3460,28 @@ class Graph:
         control_epoch: int | None = None,
     ) -> ShadowSnapshot:
         """Publish observed shadow updates for a write binding and return the resulting snapshot."""
-        if isinstance(binding_or_request, WriteBinding):
-            binding = binding_or_request
-            self._write_bindings[binding.request.display()] = binding
-        else:
-            request = self._coerce_route_ref(binding_or_request)
-            if request.display() not in self._write_bindings:
-                raise KeyError(f"no write binding registered for {request.display()}")
-            binding = self._write_bindings[request.display()]
+        binding = self._resolve_write_binding(binding_or_request)
         if reported is not None:
-            self.publish(binding.reported, reported, producer=producer, control_epoch=control_epoch)
+            self.publish(
+                binding.reported,
+                reported,
+                producer=producer,
+                control_epoch=control_epoch,
+            )
         if effective is not None:
-            self.publish(binding.effective, effective, producer=producer, control_epoch=control_epoch)
+            self.publish(
+                binding.effective,
+                effective,
+                producer=producer,
+                control_epoch=control_epoch,
+            )
         if ack is not None:
             if binding.ack is None:
                 raise ValueError("write binding does not define an ack route")
-            self.publish(binding.ack, ack, producer=producer, control_epoch=control_epoch)
+            self.publish(
+                binding.ack, ack, producer=producer, control_epoch=control_epoch
+            )
+        self._refresh_binding_coherence(binding)
         return self.shadow_state(binding)
 
     def publish_guarded(
@@ -1478,11 +3494,41 @@ class Graph:
         expires_at_epoch: int | None = None,
         producer: ProducerRef | None = None,
         control_epoch: int | None = None,
+        retry_policy: RetryPolicy | None = None,
+        ack_route: RouteLike | None = None,
+        trace_id: str | None = None,
+        causality_id: str | None = None,
+        correlation_id: str | None = None,
+        parent_events: Sequence[EventRef] = (),
     ) -> ScheduledWrite:
         """Queue a guarded write for later scheduler release."""
+        if isinstance(target, LifecycleBinding):
+            self._write_bindings[target.request.display()] = target.binding
+            self._lifecycle_bindings[target.request.display()] = target
+            self._graph.register_binding(target.request.display(), target.binding)
+            if ack_route is None:
+                ack_route = target.ack
+            target = target.binding
         if isinstance(target, WriteBinding):
             self._write_bindings[target.request.display()] = target
             self._graph.register_binding(target.request.display(), target)
+            if ack_route is None:
+                ack_route = target.ack
+        if retry_policy is not None and ack_route is None:
+            raise ValueError(
+                "retry_policy requires an ack_route or a write binding with an ack route"
+            )
+        ack_baseline_seq = -1
+        if ack_route is not None:
+            latest_ack = self.latest(ack_route)
+            ack_closed = (
+                None
+                if latest_ack is None
+                else latest_ack.closed
+                if isinstance(latest_ack, TypedEnvelope)
+                else latest_ack
+            )
+            ack_baseline_seq = -1 if ack_closed is None else ack_closed.seq_source
         scheduled = ScheduledWrite(
             target=target,
             payload=payload,
@@ -1491,16 +3537,27 @@ class Graph:
             expires_at_epoch=expires_at_epoch,
             producer=producer,
             control_epoch=control_epoch,
+            retry_policy=retry_policy,
+            ack_route=ack_route,
+            ack_baseline_seq=ack_baseline_seq,
+            trace_id=trace_id,
+            causality_id=causality_id,
+            correlation_id=correlation_id,
+            parent_events=tuple(parent_events),
         )
         self._pending_writes.append(scheduled)
         self._emit_debug_event(
             "scheduler",
             f"queued guarded write for {self._route_key(target.request if isinstance(target, WriteBinding) else target)}",
-            target.request if isinstance(target, WriteBinding) else self._coerce_route_ref(target),
+            target.request
+            if isinstance(target, WriteBinding)
+            else self._coerce_route_ref(target),
         )
         return scheduled
 
-    def run_scheduler(self, epoch: int | None = None) -> tuple[TypedEnvelope[Any] | ClosedEnvelope, ...]:
+    def run_scheduler(
+        self, epoch: int | None = None
+    ) -> tuple[TypedEnvelope[Any] | ClosedEnvelope, ...]:
         """Advance scheduler state and release any writes whose guards are satisfied."""
         self._scheduler_epoch = self._scheduler_epoch + 1 if epoch is None else epoch
         ready: list[ScheduledWrite] = []
@@ -1513,8 +3570,51 @@ class Graph:
                 self._emit_debug_event(
                     "scheduler",
                     f"expired guarded write for {self._route_key(scheduled.target.request if isinstance(scheduled.target, WriteBinding) else scheduled.target)}",
-                    scheduled.target.request if isinstance(scheduled.target, WriteBinding) else self._coerce_route_ref(scheduled.target),
+                    scheduled.target.request
+                    if isinstance(scheduled.target, WriteBinding)
+                    else self._coerce_route_ref(scheduled.target),
                 )
+                continue
+            if scheduled.attempt_count > 0 and scheduled.ack_route is not None:
+                latest_ack = self.latest(scheduled.ack_route)
+                ack_closed = (
+                    None
+                    if latest_ack is None
+                    else latest_ack.closed
+                    if isinstance(latest_ack, TypedEnvelope)
+                    else latest_ack
+                )
+                latest_ack_seq = -1 if ack_closed is None else ack_closed.seq_source
+                if latest_ack_seq > scheduled.ack_baseline_seq:
+                    self._emit_debug_event(
+                        "scheduler",
+                        f"acknowledged guarded write for {self._route_key(scheduled.target.request if isinstance(scheduled.target, WriteBinding) else scheduled.target)} after {scheduled.attempt_count} attempts",
+                        scheduled.target.request
+                        if isinstance(scheduled.target, WriteBinding)
+                        else self._coerce_route_ref(scheduled.target),
+                    )
+                    continue
+                assert scheduled.retry_policy is not None
+                if scheduled.attempt_count >= scheduled.retry_policy.max_attempts:
+                    self._emit_debug_event(
+                        "scheduler",
+                        f"exhausted guarded write retries for {self._route_key(scheduled.target.request if isinstance(scheduled.target, WriteBinding) else scheduled.target)} after {scheduled.attempt_count} attempts",
+                        scheduled.target.request
+                        if isinstance(scheduled.target, WriteBinding)
+                        else self._coerce_route_ref(scheduled.target),
+                    )
+                    continue
+                next_attempt_epoch = (
+                    self._scheduler_epoch
+                    if scheduled.last_attempt_epoch is None
+                    else scheduled.last_attempt_epoch
+                    + scheduled.retry_policy.backoff_epochs
+                    + 1
+                )
+                if self._scheduler_epoch >= next_attempt_epoch:
+                    ready.append(scheduled)
+                else:
+                    pending.append(scheduled)
                 continue
             ack_ready = True
             if scheduled.wait_for_ack is not None:
@@ -1530,14 +3630,37 @@ class Graph:
         self._pending_writes = pending
         emitted: list[TypedEnvelope[Any] | ClosedEnvelope] = []
         for scheduled in ready:
+            target_route = (
+                scheduled.target.request
+                if isinstance(scheduled.target, WriteBinding)
+                else self._coerce_route_ref(scheduled.target)
+            )
             emitted.append(
                 self.publish(
                     scheduled.target,
                     scheduled.payload,
                     producer=scheduled.producer,
                     control_epoch=scheduled.control_epoch,
+                    trace_id=scheduled.trace_id,
+                    causality_id=scheduled.causality_id,
+                    correlation_id=scheduled.correlation_id,
+                    parent_events=scheduled.parent_events,
                 )
             )
+            if scheduled.retry_policy is not None:
+                self._pending_writes.append(
+                    replace(
+                        scheduled,
+                        attempt_count=scheduled.attempt_count + 1,
+                        last_attempt_epoch=self._scheduler_epoch,
+                    )
+                )
+                if scheduled.attempt_count > 0:
+                    self._emit_debug_event(
+                        "scheduler",
+                        f"retried guarded write for {target_route.display()} at epoch {self._scheduler_epoch}",
+                        target_route,
+                    )
         if emitted:
             self._emit_debug_event(
                 "scheduler",
@@ -1555,34 +3678,315 @@ class Graph:
     ) -> SubscriptionLike:
         """Apply a stateful step function and publish each emitted value to `output`."""
         state = initial_state
+        source_route = self._coerce_route_ref(source)
 
         def on_next(item: TypedEnvelope[TIn] | ClosedEnvelope) -> None:
             nonlocal state
-            value = item.value if isinstance(item, TypedEnvelope) else cast(TIn, bytes(item.payload_ref.inline_bytes))
+            value = self._operator_value(source, source_route, item)
             state, out = step(state, value)
-            self.publish(output, out)
+            lineage = self._lineage_for_item(item)
+            self._extend_taints(
+                self.publish(
+                    output,
+                    out,
+                    trace_id=lineage.trace_id,
+                    causality_id=lineage.causality_id,
+                    correlation_id=lineage.correlation_id,
+                    parent_events=(lineage.event,),
+                ),
+                self._item_taints(item),
+            )
 
         return self.observe(source).subscribe(on_next)  # type: ignore[arg-type]
+
+    def filter(
+        self,
+        source: TypedRoute[T] | RouteRef,
+        *,
+        predicate: Callable[[T | bytes], bool],
+    ) -> Observable[T | bytes]:
+        """Emit only the source values that satisfy `predicate`.
+
+        This keeps filtering explicit in the graph-facing API instead of forcing
+        callers to drop into raw Rx operators for a core RFC composition
+        primitive. Typed routes deliver decoded values to the predicate, while
+        raw route refs continue to expose payload bytes.
+        """
+        source_route = self._coerce_route_ref(source)
+
+        def subscribe(
+            observer: ObserverLike[T | bytes],
+            scheduler: object | None = None,
+        ) -> SubscriptionLike:
+            def on_next(item: TypedEnvelope[T] | ClosedEnvelope) -> None:
+                value = self._operator_value(source, source_route, item)
+                if predicate(value):
+                    observer.on_next(value)
+
+            self._replay_latest_value(source, on_next)
+            return self.observe(source, replay_latest=False).subscribe(
+                on_next, scheduler=scheduler
+            )  # type: ignore[arg-type]
+
+        return rx.create(subscribe)
 
     def window(
         self,
         source: TypedRoute[T] | RouteRef,
         *,
         size: int,
+        trigger: TypedRoute[Any] | RouteRef | None = None,
+        partition_by: Callable[[T | bytes], Hashable] | None = None,
     ) -> Observable[list[T] | list[bytes]]:
-        """Emit the most recent `size` values on each source update."""
-        buffer: deque[T | bytes] = deque(maxlen=size)
+        """Emit the most recent `size` values on source updates or explicit triggers.
+
+        When ``partition_by`` is provided, each partition keeps its own bounded
+        buffer and source updates emit the window for that partition only.
+        Trigger routes flush every currently buffered partition in insertion
+        order.
+        """
+        if size <= 0:
+            raise ValueError("window size must be positive")
+        source_route = self._coerce_route_ref(source)
+        trigger_route = None if trigger is None else self._coerce_route_ref(trigger)
 
         def subscribe(
             observer: ObserverLike[list[T] | list[bytes]],
             scheduler: object | None = None,
         ) -> SubscriptionLike:
-            def on_next(item: TypedEnvelope[T] | ClosedEnvelope) -> None:
-                value = item.value if isinstance(item, TypedEnvelope) else bytes(item.payload_ref.inline_bytes)
-                buffer.append(value)
-                observer.on_next(list(buffer))
+            buffers: dict[Hashable | None, deque[T | bytes]] = {}
 
-            return self.observe(source, replay_latest=False).subscribe(on_next, scheduler=scheduler)  # type: ignore[arg-type]
+            def buffer_for(value: T | bytes) -> deque[T | bytes]:
+                partition_key = None if partition_by is None else partition_by(value)
+                return buffers.setdefault(partition_key, deque(maxlen=size))
+
+            def on_next(item: TypedEnvelope[T] | ClosedEnvelope) -> None:
+                value = self._operator_value(source, source_route, item)
+                buffer = buffer_for(value)
+                buffer.append(value)
+                if trigger_route is None:
+                    observer.on_next(list(buffer))
+
+            def emit_window(_item: TypedEnvelope[Any] | ClosedEnvelope) -> None:
+                for buffer in buffers.values():
+                    if buffer:
+                        observer.on_next(list(buffer))
+
+            self._replay_latest_value(source, on_next)
+            if trigger is not None:
+                self._replay_latest_value(trigger, emit_window)
+
+            source_sub = self.observe(source, replay_latest=False).subscribe(
+                on_next, scheduler=scheduler
+            )  # type: ignore[arg-type]
+            if trigger is None:
+                return source_sub
+            trigger_sub = self.observe(trigger, replay_latest=False).subscribe(
+                emit_window, scheduler=scheduler
+            )  # type: ignore[arg-type]
+
+            class _Subscription:
+                def dispose(self) -> None:
+                    source_sub.dispose()
+                    trigger_sub.dispose()
+
+            return _Subscription()
+
+        return rx.create(subscribe)
+
+    def window_aggregate(
+        self,
+        source: TypedRoute[T] | RouteRef,
+        *,
+        size: int,
+        aggregate: Callable[[TypingSequence[T] | TypingSequence[bytes]], TOut],
+        trigger: TypedRoute[Any] | RouteRef | None = None,
+        partition_by: Callable[[T | bytes], Hashable] | None = None,
+    ) -> Observable[TOut]:
+        """Aggregate each rolling window emitted from `source`.
+
+        This keeps windowed aggregation explicit in the graph-facing API while
+        still reusing the same bounded sliding-window semantics as `window()`.
+        Each subscription owns its own buffer and receives an aggregate for the
+        replayed latest value (if any) plus each future update, or only when an
+        explicit trigger route advances.
+        """
+
+        def subscribe(
+            observer: ObserverLike[TOut],
+            scheduler: object | None = None,
+        ) -> SubscriptionLike:
+            def on_window(items: list[T] | list[bytes]) -> None:
+                observer.on_next(aggregate(tuple(items)))
+
+            windowed = self.window(
+                source,
+                size=size,
+                trigger=trigger,
+                partition_by=partition_by,
+            )
+            return windowed.subscribe(
+                on_window,
+                scheduler=scheduler,
+            )
+
+        return rx.create(subscribe)
+
+    def window_by_time(
+        self,
+        source: TypedRoute[T] | RouteRef,
+        *,
+        width: int,
+        watermark: TypedRoute[Any] | RouteRef | None = None,
+        grace: int = 0,
+        partition_by: Callable[[T | bytes], Hashable] | None = None,
+        event_time: Callable[[T | bytes], int] | None = None,
+        watermark_time: Callable[[Any | bytes], int] | None = None,
+    ) -> Observable[list[T] | list[bytes]]:
+        """Emit a watermark-aware rolling window over event time.
+
+        Event timestamps default to `control_epoch` when present and fall back
+        to `seq_source` otherwise. When `watermark` is omitted, source events
+        advance watermark progress implicitly. When `watermark` is present, the
+        source buffers values and emits only as watermarks advance.
+        """
+        if width <= 0:
+            raise ValueError("window width must be positive")
+        if grace < 0:
+            raise ValueError("window grace must be non-negative")
+        source_route = self._coerce_route_ref(source)
+        watermark_route = None if watermark is None else self._coerce_route_ref(watermark)
+
+        def subscribe(
+            observer: ObserverLike[list[T] | list[bytes]],
+            scheduler: object | None = None,
+        ) -> SubscriptionLike:
+            buffers: dict[Hashable | None, deque[tuple[int, T | bytes]]] = {}
+            watermarks: dict[Hashable | None, int] = {}
+
+            def partition_key_for(value: T | bytes) -> Hashable | None:
+                if partition_by is None:
+                    return None
+                return partition_by(value)
+
+            def buffer_for(
+                partition_key: Hashable | None,
+            ) -> deque[tuple[int, T | bytes]]:
+                return buffers.setdefault(partition_key, deque())
+
+            def prune(partition_key: Hashable | None) -> None:
+                current_watermark = watermarks.get(partition_key)
+                if current_watermark is None:
+                    return
+                minimum_kept = current_watermark - width - grace + 1
+                buffer = buffer_for(partition_key)
+                while buffer and buffer[0][0] < minimum_kept:
+                    buffer.popleft()
+
+            def emit_window(partition_key: Hashable | None) -> None:
+                current_watermark = watermarks.get(partition_key)
+                if current_watermark is None:
+                    return
+                buffer = buffers.get(partition_key)
+                if not buffer:
+                    return
+                window_start = current_watermark - width + 1
+                items = [
+                    value
+                    for event_time_value, value in sorted(buffer, key=lambda item: item[0])
+                    if window_start <= event_time_value <= current_watermark
+                ]
+                if items:
+                    observer.on_next(items)
+
+            def on_next(item: TypedEnvelope[T] | ClosedEnvelope) -> None:
+                value = self._operator_value(source, source_route, item)
+                partition_key = partition_key_for(value)
+                progress = self._progress_value(
+                    source,
+                    source_route,
+                    item,
+                    extractor=event_time,
+                )
+                current_watermark = watermarks.get(partition_key)
+                if current_watermark is not None:
+                    minimum_kept = current_watermark - width - grace + 1
+                    if progress < minimum_kept:
+                        return
+                buffer_for(partition_key).append((progress, value))
+                if watermark_route is None:
+                    watermarks[partition_key] = progress
+                    prune(partition_key)
+                    emit_window(partition_key)
+
+            def on_watermark(item: TypedEnvelope[Any] | ClosedEnvelope) -> None:
+                assert watermark is not None
+                progress = self._progress_value(
+                    watermark,
+                    self._coerce_route_ref(watermark),
+                    item,
+                    extractor=watermark_time,
+                )
+                for partition_key in tuple(buffers):
+                    current_watermark = watermarks.get(partition_key)
+                    if current_watermark is None or progress > current_watermark:
+                        watermarks[partition_key] = progress
+                    prune(partition_key)
+                    emit_window(partition_key)
+
+            self._replay_latest_value(source, on_next)
+            if watermark is not None:
+                self._replay_latest_value(watermark, on_watermark)
+
+            source_sub = self.observe(source, replay_latest=False).subscribe(
+                on_next, scheduler=scheduler
+            )  # type: ignore[arg-type]
+            if watermark is None:
+                return source_sub
+            watermark_sub = self.observe(watermark, replay_latest=False).subscribe(
+                on_watermark, scheduler=scheduler
+            )  # type: ignore[arg-type]
+
+            class _Subscription:
+                def dispose(self) -> None:
+                    source_sub.dispose()
+                    watermark_sub.dispose()
+
+            return _Subscription()
+
+        return rx.create(subscribe)
+
+    def window_aggregate_by_time(
+        self,
+        source: TypedRoute[T] | RouteRef,
+        *,
+        width: int,
+        aggregate: Callable[[TypingSequence[T] | TypingSequence[bytes]], TOut],
+        watermark: TypedRoute[Any] | RouteRef | None = None,
+        grace: int = 0,
+        partition_by: Callable[[T | bytes], Hashable] | None = None,
+        event_time: Callable[[T | bytes], int] | None = None,
+        watermark_time: Callable[[Any | bytes], int] | None = None,
+    ) -> Observable[TOut]:
+        """Aggregate watermark-aware event-time windows from `source`."""
+
+        def subscribe(
+            observer: ObserverLike[TOut],
+            scheduler: object | None = None,
+        ) -> SubscriptionLike:
+            def on_window(items: list[T] | list[bytes]) -> None:
+                observer.on_next(aggregate(tuple(items)))
+
+            windowed = self.window_by_time(
+                source,
+                width=width,
+                watermark=watermark,
+                grace=grace,
+                partition_by=partition_by,
+                event_time=event_time,
+                watermark_time=watermark_time,
+            )
+            return windowed.subscribe(on_window, scheduler=scheduler)
 
         return rx.create(subscribe)
 
@@ -1594,27 +3998,157 @@ class Graph:
         combine: Callable[[TIn, TRight], TOut],
     ) -> Observable[TOut]:
         """Combine each incoming side with the latest value from the other side."""
-        left_latest: TIn | None = None
-        right_latest: TRight | None = None
+        left_route = self._coerce_route_ref(left)
+        right_route = self._coerce_route_ref(right)
 
         def subscribe(
             observer: ObserverLike[TOut],
             scheduler: object | None = None,
         ) -> SubscriptionLike:
+            left_latest: TIn | None = None
+            right_latest: TRight | None = None
+
             def on_left(item: TypedEnvelope[TIn] | ClosedEnvelope) -> None:
                 nonlocal left_latest
-                left_latest = item.value if isinstance(item, TypedEnvelope) else cast(TIn, bytes(item.payload_ref.inline_bytes))
+                left_latest = self._operator_value(left, left_route, item)
                 if right_latest is not None:
                     observer.on_next(combine(left_latest, right_latest))
 
             def on_right(item: TypedEnvelope[TRight] | ClosedEnvelope) -> None:
                 nonlocal right_latest
-                right_latest = item.value if isinstance(item, TypedEnvelope) else cast(TRight, bytes(item.payload_ref.inline_bytes))
+                right_latest = self._operator_value(right, right_route, item)
                 if left_latest is not None:
                     observer.on_next(combine(left_latest, right_latest))
 
-            left_sub = self.observe(left, replay_latest=False).subscribe(on_left, scheduler=scheduler)  # type: ignore[arg-type]
-            right_sub = self.observe(right, replay_latest=False).subscribe(on_right, scheduler=scheduler)  # type: ignore[arg-type]
+            self._replay_latest_value(left, on_left)
+            self._replay_latest_value(right, on_right)
+
+            left_sub = self.observe(left, replay_latest=False).subscribe(
+                on_left, scheduler=scheduler
+            )  # type: ignore[arg-type]
+            right_sub = self.observe(right, replay_latest=False).subscribe(
+                on_right, scheduler=scheduler
+            )  # type: ignore[arg-type]
+
+            class _Subscription:
+                def dispose(self) -> None:
+                    left_sub.dispose()
+                    right_sub.dispose()
+
+            return _Subscription()
+
+        return rx.create(subscribe)
+
+    def lookup_join(
+        self,
+        left: TypedRoute[TIn] | RouteRef,
+        right_state: TypedRoute[TRight] | RouteRef,
+        *,
+        combine: Callable[[TIn | bytes, TRight | bytes], TOut],
+    ) -> Observable[TOut]:
+        """Join each left-side event against the latest right-hand state view.
+
+        Unlike :meth:`join_latest`, updates on ``right_state`` only refresh the
+        materialized lookup value; they do not emit output until a left-side
+        event arrives. This matches the RFC's stream-table lookup shape.
+        """
+        left_route = self._coerce_route_ref(left)
+        right_route = self._coerce_route_ref(right_state)
+
+        def subscribe(
+            observer: ObserverLike[TOut],
+            scheduler: object | None = None,
+        ) -> SubscriptionLike:
+            right_latest: TRight | bytes | None = None
+
+            def on_right(item: TypedEnvelope[TRight] | ClosedEnvelope) -> None:
+                nonlocal right_latest
+                right_latest = self._operator_value(right_state, right_route, item)
+
+            def on_left(item: TypedEnvelope[TIn] | ClosedEnvelope) -> None:
+                if right_latest is None:
+                    return
+                left_value = self._operator_value(left, left_route, item)
+                observer.on_next(combine(left_value, right_latest))
+
+            self._replay_latest_value(right_state, on_right)
+
+            left_sub = self.observe(left, replay_latest=False).subscribe(
+                on_left, scheduler=scheduler
+            )  # type: ignore[arg-type]
+            right_sub = self.observe(right_state, replay_latest=False).subscribe(
+                on_right, scheduler=scheduler
+            )  # type: ignore[arg-type]
+
+            class _Subscription:
+                def dispose(self) -> None:
+                    left_sub.dispose()
+                    right_sub.dispose()
+
+            return _Subscription()
+
+        return rx.create(subscribe)
+
+    def interval_join(
+        self,
+        left: TypedRoute[TIn] | RouteRef,
+        right: TypedRoute[TRight] | RouteRef,
+        *,
+        within: int,
+        combine: Callable[[TIn | bytes, TRight | bytes], TOut],
+    ) -> Observable[TOut]:
+        """Join nearby events from both sides within a bounded sequence interval.
+
+        The current scaffold does not model full event timestamps yet, so this
+        operator uses `seq_source` as a stable event-order surrogate. It keeps
+        a recent buffer on each side and emits joined values whenever the
+        opposite side has events within the requested distance.
+        """
+        if within < 0:
+            raise ValueError("interval join distance must be non-negative")
+        left_route = self._coerce_route_ref(left)
+        right_route = self._coerce_route_ref(right)
+
+        def prune(buffer: deque[tuple[int, Any]], seq: int) -> None:
+            minimum = seq - within
+            while buffer and buffer[0][0] < minimum:
+                buffer.popleft()
+
+        def subscribe(
+            observer: ObserverLike[TOut],
+            scheduler: object | None = None,
+        ) -> SubscriptionLike:
+            left_buffer: deque[tuple[int, TIn | bytes]] = deque()
+            right_buffer: deque[tuple[int, TRight | bytes]] = deque()
+
+            def on_left(item: TypedEnvelope[TIn] | ClosedEnvelope) -> None:
+                closed = item.closed if isinstance(item, TypedEnvelope) else item
+                seq = closed.seq_source
+                value = self._operator_value(left, left_route, item)
+                left_buffer.append((seq, value))
+                prune(left_buffer, seq)
+                prune(right_buffer, seq)
+                for right_seq, right_value in tuple(right_buffer):
+                    if abs(seq - right_seq) <= within:
+                        observer.on_next(combine(value, right_value))
+
+            def on_right(item: TypedEnvelope[TRight] | ClosedEnvelope) -> None:
+                closed = item.closed if isinstance(item, TypedEnvelope) else item
+                seq = closed.seq_source
+                value = self._operator_value(right, right_route, item)
+                right_buffer.append((seq, value))
+                prune(right_buffer, seq)
+                prune(left_buffer, seq)
+                for left_seq, left_value in tuple(left_buffer):
+                    if abs(seq - left_seq) <= within:
+                        observer.on_next(combine(left_value, value))
+
+            left_sub = self.observe(left, replay_latest=False).subscribe(
+                on_left, scheduler=scheduler
+            )  # type: ignore[arg-type]
+            right_sub = self.observe(right, replay_latest=False).subscribe(
+                on_right, scheduler=scheduler
+            )  # type: ignore[arg-type]
 
             class _Subscription:
                 def dispose(self) -> None:
@@ -1632,12 +4166,110 @@ class Graph:
         state_route: TypedRoute[T] | RouteRef,
     ) -> SubscriptionLike:
         """Mirror source updates into a state route owned by the topology."""
+        source_route = self._coerce_route_ref(source)
+
         def on_next(item: TypedEnvelope[T] | ClosedEnvelope) -> None:
             if isinstance(state_route, TypedRoute):
-                value = item.value if isinstance(item, TypedEnvelope) else state_route.schema.decode(bytes(item.payload_ref.inline_bytes))
-                self.publish(state_route, value)
+                if isinstance(source, TypedRoute):
+                    value = cast(T, self._operator_value(source, source_route, item))
+                else:
+                    value = state_route.schema.decode(
+                        self._resolve_payload_bytes(
+                            source_route, item, record_open=False
+                        )
+                    )
+                lineage = self._lineage_for_item(item)
+                self._extend_taints(
+                    self.publish(
+                        state_route,
+                        value,
+                        trace_id=lineage.trace_id,
+                        causality_id=lineage.causality_id,
+                        correlation_id=lineage.correlation_id,
+                        parent_events=(lineage.event,),
+                    ),
+                    self._item_taints(item),
+                )
             else:
-                self.publish(state_route, bytes(item.payload_ref.inline_bytes))
+                payload = (
+                    source.schema.encode(item.value)
+                    if isinstance(source, TypedRoute)
+                    and isinstance(item, TypedEnvelope)
+                    else self._resolve_payload_bytes(
+                        source_route, item, record_open=False
+                    )
+                )
+                lineage = self._lineage_for_item(item)
+                self._extend_taints(
+                    self.publish(
+                        state_route,
+                        payload,
+                        trace_id=lineage.trace_id,
+                        causality_id=lineage.causality_id,
+                        correlation_id=lineage.correlation_id,
+                        parent_events=(lineage.event,),
+                    ),
+                    self._item_taints(item),
+                )
+
+        return self.observe(source).subscribe(on_next)  # type: ignore[arg-type]
+
+    def repair_taints(
+        self,
+        source: TypedRoute[T] | RouteRef,
+        *,
+        output: TypedRoute[TOut] | RouteRef,
+        repair: TaintRepair,
+        transform: Callable[[T | bytes], TOut | bytes] | None = None,
+    ) -> SubscriptionLike:
+        """Publish repaired downstream events with explicit taint-clearing rules."""
+        source_route = self._coerce_route_ref(source)
+
+        def on_next(item: TypedEnvelope[T] | ClosedEnvelope) -> None:
+            value = self._operator_value(source, source_route, item)
+            emitted_value = value if transform is None else transform(value)
+            lineage = self._lineage_for_item(item)
+            if isinstance(output, TypedRoute):
+                emitted = self.publish(
+                    output,
+                    cast(TOut, emitted_value),
+                    trace_id=lineage.trace_id,
+                    causality_id=lineage.causality_id,
+                    correlation_id=lineage.correlation_id,
+                    parent_events=(lineage.event,),
+                )
+            else:
+                payload = (
+                    cast(bytes, emitted_value)
+                    if isinstance(emitted_value, (bytes, bytearray))
+                    else source.schema.encode(cast(T, emitted_value))
+                    if isinstance(source, TypedRoute)
+                    else self._resolve_payload_bytes(
+                        source_route, item, record_open=False
+                    )
+                )
+                emitted = self.publish(
+                    output,
+                    payload,
+                    trace_id=lineage.trace_id,
+                    causality_id=lineage.causality_id,
+                    correlation_id=lineage.correlation_id,
+                    parent_events=(lineage.event,),
+                )
+            self._apply_taint_repair(emitted, self._item_taints(item), repair=repair)
+            key = self._route_key(output)
+            note = (
+                f"{self._taint_domain_name(repair.domain)}:"
+                f"{repair.proof}"
+            )
+            notes = self._route_repair_notes.setdefault(key, [])
+            if note not in notes:
+                notes.append(note)
+            self._emit_debug_event(
+                "repair",
+                f"applied taint repair on {self._route_key(output)} with proof {repair.proof}",
+                output,
+            )
 
         return self.observe(source).subscribe(on_next)  # type: ignore[arg-type]
 
@@ -1688,8 +4320,8 @@ class Graph:
                         schema_id="RepartitionState",
                     )
                 )
-                self.connect(left_route, left_repartition)
-                self.connect(right_route, right_repartition)
+                self.connect(source=left_route, sink=left_repartition)
+                self.connect(source=right_route, sink=right_repartition)
                 plan = JoinPlan(
                     name=name,
                     join_class="repartition",
@@ -1742,8 +4374,8 @@ class Graph:
                     schema_id="RepartitionState",
                 )
             )
-            self.connect(left_route, left_repartition)
-            self.connect(right_route, right_repartition)
+            self.connect(source=left_route, sink=left_repartition)
+            self.connect(source=right_route, sink=right_repartition)
             plan = JoinPlan(
                 name=name,
                 join_class="repartition",
@@ -1754,9 +4386,13 @@ class Graph:
                 taint_implications=("deterministic_rekey",),
             )
         else:
-            raise ValueError("join partition keys are incompatible without repartition or broadcast")
+            raise ValueError(
+                "join partition keys are incompatible without repartition or broadcast"
+            )
         self._join_plans[name] = plan
-        self._emit_debug_event("join", f"planned {plan.join_class} join {name}", left_route)
+        self._emit_debug_event(
+            "join", f"planned {plan.join_class} join {name}", left_route
+        )
         return plan
 
     def explain_join(self, name: str) -> JoinPlan:
@@ -1766,13 +4402,17 @@ class Graph:
     def add_middleware(self, middleware: Middleware) -> Middleware:
         """Register middleware after enforcing RFC preservation rules."""
         if not middleware.preserves_envelope_identity:
-            raise ValueError("middleware must preserve envelope identity unless explicitly reframing")
+            raise ValueError(
+                "middleware must preserve envelope identity unless explicitly reframing"
+            )
         if not middleware.updates_taints:
             raise ValueError("middleware must preserve or update taints")
         if not middleware.updates_causality:
             raise ValueError("middleware must preserve or update causality")
         self._middlewares.append(middleware)
-        self._emit_debug_event("middleware", f"attached {middleware.kind} middleware {middleware.name}")
+        self._emit_debug_event(
+            "middleware", f"attached {middleware.kind} middleware {middleware.name}"
+        )
         return middleware
 
     def middleware(self) -> Iterator[Middleware]:
@@ -1782,7 +4422,9 @@ class Graph:
     def register_link(self, link: Link) -> Link:
         """Register a transport/link adapter."""
         self._links[link.name] = link
-        self._emit_debug_event("link_health", f"registered {link.link_class} link {link.name}")
+        self._emit_debug_event(
+            "link_health", f"registered {link.link_class} link {link.name}"
+        )
         return link
 
     def links(self) -> Iterator[Link]:
@@ -1791,7 +4433,10 @@ class Graph:
 
     def add_mesh_primitive(self, primitive: MeshPrimitive) -> MeshPrimitive:
         """Register an explicit mesh primitive in topology metadata."""
-        if primitive.kind in {"bridge", "mirror", "replicate"} and primitive.link_name is None:
+        if (
+            primitive.kind in {"bridge", "mirror", "replicate"}
+            and primitive.link_name is None
+        ):
             raise ValueError(f"{primitive.kind} requires a link")
         if primitive.link_name is not None and primitive.link_name not in self._links:
             raise KeyError(f"unknown link {primitive.link_name}")
@@ -1799,7 +4444,9 @@ class Graph:
             name=primitive.name,
             kind=primitive.kind,
             sources=tuple(self._coerce_route_ref(route) for route in primitive.sources),
-            destinations=tuple(self._coerce_route_ref(route) for route in primitive.destinations),
+            destinations=tuple(
+                self._coerce_route_ref(route) for route in primitive.destinations
+            ),
             link_name=primitive.link_name,
             ordering_policy=primitive.ordering_policy,
             state_budget=primitive.state_budget,
@@ -1812,9 +4459,11 @@ class Graph:
             self.register_port(destination)
         for source in normalized.sources:
             for destination in normalized.destinations:
-                self.connect(source, destination)
+                self.connect(source=source, sink=destination)
         self._mesh_primitives[normalized.name] = normalized
-        self._emit_debug_event("topology", f"registered mesh primitive {normalized.kind}:{normalized.name}")
+        self._emit_debug_event(
+            "topology", f"registered mesh primitive {normalized.kind}:{normalized.name}"
+        )
         return normalized
 
     def mesh_primitives(self) -> Iterator[MeshPrimitive]:
@@ -1846,25 +4495,42 @@ class Graph:
                     schema_id="QueryResponse",
                 )
             )
-            self._query_services[owner] = QueryServiceRoutes(request=request, response=response)
+            self._query_services[owner] = QueryServiceRoutes(
+                request=request, response=response
+            )
         return self._query_services[owner]
 
-    def query(self, request: QueryRequest, *, requester_id: str = "python", service_owner: str = "query") -> QueryResponse:
+    def query(
+        self,
+        request: QueryRequest,
+        *,
+        requester_id: str = "python",
+        service_owner: str = "query",
+    ) -> QueryResponse:
         """Execute a typed query through the query-plane stream model."""
         service = self.query_service(service_owner)
         correlation_id = request.correlation_id or self._correlation_id()
         request_payload = json.dumps(
             {
                 "command": request.command,
-                "route": None if request.route is None else self._route_key(request.route),
+                "route": None
+                if request.route is None
+                else self._route_key(request.route),
                 "join_name": request.join_name,
                 "principal_id": request.principal_id or requester_id,
                 "correlation_id": correlation_id,
+                "lineage_trace_id": request.lineage_trace_id,
+                "lineage_causality_id": request.lineage_causality_id,
+                "lineage_correlation_id": request.lineage_correlation_id,
             },
             sort_keys=True,
         ).encode()
-        request_envelope = self._graph.writable_port(service.request).write(request_payload)
-        self._record_envelope(service.request, request_envelope, producer_id=requester_id)
+        request_envelope = self._graph.writable_port(service.request).write(
+            request_payload
+        )
+        self._record_envelope(
+            service.request, request_envelope, producer_id=requester_id
+        )
         items = self._execute_query(
             QueryRequest(
                 command=request.command,
@@ -1872,9 +4538,14 @@ class Graph:
                 join_name=request.join_name,
                 principal_id=request.principal_id or requester_id,
                 correlation_id=correlation_id,
+                lineage_trace_id=request.lineage_trace_id,
+                lineage_causality_id=request.lineage_causality_id,
+                lineage_correlation_id=request.lineage_correlation_id,
             )
         )
-        response = QueryResponse(command=request.command, correlation_id=correlation_id, items=items)
+        response = QueryResponse(
+            command=request.command, correlation_id=correlation_id, items=items
+        )
         response_payload = json.dumps(
             {
                 "command": response.command,
@@ -1883,9 +4554,15 @@ class Graph:
             },
             sort_keys=True,
         ).encode()
-        response_envelope = self._graph.writable_port(service.response).write(response_payload)
-        self._record_envelope(service.response, response_envelope, producer_id="query_service")
-        self._emit_debug_event("audit", f"query {request.command} handled", service.response)
+        response_envelope = self._graph.writable_port(service.response).write(
+            response_payload
+        )
+        self._record_envelope(
+            service.response, response_envelope, producer_id="query_service"
+        )
+        self._emit_debug_event(
+            "audit", f"query {request.command} handled", service.response
+        )
         return response
 
     def debug_routes(self) -> Iterator[RouteRef]:
@@ -1895,4 +4572,10 @@ class Graph:
     def audit(self, route_ref: RouteLike | None = None) -> Iterator[DebugEvent]:
         """Return retained audit/debug events, optionally filtered by route."""
         route_display = None if route_ref is None else self._route_key(route_ref)
-        return iter(tuple(event for event in self._audit_events if route_display is None or event.route_display == route_display))
+        return iter(
+            tuple(
+                event
+                for event in self._audit_events
+                if route_display is None or event.route_display == route_display
+            )
+        )

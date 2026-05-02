@@ -14,6 +14,7 @@ class ClosedCounterLoopExampleResult(TypedDict):
     desired_latest: bytes
     effective_latest: bytes
     ack_latest: bytes
+    coherence_taints: tuple[str, ...]
 
 
 def run_example() -> ClosedCounterLoopExampleResult:
@@ -31,11 +32,13 @@ def run_example() -> ClosedCounterLoopExampleResult:
     assert binding.ack is not None
     graph.register_port(binding.ack)
 
-    graph.publish(binding.request, b"2")
-    graph.publish(binding.desired, b"2")
-    graph.publish(binding.reported, b"2")
-    graph.publish(binding.effective, b"2")
-    graph.publish(binding.ack, b"ok")
+    graph.publish(binding, b"2")
+    shadow = graph.reconcile_write_binding(
+        binding,
+        reported=b"2",
+        effective=b"2",
+        ack=b"ok",
+    )
 
     desired_latest = graph.latest(binding.desired)
     effective_latest = graph.latest(binding.effective)
@@ -48,9 +51,9 @@ def run_example() -> ClosedCounterLoopExampleResult:
         "desired_latest": desired_latest.payload_ref.inline_bytes,
         "effective_latest": effective_latest.payload_ref.inline_bytes,
         "ack_latest": ack_latest.payload_ref.inline_bytes,
+        "coherence_taints": shadow.coherence_taints,
     }
 
 
 if __name__ == "__main__":
     print(run_example())
-

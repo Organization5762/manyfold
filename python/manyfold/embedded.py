@@ -81,7 +81,9 @@ class EmbeddedRuntimeRules:
         if not self.separate_metadata_and_payload_early:
             issues.append("embedded routes should separate metadata and payload early")
         if not self.preserve_device_and_ingest_time:
-            issues.append("embedded routes must preserve device time and ingest time separately")
+            issues.append(
+                "embedded routes must preserve device time and ingest time separately"
+            )
         return tuple(issues)
 
     def bulk_issues(self) -> tuple[str, ...]:
@@ -89,9 +91,13 @@ class EmbeddedRuntimeRules:
         if not self.lazy_bulk_payload_open:
             issues.append("bulk payload opening should be lazy")
         if not self.prefer_zero_copy_bulk_payloads:
-            issues.append("bulk payload paths should prefer zero-copy or shared memory strategies")
+            issues.append(
+                "bulk payload paths should prefer zero-copy or shared memory strategies"
+            )
         if self.bulk_credit_policy != "bytes":
-            issues.append("bulk payload routes must use byte credits instead of count credits")
+            issues.append(
+                "bulk payload routes must use byte credits instead of count credits"
+            )
         return tuple(issues)
 
 
@@ -196,4 +202,3 @@ class EmbeddedDeviceProfile:
             firmware=self.firmware,
             rules=self.rules,
         )
-

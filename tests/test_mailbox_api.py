@@ -1,0 +1,167 @@
+from __future__ import annotations
+
+import unittest
+
+from tests.test_support import load_manyfold_graph_module
+
+
+def load_graph_module():
+    return load_manyfold_graph_module()
+
+
+class MailboxApiTests(unittest.TestCase):
+    def test_mailbox_snapshot_exposes_semantics_and_delivery_counters(self) -> None:
+        graph_module = load_graph_module()
+        source = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("sensor"),
+            family=graph_module.StreamFamily("events"),
+            stream=graph_module.StreamName("raw"),
+            variant=graph_module.Variant.Meta,
+            schema=graph_module.Schema.bytes("SensorEvent"),
+        )
+        sink = graph_module.route(
+            plane=graph_module.Plane.Write,
+            layer=graph_module.Layer.Internal,
+            owner=graph_module.OwnerName("worker"),
+            family=graph_module.StreamFamily("mailbox"),
+            stream=graph_module.StreamName("ingest"),
+            variant=graph_module.Variant.Request,
+            schema=graph_module.Schema.bytes("WorkerInbox"),
+        )
+        graph = graph_module.Graph()
+        mailbox = graph.mailbox(
+            "worker-inbox",
+            graph_module.NativeMailboxDescriptor(
+                capacity=2,
+                delivery_mode="mpmc_unique",
+                ordering_policy="round_robin_by_producer",
+                overflow_policy="drop_oldest",
+            ),
+        )
+        graph.connect(source=source, sink=mailbox)
+        graph.connect(source=mailbox, sink=sink)
+
+        graph.publish(source, b"one")
+        graph.publish(source, b"two")
+
+        snapshot = graph.mailbox_snapshot(mailbox)
+
+        self.assertEqual(snapshot.name, "worker-inbox")
+        self.assertEqual(snapshot.capacity, 2)
+        self.assertEqual(snapshot.delivery_mode, "mpmc_unique")
+        self.assertEqual(snapshot.ordering_policy, "round_robin_by_producer")
+        self.assertEqual(snapshot.overflow_policy, "drop_oldest")
+        self.assertEqual(snapshot.depth, 0)
+        self.assertEqual(snapshot.available_credit, 2)
+        self.assertEqual(snapshot.blocked_writes, 0)
+        self.assertEqual(snapshot.dropped_messages, 0)
+        self.assertEqual(snapshot.coalesced_messages, 0)
+        self.assertEqual(snapshot.delivered_messages, 2)
+
+    def test_mailbox_snapshot_tracks_coalesced_latest_updates(self) -> None:
+        graph_module = load_graph_module()
+        source = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("sensor"),
+            family=graph_module.StreamFamily("events"),
+            stream=graph_module.StreamName("raw"),
+            variant=graph_module.Variant.Meta,
+            schema=graph_module.Schema.bytes("SensorEvent"),
+        )
+        graph = graph_module.Graph()
+        mailbox = graph.mailbox(
+            "coalescing-inbox",
+            graph_module.NativeMailboxDescriptor(
+                capacity=1,
+                delivery_mode="mpsc_serial",
+                ordering_policy="latest_only",
+                overflow_policy="coalesce_latest",
+            ),
+        )
+        graph.connect(source=source, sink=mailbox)
+
+        graph.publish(source, b"one")
+        graph.publish(source, b"two")
+
+        snapshot = graph.mailbox_snapshot(mailbox)
+
+        self.assertEqual(snapshot.delivery_mode, "mpsc_serial")
+        self.assertEqual(snapshot.ordering_policy, "latest_only")
+        self.assertEqual(snapshot.depth, 1)
+        self.assertEqual(snapshot.available_credit, 0)
+        self.assertEqual(snapshot.dropped_messages, 0)
+        self.assertEqual(snapshot.coalesced_messages, 1)
+        self.assertEqual(snapshot.delivered_messages, 0)
+
+    def test_mailbox_snapshot_treats_reject_write_as_blocking_overflow(self) -> None:
+        graph_module = load_graph_module()
+        source = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("sensor"),
+            family=graph_module.StreamFamily("events"),
+            stream=graph_module.StreamName("raw"),
+            variant=graph_module.Variant.Meta,
+            schema=graph_module.Schema.bytes("SensorEvent"),
+        )
+        graph = graph_module.Graph()
+        mailbox = graph.mailbox(
+            "rejecting-inbox",
+            graph_module.NativeMailboxDescriptor(
+                capacity=1,
+                overflow_policy="reject_write",
+            ),
+        )
+        graph.connect(source=source, sink=mailbox)
+
+        graph.publish(source, b"one")
+        graph.publish(source, b"two")
+
+        snapshot = graph.mailbox_snapshot(mailbox)
+
+        self.assertEqual(snapshot.overflow_policy, "reject_write")
+        self.assertEqual(snapshot.depth, 1)
+        self.assertEqual(snapshot.available_credit, 0)
+        self.assertEqual(snapshot.blocked_writes, 1)
+        self.assertEqual(snapshot.dropped_messages, 0)
+        self.assertEqual(snapshot.coalesced_messages, 0)
+
+    def test_mailbox_snapshot_tracks_drop_style_overflow_policies(self) -> None:
+        graph_module = load_graph_module()
+
+        for overflow_policy in ("drop_newest", "deadline_drop", "spill_to_store"):
+            with self.subTest(overflow_policy=overflow_policy):
+                source = graph_module.route(
+                    plane=graph_module.Plane.Read,
+                    layer=graph_module.Layer.Logical,
+                    owner=graph_module.OwnerName("sensor"),
+                    family=graph_module.StreamFamily("events"),
+                    stream=graph_module.StreamName(overflow_policy),
+                    variant=graph_module.Variant.Meta,
+                    schema=graph_module.Schema.bytes("SensorEvent"),
+                )
+                graph = graph_module.Graph()
+                mailbox = graph.mailbox(
+                    f"{overflow_policy}-inbox",
+                    graph_module.NativeMailboxDescriptor(
+                        capacity=1,
+                        overflow_policy=overflow_policy,
+                    ),
+                )
+                graph.connect(source=source, sink=mailbox)
+
+                graph.publish(source, b"one")
+                graph.publish(source, b"two")
+
+                snapshot = graph.mailbox_snapshot(mailbox)
+
+                self.assertEqual(snapshot.overflow_policy, overflow_policy)
+                self.assertEqual(snapshot.depth, 1)
+                self.assertEqual(snapshot.available_credit, 0)
+                self.assertEqual(snapshot.blocked_writes, 0)
+                self.assertEqual(snapshot.dropped_messages, 1)
+                self.assertEqual(snapshot.coalesced_messages, 0)
+                self.assertEqual(snapshot.delivered_messages, 0)
