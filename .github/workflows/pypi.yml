@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Build source distribution
         uses: PyO3/maturin-action@v1
@@ -24,7 +24,7 @@ jobs:
           args: --out dist
 
       - name: Upload source distribution
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: sdist
           path: dist/*.tar.gz
@@ -46,7 +46,7 @@ jobs:
             target: x64
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Build wheel
         uses: PyO3/maturin-action@v1
@@ -56,7 +56,7 @@ jobs:
           manylinux: auto
 
       - name: Upload wheel
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: wheels-${{ matrix.os }}-${{ matrix.target }}
           path: dist/*.whl
@@ -73,7 +73,7 @@ jobs:
       url: https://pypi.org/p/manyfold
     steps:
       - name: Download distributions
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           pattern: "*"
           path: dist/
