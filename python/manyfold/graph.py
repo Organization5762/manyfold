@@ -1499,6 +1499,7 @@ class RoutePipeline(Generic[T]):
         subscriber_id: str | None = None,
         connections: Sequence[GraphConnection] = (),
         thread_placement: NodeThreadPlacement | None = None,
+        previous_thread_placements: Sequence[NodeThreadPlacement | None] = (),
     ) -> None:
         self._graph = graph
         self._route_ref = route_ref
@@ -1506,6 +1507,7 @@ class RoutePipeline(Generic[T]):
         self._subscriber_id = subscriber_id
         self._connections = tuple(connections)
         self._thread_placement = thread_placement
+        self._previous_thread_placements = tuple(previous_thread_placements)
 
     @property
     def route(self) -> RouteLike:
@@ -1684,6 +1686,20 @@ class RoutePipeline(Generic[T]):
             NodeThreadPlacement.pooled_thread(scheduler_name)
         )
 
+    def return_to_prior_thread(self) -> RoutePipeline[T]:
+        """Restore the thread placement active before the latest placement change."""
+        if not self._previous_thread_placements:
+            return self
+        return RoutePipeline(
+            self._graph,
+            self._route_ref,
+            replay_latest=self._replay_latest,
+            subscriber_id=self._subscriber_id,
+            connections=self._connections,
+            thread_placement=self._previous_thread_placements[-1],
+            previous_thread_placements=self._previous_thread_placements[:-1],
+        )
+
     def subscribe(
         self,
         observer: ObserverLike[T] | Callable[[T], None] | None = None,
@@ -1730,6 +1746,10 @@ class RoutePipeline(Generic[T]):
             subscriber_id=self._subscriber_id,
             connections=self._connections,
             thread_placement=placement,
+            previous_thread_placements=(
+                *self._previous_thread_placements,
+                self._thread_placement,
+            ),
         )
 
     def __getattr__(self, operation: str) -> Callable[..., Any]:
@@ -3440,6 +3460,7 @@ class Graph:
             replay_latest=False,
             connections=(*pipeline._connections, connection),
             thread_placement=thread_placement,
+            previous_thread_placements=pipeline._previous_thread_placements,
         )
 
     def _connect_coalesce_latest_pipeline(
@@ -3448,10 +3469,12 @@ class Graph:
         node: CoalesceLatestNode[T],
     ) -> RoutePipeline[T]:
         output = self._pipeline_output_route(node.name)
+        thread_placement = pipeline._thread_placement
         self.register_diagram_node(
             node.name,
             input_routes=(pipeline.route,),
             output_routes=(output,),
+            thread_placement=thread_placement,
         )
 
         def publish(value: T) -> None:
@@ -3462,6 +3485,7 @@ class Graph:
                 pipeline.route,
                 replay_latest=pipeline._replay_latest,
                 subscriber_id=pipeline._subscriber_id,
+                thread_placement=thread_placement,
             )
         )
         subscription = coalesced.subscribe(publish)
@@ -3476,6 +3500,8 @@ class Graph:
             output,
             replay_latest=False,
             connections=(*pipeline._connections, connection),
+            thread_placement=thread_placement,
+            previous_thread_placements=pipeline._previous_thread_placements,
         )
 
     def _connect_logging_pipeline(
@@ -3516,6 +3542,7 @@ class Graph:
             replay_latest=False,
             connections=(*pipeline._connections, connection),
             thread_placement=thread_placement,
+            previous_thread_placements=pipeline._previous_thread_placements,
         )
 
     def _apply_registered_pipeline_operation(
