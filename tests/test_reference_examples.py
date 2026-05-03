@@ -366,7 +366,7 @@ class ReferenceExampleSuiteTests(unittest.TestCase):
         self.assertIn("examples.lazy_lidar_payload", sys.modules)
         self.assertNotIn("examples.ephemeral_entropy_stream", sys.modules)
 
-    def test_reference_example_runner_uses_catalog_import_path_at_call_time(
+    def test_reference_example_runner_uses_captured_import_path(
         self,
     ) -> None:
         load_manyfold_package()
@@ -375,17 +375,12 @@ class ReferenceExampleSuiteTests(unittest.TestCase):
         fake_module = types.ModuleType(fake_module_name)
         fake_module.run_example = lambda: {"synthetic": True}
 
-        with mock.patch.object(
-            reference_examples,
-            "catalog_entry",
-            return_value=type("Metadata", (), {"import_path": fake_module_name})(),
-        ):
-            with mock.patch.dict(sys.modules, {fake_module_name: fake_module}):
-                runner = reference_examples._example_runner("ignored_module_name")
+        with mock.patch.dict(sys.modules, {fake_module_name: fake_module}):
+            runner = reference_examples._example_runner(fake_module_name)
 
-                self.assertEqual(runner(), {"synthetic": True})
+            self.assertEqual(runner(), {"synthetic": True})
 
-    def test_reference_example_runner_queries_catalog_with_requested_module_name(
+    def test_reference_example_runner_does_not_requery_catalog_at_call_time(
         self,
     ) -> None:
         load_manyfold_package()
@@ -394,17 +389,13 @@ class ReferenceExampleSuiteTests(unittest.TestCase):
         fake_module = types.ModuleType(fake_module_name)
         fake_module.run_example = lambda: {"synthetic": "args"}
 
-        with mock.patch.object(
-            reference_examples,
-            "catalog_entry",
-            return_value=type("Metadata", (), {"import_path": fake_module_name})(),
-        ) as catalog_entry_mock:
-            with mock.patch.dict(sys.modules, {fake_module_name: fake_module}):
-                runner = reference_examples._example_runner("raft_demo")
+        with mock.patch.dict(sys.modules, {fake_module_name: fake_module}):
+            runner = reference_examples._example_runner(fake_module_name)
+            reference_examples.reference_example_metadata = mock.Mock(
+                side_effect=AssertionError("catalog should not be queried by runner")
+            )
 
-                self.assertEqual(runner(), {"synthetic": "args"})
-
-        catalog_entry_mock.assert_called_once_with("raft_demo")
+            self.assertEqual(runner(), {"synthetic": "args"})
 
     def test_reference_example_suite_runners_cover_recent_example_result_fields(
         self,

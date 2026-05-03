@@ -23,7 +23,6 @@ try:
         REFERENCE_EXAMPLE_NUMBERS,
         ExampleCatalogEntry,
         ReferenceExampleGap,
-        catalog_entry,
         reference_example_metadata,
     )
 except ModuleNotFoundError as exc:
@@ -32,7 +31,6 @@ except ModuleNotFoundError as exc:
     REFERENCE_EXAMPLE_NUMBERS: tuple[int, ...] = ()
     ExampleCatalogEntry = Any
     ReferenceExampleGap = Any
-    catalog_entry = None
     reference_example_metadata = None
 
 __all__ = [
@@ -57,9 +55,9 @@ class ReferenceExample:
     runner: ExampleRunner | None = None
 
 
-def _example_runner(module_name: str) -> ExampleRunner:
+def _example_runner(import_path: str) -> ExampleRunner:
     def run() -> Any:
-        return import_module(catalog_entry(module_name).import_path).run_example()
+        return import_module(import_path).run_example()
 
     return run
 
@@ -73,7 +71,7 @@ def _implemented_reference_example(metadata: ExampleCatalogEntry) -> ReferenceEx
         summary=metadata.summary,
         implemented=True,
         module_name=metadata.module_name,
-        runner=_example_runner(metadata.module_name),
+        runner=_example_runner(metadata.import_path),
     )
 
 
