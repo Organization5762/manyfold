@@ -156,7 +156,7 @@ class Keyspace:
     def _directory_path(self, key: Key) -> Path:
         path = self.store.root
         for part in key:
-            path /= quote(part, safe="")
+            path /= _encode_key_part(part)
         return path
 
     def _value_path(self, key: Key) -> Path:
@@ -164,7 +164,7 @@ class Keyspace:
 
     def _key_from_value_path(self, path: Path) -> Key:
         relative = path.relative_to(self.store.root)
-        return tuple(unquote(part) for part in relative.parts[:-1])
+        return tuple(_decode_key_part(part) for part in relative.parts[:-1])
 
 
 class EventLog(Generic[T]):
@@ -728,7 +728,27 @@ _VALUE_FILENAME = "__value__.bin"
 
 
 def _normalize_key(parts: tuple[KeyPart, ...]) -> Key:
-    return tuple(str(part) for part in parts)
+    key = tuple(str(part) for part in parts)
+    if any("\x00" in part for part in key):
+        raise ValueError("key parts cannot contain NUL bytes")
+    return key
+
+
+def _encode_key_part(part: str) -> str:
+    encoded = quote(part, safe="")
+    if encoded == "":
+        return "%00"
+    if encoded == ".":
+        return "%2E"
+    if encoded == "..":
+        return "%2E%2E"
+    return encoded
+
+
+def _decode_key_part(part: str) -> str:
+    if part == "%00":
+        return ""
+    return unquote(part)
 
 
 def _has_prefix(key: Key, prefix: Key) -> bool:

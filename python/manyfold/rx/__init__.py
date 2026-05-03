@@ -6,40 +6,43 @@ underlying implementation evolves.
 """
 
 from reactivex import *  # noqa: F403
-from reactivex import Observable as Observable
-from . import abc as abc
-from reactivex import amb as amb
-from reactivex import case as case
-from reactivex import catch as catch
-from reactivex import combine_latest as combine_latest
-from reactivex import concat as concat
-from reactivex import create as create
-from reactivex import defer as defer
-from reactivex import empty as empty
-from reactivex import fork_join as fork_join
-from reactivex import from_callable as from_callable
-from reactivex import from_callback as from_callback
-from reactivex import from_future as from_future
-from reactivex import from_iterable as from_iterable
-from reactivex import from_marbles as from_marbles
-from reactivex import generate as generate
-from reactivex import generate_with_relative_time as generate_with_relative_time
-from reactivex import if_then as if_then
-from reactivex import interval as interval
-from reactivex import just as just
-from reactivex import merge as merge
-from reactivex import never as never
-from reactivex import of as of
-from reactivex import operators as operators
-from reactivex import pipe as pipe
-from reactivex import range as range
-from reactivex import repeat_value as repeat_value
-from reactivex import return_value as return_value
-from reactivex import start as start
-from reactivex import start_async as start_async
-from reactivex import throw as throw
-from reactivex import timer as timer
-from reactivex import to_async as to_async
-from reactivex import using as using
-from reactivex import with_latest_from as with_latest_from
+from reactivex import (
+    Observable as Observable,
+    amb as amb,
+    case as case,
+    catch as catch,
+    combine_latest as combine_latest,
+    concat as concat,
+    create as create,
+    defer as defer,
+    empty as empty,
+    fork_join as fork_join,
+    from_callable as from_callable,
+    from_callback as from_callback,
+    from_future as from_future,
+    from_iterable as from_iterable,
+    from_marbles as from_marbles,
+    generate as generate,
+    generate_with_relative_time as generate_with_relative_time,
+    if_then as if_then,
+    interval as interval,
+    just as just,
+    merge as merge,
+    never as never,
+    of as of,
+    operators as operators,
+    pipe as pipe,
+    range as range,
+    repeat_value as repeat_value,
+    return_value as return_value,
+    start as start,
+    start_async as start_async,
+    throw as throw,
+    timer as timer,
+    to_async as to_async,
+    using as using,
+    with_latest_from as with_latest_from,
+)
 from reactivex.subject import Subject as Subject
+
+from . import abc as abc

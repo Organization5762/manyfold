@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import threading
 import tempfile
+import threading
 import unittest
 from dataclasses import dataclass
 from pathlib import Path

@@ -33,6 +33,42 @@ class ComponentTests(unittest.TestCase):
             ],
         )
 
+    def test_file_store_keeps_special_key_parts_inside_root(self) -> None:
+        manyfold = load_manyfold_package()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir) / "store"
+            store = manyfold.FileStore(root)
+            keyspace = store.prefix("safe")
+
+            keyspace.put("..", value=b"parent")
+            keyspace.put(".", value=b"current")
+            keyspace.put("", value=b"empty")
+            entries = keyspace.scan()
+            outside_path = root.parent / "__value__.bin"
+
+            self.assertFalse(outside_path.exists())
+            self.assertEqual(keyspace.get(".."), b"parent")
+            self.assertEqual(keyspace.get("."), b"current")
+            self.assertEqual(keyspace.get(""), b"empty")
+            self.assertEqual(
+                [(entry.key, entry.value) for entry in entries],
+                [
+                    (("",), b"empty"),
+                    ((".",), b"current"),
+                    (("..",), b"parent"),
+                ],
+            )
+
+    def test_file_store_rejects_nul_key_parts(self) -> None:
+        manyfold = load_manyfold_package()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = manyfold.FileStore(temp_dir)
+
+            with self.assertRaisesRegex(ValueError, "NUL"):
+                store.put("bad\x00key", value=b"nope")
+
     def test_event_log_appends_commits_and_replays_typed_values(self) -> None:
         manyfold = load_manyfold_package()
         schema = manyfold.Schema(
