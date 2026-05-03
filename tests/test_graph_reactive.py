@@ -81,6 +81,32 @@ class GraphReactiveTests(unittest.TestCase):
         self.assertEqual([item.value for item in observed], [b"second"])
         self.assertEqual(graph.subscribers(route), 0)
 
+    def test_observe_rolls_back_subscriber_tracking_when_latest_replay_fails(
+        self,
+    ) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("imu"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("faulty_replay"),
+            variant=graph_module.Variant.Meta,
+            schema=graph_module.Schema.bytes("FaultyReplay"),
+        )
+        graph = graph_module.Graph()
+
+        graph.publish(route, b"first")
+
+        def fail(_envelope) -> None:
+            raise RuntimeError("observer rejected replay")
+
+        with self.assertRaisesRegex(RuntimeError, "observer rejected replay"):
+            graph.observe(route, subscriber_id="dashboard").subscribe(fail)
+
+        self.assertEqual(graph.subscribers(route), 0)
+        self.assertEqual(graph.route_audit(route).active_subscribers, ())
+
     def test_pipe_binds_rx_source_into_writable_port(self) -> None:
         graph_module = load_graph_module()
         route = graph_module.route(

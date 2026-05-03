@@ -2725,10 +2725,6 @@ class Graph:
             resolved_subscriber_id = subscriber_id or self._next_subscriber_id()
             self._subscriber_count[key] = self._subscriber_count.get(key, 0) + 1
             self._route_subscribers.setdefault(key, set()).add(resolved_subscriber_id)
-            if replay_latest:
-                latest = self.latest(route_ref)
-                if latest is not None:
-                    observer.on_next(latest)
 
             if typed_route is not None:
                 # Typed observers see decoded values, but the graph internally
@@ -2750,6 +2746,18 @@ class Graph:
                 inner = self._subject_for(native_route).subscribe(
                     observer, scheduler=scheduler
                 )
+            try:
+                if replay_latest:
+                    latest = self.latest(route_ref)
+                    if latest is not None:
+                        observer.on_next(latest)
+            except Exception:
+                self._subscriber_count[key] -= 1
+                subscribers = self._route_subscribers.get(key)
+                if subscribers is not None:
+                    subscribers.discard(resolved_subscriber_id)
+                inner.dispose()
+                raise
             return _TrackedSubscription(
                 self,
                 native_route,
