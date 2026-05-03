@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import threading
 import unittest
@@ -166,6 +167,53 @@ class SensorIoTests(unittest.TestCase):
         self.assertEqual(decoded.identity.id, "radio-1")
         self.assertEqual(decoded.identity.tags[0].variant, "radio")
         self.assertEqual(decoded.raw, b'{"payload":[97,98,99]}')
+
+    def test_sensor_sample_schema_rejects_invalid_value_base64(self) -> None:
+        manyfold = load_manyfold_package()
+        schema = manyfold.sensor_sample_schema(_int_schema(manyfold, "Temp"))
+        payload = {
+            "value": "not base64!",
+            "source_timestamp": 1.0,
+            "ingest_timestamp": 1.5,
+            "sequence_number": 1,
+            "quality": None,
+            "status": None,
+        }
+
+        with self.assertRaisesRegex(ValueError, "value must be valid base64"):
+            schema.decode(json.dumps(payload).encode("utf-8"))
+
+    def test_sensor_event_schema_rejects_invalid_nested_bytes_base64(self) -> None:
+        manyfold = load_manyfold_package()
+        schema = manyfold.sensor_event_schema()
+        payload = {
+            "event_type": "radio.packet",
+            "data": {"payload": {"__bytes_b64__": "not base64!"}},
+            "observed_at": 1.5,
+            "identity": {},
+            "sequence_number": 7,
+            "raw": "also not base64!",
+            "metadata": {},
+        }
+
+        with self.assertRaisesRegex(ValueError, "__bytes_b64__ must be valid base64"):
+            schema.decode(json.dumps(payload).encode("utf-8"))
+
+    def test_sensor_event_schema_rejects_invalid_raw_base64(self) -> None:
+        manyfold = load_manyfold_package()
+        schema = manyfold.sensor_event_schema()
+        payload = {
+            "event_type": "radio.packet",
+            "data": {},
+            "observed_at": 1.5,
+            "identity": {},
+            "sequence_number": 7,
+            "raw": "not base64!",
+            "metadata": {},
+        }
+
+        with self.assertRaisesRegex(ValueError, "raw must be valid base64"):
+            schema.decode(json.dumps(payload).encode("utf-8"))
 
     def test_sequence_counter_assigns_monotonic_numbers(self) -> None:
         manyfold = load_manyfold_package()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import codecs
 import json
 import threading
@@ -699,7 +700,7 @@ def sensor_sample_schema(value_schema: Schema[T], schema_id: str | None = None) 
 
     def decode(payload: bytes) -> SensorSample[T]:
         data = json.loads(payload.decode("utf-8"))
-        value = value_schema.decode(base64.b64decode(data["value"]))
+        value = value_schema.decode(_decode_base64_field(data["value"], "value"))
         return SensorSample(
             value=value,
             source_timestamp=float(data["source_timestamp"]),
@@ -747,7 +748,7 @@ def sensor_event_schema(schema_id: str = "SensorEvent") -> Schema[SensorEvent]:
             observed_at=float(data["observed_at"]),
             identity=_sensor_identity_from_json(data.get("identity")),
             sequence_number=data.get("sequence_number"),
-            raw=None if raw is None else base64.b64decode(raw),
+            raw=None if raw is None else _decode_base64_field(raw, "raw"),
             metadata=_json_restore(data.get("metadata", {})),
         )
 
@@ -1479,7 +1480,7 @@ def _json_safe(value: Any) -> Any:
 def _json_restore(value: Any) -> Any:
     if isinstance(value, Mapping):
         if set(value) == {"__bytes_b64__"}:
-            return base64.b64decode(str(value["__bytes_b64__"]))
+            return _decode_base64_field(value["__bytes_b64__"], "__bytes_b64__")
         return {str(key): _json_restore(item) for key, item in value.items()}
     if isinstance(value, list):
         return [_json_restore(item) for item in value]
@@ -1518,6 +1519,15 @@ def _sensor_identity_from_json(value: Any) -> SensorIdentity:
         location=location,
         group=value.get("group"),
     )
+
+
+def _decode_base64_field(value: Any, field: str) -> bytes:
+    if not isinstance(value, str):
+        raise ValueError(f"{field} must be a base64 string")
+    try:
+        return base64.b64decode(value, validate=True)
+    except binascii.Error as exc:
+        raise ValueError(f"{field} must be valid base64") from exc
 
 
 def _identity_from_peripheral_item(item: Any, group: str | None) -> SensorIdentity:
