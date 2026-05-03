@@ -8,25 +8,28 @@ enough to deserve first-class status.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
-from typing import Callable
-from typing import Generic
-from typing import Protocol
-from typing import TypeVar
-from typing import cast
-from typing import overload
-from typing import runtime_checkable
+from typing import (
+    Any,
+    Callable,
+    Generic,
+    Protocol,
+    TypeVar,
+    cast,
+    overload,
+    runtime_checkable,
+)
 
-from reactivex import Observable
-from reactivex import operators as ops
+from reactivex import Observable, operators as ops
 
-from ._manyfold_rust import ClosedEnvelope
-from ._manyfold_rust import Layer
-from ._manyfold_rust import NamespaceRef
-from ._manyfold_rust import Plane
-from ._manyfold_rust import RouteRef
-from ._manyfold_rust import SchemaRef
-from ._manyfold_rust import Variant
+from ._manyfold_rust import (
+    ClosedEnvelope,
+    Layer,
+    NamespaceRef,
+    Plane,
+    RouteRef,
+    SchemaRef,
+    Variant,
+)
 
 T = TypeVar("T")
 TRead = TypeVar("TRead")

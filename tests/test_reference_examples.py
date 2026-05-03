@@ -2,21 +2,22 @@ from __future__ import annotations
 
 import ast
 import importlib.util
-import types
-from pathlib import Path
 import sys
+import types
 import unittest
+from pathlib import Path
 from unittest import mock
 
-from examples import ARCHIVED_EXAMPLE_ENTRIES
-from examples import EXAMPLE_CATALOG
-from examples import REFERENCE_EXAMPLE_ENTRIES
-from examples import REFERENCE_EXAMPLE_GAPS
-from examples import REFERENCE_EXAMPLE_NUMBERS
-from examples import SUPPORTED_EXAMPLE_ENTRIES
-from examples import reference_example_metadata
-from tests.test_support import load_example_module
-from tests.test_support import load_manyfold_package
+from examples import (
+    ARCHIVED_EXAMPLE_ENTRIES,
+    EXAMPLE_CATALOG,
+    REFERENCE_EXAMPLE_ENTRIES,
+    REFERENCE_EXAMPLE_GAPS,
+    REFERENCE_EXAMPLE_NUMBERS,
+    SUPPORTED_EXAMPLE_ENTRIES,
+    reference_example_metadata,
+)
+from tests.test_support import load_example_module, load_manyfold_package
 
 
 class ReferenceExampleSuiteTests(unittest.TestCase):
@@ -357,7 +358,7 @@ class ReferenceExampleSuiteTests(unittest.TestCase):
     def test_reference_example_runner_uses_catalog_import_path_at_call_time(
         self,
     ) -> None:
-        manyfold = load_manyfold_package()
+        load_manyfold_package()
         reference_examples = sys.modules["manyfold.reference_examples"]
         fake_module_name = "examples.synthetic_runner_target"
         fake_module = types.ModuleType(fake_module_name)
@@ -376,7 +377,7 @@ class ReferenceExampleSuiteTests(unittest.TestCase):
     def test_reference_example_runner_queries_catalog_with_requested_module_name(
         self,
     ) -> None:
-        manyfold = load_manyfold_package()
+        load_manyfold_package()
         reference_examples = sys.modules["manyfold.reference_examples"]
         fake_module_name = "examples.synthetic_runner_target_args"
         fake_module = types.ModuleType(fake_module_name)

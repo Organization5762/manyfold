@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-import os
 import importlib
 import importlib.util
+import os
 import sys
 import types
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_DIR = REPO_ROOT / "python" / "manyfold"

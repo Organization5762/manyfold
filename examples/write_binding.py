@@ -1,11 +1,6 @@
 from __future__ import annotations
 
-from manyfold import Graph
-from manyfold import OwnerName
-from manyfold import Schema
-from manyfold import StreamFamily
-from manyfold import StreamName
-from manyfold import WriteBindings
+from manyfold import Graph, OwnerName, Schema, StreamFamily, StreamName, WriteBindings
 
 
 def run_example() -> dict[str, bytes]:

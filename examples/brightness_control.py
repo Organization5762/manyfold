@@ -3,15 +3,16 @@ from __future__ import annotations
 from typing import TypedDict
 
 import reactivex as rx
-
-from manyfold import Graph
-from manyfold import Layer
-from manyfold import ReadThenWriteNextEpochStep
-from manyfold import RouteIdentity
-from manyfold import RouteNamespace
-from manyfold import Variant
-from manyfold import route
-from manyfold import Plane
+from manyfold import (
+    Graph,
+    Layer,
+    Plane,
+    ReadThenWriteNextEpochStep,
+    RouteIdentity,
+    RouteNamespace,
+    Variant,
+    route,
+)
 
 
 class BrightnessControlExampleResult(TypedDict):

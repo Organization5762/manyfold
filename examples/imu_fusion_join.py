@@ -2,14 +2,9 @@ from __future__ import annotations
 
 from typing import TypedDict
 
-from manyfold import Graph
-from manyfold import Layer
-from manyfold import Plane
-from manyfold import Schema
-from manyfold import Variant
+from manyfold import Graph, Layer, Plane, Schema, Variant
 
-from ._shared import example_route
-from ._shared import int_schema
+from ._shared import example_route, int_schema
 
 
 class ImuFusionJoinExampleResult(TypedDict):

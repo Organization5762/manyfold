@@ -3,28 +3,24 @@
 from __future__ import annotations
 
 import base64
-from dataclasses import dataclass
 import json
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
-from typing import Generic
-from typing import Iterator
-from typing import TypeVar
-from urllib.parse import quote
-from urllib.parse import unquote
+from typing import Any, Generic, Iterator, TypeVar
+from urllib.parse import quote, unquote
 
-from ._manyfold_rust import Layer
-from ._manyfold_rust import Plane
-from ._manyfold_rust import Variant
+from ._manyfold_rust import Layer, Plane, Variant
 from .graph import Graph
-from .primitives import OwnerName
-from .primitives import Schema
-from .primitives import StreamFamily
-from .primitives import StreamName
-from .primitives import SubscriptionLike
-from .primitives import TypedEnvelope
-from .primitives import TypedRoute
-from .primitives import route
+from .primitives import (
+    OwnerName,
+    Schema,
+    StreamFamily,
+    StreamName,
+    SubscriptionLike,
+    TypedEnvelope,
+    TypedRoute,
+    route,
+)
 
 T = TypeVar("T")
 KeyPart = str | int

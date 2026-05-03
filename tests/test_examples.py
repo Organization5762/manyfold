@@ -1,45 +1,49 @@
 from __future__ import annotations
 
-from dataclasses import replace
 import importlib.util
-from pathlib import Path
 import re
 import subprocess
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
+from pathlib import Path
 from unittest import mock
 
-from examples import ARCHIVED_EXAMPLE_ENTRIES
-from examples import ARCHIVED_EXAMPLE_MODULES
-from examples import EXAMPLE_CATALOG
-from examples import EXAMPLE_CATALOG_BY_MODULE
-from examples import ExampleCatalogEntry
-from examples import README_EXAMPLE_ENTRIES
-from examples import README_FEATURED_EXAMPLES_END
-from examples import README_FEATURED_EXAMPLES_START
-from examples import README_EXAMPLE_MODULES
-from examples import REFERENCE_EXAMPLE_ENTRIES
-from examples import REFERENCE_EXAMPLE_ENTRY_BY_NUMBER
-from examples import REFERENCE_EXAMPLE_GAPS
-from examples import REFERENCE_EXAMPLE_IMPLEMENTED_COUNT
-from examples import REFERENCE_EXAMPLE_NUMBERS
-from examples import REFERENCE_EXAMPLE_PROGRESS_DETAIL
-from examples import ReferenceExampleGap
-from examples import SUPPORTED_EXAMPLE_ENTRIES
-from examples import SUPPORTED_EXAMPLE_MODULES
-from examples import catalog_entry
-from examples import reference_example_metadata
-from examples._catalog import _discover_manifestable_modules
+from examples import (
+    ARCHIVED_EXAMPLE_ENTRIES,
+    ARCHIVED_EXAMPLE_MODULES,
+    EXAMPLE_CATALOG,
+    EXAMPLE_CATALOG_BY_MODULE,
+    README_EXAMPLE_ENTRIES,
+    README_EXAMPLE_MODULES,
+    README_FEATURED_EXAMPLES_END,
+    README_FEATURED_EXAMPLES_START,
+    REFERENCE_EXAMPLE_ENTRIES,
+    REFERENCE_EXAMPLE_ENTRY_BY_NUMBER,
+    REFERENCE_EXAMPLE_GAPS,
+    REFERENCE_EXAMPLE_IMPLEMENTED_COUNT,
+    REFERENCE_EXAMPLE_NUMBERS,
+    REFERENCE_EXAMPLE_PROGRESS_DETAIL,
+    SUPPORTED_EXAMPLE_ENTRIES,
+    SUPPORTED_EXAMPLE_MODULES,
+    ExampleCatalogEntry,
+    ReferenceExampleGap,
+    catalog_entry,
+    reference_example_metadata,
+)
+from examples._catalog import (
+    _discover_manifestable_modules,
+    render_readme_featured_examples,
+    sync_readme_featured_examples,
+)
 from examples._exports import CATALOG_EXPORTS
-from examples._catalog import render_readme_featured_examples
-from examples._catalog import sync_readme_featured_examples
-from examples._shared import example_route
-from examples._shared import int_schema
-from examples._shared import sibling_route
-from tests.test_support import load_manyfold_package
-from tests.test_support import load_example_module
-from tests.test_support import subprocess_test_env
+from examples._shared import example_route, int_schema, sibling_route
+from tests.test_support import (
+    load_example_module,
+    load_manyfold_package,
+    subprocess_test_env,
+)
 
 
 class ExampleTests(unittest.TestCase):

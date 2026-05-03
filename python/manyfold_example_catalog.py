@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
-import sys
 
 MODULE_PATH = Path(__file__).resolve()
 PYTHON_DIR = MODULE_PATH.parent

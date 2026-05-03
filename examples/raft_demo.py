@@ -2,11 +2,8 @@ from __future__ import annotations
 
 from typing import TypedDict
 
-from manyfold import Consensus
-from manyfold import Graph
-from manyfold.components import LeaderState
-from manyfold.components import QuorumState
-from manyfold.components import ReplicatedLog
+from manyfold import Consensus, Graph
+from manyfold.components import LeaderState, QuorumState, ReplicatedLog
 
 
 class RaftDemoExampleResult(TypedDict):

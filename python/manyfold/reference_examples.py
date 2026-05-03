@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from importlib import import_module
 from pathlib import Path
-import sys
-from typing import Any
-from typing import Callable
+from typing import Any, Callable
 
 try:
     from ._repo_paths import ensure_repo_import_paths
@@ -19,11 +18,13 @@ except ImportError:
 
 ensure_repo_import_paths()
 
-from examples import catalog_entry
-from examples import ExampleCatalogEntry
-from examples import REFERENCE_EXAMPLE_NUMBERS
-from examples import ReferenceExampleGap
-from examples import reference_example_metadata
+from examples import (
+    REFERENCE_EXAMPLE_NUMBERS,
+    ExampleCatalogEntry,
+    ReferenceExampleGap,
+    catalog_entry,
+    reference_example_metadata,
+)
 
 __all__ = [
     "REFERENCE_EXAMPLE_SUITE",

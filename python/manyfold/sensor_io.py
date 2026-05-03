@@ -2,33 +2,29 @@
 
 from __future__ import annotations
 
-from collections import deque
-import codecs
-from dataclasses import asdict
-from dataclasses import dataclass
-from dataclasses import field
-from dataclasses import is_dataclass
-from enum import Enum
 import base64
+import codecs
 import json
 import time
-from typing import Any
-from typing import Callable
-from typing import Generic
-from typing import Iterable
-from typing import Iterator
-from typing import Literal
-from typing import Mapping
-from typing import Protocol
-from typing import Sequence
-from typing import TypeVar
+from collections import deque
+from dataclasses import asdict, dataclass, field, is_dataclass
+from enum import Enum
+from typing import (
+    Any,
+    Callable,
+    Generic,
+    Iterable,
+    Iterator,
+    Literal,
+    Mapping,
+    Protocol,
+    Sequence,
+    TypeVar,
+)
 
-from .components import EventLog
-from .components import Keyspace
+from .components import EventLog, Keyspace
 from .graph import Graph
-from .primitives import Schema
-from .primitives import SubscriptionLike
-from .primitives import TypedRoute
+from .primitives import Schema, SubscriptionLike, TypedRoute
 
 T = TypeVar("T")
 TFrame = TypeVar("TFrame")
