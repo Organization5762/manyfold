@@ -257,10 +257,40 @@ if _UNKNOWN_REQUIREMENTS:
     unknown = ", ".join(_UNKNOWN_REQUIREMENTS)
     raise RuntimeError(f"lego catalog references unknown dependencies: {unknown}")
 
+# Query helpers return immutable tuples, so precompute the small static indexes once.
+_ALL_LEGOS = tuple(sorted(_LEGOS, key=lambda lego: lego.name))
+_DEPENDENCIES_BY_NAME = {
+    lego.name: tuple(_BY_NAME[requirement] for requirement in lego.requires)
+    for lego in _LEGOS
+}
+
+_dependents_by_name: dict[str, list[Lego]] = {lego.name: [] for lego in _LEGOS}
+_legos_by_role: dict[str, list[Lego]] = {}
+_legos_by_layer: dict[str, list[Lego]] = {}
+for lego in _LEGOS:
+    for requirement in lego.requires:
+        _dependents_by_name[requirement].append(lego)
+    _legos_by_role.setdefault(lego.role, []).append(lego)
+    _legos_by_layer.setdefault(lego.layer, []).append(lego)
+
+_DEPENDENTS_BY_NAME = {
+    name: tuple(sorted(dependents, key=lambda lego: lego.name))
+    for name, dependents in _dependents_by_name.items()
+}
+_LEGOS_BY_ROLE = {
+    role: tuple(sorted(legos, key=lambda lego: lego.name))
+    for role, legos in _legos_by_role.items()
+}
+_LEGOS_BY_LAYER = {
+    layer: tuple(sorted(legos, key=lambda lego: lego.name))
+    for layer, legos in _legos_by_layer.items()
+}
+del _dependents_by_name, _legos_by_layer, _legos_by_role
+
 
 def all_legos() -> tuple[Lego, ...]:
     """Return every known lego sorted by name."""
-    return tuple(sorted(_LEGOS, key=lambda lego: lego.name))
+    return _ALL_LEGOS
 
 
 def get_lego(name: str) -> Lego:
@@ -273,24 +303,24 @@ def get_lego(name: str) -> Lego:
 
 def dependencies_of(name: str) -> tuple[Lego, ...]:
     """Return direct dependencies for one lego in declared order."""
-    lego = get_lego(name)
-    return tuple(get_lego(requirement) for requirement in lego.requires)
+    get_lego(name)
+    return _DEPENDENCIES_BY_NAME[name]
 
 
 def dependents_of(name: str) -> tuple[Lego, ...]:
     """Return legos that directly depend on ``name`` sorted by name."""
     get_lego(name)
-    return tuple(sorted((lego for lego in _LEGOS if name in lego.requires), key=lambda lego: lego.name))
+    return _DEPENDENTS_BY_NAME[name]
 
 
 def legos_by_role(role: str) -> tuple[Lego, ...]:
     """Return legos with the requested primary role sorted by name."""
-    return tuple(sorted((lego for lego in _LEGOS if lego.role == role), key=lambda lego: lego.name))
+    return _LEGOS_BY_ROLE.get(role, ())
 
 
 def legos_by_layer(layer: str) -> tuple[Lego, ...]:
     """Return legos in the requested dependency layer sorted by name."""
-    return tuple(sorted((lego for lego in _LEGOS if lego.layer == layer), key=lambda lego: lego.name))
+    return _LEGOS_BY_LAYER.get(layer, ())
 
 
 __all__ = [
