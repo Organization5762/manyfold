@@ -35,6 +35,7 @@ from ._rx.scheduler import (
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
+TStarting = TypeVar("TStarting")
 StartableTarget = Callable[..., None]
 
 FRAME_THREAD_LATENCY_STREAM = "frame_thread_handoff"
@@ -63,6 +64,13 @@ class _SchedulerState:
 class _FrameThreadTask:
     callback: Callable[[], None]
     enqueued_monotonic: float
+
+
+class _NoStartingValue:
+    pass
+
+
+_NO_STARTING_VALUE = _NoStartingValue()
 
 
 class _LatencyRecorder:
@@ -278,11 +286,27 @@ def deliver_on_frame_thread(source: Observable[T]) -> Observable[T]:
     return rx.create(_subscribe)
 
 
-def pipe_in_background(source: Observable[T], *operators: Any) -> Observable[Any]:
+def start_with_once(value: TStarting) -> Callable[[Observable[T]], Observable[Any]]:
+    """Prepend one value to a stream for each subscription."""
+
+    def _start(source: Observable[T]) -> Observable[Any]:
+        return source.pipe(ops.start_with(value))
+
+    return _start
+
+
+def pipe_in_background(
+    source: Observable[T],
+    *operators: Any,
+    starting_value: TStarting | _NoStartingValue = _NO_STARTING_VALUE,
+) -> Observable[Any]:
     """Apply operators to a source and share the resulting observable."""
 
     logger.debug("Building background pipeline.")
-    return pipe(source, *operators, ops.share())
+    resolved_operators = operators
+    if not isinstance(starting_value, _NoStartingValue):
+        resolved_operators = (*operators, start_with_once(starting_value))
+    return pipe(source, *resolved_operators, ops.share())
 
 
 def pipe_in_main_thread(source: Observable[T], *operators: Any) -> Observable[Any]:
@@ -472,5 +496,6 @@ __all__ = [
     "reset_reactive_threading_state_for_tests",
     "scheduler_diagnostics",
     "share_sequence",
+    "start_with_once",
     "shutdown",
 ]

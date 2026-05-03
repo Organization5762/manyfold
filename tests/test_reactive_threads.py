@@ -131,6 +131,28 @@ class ReactiveThreadsTests(unittest.TestCase):
         self.assertEqual(background_values, [2, 4, 6])
         self.assertEqual(main_thread_values, [11, 12])
 
+    def test_pipe_in_background_emits_starting_value_once_per_subscription(self) -> None:
+        source = self.rx.Subject()
+        values: list[int | None] = []
+
+        self.reactive_threads.pipe_in_background(
+            source,
+            starting_value=None,
+        ).subscribe(values.append)
+        source.on_next(1)
+        source.on_next(2)
+
+        self.assertEqual(values, [None, 1, 2])
+
+    def test_start_with_once_prepends_value_to_source(self) -> None:
+        values: list[int] = []
+
+        self.rx.from_iterable([2, 3]).pipe(
+            self.reactive_threads.start_with_once(1)
+        ).subscribe(values.append)
+
+        self.assertEqual(values, [1, 2, 3])
+
     def test_share_sequence_exposes_iterable_as_observable(self) -> None:
         values: list[str] = []
 
