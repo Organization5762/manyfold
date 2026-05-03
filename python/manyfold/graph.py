@@ -5135,7 +5135,8 @@ class Graph:
         Event timestamps default to `control_epoch` when present and fall back
         to `seq_source` otherwise. When `watermark` is omitted, source events
         advance watermark progress implicitly. When `watermark` is present, the
-        source buffers values and emits only as watermarks advance.
+        source buffers values and emits only as watermarks advance. Explicit
+        watermark progress is retained even when it arrives before source data.
         """
         if width <= 0:
             raise ValueError("window width must be positive")
@@ -5150,6 +5151,7 @@ class Graph:
         ) -> SubscriptionLike:
             buffers: dict[Hashable | None, deque[tuple[int, T | bytes]]] = {}
             watermarks: dict[Hashable | None, int] = {}
+            latest_watermark: int | None = None
 
             def partition_key_for(value: T | bytes) -> Hashable | None:
                 if partition_by is None:
@@ -5195,11 +5197,12 @@ class Graph:
                     item,
                     extractor=event_time,
                 )
-                current_watermark = watermarks.get(partition_key)
+                current_watermark = watermarks.get(partition_key, latest_watermark)
                 if current_watermark is not None:
                     minimum_kept = current_watermark - width - grace + 1
                     if progress < minimum_kept:
                         return
+                    watermarks.setdefault(partition_key, current_watermark)
                 buffer_for(partition_key).append((progress, value))
                 if watermark_route is None:
                     watermarks[partition_key] = progress
@@ -5207,6 +5210,7 @@ class Graph:
                     emit_window(partition_key)
 
             def on_watermark(item: TypedEnvelope[Any] | ClosedEnvelope) -> None:
+                nonlocal latest_watermark
                 assert watermark is not None
                 progress = self._progress_value(
                     watermark,
@@ -5214,6 +5218,8 @@ class Graph:
                     item,
                     extractor=watermark_time,
                 )
+                if latest_watermark is None or progress > latest_watermark:
+                    latest_watermark = progress
                 for partition_key in tuple(buffers):
                     current_watermark = watermarks.get(partition_key)
                     if current_watermark is None or progress > current_watermark:

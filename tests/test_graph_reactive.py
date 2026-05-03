@@ -1400,6 +1400,42 @@ class GraphReactiveTests(unittest.TestCase):
 
         self.assertEqual(windows, [[20, 22], [21, 22], [22]])
 
+    def test_window_by_time_retains_watermark_before_source_data(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("imu"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("temperature"),
+            variant=graph_module.Variant.Meta,
+            schema=int_schema(graph_module, "Temperature"),
+        )
+        watermark = graph_module.route(
+            plane=graph_module.Plane.State,
+            layer=graph_module.Layer.Internal,
+            owner=graph_module.OwnerName("scheduler"),
+            family=graph_module.StreamFamily("tick"),
+            stream=graph_module.StreamName("watermark"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="WatermarkTick"),
+        )
+        graph = graph_module.Graph()
+
+        windows = []
+        subscription = graph.window_by_time(
+            route,
+            width=3,
+            watermark=watermark,
+        ).subscribe(windows.append)
+        graph.publish(watermark, b"tick-12", control_epoch=12)
+        graph.publish(route, 19, control_epoch=9)
+        graph.publish(route, 22, control_epoch=12)
+        graph.publish(watermark, b"tick-12", control_epoch=12)
+        subscription.dispose()
+
+        self.assertEqual(windows, [[22]])
+
     def test_window_by_time_rejects_invalid_width_and_grace(self) -> None:
         graph_module = load_graph_module()
         route = graph_module.route(
