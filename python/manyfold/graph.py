@@ -9,9 +9,12 @@ RFC checklist coverage.
 from __future__ import annotations
 
 import json
+import logging
+import time
 from collections import deque
 from dataclasses import dataclass, field, replace
 from itertools import count
+from threading import RLock, Timer
 from typing import (
     Any,
     Callable,
@@ -52,6 +55,8 @@ from ._manyfold_rust import (
     WriteBinding,
 )
 from ._rx import Observable, operators as ops
+from ._rx.disposable import Disposable
+from ._rx.scheduler import TimeoutScheduler
 from ._rx.subject import Subject
 from .primitives import (
     OwnerName,
@@ -89,6 +94,9 @@ _THREAD_PLACEMENT_KINDS = frozenset(
     ("main", "background", "pooled", "isolated")
 )
 _POOLED_THREAD_SCHEDULERS = frozenset(("background", "blocking_io", "input"))
+_NO_PENDING: Any = object()
+_STATS_SCHEDULER = TimeoutScheduler()
+logger = logging.getLogger(__name__)
 
 
 @runtime_checkable
@@ -108,8 +116,216 @@ class ObservableLike(Protocol[T]):
     def subscribe(
         self,
         observer: ObserverLike[T] | Callable[[T], None] | None = None,
+        on_error: Callable[[Exception], None] | None = None,
+        on_completed: Callable[[], None] | None = None,
         scheduler: object | None = None,
     ) -> SubscriptionLike: ...
+
+
+@dataclass(frozen=True)
+class CoalesceLatestNode(Generic[T]):
+    """Coalesce bursty stream updates to the latest value per time window."""
+
+    name: str
+    window_ms: int
+    stream_name: str | None = None
+
+    def observable(self, source: ObservableLike[T]) -> Observable[T]:
+        if self.window_ms <= 0:
+            return cast(Observable[T], source)
+
+        def subscribe(observer: ObserverLike[T], scheduler: object | None = None) -> Any:
+            del scheduler
+            from .reactive_threads import coalesce_scheduler
+
+            lock = RLock()
+            pending: Any = _NO_PENDING
+            timer: Any | None = None
+            fallback_timer: Timer | None = None
+            due_time: float | None = None
+            window_seconds = self.window_ms / 1000
+
+            def cancel_timers() -> None:
+                nonlocal timer, fallback_timer
+                if timer is not None:
+                    timer.dispose()
+                    timer = None
+                if fallback_timer is not None:
+                    fallback_timer.cancel()
+                    fallback_timer = None
+
+            def flush() -> None:
+                nonlocal pending, due_time
+                with lock:
+                    value = pending
+                    pending = _NO_PENDING
+                    cancel_timers()
+                    due_time = None
+                if value is not _NO_PENDING:
+                    observer.on_next(value)
+
+            def schedule_flush(now: float) -> None:
+                nonlocal timer, fallback_timer, due_time
+                if timer is not None or fallback_timer is not None:
+                    if due_time is not None and now >= due_time:
+                        cancel_timers()
+                        due_time = None
+                    else:
+                        return
+                due_time = now + window_seconds
+                timer = coalesce_scheduler().schedule_relative(
+                    window_seconds,
+                    lambda *_: flush(),
+                )
+                fallback_timer = Timer(window_seconds, flush)
+                fallback_timer.daemon = True
+                fallback_timer.start()
+
+            def on_next(value: T) -> None:
+                nonlocal pending, due_time
+                now = time.monotonic()
+                flush_value: Any = _NO_PENDING
+                with lock:
+                    if (
+                        pending is not _NO_PENDING
+                        and due_time is not None
+                        and now >= due_time
+                    ):
+                        flush_value = pending
+                        pending = _NO_PENDING
+                        cancel_timers()
+                        due_time = None
+                    pending = value
+                    schedule_flush(now)
+                if flush_value is not _NO_PENDING:
+                    observer.on_next(flush_value)
+
+            def on_error(error: Exception) -> None:
+                nonlocal pending, due_time
+                with lock:
+                    cancel_timers()
+                    pending = _NO_PENDING
+                    due_time = None
+                observer.on_error(error)
+
+            def on_completed() -> None:
+                nonlocal due_time
+                with lock:
+                    cancel_timers()
+                    due_time = None
+                flush()
+                observer.on_completed()
+
+            subscription = source.subscribe(
+                on_next,
+                on_error,
+                on_completed,
+                scheduler=coalesce_scheduler(),
+            )
+
+            def dispose() -> None:
+                nonlocal pending, due_time
+                subscription.dispose()
+                with lock:
+                    pending = _NO_PENDING
+                    cancel_timers()
+                    due_time = None
+
+            return Disposable(dispose)
+
+        return rx.create(subscribe)
+
+
+@dataclass(frozen=True)
+class LoggingNode(Generic[T]):
+    """Log periodic stream delivery statistics for an observable."""
+
+    name: str
+    stream_name: str
+    interval_ms: int
+
+    def observable(self, source: ObservableLike[T]) -> Observable[T]:
+        if self.interval_ms <= 0:
+            return cast(Observable[T], source)
+
+        subscriber_count = 0
+        event_count = 0
+        timer: Any | None = None
+
+        def schedule_log() -> None:
+            nonlocal timer
+            if timer is not None:
+                return
+            timer = _STATS_SCHEDULER.schedule_relative(
+                self.interval_ms / 1000,
+                lambda *_: log_stats(),
+            )
+
+        def log_stats() -> None:
+            nonlocal event_count, timer
+            timer = None
+            if subscriber_count <= 0:
+                event_count = 0
+                return
+            count = event_count
+            event_count = 0
+            logger.debug(
+                "Stream stats for %s events=%d subscribers=%d interval_ms=%d",
+                self.stream_name,
+                count,
+                subscriber_count,
+                self.interval_ms,
+            )
+            schedule_log()
+
+        def subscribe(observer: ObserverLike[T], scheduler: object | None = None) -> Any:
+            nonlocal event_count, subscriber_count, timer
+            subscriber_count += 1
+            schedule_log()
+
+            def on_next(value: T) -> None:
+                nonlocal event_count
+                event_count += 1
+                observer.on_next(value)
+
+            def on_error(error: Exception) -> None:
+                observer.on_error(error)
+
+            def on_completed() -> None:
+                observer.on_completed()
+
+            subscription = source.subscribe(
+                on_next,
+                on_error,
+                on_completed,
+                scheduler=scheduler,
+            )
+
+            def dispose() -> None:
+                nonlocal subscriber_count, timer
+                subscription.dispose()
+                subscriber_count -= 1
+                if subscriber_count <= 0 and timer is not None:
+                    timer.dispose()
+                    timer = None
+
+            return Disposable(dispose)
+
+        return rx.create(subscribe)
+
+
+def instrument_stream(
+    source: ObservableLike[T],
+    *,
+    stream_name: str,
+    log_interval_ms: int,
+) -> Observable[T]:
+    """Wrap an observable with periodic stream delivery logging."""
+    return LoggingNode(
+        name=f"{stream_name}.logging",
+        stream_name=stream_name,
+        interval_ms=log_interval_ms,
+    ).observable(source)
 
 
 @dataclass(frozen=True)
@@ -1251,6 +1467,23 @@ class FilterNode(_ThreadPlaceableNode, Generic[T]):
     thread_placement: NodeThreadPlacement | None = None
 
 
+@dataclass(frozen=True)
+class PipelineLoggingNode(_ThreadPlaceableNode, Generic[T]):
+    """Graph-visible logging operation."""
+
+    name: str
+    stream_name: str
+    interval_ms: int
+    thread_placement: NodeThreadPlacement | None = None
+
+    def observable(self, source: ObservableLike[T]) -> Observable[T]:
+        return LoggingNode(
+            name=self.name,
+            stream_name=self.stream_name,
+            interval_ms=self.interval_ms,
+        ).observable(source)
+
+
 class RoutePipeline(Generic[T]):
     """Fluent graph pipeline rooted at one route."""
 
@@ -1324,6 +1557,21 @@ class RoutePipeline(Generic[T]):
             )
         )
 
+    def coalesce_latest(
+        self,
+        *,
+        window_ms: int,
+        name: str | None = None,
+        stream_name: str | None = None,
+    ) -> RoutePipeline[T]:
+        """Install a graph-visible latest-value coalescing node."""
+        node = CoalesceLatestNode(
+            name or self._graph._next_pipeline_node_name("coalesce-latest"),
+            window_ms=window_ms,
+            stream_name=stream_name,
+        )
+        return self._graph._connect_coalesce_latest_pipeline(self, node)
+
     def filter(
         self,
         predicate: Callable[[T], bool],
@@ -1341,6 +1589,23 @@ class RoutePipeline(Generic[T]):
             node,
             lambda value: (node.predicate(value), value),
         )
+
+    def log(
+        self,
+        *,
+        interval_ms: int,
+        name: str | None = None,
+        stream_name: str | None = None,
+    ) -> RoutePipeline[T]:
+        """Install a graph-visible periodic stream logging node."""
+        node_name = name or self._graph._next_pipeline_node_name("log")
+        node = PipelineLoggingNode(
+            node_name,
+            stream_name=stream_name or node_name,
+            interval_ms=interval_ms,
+            thread_placement=self._thread_placement,
+        )
+        return self._graph._connect_logging_pipeline(self, node)
 
     def map(
         self,
@@ -1511,7 +1776,9 @@ class Graph:
         self._pipeline_node_sequence = 0
         self._pipeline_factories: dict[str, Callable[..., Any]] = {
             "callback": CallbackNode,
+            "coalesce_latest": CoalesceLatestNode,
             "filter": FilterNode,
+            "log": PipelineLoggingNode,
             "map": MapNode,
         }
 
@@ -3140,6 +3407,82 @@ class Graph:
             thread_placement=thread_placement,
         )
 
+    def _connect_coalesce_latest_pipeline(
+        self,
+        pipeline: RoutePipeline[T],
+        node: CoalesceLatestNode[T],
+    ) -> RoutePipeline[T]:
+        output = self._pipeline_output_route(node.name)
+        self.register_diagram_node(
+            node.name,
+            input_routes=(pipeline.route,),
+            output_routes=(output,),
+        )
+
+        def publish(value: T) -> None:
+            self.publish(output, value)
+
+        coalesced = node.observable(
+            self._pipeline_value_observable(
+                pipeline.route,
+                replay_latest=pipeline._replay_latest,
+                subscriber_id=pipeline._subscriber_id,
+            )
+        )
+        subscription = coalesced.subscribe(publish)
+        connection = GraphConnection(
+            self,
+            name=node.name,
+            subscriptions=(subscription,),
+            nodes=(node.name,),
+        )
+        return RoutePipeline(
+            self,
+            output,
+            replay_latest=False,
+            connections=(*pipeline._connections, connection),
+        )
+
+    def _connect_logging_pipeline(
+        self,
+        pipeline: RoutePipeline[T],
+        node: PipelineLoggingNode[T],
+    ) -> RoutePipeline[T]:
+        output = self._pipeline_output_route(node.name)
+        thread_placement = node.thread_placement or pipeline._thread_placement
+        self.register_diagram_node(
+            node.name,
+            input_routes=(pipeline.route,),
+            output_routes=(output,),
+            thread_placement=thread_placement,
+        )
+
+        def publish(value: T) -> None:
+            self.publish(output, value)
+
+        logged = node.observable(
+            self._pipeline_value_observable(
+                pipeline.route,
+                replay_latest=pipeline._replay_latest,
+                subscriber_id=pipeline._subscriber_id,
+                thread_placement=thread_placement,
+            )
+        )
+        subscription = logged.subscribe(publish)
+        connection = GraphConnection(
+            self,
+            name=node.name,
+            subscriptions=(subscription,),
+            nodes=(node.name,),
+        )
+        return RoutePipeline(
+            self,
+            output,
+            replay_latest=False,
+            connections=(*pipeline._connections, connection),
+            thread_placement=thread_placement,
+        )
+
     def _apply_registered_pipeline_operation(
         self,
         pipeline: RoutePipeline[Any],
@@ -3163,6 +3506,10 @@ class Graph:
                 node,
                 lambda value: (node.predicate(value), value),
             )
+        if isinstance(node, CoalesceLatestNode):
+            return self._connect_coalesce_latest_pipeline(pipeline, node)
+        if isinstance(node, PipelineLoggingNode):
+            return self._connect_logging_pipeline(pipeline, node)
         if isinstance(node, CallbackNode):
             return pipeline.connect(
                 node.with_thread_placement(

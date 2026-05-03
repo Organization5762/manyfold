@@ -103,14 +103,20 @@ def install_reactivex_stub() -> None:
             self._dispose()
 
     class _CallbackObserver:
-        def __init__(self, on_next):
-            self.on_next = on_next
+        def __init__(self, on_next, on_error=None, on_completed=None):
+            self.on_next = on_next or (lambda _value: None)
+            self._on_error = on_error
+            self._on_completed = on_completed
 
         def on_error(self, error):
+            if self._on_error is not None:
+                self._on_error(error)
+                return
             raise error
 
         def on_completed(self):
-            return None
+            if self._on_completed is not None:
+                self._on_completed()
 
     class Observable:
         def __init__(self, subscribe):
@@ -119,9 +125,15 @@ def install_reactivex_stub() -> None:
         def __class_getitem__(cls, item):
             return cls
 
-        def subscribe(self, observer=None, scheduler=None):
+        def subscribe(
+            self,
+            observer=None,
+            on_error=None,
+            on_completed=None,
+            scheduler=None,
+        ):
             if callable(observer) and not hasattr(observer, "on_next"):
-                observer = _CallbackObserver(observer)
+                observer = _CallbackObserver(observer, on_error, on_completed)
             return self._subscribe(observer, scheduler)
 
         def pipe(self, *transforms):
@@ -134,9 +146,15 @@ def install_reactivex_stub() -> None:
         def __init__(self):
             self._observers = []
 
-        def subscribe(self, observer=None, scheduler=None):
+        def subscribe(
+            self,
+            observer=None,
+            on_error=None,
+            on_completed=None,
+            scheduler=None,
+        ):
             if callable(observer) and not hasattr(observer, "on_next"):
-                observer = _CallbackObserver(observer)
+                observer = _CallbackObserver(observer, on_error, on_completed)
             self._observers.append(observer)
 
             def unsubscribe() -> None:
@@ -154,8 +172,19 @@ def install_reactivex_stub() -> None:
             super().__init__()
             self._value = value
 
-        def subscribe(self, observer=None, scheduler=None):
-            subscription = super().subscribe(observer, scheduler=scheduler)
+        def subscribe(
+            self,
+            observer=None,
+            on_error=None,
+            on_completed=None,
+            scheduler=None,
+        ):
+            subscription = super().subscribe(
+                observer,
+                on_error,
+                on_completed,
+                scheduler=scheduler,
+            )
             if callable(observer) and not hasattr(observer, "on_next"):
                 observer(self._value)
             else:
@@ -182,6 +211,7 @@ def install_reactivex_stub() -> None:
         def subscribe(observer=None, scheduler=None):
             for item in items:
                 observer.on_next(item)
+            observer.on_completed()
             return Disposable()
 
         return Observable(subscribe)
@@ -965,6 +995,7 @@ def load_manyfold_package():
         "FirmwareAgentProfile": embedded.FirmwareAgentProfile,
         "Capacitor": graph.Capacitor,
         "CallbackNode": graph.CallbackNode,
+        "CoalesceLatestNode": graph.CoalesceLatestNode,
         "DelimitedMessageBuffer": sensor_io.DelimitedMessageBuffer,
         "DoubleBuffer": sensor_io.DoubleBuffer,
         "DuplexSensorPeripheral": sensor_io.DuplexSensorPeripheral,
@@ -983,6 +1014,7 @@ def load_manyfold_package():
         "LazyPayloadSource": graph.LazyPayloadSource,
         "LifecycleBinding": graph.LifecycleBinding,
         "LineageRecord": graph.LineageRecord,
+        "LoggingNode": graph.LoggingNode,
         "MapNode": graph.MapNode,
         "LocalDurableSpool": sensor_io.LocalDurableSpool,
         "LocalSensorSource": sensor_io.LocalSensorSource,
@@ -1067,6 +1099,7 @@ def load_manyfold_package():
         "dependents_of": lego_catalog.dependents_of,
         "get_lego": lego_catalog.get_lego,
         "health_status_schema": sensor_io.health_status_schema,
+        "instrument_stream": graph.instrument_stream,
         "route": primitives.route,
         "legos_by_layer": lego_catalog.legos_by_layer,
         "legos_by_role": lego_catalog.legos_by_role,
