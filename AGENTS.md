@@ -62,6 +62,14 @@ uv run python -m unittest tests.test_components.ComponentTests.test_file_store_a
 - Keep public API documentation and docstrings current when behavior changes.
 - Keep the top-level `manyfold` namespace narrow; advanced helpers belong under
   `manyfold.graph` or in semi-private helpers.
+- Organize files in this rough order: constants, public methods, then private
+  methods prefixed with `_`, with each group sorted by importance. Keep files
+  under about 1000 lines of code.
+- Avoid stubs unless absolutely necessary. Prefer runners that exercise actual
+  code paths instead of replacing behavior.
+- Keep code condensed, typed, and documented. Use docstrings for public surface
+  area and add short comments around key logic when they make the surrounding
+  code easier to interpret.
 - Treat README verification commands as the source of truth when they conflict
   with memory or assumptions.
 - If you discover a new setup trap, missing command, or repeated source of agent
