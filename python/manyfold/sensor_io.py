@@ -797,17 +797,22 @@ class DelimitedMessageBuffer:
         init=False,
         repr=False,
     )
+    _text_delimiter: str = field(default="", init=False, repr=False)
+    _delimiter_len: int = field(default=0, init=False, repr=False)
+    _text_delimiter_len: int = field(default=0, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if not self.delimiter:
             raise ValueError("delimiter must not be empty")
         if self.mode not in ("bytes", "text"):
             raise ValueError("mode must be 'bytes' or 'text'")
+        self._delimiter_len = len(self.delimiter)
         if self.mode == "text":
             try:
-                self.delimiter.decode("utf-8")
+                self._text_delimiter = self.delimiter.decode("utf-8")
             except UnicodeDecodeError as exc:
                 raise ValueError("text delimiter must be valid UTF-8") from exc
+            self._text_delimiter_len = len(self._text_delimiter)
 
     @property
     def buffer_size(self) -> int:
@@ -835,25 +840,21 @@ class DelimitedMessageBuffer:
 
     def _drain_bytes(self) -> list[bytes]:
         messages: list[bytes] = []
-        delimiter_len = len(self.delimiter)
         while True:
-            try:
-                index = self._bytes_buffer.index(self.delimiter)
-            except ValueError:
+            index = self._bytes_buffer.find(self.delimiter)
+            if index < 0:
                 return messages
             messages.append(bytes(self._bytes_buffer[:index]))
-            del self._bytes_buffer[: index + delimiter_len]
+            del self._bytes_buffer[: index + self._delimiter_len]
 
     def _drain_text(self) -> list[str]:
         messages: list[str] = []
-        delimiter = self.delimiter.decode("utf-8")
-        delimiter_len = len(delimiter)
         while True:
-            index = self._text_buffer.find(delimiter)
+            index = self._text_buffer.find(self._text_delimiter)
             if index < 0:
                 return messages
             messages.append(self._text_buffer[:index])
-            self._text_buffer = self._text_buffer[index + delimiter_len :]
+            self._text_buffer = self._text_buffer[index + self._text_delimiter_len :]
 
 
 @dataclass
