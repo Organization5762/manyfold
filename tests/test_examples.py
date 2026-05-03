@@ -1235,10 +1235,17 @@ class ExampleTests(unittest.TestCase):
     def test_average_temperature_example(self) -> None:
         result = load_example_module("average_temperature").run_example()
 
-        self.assertEqual(result["samples"], (b"72.4F", b"72.9F", b"73.7F"))
-        self.assertEqual(result["averages"], (b"72.4F", b"72.7F", b"73.0F"))
-        self.assertEqual(result["latest_average"], b"73.0F")
-        self.assertEqual(result["latest_seq"], 3)
+        self.assertAlmostEqual(result["latest_average"], 73.0)
+        self.assertEqual(result["latest_seq"], 6)
+        self.assertEqual(result["moving_average_node"], "moving-average-1")
+        self.assertEqual(
+            result["moving_average_inputs"],
+            ("read.logical.sensor.environment.temperature.meta.v1",),
+        )
+        self.assertEqual(result["moving_average_storage"], "sliding_capacitor")
+        self.assertEqual(result["moving_average_window_size"], 3)
+        self.assertEqual(len(result["moving_average_outputs"]), 1)
+        self.assertIn("moving-average-1", result["moving_average_outputs"][0])
 
     def test_observe_publish_example(self) -> None:
         result = load_example_module("observe_publish").run_example()

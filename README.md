@@ -66,44 +66,50 @@ Basic routes default to read/logical/meta, so the first example stays focused
 on the moving signal. Pass explicit `plane`, `layer`, or `variant` when that
 role matters.
 
-### Compute Values
+### Stats: Compute Values
 
 ```python
-average_temperature = route(
+temperature = route(
     owner="sensor",
     family="environment",
+    stream="temperature",
+    schema=Schema.float(name="Temperature"),
+)
+average_temperature = temperature.derivative_route(
     stream="average_temperature",
-    schema=Schema.bytes(name="AverageTemperature"),
+    schema=Schema.float(name="AverageTemperature"),
 )
 
-samples = []
-
-
-def publish_average(envelope):
-    samples.append(float(envelope.value.decode("ascii").removesuffix("F")))
-    average = f"{sum(samples) / len(samples):.1f}F".encode("ascii")
-    graph.publish(average_temperature, average)
-
-
-subscription = graph.observe(temperature, replay_latest=False).subscribe(publish_average)
-for reading in (b"72.4F", b"72.9F", b"73.7F"):
+subscription = graph.observe(temperature, replay_latest=False).moving_average(
+    window_size=3
+).connect(average_temperature)
+for reading in (72.4, 72.9, 73.7):
     graph.publish(temperature, reading)
 subscription.dispose()
 
 latest_average = graph.latest(average_temperature)
 assert latest_average is not None
-print(f"average #{latest_average.closed.seq_source}: {latest_average.value!r}")
+print(f"average: {latest_average.value:.1f}F")
+
+node = next(
+    node
+    for node in graph.diagram_nodes()
+    if dict(node.metadata).get("statistic") == "moving_average"
+)
+print(dict(node.metadata))
 ```
 
 Output:
 
 ```text
-average #3: b'73.0F'
+average: 73.0F
+{'statistic': 'moving_average', 'storage': 'sliding_capacitor', 'window_size': '3'}
 ```
 
 The shape is the same: computed values are just values published to another
-typed route. That keeps callbacks, derived state, and operational inspection in
-the same graph vocabulary.
+typed route. The moving average also renders as a graph-visible node backed by
+a sliding capacitor, so derived state and operational inspection stay in the
+same vocabulary.
 
 ### Model Consensus
 

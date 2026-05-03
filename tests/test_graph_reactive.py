@@ -4579,6 +4579,53 @@ class GraphReactiveTests(unittest.TestCase):
         self.assertIs(route.layer, graph_module.Layer.Logical)
         self.assertIs(route.variant, graph_module.Variant.Meta)
 
+    def test_typed_route_builds_derivative_route_from_existing_context(self) -> None:
+        graph_module = load_graph_module()
+        source = graph_module.route(
+            owner="sensor",
+            family="environment",
+            stream="temperature",
+            schema=graph_module.Schema.float(name="Temperature"),
+        )
+
+        derivative = source.derivative_route(
+            stream="average_temperature",
+            schema=graph_module.Schema.float(name="AverageTemperature"),
+        )
+
+        self.assertEqual(
+            derivative.display(),
+            "read.logical.sensor.environment.average_temperature.meta.v1",
+        )
+        self.assertEqual(derivative.schema.schema_id, "AverageTemperature")
+        self.assertIs(derivative.owner, source.owner)
+        self.assertIs(derivative.family, source.family)
+        self.assertIs(derivative.plane, source.plane)
+        self.assertIs(derivative.layer, source.layer)
+        self.assertIs(derivative.variant, source.variant)
+
+    def test_typed_route_derivative_route_accepts_context_overrides(self) -> None:
+        graph_module = load_graph_module()
+        source = graph_module.route(
+            owner="sensor",
+            family="environment",
+            stream="temperature",
+            schema=graph_module.Schema.float(name="Temperature"),
+        )
+
+        derivative = source.derivative_route(
+            owner="analytics",
+            family="rollup",
+            stream="average_temperature",
+            variant=graph_module.Variant.State,
+            schema=graph_module.Schema.float(name="AverageTemperature"),
+        )
+
+        self.assertEqual(
+            derivative.display(),
+            "read.logical.analytics.rollup.average_temperature.state.v1",
+        )
+
     def test_bytes_schema_requires_name_keyword(self) -> None:
         graph_module = load_graph_module()
 
@@ -4587,6 +4634,71 @@ class GraphReactiveTests(unittest.TestCase):
         self.assertEqual(schema.schema_id, "Temperature")
         with self.assertRaises(TypeError):
             graph_module.Schema.bytes("Temperature")
+
+    def test_float_schema_round_trips_ascii_float_values(self) -> None:
+        graph_module = load_graph_module()
+
+        schema = graph_module.Schema.float(name="Temperature")
+
+        self.assertEqual(schema.schema_id, "Temperature")
+        self.assertEqual(schema.decode(schema.encode(72.4)), 72.4)
+
+    def test_route_pipeline_moving_average_publishes_to_route(self) -> None:
+        graph_module = load_graph_module()
+        source = graph_module.route(
+            owner="sensor",
+            family="environment",
+            stream="temperature",
+            schema=graph_module.Schema.float(name="Temperature"),
+        )
+        average = graph_module.route(
+            owner="sensor",
+            family="environment",
+            stream="average_temperature",
+            schema=graph_module.Schema.float(name="AverageTemperature"),
+        )
+        graph = graph_module.Graph()
+
+        connection = graph.observe(source, replay_latest=False).moving_average(
+            window_size=3
+        ).connect(average)
+        graph.publish(source, 72.4)
+        graph.publish(source, 72.9)
+        graph.publish(source, 73.7)
+
+        latest = graph.latest(average)
+        assert latest is not None
+        node = next(graph.diagram_nodes())
+        metadata = dict(node.metadata)
+        self.assertAlmostEqual(latest.value, 73.0)
+        self.assertEqual(latest.closed.seq_source, 6)
+        self.assertEqual(node.name, "moving-average-1")
+        self.assertEqual(
+            node.input_routes,
+            ("read.logical.sensor.environment.temperature.meta.v1",),
+        )
+        self.assertEqual(
+            node.output_routes,
+            ("read.internal.manyfold.graph.pipeline.moving-average-1-1.event.v1",),
+        )
+        self.assertEqual(metadata["statistic"], "moving_average")
+        self.assertEqual(metadata["storage"], "sliding_capacitor")
+        self.assertEqual(metadata["window_size"], "3")
+        connection.dispose()
+        self.assertEqual(tuple(graph.diagram_nodes()), ())
+
+    def test_route_pipeline_moving_average_rejects_non_positive_window(self) -> None:
+        graph_module = load_graph_module()
+        source = graph_module.route(
+            owner="sensor",
+            family="environment",
+            stream="temperature",
+            schema=graph_module.Schema.float(name="Temperature"),
+        )
+        graph = graph_module.Graph()
+
+        with self.assertRaisesRegex(ValueError, "average window size must be positive"):
+            graph.observe(source).moving_average(window_size=0)
 
     def test_route_preserves_existing_schema_version_without_override(self) -> None:
         graph_module = load_graph_module()

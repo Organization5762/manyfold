@@ -72,6 +72,7 @@ from .primitives import (
     sink as sink,
     source as source,
 )
+from .stats import Average
 
 T = TypeVar("T")
 TIn = TypeVar("TIn")
@@ -384,6 +385,7 @@ class DiagramNode:
     input_routes: tuple[str, ...] = ()
     output_routes: tuple[str, ...] = ()
     group: str | None = None
+    metadata: tuple[tuple[str, str], ...] = ()
     thread_placement: NodeThreadPlacement | None = None
 
 
@@ -1624,6 +1626,36 @@ class RoutePipeline(Generic[T]):
             self,
             node,
             lambda value: (True, node.transform(value)),
+        )
+
+    def moving_average(
+        self,
+        *,
+        window_size: int,
+        name: str | None = None,
+    ) -> RoutePipeline[float]:
+        """Install a graph-visible moving average over numeric route values."""
+        average = Average(window_size=window_size)
+        values: deque[float] = deque(maxlen=average.window_size)
+        node = MapNode(
+            name or self._graph._next_pipeline_node_name("moving-average"),
+            lambda value: float(value),
+            thread_placement=self._thread_placement,
+        )
+
+        def apply(value: T) -> tuple[bool, float]:
+            values.append(node.transform(value))
+            return True, average(tuple(values))
+
+        return self._graph._connect_transform_pipeline(
+            self,
+            node,
+            apply,
+            metadata={
+                "statistic": "moving_average",
+                "storage": "sliding_capacitor",
+                "window_size": average.window_size,
+            },
         )
 
     def on_main_thread(self) -> RoutePipeline[T]:
@@ -3373,6 +3405,7 @@ class Graph:
         pipeline: RoutePipeline[Any],
         node: MapNode[Any, Any] | FilterNode[Any],
         apply: Callable[[Any], tuple[bool, Any]],
+        metadata: dict[str, Any] | None = None,
     ) -> RoutePipeline[Any]:
         output = self._pipeline_output_route(node.name)
         thread_placement = node.thread_placement or pipeline._thread_placement
@@ -3380,6 +3413,7 @@ class Graph:
             node.name,
             input_routes=(pipeline.route,),
             output_routes=(output,),
+            metadata=metadata,
             thread_placement=thread_placement,
         )
 
@@ -4182,9 +4216,13 @@ class Graph:
         input_routes: Sequence[RouteLike] = (),
         output_routes: Sequence[RouteLike] = (),
         group: str | None = None,
+        metadata: dict[str, Any] | None = None,
         thread_placement: NodeThreadPlacement | None = None,
     ) -> DiagramNode:
         """Register a graph-visible node for topology diagrams."""
+        metadata_items = tuple(
+            (str(key), str(value)) for key, value in (metadata or {}).items()
+        )
         for route_ref in tuple(input_routes) + tuple(output_routes):
             coerced = self._coerce_route_ref(route_ref)
             self._diagram_routes[coerced.display()] = coerced
@@ -4193,6 +4231,7 @@ class Graph:
             input_routes=tuple(self._route_key(route) for route in input_routes),
             output_routes=tuple(self._route_key(route) for route in output_routes),
             group=group,
+            metadata=metadata_items,
             thread_placement=thread_placement,
         )
         self._diagram_nodes[name] = node

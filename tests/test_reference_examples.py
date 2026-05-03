@@ -91,7 +91,9 @@ class ReferenceExampleSuiteTests(unittest.TestCase):
         manyfold = load_manyfold_package()
         graph_module = sys.modules["manyfold.graph"]
         primitives_module = sys.modules["manyfold.primitives"]
+        stats_module = sys.modules["manyfold.stats"]
 
+        self.assertIs(manyfold.Average, stats_module.Average)
         self.assertIs(manyfold.FlowPolicy, graph_module.FlowPolicy)
         self.assertIs(manyfold.RetryPolicy, graph_module.RetryPolicy)
         self.assertIs(manyfold.LineageRecord, graph_module.LineageRecord)
@@ -109,6 +111,7 @@ class ReferenceExampleSuiteTests(unittest.TestCase):
         self.assertIs(manyfold.source, primitives_module.source)
         self.assertIs(manyfold.sink, primitives_module.sink)
         self.assertTrue(callable(manyfold.bridge_version))
+        self.assertIn("Average", manyfold.__all__)
         self.assertIn("FlowPolicy", manyfold.__all__)
         self.assertIn("RetryPolicy", manyfold.__all__)
         self.assertIn("LineageRecord", manyfold.__all__)

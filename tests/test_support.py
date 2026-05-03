@@ -22,6 +22,7 @@ MODULES_TO_RESET = (
     "manyfold.sensor_io",
     "manyfold.reference_examples",
     "manyfold.reactive_threads",
+    "manyfold.stats",
     "manyfold._rx",
     "manyfold._rx.abc",
     "manyfold._rx.disposable",
@@ -967,10 +968,12 @@ def load_manyfold_package():
         "manyfold.lego_catalog", PACKAGE_DIR / "lego_catalog.py"
     )
     sensor_io = _load_module("manyfold.sensor_io", PACKAGE_DIR / "sensor_io.py")
+    stats = sys.modules["manyfold.stats"]
     rust = sys.modules["manyfold._manyfold_rust"]
 
     exports = {
         "all_legos": lego_catalog.all_legos,
+        "Average": stats.Average,
         "BackoffPolicy": sensor_io.BackoffPolicy,
         "BoundedRingBuffer": sensor_io.BoundedRingBuffer,
         "ChangeFilter": sensor_io.ChangeFilter,

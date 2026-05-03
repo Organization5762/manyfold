@@ -33,6 +33,7 @@ from ._manyfold_rust import (
 from ._rx import Observable, operators as ops
 
 T = TypeVar("T")
+U = TypeVar("U")
 TRead = TypeVar("TRead")
 TWrite = TypeVar("TWrite")
 TProto = TypeVar("TProto", bound="ProtobufMessage")
@@ -162,6 +163,16 @@ class Schema(Generic[T]):
         )
 
     @classmethod
+    def float(cls, *, name: str, version: int = 1) -> Schema[float]:
+        """Create a schema for ASCII-encoded floating point values."""
+        return cls(
+            schema_id=name,
+            version=version,
+            encode=lambda value: repr(float(value)).encode("ascii"),
+            decode=lambda payload: float(payload.decode("ascii")),
+        )
+
+    @classmethod
     def protobuf(
         cls,
         message_type: ProtobufMessageType[TProto],
@@ -204,6 +215,32 @@ class TypedRoute(Generic[T]):
 
     def display(self) -> str:
         return self.route_ref.display()
+
+    def derivative_route(
+        self,
+        *,
+        stream: StreamName | str,
+        schema: SchemaLike[U],
+        owner: OwnerName | str | None = None,
+        family: StreamFamily | str | None = None,
+        plane: Plane | None = None,
+        layer: Layer | None = None,
+        variant: Variant | None = None,
+        schema_id: str | None = None,
+        version: int | None = None,
+    ) -> TypedRoute[U]:
+        """Create a related route that keeps this route's context by default."""
+        return route(
+            plane=self.plane if plane is None else plane,
+            layer=self.layer if layer is None else layer,
+            owner=self.owner if owner is None else owner,
+            family=self.family if family is None else family,
+            stream=stream,
+            variant=self.variant if variant is None else variant,
+            schema=schema,
+            schema_id=schema_id,
+            version=version,
+        )
 
 
 @dataclass(frozen=True)

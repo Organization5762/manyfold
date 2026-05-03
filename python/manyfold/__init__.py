@@ -162,9 +162,11 @@ from .sensor_io import (
     sensor_sample_schema as sensor_sample_schema,
     xor_checksum as xor_checksum,
 )
+from .stats import Average as Average
 
 __all__ = [
     "all_legos",
+    "Average",
     "BackoffPolicy",
     "Clock",
     "ClockDomainRef",
