@@ -35,11 +35,11 @@ class LegoCatalogTests(unittest.TestCase):
     def test_retry_loop_dependencies_keep_retry_low_level(self) -> None:
         manyfold = load_manyfold_package()
 
-        dependencies = {lego.name for lego in manyfold.dependencies_of("RetryLoop")}
+        dependencies = [lego.name for lego in manyfold.dependencies_of("RetryLoop")]
 
         self.assertEqual(
             dependencies,
-            {"RetryPolicy", "BackoffPolicy", "Timeout", "Cancellation"},
+            ["RetryPolicy", "BackoffPolicy", "Timeout", "Cancellation"],
         )
 
     def test_local_sensor_source_depends_on_sequence_counter(self) -> None:
@@ -70,11 +70,12 @@ class LegoCatalogTests(unittest.TestCase):
     def test_dependents_report_direct_users(self) -> None:
         manyfold = load_manyfold_package()
 
-        dependents = {lego.name for lego in manyfold.dependents_of("EventLog")}
+        dependents = [lego.name for lego in manyfold.dependents_of("EventLog")]
 
         self.assertIn("Consensus", dependents)
         self.assertIn("DurableQueue", dependents)
         self.assertIn("Workflow", dependents)
+        self.assertEqual(dependents, sorted(dependents))
 
 
 if __name__ == "__main__":
