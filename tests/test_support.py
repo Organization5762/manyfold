@@ -21,6 +21,7 @@ MODULES_TO_RESET = (
     "manyfold.lego_catalog",
     "manyfold.sensor_io",
     "manyfold.reference_examples",
+    "manyfold.reactive_threads",
     "manyfold._rx",
     "manyfold._rx.abc",
     "manyfold._rx.disposable",
