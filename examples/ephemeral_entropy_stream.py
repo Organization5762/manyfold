@@ -23,7 +23,7 @@ def run_example() -> EphemeralEntropyStreamExampleResult:
         family="trace",
         stream="entropy",
         variant=Variant.Event,
-        schema=Schema.bytes("EntropyBytes"),
+        schema=Schema.bytes(name="EntropyBytes"),
     )
 
     graph.publish(entropy, b"nonce-1")

@@ -18,7 +18,7 @@ def run_example() -> ClosedCounterLoopExampleResult:
         owner=OwnerName("counter"),
         family=StreamFamily("loop"),
         stream=StreamName("count"),
-        schema=Schema.bytes("CounterValue"),
+        schema=Schema.bytes(name="CounterValue"),
     )
     graph.register_port(binding.request)
     graph.register_port(binding.desired)

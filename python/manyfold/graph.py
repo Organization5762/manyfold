@@ -853,7 +853,7 @@ class WriteBindings:
             family=family,
             stream=stream,
             variant=Variant.Ack,
-            schema=Schema.bytes(f"{schema.schema_id}Ack", version=schema.version),
+            schema=Schema.bytes(name=f"{schema.schema_id}Ack", version=schema.version),
         )
         return WriteBinding(
             request=request.route_ref,
@@ -923,7 +923,8 @@ class WriteBindings:
             variant=Variant.Event,
             schema=event_schema
             or Schema.bytes(
-                f"{observation.schema_id}Event", version=observation.version
+                name=f"{observation.schema_id}Event",
+                version=observation.version,
             ),
         )
         ack = (

@@ -46,7 +46,7 @@ def run_example() -> LazyLidarPayloadExampleResult:
         metadata_stream=StreamName("frame_meta"),
         metadata_schema=_frame_schema(),
         payload_stream=StreamName("frame_payload"),
-        payload_schema=Schema.bytes("LidarFramePayload"),
+        payload_schema=Schema.bytes(name="LidarFramePayload"),
     )
 
     selected_metadata = sibling_route(

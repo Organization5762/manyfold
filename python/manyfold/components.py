@@ -597,7 +597,7 @@ class Consensus:
                 family="raft",
                 stream="election_tick",
                 variant=Variant.Event,
-                schema=Schema.bytes("RaftElectionTick"),
+                schema=Schema.bytes(name="RaftElectionTick"),
             ),
             election_timeout=_component_route(
                 plane=Plane.Read,
@@ -606,7 +606,7 @@ class Consensus:
                 family="raft",
                 stream="election_timeout",
                 variant=Variant.Event,
-                schema=Schema.bytes("RaftElectionTimeout"),
+                schema=Schema.bytes(name="RaftElectionTimeout"),
             ),
             request_vote=_component_route(
                 plane=Plane.Write,

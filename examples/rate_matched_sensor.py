@@ -29,7 +29,7 @@ def run_example() -> RateMatchedSensorExampleResult:
         family="tick",
         stream="drain",
         variant=Variant.Event,
-        schema=Schema.bytes("DrainTick"),
+        schema=Schema.bytes(name="DrainTick"),
     )
     sampled = example_route(
         plane=Plane.Read,

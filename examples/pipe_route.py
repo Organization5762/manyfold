@@ -31,7 +31,7 @@ def run_example() -> PipeRouteExampleResult:
         family=StreamFamily("speed"),
         stream=StreamName("command"),
         variant=Variant.Request,
-        schema=Schema.bytes("SpeedCommand"),
+        schema=Schema.bytes(name="SpeedCommand"),
     )
     staged_route = route(
         plane=Plane.Read,
@@ -40,7 +40,7 @@ def run_example() -> PipeRouteExampleResult:
         family=StreamFamily("speed"),
         stream=StreamName("staged_command"),
         variant=Variant.Meta,
-        schema=Schema.bytes("SpeedCommand"),
+        schema=Schema.bytes(name="SpeedCommand"),
     )
 
     graph.capacitor(

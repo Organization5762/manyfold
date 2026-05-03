@@ -23,7 +23,7 @@ def run_example() -> CrossPartitionJoinExampleResult:
         family="sensor",
         stream="accel",
         variant=Variant.Meta,
-        schema=Schema.bytes("AccelFrame"),
+        schema=Schema.bytes(name="AccelFrame"),
     )
     gyro = example_route(
         plane=Plane.Read,
@@ -32,7 +32,7 @@ def run_example() -> CrossPartitionJoinExampleResult:
         family="sensor",
         stream="gyro",
         variant=Variant.Meta,
-        schema=Schema.bytes("GyroFrame"),
+        schema=Schema.bytes(name="GyroFrame"),
     )
 
     plan = graph.plan_join(

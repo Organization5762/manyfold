@@ -13,31 +13,44 @@ daily API is:
 A route is more than a topic string. It records where a signal belongs.
 
 ```python
-from manyfold import Graph, Layer, OwnerName, Plane, Schema, StreamFamily, StreamName, Variant, route
+from manyfold import Graph, Schema, route
 
 graph = Graph()
 temperature = route(
-    plane=Plane.Read,
-    layer=Layer.Logical,
-    owner=OwnerName("sensor"),
-    family=StreamFamily("environment"),
-    stream=StreamName("temperature"),
-    variant=Variant.Meta,
-    schema=Schema.bytes("Temperature"),
+    owner="sensor",
+    family="environment",
+    stream="temperature",
+    schema=Schema.bytes(name="Temperature"),
 )
 ```
 
-The route carries ownership, stream identity, plane, layer, variant, and schema.
-Those fields are what make the graph inspectable later.
+Basic routes default to the common read/logical/meta shape. The route still
+carries ownership, stream identity, plane, layer, variant, and schema; those
+fields are what make the graph inspectable later. Pass explicit `plane`,
+`layer`, or `variant` only when the route needs a less common role.
+
+For a first route, read the fields as:
+
+- `owner`: the component or subsystem responsible for the signal.
+- `family`: a group for related streams.
+- `stream`: this specific signal inside the family.
+- `schema`: the encode/decode contract for values on the route.
 
 ## Publish and Read
 
 ```python
 graph.publish(temperature, b"72.4F")
+graph.publish(temperature, b"72.9F")
 latest = graph.latest(temperature)
 
 if latest is not None:
-    print(latest.value)
+    print(f"latest #{latest.closed.seq_source}: {latest.value!r}")
+```
+
+Output:
+
+```text
+latest #2: b'72.9F'
 ```
 
 `Schema` owns encoding and decoding, so reads and observations can return typed
@@ -52,6 +65,12 @@ subscription = graph.observe(temperature, replay_latest=False).subscribe(
 
 graph.publish(temperature, b"72.5F")
 subscription.dispose()
+```
+
+Output:
+
+```text
+b'72.5F'
 ```
 
 Observation is useful for application callbacks. When a callback starts to hide

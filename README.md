@@ -27,27 +27,110 @@ uv run python examples/simple_latest.py
 uv run python -m unittest tests.test_examples
 ```
 
-Smallest useful shape:
+## A Small Graph in Motion
+
+### Publish Values
 
 ```python
-from manyfold import Graph, Layer, OwnerName, Plane, Schema, StreamFamily, StreamName, Variant, route
+from manyfold import Graph, Schema, route
 
 graph = Graph()
 temperature = route(
-    plane=Plane.Read,
-    layer=Layer.Logical,
-    owner=OwnerName("sensor"),
-    family=StreamFamily("environment"),
-    stream=StreamName("temperature"),
-    variant=Variant.Meta,
-    schema=Schema.bytes("Temperature"),
+    owner="sensor",
+    family="environment",
+    stream="temperature",
+    schema=Schema.bytes(name="Temperature"),
 )
 
 graph.publish(temperature, b"72.4F")
+graph.publish(temperature, b"72.9F")
 latest = graph.latest(temperature)
 assert latest is not None
-print(latest.value)
+print(f"latest #{latest.closed.seq_source}: {latest.value!r}")
 ```
+
+Output:
+
+```text
+latest #2: b'72.9F'
+```
+
+The fields are the parts of the graph name:
+
+- `owner` is the component or subsystem responsible for the signal.
+- `family` groups related streams.
+- `stream` names this specific signal.
+- `schema` says how payloads are encoded and decoded.
+
+Basic routes default to read/logical/meta, so the first example stays focused
+on the moving signal. Pass explicit `plane`, `layer`, or `variant` when that
+role matters.
+
+### Compute Values
+
+```python
+average_temperature = route(
+    owner="sensor",
+    family="environment",
+    stream="average_temperature",
+    schema=Schema.bytes(name="AverageTemperature"),
+)
+
+samples = []
+
+
+def publish_average(envelope):
+    samples.append(float(envelope.value.decode("ascii").removesuffix("F")))
+    average = f"{sum(samples) / len(samples):.1f}F".encode("ascii")
+    graph.publish(average_temperature, average)
+
+
+subscription = graph.observe(temperature, replay_latest=False).subscribe(publish_average)
+for reading in (b"72.4F", b"72.9F", b"73.7F"):
+    graph.publish(temperature, reading)
+subscription.dispose()
+
+latest_average = graph.latest(average_temperature)
+assert latest_average is not None
+print(f"average #{latest_average.closed.seq_source}: {latest_average.value!r}")
+```
+
+Output:
+
+```text
+average #3: b'73.0F'
+```
+
+The shape is the same: computed values are just values published to another
+typed route. That keeps callbacks, derived state, and operational inspection in
+the same graph vocabulary.
+
+### Model Consensus
+
+```python
+from manyfold import Consensus
+
+consensus = Consensus.install(graph, nodes=("node-a", "node-b"))
+consensus.tick(1)
+consensus.tick(2)
+consensus.propose(1, "set mode=auto")
+consensus.propose(2, "set temp=21")
+
+print(consensus.latest_leader())
+print(consensus.latest_log())
+```
+
+Output:
+
+```text
+('node-a', 3, True)
+((1, 'set mode=auto'), (2, 'set temp=21'))
+```
+
+The consensus component uses Raft-shaped leader election and replicated-log
+concepts from Diego Ongaro and John Ousterhout's
+[“In Search of an Understandable Consensus Algorithm”](https://www.usenix.org/conference/atc14/technical-sessions/presentation/ongaro)
+(USENIX ATC 2014).
 
 ## Read Next
 
@@ -76,32 +159,38 @@ which parts are supported today.
 
 <!-- manyfold:featured-examples:start -->
 The `examples/` directory is organized as a short path through the mental
-model. Start with a route, add explicit demand, then move into joins,
-watermarks, planning, and taint-aware runtime behavior. The supported
+model. Start with a route, derive values, add explicit demand, then move
+into joins, watermarks, planning, consensus, and taint-aware runtime behavior. The supported
 examples are validated by the regular `unittest` run so they do not drift
 away from the API.
 
-**Start here: create one typed route and read it back**
-- `examples/simple_latest.py`: Smallest publish/read-back example.
+**Start here: publish changing state and read the latest value**
+- [examples/simple_latest.py](examples/simple_latest.py): Smallest changing-signal publish/read-back example.
+
+**Layer computation: publish derived values**
+- [examples/average_temperature.py](examples/average_temperature.py): Compute and publish a rolling average from temperature samples.
 
 **Control the flow: make downstream demand visible**
-- `examples/rate_matched_sensor.py`: A one-slot capacitor coalesces bursty reads behind explicit demand.
+- [examples/rate_matched_sensor.py](examples/rate_matched_sensor.py): A one-slot capacitor coalesces bursty reads behind explicit demand.
 
 **Fuse streams: coordinate independent sensors**
-- `examples/imu_fusion_join.py`: Capacitors stage accelerometer and gyro streams before an event-time join.
+- [examples/imu_fusion_join.py](examples/imu_fusion_join.py): Capacitors stage accelerometer and gyro streams before an event-time join.
 
 **Reason in time: release data by watermark progress**
-- `examples/rolling_window_aggregate.py`: A capacitor discharges samples behind explicit event-time watermarks.
+- [examples/rolling_window_aggregate.py](examples/rolling_window_aggregate.py): A capacitor discharges samples behind explicit event-time watermarks.
 
 **Scale the graph: plan repartition work explicitly**
-- `examples/cross_partition_join.py`: A repartition join with skew metrics and planner output.
+- [examples/cross_partition_join.py](examples/cross_partition_join.py): A repartition join with skew metrics and planner output.
+
+**Capstone: wire a Raft-shaped consensus component**
+- [examples/raft_demo.py](examples/raft_demo.py): The Consensus component wires Raft election defaults from graph primitives.
 
 **Audit the hard parts: mark nondeterminism on purpose**
-- `examples/ephemeral_entropy_stream.py`: Per-request entropy derivation that taints determinism explicitly.
+- [examples/ephemeral_entropy_stream.py](examples/ephemeral_entropy_stream.py): Per-request entropy derivation that taints determinism explicitly.
 
 More involved operator, query, transport, mesh, and security coverage stays
-in `tests/test_graph_reactive.py`, with archived exploratory scripts kept
-under `examples/archived/`. The example manifest, README featured-example
+in [tests/test_graph_reactive.py](tests/test_graph_reactive.py), with archived exploratory scripts kept
+under [examples/archived/](examples/archived/). The example manifest, README featured-example
 list, and RFC reference suite all derive from the shared example catalog,
 so supported versus archived status lives in one place.
 <!-- manyfold:featured-examples:end -->
