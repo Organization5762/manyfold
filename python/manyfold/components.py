@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 from dataclasses import dataclass
+from json import JSONDecodeError
 from pathlib import Path
 from typing import Any, Generic, Iterator, TypeVar
 from urllib.parse import quote, unquote
@@ -448,10 +449,33 @@ class Memory:
         if not self.path.exists():
             return
         with self.path.open("r", encoding="utf-8") as handle:
-            for line in handle:
+            for line_number, line in enumerate(handle, start=1):
                 stripped = line.strip()
-                if stripped:
-                    yield json.loads(stripped)
+                if not stripped:
+                    continue
+                try:
+                    record = json.loads(stripped)
+                except JSONDecodeError as exc:
+                    raise ValueError(
+                        f"memory file {self.path} line {line_number} is not valid JSON"
+                    ) from exc
+                if not isinstance(record, dict):
+                    raise ValueError(
+                        f"memory file {self.path} line {line_number} must be a JSON object"
+                    )
+                for field in (
+                    "route",
+                    "seq_source",
+                    "control_epoch",
+                    "schema_id",
+                    "schema_version",
+                    "payload_b64",
+                ):
+                    if field not in record:
+                        raise ValueError(
+                            f"memory file {self.path} line {line_number} is missing {field}"
+                        )
+                yield record
 
     @staticmethod
     def _event_key(record: dict[str, Any]) -> tuple[str, int, str, int | None]:

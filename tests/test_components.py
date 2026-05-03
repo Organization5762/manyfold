@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -344,6 +345,57 @@ class ComponentTests(unittest.TestCase):
 
         self.assertEqual([record.value for record in records], [b"already-recorded"])
         self.assertEqual([record.control_epoch for record in records], [7])
+
+    def test_memory_chip_reports_corrupt_jsonl_line_with_path_and_line(self) -> None:
+        manyfold = load_manyfold_package()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "memory.jsonl"
+            path.write_text(
+                json.dumps(
+                    {
+                        "route": "read/logical/demo/memory/bytes/meta@MemoryBytes.v1",
+                        "seq_source": 1,
+                        "control_epoch": None,
+                        "schema_id": "MemoryBytes",
+                        "schema_version": 1,
+                        "payload_b64": "",
+                    }
+                )
+                + '\n{"route": ',
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(
+                ValueError,
+                r"memory file .*memory\.jsonl line 2 is not valid JSON",
+            ):
+                manyfold.Memory(path)
+
+    def test_memory_chip_reports_missing_record_field_with_path_and_line(self) -> None:
+        manyfold = load_manyfold_package()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "memory.jsonl"
+            path.write_text(
+                json.dumps(
+                    {
+                        "route": "read/logical/demo/memory/bytes/meta@MemoryBytes.v1",
+                        "seq_source": 1,
+                        "control_epoch": None,
+                        "schema_id": "MemoryBytes",
+                        "schema_version": 1,
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(
+                ValueError,
+                r"memory file .*memory\.jsonl line 1 is missing payload_b64",
+            ):
+                manyfold.Memory(path)
 
 
 if __name__ == "__main__":
