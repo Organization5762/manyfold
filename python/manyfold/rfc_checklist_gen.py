@@ -187,7 +187,7 @@ class AppendixStatus:
 def parse_rfc_sections(
     rfc_path: Path = RFC_PATH,
 ) -> tuple[list[SectionStatus], list[AppendixStatus]]:
-    lines = rfc_path.read_text().splitlines()
+    lines = rfc_path.read_text(encoding="utf-8").splitlines()
     section_matches = [
         section
         for line in lines
@@ -266,11 +266,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.check:
         current_checklist = (
-            CHECKLIST_PATH.read_text() if CHECKLIST_PATH.exists() else ""
+            CHECKLIST_PATH.read_text(encoding="utf-8")
+            if CHECKLIST_PATH.exists()
+            else ""
         )
         return 0 if current_checklist == checklist_content else 1
 
-    CHECKLIST_PATH.write_text(checklist_content)
+    CHECKLIST_PATH.write_text(checklist_content, encoding="utf-8")
     return 0
 
 
