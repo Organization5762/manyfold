@@ -347,7 +347,7 @@ def _module_name_from_path(path: Path) -> str:
 
 def _discover_manifestable_modules() -> tuple[str, ...]:
     discovered: list[str] = []
-    for path in sorted(_EXAMPLES_DIR.rglob("*.py")):
+    for path in _EXAMPLES_DIR.rglob("*.py"):
         if "__pycache__" in path.parts:
             continue
         if path.stem in _IGNORED_MODULE_NAMES:
