@@ -21,9 +21,32 @@ MODULES_TO_RESET = (
     "manyfold.lego_catalog",
     "manyfold.sensor_io",
     "manyfold.reference_examples",
+    "manyfold.rx",
+    "manyfold.rx.abc",
+    "manyfold.rx.disposable",
+    "manyfold.rx.operators",
+    "manyfold.rx.scheduler",
+    "manyfold.rx.subject",
+    "manyfold.rx.subject.asyncsubject",
+    "manyfold.rx.subject.behaviorsubject",
+    "manyfold.rx.subject.replaysubject",
+    "manyfold.rx.subject.subject",
+    "manyfold.rx.testing",
+    "manyfold.rx.testing.marbles",
+    "manyfold.rx.typing",
     "manyfold._manyfold_rust",
     "reactivex",
+    "reactivex.abc",
+    "reactivex.disposable",
+    "reactivex.scheduler",
     "reactivex.subject",
+    "reactivex.subject.asyncsubject",
+    "reactivex.subject.behaviorsubject",
+    "reactivex.subject.replaysubject",
+    "reactivex.subject.subject",
+    "reactivex.testing",
+    "reactivex.testing.marbles",
+    "reactivex.typing",
     "reactivex.operators",
 )
 
@@ -42,6 +65,15 @@ def subprocess_test_env() -> dict[str, str]:
 
 
 def install_reactivex_stub() -> None:
+    try:
+        import reactivex  # noqa: F401
+        import reactivex.operators  # noqa: F401
+        import reactivex.subject  # noqa: F401
+
+        return
+    except ImportError:
+        pass
+
     if (
         "reactivex" in sys.modules
         and "reactivex.subject" in sys.modules
@@ -69,6 +101,9 @@ def install_reactivex_stub() -> None:
     class Observable:
         def __init__(self, subscribe):
             self._subscribe = subscribe
+
+        def __class_getitem__(cls, item):
+            return cls
 
         def subscribe(self, observer=None, scheduler=None):
             if callable(observer) and not hasattr(observer, "on_next"):
@@ -99,6 +134,32 @@ def install_reactivex_stub() -> None:
         def on_next(self, value) -> None:
             for observer in list(self._observers):
                 observer.on_next(value)
+
+    class BehaviorSubject(Subject):
+        def __init__(self, value):
+            super().__init__()
+            self._value = value
+
+        def subscribe(self, observer=None, scheduler=None):
+            subscription = super().subscribe(observer, scheduler=scheduler)
+            if callable(observer) and not hasattr(observer, "on_next"):
+                observer(self._value)
+            else:
+                observer.on_next(self._value)
+            return subscription
+
+        def on_next(self, value) -> None:
+            self._value = value
+            super().on_next(value)
+
+    class ReplaySubject(Subject):
+        pass
+
+    class AsyncSubject(Subject):
+        pass
+
+    class TimeoutScheduler:
+        pass
 
     def create(subscribe):
         return Observable(subscribe)
@@ -185,15 +246,103 @@ def install_reactivex_stub() -> None:
     rx_module.Observable = Observable
     rx_module.create = create
     rx_module.from_iterable = from_iterable
+    for name in (
+        "amb",
+        "case",
+        "catch",
+        "combine_latest",
+        "concat",
+        "defer",
+        "empty",
+        "fork_join",
+        "from_callable",
+        "from_callback",
+        "from_future",
+        "from_marbles",
+        "generate",
+        "generate_with_relative_time",
+        "if_then",
+        "interval",
+        "just",
+        "merge",
+        "never",
+        "of",
+        "pipe",
+        "range",
+        "repeat_value",
+        "return_value",
+        "start",
+        "start_async",
+        "throw",
+        "timer",
+        "to_async",
+        "using",
+        "with_latest_from",
+    ):
+        setattr(rx_module, name, lambda *args, **kwargs: Observable(lambda *_: Disposable()))
+    abc_module = types.ModuleType("reactivex.abc")
+    disposable_module = types.ModuleType("reactivex.disposable")
+    disposable_module.Disposable = Disposable
+    scheduler_module = types.ModuleType("reactivex.scheduler")
+    scheduler_module.TimeoutScheduler = TimeoutScheduler
     subject_module = types.ModuleType("reactivex.subject")
     subject_module.Subject = Subject
+    subject_module.BehaviorSubject = BehaviorSubject
+    subject_module.ReplaySubject = ReplaySubject
+    subject_module.AsyncSubject = AsyncSubject
+    subject_subject_module = types.ModuleType("reactivex.subject.subject")
+    subject_subject_module.Subject = Subject
+    behavior_subject_module = types.ModuleType("reactivex.subject.behaviorsubject")
+    behavior_subject_module.BehaviorSubject = BehaviorSubject
+    replay_subject_module = types.ModuleType("reactivex.subject.replaysubject")
+    replay_subject_module.ReplaySubject = ReplaySubject
+    async_subject_module = types.ModuleType("reactivex.subject.asyncsubject")
+    async_subject_module.AsyncSubject = AsyncSubject
+    testing_module = types.ModuleType("reactivex.testing")
+    marbles_module = types.ModuleType("reactivex.testing.marbles")
+
+    def marbles_testing():
+        class MarbleContext:
+            def __enter__(self):
+                return (
+                    lambda source: source,
+                    lambda source: source,
+                    lambda source: source,
+                    lambda expected: expected,
+                )
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        return MarbleContext()
+
+    marbles_module.marbles_testing = marbles_testing
+    typing_module = types.ModuleType("reactivex.typing")
+    typing_module.StartableTarget = object
     ops_module = types.ModuleType("reactivex.operators")
     ops_module.filter = op_filter
     ops_module.map = op_map
     ops_module.distinct = op_distinct
     ops_module.publish = op_publish
+    rx_module.abc = abc_module
+    rx_module.disposable = disposable_module
+    rx_module.operators = ops_module
+    rx_module.scheduler = scheduler_module
+    rx_module.subject = subject_module
+    rx_module.testing = testing_module
+    rx_module.typing = typing_module
     sys.modules["reactivex"] = rx_module
+    sys.modules["reactivex.abc"] = abc_module
+    sys.modules["reactivex.disposable"] = disposable_module
+    sys.modules["reactivex.scheduler"] = scheduler_module
     sys.modules["reactivex.subject"] = subject_module
+    sys.modules["reactivex.subject.subject"] = subject_subject_module
+    sys.modules["reactivex.subject.behaviorsubject"] = behavior_subject_module
+    sys.modules["reactivex.subject.replaysubject"] = replay_subject_module
+    sys.modules["reactivex.subject.asyncsubject"] = async_subject_module
+    sys.modules["reactivex.testing"] = testing_module
+    sys.modules["reactivex.testing.marbles"] = marbles_module
+    sys.modules["reactivex.typing"] = typing_module
     sys.modules["reactivex.operators"] = ops_module
 
 
@@ -821,6 +970,8 @@ def load_manyfold_package():
         "MailboxDescriptor": rust.MailboxDescriptor,
         "MailboxSnapshot": graph.MailboxSnapshot,
         "ManualClock": sensor_io.ManualClock,
+        "ManagedRunLoop": sensor_io.ManagedRunLoop,
+        "ManagedRunLoopHandle": sensor_io.ManagedRunLoopHandle,
         "Memory": components.Memory,
         "MemoryRecord": components.MemoryRecord,
         "NamespaceRef": rust.NamespaceRef,
@@ -872,6 +1023,7 @@ def load_manyfold_package():
         "SnapshotStore": components.SnapshotStore,
         "SnapshotStoreRoutes": components.SnapshotStoreRoutes,
         "Source": primitives.Source,
+        "StopToken": sensor_io.StopToken,
         "StoreEntry": components.StoreEntry,
         "StreamFamily": primitives.StreamFamily,
         "StreamName": primitives.StreamName,

@@ -18,13 +18,22 @@ except ImportError:
 
 ensure_repo_import_paths()
 
-from examples import (
-    REFERENCE_EXAMPLE_NUMBERS,
-    ExampleCatalogEntry,
-    ReferenceExampleGap,
-    catalog_entry,
-    reference_example_metadata,
-)
+try:
+    from examples import (
+        REFERENCE_EXAMPLE_NUMBERS,
+        ExampleCatalogEntry,
+        ReferenceExampleGap,
+        catalog_entry,
+        reference_example_metadata,
+    )
+except ModuleNotFoundError as exc:
+    if exc.name != "examples":
+        raise
+    REFERENCE_EXAMPLE_NUMBERS: tuple[int, ...] = ()
+    ExampleCatalogEntry = Any
+    ReferenceExampleGap = Any
+    catalog_entry = None
+    reference_example_metadata = None
 
 __all__ = [
     "REFERENCE_EXAMPLE_SUITE",

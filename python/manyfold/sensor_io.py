@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import codecs
 import json
+import threading
 import time
 from collections import deque
 from dataclasses import asdict, dataclass, field, is_dataclass
@@ -148,6 +149,99 @@ class RetryLoop:
                     raise
         assert last_error is not None
         raise last_error
+
+
+@dataclass
+class StopToken:
+    """Cooperative stop signal for long-lived local loops."""
+
+    group: str | None = None
+    _event: threading.Event = field(default_factory=threading.Event, init=False, repr=False)
+
+    def is_set(self) -> bool:
+        return self._event.is_set()
+
+    def set(self) -> None:
+        self._event.set()
+
+    def wait(self, timeout: float | None = None) -> bool:
+        return self._event.wait(timeout)
+
+
+@dataclass
+class ManagedRunLoop:
+    """Run one long-lived operation until stopped, retrying transient failures.
+
+    The loop body receives a ``StopToken`` and should return when its current
+    connection/session ends. Returning normally starts the next iteration unless
+    the token was stopped. Retry delays use ``StopToken.wait`` so shutdown wakes
+    sleeping loops immediately.
+    """
+
+    body: Callable[[StopToken], None]
+    retry: RetryPolicy = field(default_factory=lambda: RetryPolicy(max_attempts=1_000_000))
+    backoff: BackoffPolicy = field(default_factory=BackoffPolicy)
+    on_error: Callable[[BaseException, int], None] | None = None
+    group: str | None = None
+
+    def run(self, stop: StopToken | None = None) -> None:
+        token = stop or StopToken(group=self.group)
+        consecutive_failures = 0
+        while not token.is_set():
+            try:
+                self.body(token)
+                consecutive_failures = 0
+            except self.retry.retry_on as exc:
+                consecutive_failures += 1
+                if self.on_error is not None:
+                    self.on_error(exc, consecutive_failures)
+                if consecutive_failures >= self.retry.max_attempts:
+                    raise
+            if token.is_set():
+                return
+            delay = self.backoff.delay_for_attempt(consecutive_failures + 1)
+            if delay > 0 and token.wait(delay):
+                return
+
+    def start_thread(
+        self,
+        *,
+        name: str,
+        daemon: bool = True,
+    ) -> "ManagedRunLoopHandle":
+        token = StopToken(group=self.group)
+        thread = threading.Thread(
+            target=self.run,
+            args=(token,),
+            name=name,
+            daemon=daemon,
+        )
+        handle = ManagedRunLoopHandle(loop=self, token=token, thread=thread)
+        thread.start()
+        return handle
+
+
+@dataclass
+class ManagedRunLoopHandle:
+    """Owned thread handle for a ``ManagedRunLoop``."""
+
+    loop: ManagedRunLoop
+    token: StopToken
+    thread: threading.Thread
+    disposed: bool = False
+
+    def stop(self) -> None:
+        self.token.set()
+
+    def join(self, timeout: float | None = None) -> None:
+        self.thread.join(timeout=timeout)
+
+    def dispose(self, timeout: float | None = None) -> None:
+        if self.disposed:
+            return
+        self.stop()
+        self.join(timeout=timeout)
+        self.disposed = True
 
 
 @dataclass
@@ -1237,6 +1331,8 @@ __all__ = [
     "LocalDurableSpool",
     "LocalSensorSource",
     "ManualClock",
+    "ManagedRunLoop",
+    "ManagedRunLoopHandle",
     "PeripheralAdapter",
     "PeripheralAdapterHandle",
     "RateMatchedSensor",
@@ -1257,6 +1353,7 @@ __all__ = [
     "SensorSample",
     "SensorSourceHandle",
     "SensorTag",
+    "StopToken",
     "SystemClock",
     "ThresholdFilter",
     "health_status_schema",

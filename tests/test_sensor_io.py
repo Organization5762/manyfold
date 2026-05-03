@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import tempfile
 import unittest
 from dataclasses import dataclass
@@ -173,6 +174,61 @@ class SensorIoTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "still failing"):
             loop.run(read)
         self.assertEqual(attempts, 2)
+
+    def test_managed_run_loop_retries_until_stopped(self) -> None:
+        manyfold = load_manyfold_package()
+        attempts = 0
+        errors: list[tuple[str, int]] = []
+        sleeps: list[float] = []
+
+        def body(stop: manyfold.StopToken) -> None:
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise RuntimeError("not ready")
+            stop.set()
+
+        loop = manyfold.ManagedRunLoop(
+            body=body,
+            retry=manyfold.SensorRetryPolicy(max_attempts=3),
+            backoff=manyfold.SensorBackoffPolicy.fixed(0.5),
+            on_error=lambda exc, count: errors.append((str(exc), count)),
+        )
+        stop = manyfold.StopToken()
+        original_wait = stop.wait
+
+        def wait(delay: float | None = None) -> bool:
+            assert delay is not None
+            sleeps.append(delay)
+            return original_wait(0)
+
+        stop.wait = wait  # type: ignore[method-assign]
+
+        loop.run(stop)
+
+        self.assertEqual(attempts, 2)
+        self.assertEqual(errors, [("not ready", 1)])
+        self.assertEqual(sleeps, [0.5])
+        self.assertTrue(stop.is_set())
+
+    def test_managed_run_loop_dispose_stops_thread(self) -> None:
+        manyfold = load_manyfold_package()
+        entered = threading.Event()
+
+        def body(stop: manyfold.StopToken) -> None:
+            entered.set()
+            stop.wait(10)
+
+        handle = manyfold.ManagedRunLoop(body=body).start_thread(
+            name="manyfold-test-managed-loop"
+        )
+        try:
+            self.assertTrue(entered.wait(1))
+        finally:
+            handle.dispose(timeout=1)
+
+        self.assertTrue(handle.disposed)
+        self.assertFalse(handle.thread.is_alive())
 
     def test_change_and_threshold_filters_reduce_noise(self) -> None:
         manyfold = load_manyfold_package()
