@@ -364,7 +364,7 @@ class Memory:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._seen: set[tuple[str, int]] = self._load_seen()
+        self._seen: set[tuple[str, int, str, int | None]] = set()
 
     def remember(
         self,
@@ -377,7 +377,15 @@ class Memory:
 
         def on_next(envelope: TypedEnvelope[T]) -> None:
             closed = envelope.closed
-            event_key = (closed.route.display(), closed.seq_source)
+            payload_b64 = base64.b64encode(route_ref.schema.encode(envelope.value)).decode(
+                "ascii"
+            )
+            event_key = (
+                closed.route.display(),
+                closed.seq_source,
+                payload_b64,
+                closed.control_epoch,
+            )
             if event_key in self._seen:
                 return
             self._seen.add(event_key)
@@ -387,9 +395,7 @@ class Memory:
                 "control_epoch": closed.control_epoch,
                 "schema_id": route_ref.schema.schema_id,
                 "schema_version": route_ref.schema.version,
-                "payload_b64": base64.b64encode(
-                    route_ref.schema.encode(envelope.value)
-                ).decode("ascii"),
+                "payload_b64": payload_b64,
             }
             with self.path.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(record, sort_keys=True))
@@ -411,13 +417,6 @@ class Memory:
                 control_epoch=record.control_epoch,
             )
         return records
-
-    def _load_seen(self) -> set[tuple[str, int]]:
-        return {
-            (record["route"], int(record["seq_source"]))
-            for record in self._iter_raw_records()
-            if "route" in record and "seq_source" in record
-        }
 
     def _iter_records(self, route_ref: TypedRoute[T]) -> Iterator[MemoryRecord[T]]:
         route_display = route_ref.display()

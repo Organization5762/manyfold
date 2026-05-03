@@ -240,6 +240,38 @@ class ComponentTests(unittest.TestCase):
 
         self.assertEqual([record.value for record in records], [b"same"])
 
+    def test_memory_chip_records_new_events_after_graph_sequence_restart(self) -> None:
+        manyfold = load_manyfold_package()
+        route = manyfold.route(
+            plane=manyfold.Plane.Read,
+            layer=manyfold.Layer.Logical,
+            owner=manyfold.OwnerName("demo"),
+            family=manyfold.StreamFamily("memory"),
+            stream=manyfold.StreamName("bytes"),
+            variant=manyfold.Variant.Meta,
+            schema=manyfold.Schema.bytes("MemoryBytes"),
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "memory.jsonl"
+
+            first_graph = manyfold.Graph()
+            first_memory = manyfold.Memory(path)
+            first_subscription = first_memory.remember(first_graph, route)
+            first_graph.publish(route, b"first", control_epoch=1)
+            first_subscription.dispose()
+
+            restarted_graph = manyfold.Graph()
+            restarted_memory = manyfold.Memory(path)
+            restarted_subscription = restarted_memory.remember(restarted_graph, route)
+            restarted_graph.publish(route, b"first")
+            restarted_subscription.dispose()
+
+            records = manyfold.Memory(path).records(route)
+
+        self.assertEqual([record.value for record in records], [b"first", b"first"])
+        self.assertEqual([record.seq_source for record in records], [1, 1])
+
 
 if __name__ == "__main__":
     unittest.main()
