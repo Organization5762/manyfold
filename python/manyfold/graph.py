@@ -11,9 +11,11 @@ from __future__ import annotations
 import json
 from collections import deque
 from dataclasses import dataclass, field, replace
+from itertools import count
 from typing import (
     Any,
     Callable,
+    Generic,
     Hashable,
     Iterator,
     Protocol,
@@ -69,6 +71,7 @@ from .primitives import (
 T = TypeVar("T")
 TIn = TypeVar("TIn")
 TOut = TypeVar("TOut")
+U = TypeVar("U")
 AnyTypedRoute = TypedRoute[Any]
 AnySource = Source[Any]
 AnySink = Sink[Any]
@@ -81,6 +84,7 @@ TRight = TypeVar("TRight")
 DIAGRAM_GROUP_FIELDS = frozenset(
     ("plane", "layer", "owner", "family", "stream", "variant")
 )
+_PIPELINE_ROUTE_IDS = count(1)
 
 
 @runtime_checkable
@@ -1078,6 +1082,210 @@ class _TrackedSubscription:
         self._inner.dispose()
 
 
+class GraphConnection:
+    """Handle for graph-installed observation topology."""
+
+    def __init__(
+        self,
+        graph: Graph,
+        *,
+        name: str,
+        subscriptions: Sequence[SubscriptionLike] = (),
+        nodes: Sequence[str] = (),
+        connections: Sequence[GraphConnection] = (),
+    ) -> None:
+        self._graph = graph
+        self.name = name
+        self._subscriptions = tuple(subscriptions)
+        self._nodes = tuple(nodes)
+        self._connections = tuple(connections)
+        self._removed = False
+
+    def remove(self) -> None:
+        """Stop this connection and unregister graph-visible pipeline nodes."""
+        if self._removed:
+            return
+        self._removed = True
+        for connection in self._connections:
+            connection.remove()
+        for subscription in self._subscriptions:
+            subscription.dispose()
+        for node in self._nodes:
+            self._graph._diagram_nodes.pop(node, None)
+
+    def dispose(self) -> None:
+        """Compatibility alias for callers still expecting disposable handles."""
+        self.remove()
+
+
+@dataclass(frozen=True)
+class CallbackNode(Generic[T]):
+    """Leaf graph node that delivers route updates to ordinary Python code."""
+
+    name: str
+    receive: Callable[[T], None]
+
+
+@dataclass(frozen=True)
+class MapNode(Generic[TIn, TOut]):
+    """Graph-visible map operation."""
+
+    name: str
+    transform: Callable[[TIn], TOut]
+
+
+@dataclass(frozen=True)
+class FilterNode(Generic[T]):
+    """Graph-visible filter operation."""
+
+    name: str
+    predicate: Callable[[T], bool]
+
+
+class RoutePipeline(Generic[T]):
+    """Fluent graph pipeline rooted at one route."""
+
+    def __init__(
+        self,
+        graph: Graph,
+        route_ref: RouteLike,
+        *,
+        replay_latest: bool = True,
+        subscriber_id: str | None = None,
+        connections: Sequence[GraphConnection] = (),
+    ) -> None:
+        self._graph = graph
+        self._route_ref = route_ref
+        self._replay_latest = replay_latest
+        self._subscriber_id = subscriber_id
+        self._connections = tuple(connections)
+
+    @property
+    def route(self) -> RouteLike:
+        return self._route_ref
+
+    def connect(
+        self,
+        target: CallbackNode[T] | Callable[[T], None] | RouteLike,
+        *,
+        name: str | None = None,
+    ) -> GraphConnection:
+        """Install this pipeline into a route or callback sink."""
+        if isinstance(target, (TypedRoute, RouteRef, Source, Sink)):
+            connection = self._connect_route(target, name=name)
+        else:
+            node = (
+                target
+                if isinstance(target, CallbackNode)
+                else CallbackNode(
+                    name or self._graph._next_pipeline_node_name("callback"),
+                    target,
+                )
+            )
+            connection = self._graph._connect_callback_pipeline(
+                self._route_ref,
+                node,
+                replay_latest=self._replay_latest,
+                subscriber_id=self._subscriber_id,
+            )
+        if not self._connections:
+            return connection
+        return GraphConnection(
+            self._graph,
+            name=connection.name,
+            connections=(*self._connections, connection),
+        )
+
+    def callback(
+        self,
+        receive: Callable[[T], None],
+        *,
+        name: str | None = None,
+    ) -> GraphConnection:
+        """Install a callback sink node for this pipeline."""
+        return self.connect(
+            CallbackNode(
+                name or self._graph._next_pipeline_node_name("callback"),
+                receive,
+            )
+        )
+
+    def filter(
+        self,
+        predicate: Callable[[T], bool],
+        *,
+        name: str | None = None,
+    ) -> RoutePipeline[T]:
+        """Install a graph-visible filter node and continue from its output."""
+        node = FilterNode(
+            name or self._graph._next_pipeline_node_name("filter"),
+            predicate,
+        )
+        return self._graph._connect_transform_pipeline(
+            self,
+            node,
+            lambda value: (node.predicate(value), value),
+        )
+
+    def map(
+        self,
+        transform: Callable[[T], U],
+        *,
+        name: str | None = None,
+    ) -> RoutePipeline[U]:
+        """Install a graph-visible map node and continue from its output."""
+        node = MapNode(name or self._graph._next_pipeline_node_name("map"), transform)
+        return self._graph._connect_transform_pipeline(
+            self,
+            node,
+            lambda value: (True, node.transform(value)),
+        )
+
+    def subscribe(
+        self,
+        observer: ObserverLike[T] | Callable[[T], None] | None = None,
+        on_error: Callable[[Exception], None] | None = None,
+        on_completed: Callable[[], None] | None = None,
+        scheduler: object | None = None,
+    ) -> SubscriptionLike:
+        """Compatibility shim for existing Rx-style callers."""
+        return self._graph._observe_observable(
+            self._route_ref,
+            replay_latest=self._replay_latest,
+            subscriber_id=self._subscriber_id,
+        ).subscribe(
+            observer,
+            on_error,
+            on_completed,
+            scheduler=scheduler,
+        )
+
+    def _connect_route(
+        self,
+        target: RouteLike,
+        *,
+        name: str | None = None,
+    ) -> GraphConnection:
+        return self._graph._connect_route_pipeline(
+            self._route_ref,
+            target,
+            replay_latest=self._replay_latest,
+            subscriber_id=self._subscriber_id,
+            name=name,
+        )
+
+    def __getattr__(self, operation: str) -> Callable[..., Any]:
+        def apply(*args: Any, **kwargs: Any) -> Any:
+            return self._graph._apply_registered_pipeline_operation(
+                self,
+                operation,
+                *args,
+                **kwargs,
+            )
+
+        return apply
+
+
 class Graph:
     """Python-facing Manyfold API.
 
@@ -1140,6 +1348,12 @@ class Graph:
         self._scheduler_epoch = 0
         self._query_sequence = 0
         self._subscriber_sequence = 0
+        self._pipeline_node_sequence = 0
+        self._pipeline_factories: dict[str, Callable[..., Any]] = {
+            "callback": CallbackNode,
+            "filter": FilterNode,
+            "map": MapNode,
+        }
 
     def _coerce_route_ref(self, route_ref: RouteLike) -> RouteRef:
         if isinstance(route_ref, (Source, Sink)):
@@ -1171,6 +1385,10 @@ class Graph:
 
     def _route_key(self, route_ref: RouteLike) -> str:
         return self._coerce_route_ref(route_ref).display()
+
+    def _next_pipeline_node_name(self, kind: str) -> str:
+        self._pipeline_node_sequence += 1
+        return f"{kind}-{self._pipeline_node_sequence}"
 
     def _auto_node_name(
         self,
@@ -2458,7 +2676,7 @@ class Graph:
         *,
         replay_latest: bool = True,
         subscriber_id: str | None = None,
-    ) -> Observable[TypedEnvelope[T]]: ...
+    ) -> RoutePipeline[T]: ...
 
     @overload
     def observe(
@@ -2467,7 +2685,7 @@ class Graph:
         *,
         replay_latest: bool = True,
         subscriber_id: str | None = None,
-    ) -> Observable[ClosedEnvelope]: ...
+    ) -> RoutePipeline[bytes]: ...
 
     def observe(
         self,
@@ -2475,8 +2693,23 @@ class Graph:
         *,
         replay_latest: bool = True,
         subscriber_id: str | None = None,
+    ) -> RoutePipeline[Any]:
+        """Start a graph-owned pipeline from a route."""
+        return RoutePipeline(
+            self,
+            route_ref,
+            replay_latest=replay_latest,
+            subscriber_id=subscriber_id,
+        )
+
+    def _observe_observable(
+        self,
+        route_ref: RouteLike,
+        *,
+        replay_latest: bool = True,
+        subscriber_id: str | None = None,
     ) -> Observable[Any]:
-        """Observe route updates as an Rx stream.
+        """Compatibility observable for route updates.
 
         Typed routes decode payloads before delivery; raw route refs expose the
         underlying closed envelopes.
@@ -2525,6 +2758,175 @@ class Graph:
             )
 
         return rx.create(subscribe)
+
+    def register_pipeline_operation(
+        self,
+        name: str,
+        factory: Callable[..., Any],
+        *,
+        replace_existing: bool = False,
+    ) -> None:
+        """Register a fluent pipeline operation factory."""
+        if name in self._pipeline_factories and not replace_existing:
+            raise ValueError(f"pipeline operation already registered: {name}")
+        self._pipeline_factories[name] = factory
+
+    def _pipeline_value_observable(
+        self,
+        route_ref: RouteLike,
+        *,
+        replay_latest: bool,
+        subscriber_id: str | None,
+    ) -> Observable[Any]:
+        native_route = self._coerce_route_ref(route_ref)
+
+        def subscribe(
+            observer: ObserverLike[Any],
+            scheduler: object | None = None,
+        ) -> SubscriptionLike:
+            def on_next(item: TypedEnvelope[Any] | ClosedEnvelope) -> None:
+                observer.on_next(self._operator_value(route_ref, native_route, item))
+
+            return self._observe_observable(
+                route_ref,
+                replay_latest=replay_latest,
+                subscriber_id=subscriber_id,
+            ).subscribe(
+                on_next,
+                observer.on_error,
+                observer.on_completed,
+                scheduler=scheduler,
+            )
+
+        return rx.create(subscribe)
+
+    def _pipeline_output_route(self, node_name: str) -> TypedRoute[Any]:
+        route_id = next(_PIPELINE_ROUTE_IDS)
+        safe_name = "".join(
+            char if char.isalnum() or char in ("-", "_") else "-"
+            for char in node_name
+        ).strip("-") or "node"
+        return route(
+            plane=Plane.Read,
+            layer=Layer.Internal,
+            owner=OwnerName("manyfold.graph"),
+            family=StreamFamily("pipeline"),
+            stream=StreamName(f"{safe_name}-{route_id}"),
+            variant=Variant.Event,
+            schema=Schema.any(f"ManyfoldPipeline{route_id}"),
+        )
+
+    def _connect_callback_pipeline(
+        self,
+        source: RouteLike,
+        node: CallbackNode[Any],
+        *,
+        replay_latest: bool,
+        subscriber_id: str | None,
+    ) -> GraphConnection:
+        self.register_diagram_node(node.name, input_routes=(source,))
+        subscription = self._pipeline_value_observable(
+            source,
+            replay_latest=replay_latest,
+            subscriber_id=subscriber_id,
+        ).subscribe(node.receive)
+        return GraphConnection(
+            self,
+            name=node.name,
+            subscriptions=(subscription,),
+            nodes=(node.name,),
+        )
+
+    def _connect_route_pipeline(
+        self,
+        source: RouteLike,
+        target: RouteLike,
+        *,
+        replay_latest: bool,
+        subscriber_id: str | None,
+        name: str | None = None,
+    ) -> GraphConnection:
+        connection_name = name or self._next_pipeline_node_name("route")
+        self.connect(source=source, sink=target)
+
+        def publish(value: Any) -> None:
+            self.publish(target, value)
+
+        subscription = self._pipeline_value_observable(
+            source,
+            replay_latest=replay_latest,
+            subscriber_id=subscriber_id,
+        ).subscribe(publish)
+        return GraphConnection(
+            self,
+            name=connection_name,
+            subscriptions=(subscription,),
+        )
+
+    def _connect_transform_pipeline(
+        self,
+        pipeline: RoutePipeline[Any],
+        node: MapNode[Any, Any] | FilterNode[Any],
+        apply: Callable[[Any], tuple[bool, Any]],
+    ) -> RoutePipeline[Any]:
+        output = self._pipeline_output_route(node.name)
+        self.register_diagram_node(
+            node.name,
+            input_routes=(pipeline.route,),
+            output_routes=(output,),
+        )
+
+        def on_next(value: Any) -> None:
+            should_emit, next_value = apply(value)
+            if should_emit:
+                self.publish(output, next_value)
+
+        subscription = self._pipeline_value_observable(
+            pipeline.route,
+            replay_latest=pipeline._replay_latest,
+            subscriber_id=pipeline._subscriber_id,
+        ).subscribe(on_next)
+        connection = GraphConnection(
+            self,
+            name=node.name,
+            subscriptions=(subscription,),
+            nodes=(node.name,),
+        )
+        return RoutePipeline(
+            self,
+            output,
+            replay_latest=False,
+            connections=(*pipeline._connections, connection),
+        )
+
+    def _apply_registered_pipeline_operation(
+        self,
+        pipeline: RoutePipeline[Any],
+        operation: str,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
+        factory = self._pipeline_factories.get(operation)
+        if factory is None:
+            raise AttributeError(operation)
+        node = factory(*args, **kwargs)
+        if isinstance(node, MapNode):
+            return self._connect_transform_pipeline(
+                pipeline,
+                node,
+                lambda value: (True, node.transform(value)),
+            )
+        if isinstance(node, FilterNode):
+            return self._connect_transform_pipeline(
+                pipeline,
+                node,
+                lambda value: (node.predicate(value), value),
+            )
+        if isinstance(node, CallbackNode):
+            return pipeline.connect(node)
+        raise TypeError(
+            f"registered pipeline operation {operation!r} returned unsupported node {type(node).__name__}"
+        )
 
     def pipe(
         self,

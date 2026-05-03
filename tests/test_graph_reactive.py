@@ -126,6 +126,71 @@ class GraphReactiveTests(unittest.TestCase):
         assert latest is not None
         self.assertIs(latest.value, window)
 
+    def test_observe_pipeline_installs_map_filter_and_callback_nodes(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("numbers"),
+            variant=graph_module.Variant.Event,
+            schema=int_schema(graph_module, "RuntimeNumber"),
+        )
+        graph = graph_module.Graph()
+        seen: list[int] = []
+
+        connection = (
+            graph.observe(route)
+            .map(lambda value: value + 1, name="plus-one")
+            .filter(lambda value: value > 2, name="gt-two")
+            .callback(seen.append, name="collect")
+        )
+        graph.publish(route, 1)
+        graph.publish(route, 2)
+
+        self.assertEqual(seen, [3])
+        self.assertEqual(
+            [node.name for node in graph.diagram_nodes()],
+            ["plus-one", "gt-two", "collect"],
+        )
+
+        connection.remove()
+        graph.publish(route, 3)
+
+        self.assertEqual(seen, [3])
+        self.assertEqual(list(graph.diagram_nodes()), [])
+
+    def test_registered_pipeline_operation_extends_fluent_route_pipeline(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("signed_numbers"),
+            variant=graph_module.Variant.Event,
+            schema=int_schema(graph_module, "SignedRuntimeNumber"),
+        )
+        graph = graph_module.Graph()
+        seen: list[int] = []
+        graph.register_pipeline_operation(
+            "positive",
+            lambda name="positive": graph_module.FilterNode(
+                name,
+                lambda value: value > 0,
+            ),
+        )
+
+        graph.observe(route, replay_latest=False).positive().callback(
+            seen.append,
+            name="collect-positive",
+        )
+        graph.publish(route, -1)
+        graph.publish(route, 5)
+
+        self.assertEqual(seen, [5])
+
     def test_read_then_write_next_epoch_step_installs_shared_write_stream(self) -> None:
         graph_module = load_graph_module()
         write_request = graph_module.route(
