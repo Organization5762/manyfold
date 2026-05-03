@@ -102,6 +102,30 @@ class GraphReactiveTests(unittest.TestCase):
         self.assertEqual(latest.value, b"two")
         self.assertEqual(latest.closed.seq_source, 2)
 
+    def test_any_schema_preserves_local_objects_through_graph_observe(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("window"),
+            variant=graph_module.Variant.State,
+            schema=graph_module.Schema.any("RuntimeWindow"),
+        )
+        graph = graph_module.Graph()
+        window = object()
+        seen: list[object] = []
+
+        graph.observe(route).subscribe(lambda envelope: seen.append(envelope.value))
+        graph.publish(route, window)
+        latest = graph.latest(route)
+
+        self.assertIs(seen[0], window)
+        self.assertIsNotNone(latest)
+        assert latest is not None
+        self.assertIs(latest.value, window)
+
     def test_read_then_write_next_epoch_step_installs_shared_write_stream(self) -> None:
         graph_module = load_graph_module()
         write_request = graph_module.route(
