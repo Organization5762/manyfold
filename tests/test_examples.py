@@ -572,8 +572,31 @@ class ExampleTests(unittest.TestCase):
             Path(__file__).resolve().parents[1] / "examples" / "_exports.py",
         )
 
+        self.assertIs(sys.modules["examples_catalog_exports_test"], loaded)
         self.assertEqual(loaded.CATALOG_EXPORTS[0], "ARCHIVED_EXAMPLE_ENTRIES")
         self.assertIn("sync_readme_featured_examples", loaded.CATALOG_EXPORTS)
+
+    def test_repo_path_helpers_remove_failed_module_loads(self) -> None:
+        module_path = (
+            Path(__file__).resolve().parents[1]
+            / "python"
+            / "manyfold"
+            / "_repo_paths.py"
+        )
+        spec = importlib.util.spec_from_file_location("manyfold_repo_paths_test", module_path)
+        module = importlib.util.module_from_spec(spec)
+        assert spec is not None and spec.loader is not None
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            broken_module = Path(temp_dir) / "broken_module.py"
+            broken_module.write_text("raise RuntimeError('boom')\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(RuntimeError, "boom"):
+                module.load_module_from_path("manyfold_broken_load_test", broken_module)
+
+        self.assertNotIn("manyfold_broken_load_test", sys.modules)
 
     def test_catalog_main_check_and_write_modes_follow_generated_output(self) -> None:
         import examples._catalog as catalog_module
