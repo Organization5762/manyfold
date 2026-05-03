@@ -40,11 +40,20 @@ def ensure_repo_import_paths() -> None:
 
 
 def load_module_from_path(module_name: str, module_path: Path) -> ModuleType:
-    """Load and execute a Python module from an explicit filesystem path."""
+    """Load and execute a Python module from an explicit filesystem path.
+
+    The loaded module is registered in ``sys.modules`` during execution so
+    normal import-time introspection, such as dataclass type resolution, works.
+    """
 
     spec = importlib.util.spec_from_file_location(module_name, module_path)
     if spec is None or spec.loader is None:
         raise ImportError(f"unable to load module {module_name!r} from {module_path}")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(module_name, None)
+        raise
     return module
