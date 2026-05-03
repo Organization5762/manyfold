@@ -4156,6 +4156,30 @@ class GraphReactiveTests(unittest.TestCase):
         self.assertEqual(route.schema.schema_id, "PwmDutyCycle")
         self.assertEqual(route.schema.version, 7)
 
+    def test_route_applies_schema_id_and_version_overrides_together(self) -> None:
+        graph_module = load_graph_module()
+        primitives = sys.modules["manyfold.primitives"]
+
+        route = primitives.route(
+            namespace=primitives.RouteNamespace(
+                plane=graph_module.Plane.Write,
+                layer=graph_module.Layer.Logical,
+            ),
+            identity=primitives.RouteIdentity.of(
+                owner="led",
+                family="pwm",
+                stream="duty_cycle",
+                variant=graph_module.Variant.Request,
+            ),
+            schema=graph_module.Schema.bytes("OldPwmDutyCycle", version=7),
+            schema_id="PwmDutyCycle",
+            version=8,
+        )
+
+        self.assertEqual(route.display(), "write.logical.led.pwm.duty_cycle.request.v8")
+        self.assertEqual(route.schema.schema_id, "PwmDutyCycle")
+        self.assertEqual(route.schema.version, 8)
+
     def test_load_graph_module_reloads_primitives_cleanly(self) -> None:
         load_graph_module()
         setattr(sys.modules["manyfold.primitives"], "SENTINEL", object())

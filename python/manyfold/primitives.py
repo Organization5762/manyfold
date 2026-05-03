@@ -231,17 +231,15 @@ def _coerce_schema(
     version: int | None = None,
 ) -> Schema[T]:
     if isinstance(schema, Schema):
-        if schema_id is not None and schema.schema_id != schema_id:
+        resolved_schema_id = schema.schema_id if schema_id is None else schema_id
+        resolved_version = schema.version if version is None else version
+        if (
+            resolved_schema_id != schema.schema_id
+            or resolved_version != schema.version
+        ):
             return Schema(
-                schema_id=schema_id,
-                version=schema.version,
-                encode=schema.encode,
-                decode=schema.decode,
-            )
-        if version is not None and version != schema.version:
-            return Schema(
-                schema_id=schema.schema_id,
-                version=version,
+                schema_id=resolved_schema_id,
+                version=resolved_version,
                 encode=schema.encode,
                 decode=schema.decode,
             )
