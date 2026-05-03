@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import deque
+import codecs
 from dataclasses import asdict
 from dataclasses import dataclass
 from dataclasses import field
@@ -467,6 +468,11 @@ class DelimitedMessageBuffer:
     mode: MessageBufferMode = "bytes"
     _bytes_buffer: bytearray = field(default_factory=bytearray, init=False, repr=False)
     _text_buffer: str = field(default="", init=False, repr=False)
+    _text_decoder: codecs.IncrementalDecoder = field(
+        default_factory=lambda: codecs.getincrementaldecoder("utf-8")(errors="ignore"),
+        init=False,
+        repr=False,
+    )
 
     @property
     def buffer_size(self) -> int:
@@ -479,7 +485,7 @@ class DelimitedMessageBuffer:
             if isinstance(data, str):
                 self._text_buffer += data
             else:
-                self._text_buffer += bytes(data).decode("utf-8", errors="ignore")
+                self._text_buffer += self._text_decoder.decode(bytes(data), final=False)
             return tuple(self._drain_text())
         if isinstance(data, str):
             self._bytes_buffer.extend(data.encode("utf-8"))
@@ -490,6 +496,7 @@ class DelimitedMessageBuffer:
     def clear(self) -> None:
         self._bytes_buffer.clear()
         self._text_buffer = ""
+        self._text_decoder.reset()
 
     def _drain_bytes(self) -> list[bytes]:
         messages: list[bytes] = []

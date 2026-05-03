@@ -71,6 +71,13 @@ class SensorIoTests(unittest.TestCase):
         self.assertEqual(text_buffer.append('{"ok":'), ())
         self.assertEqual(text_buffer.append(" true}\n"), ('{"ok": true}',))
 
+    def test_delimited_message_buffer_preserves_split_utf8_text_sequences(self) -> None:
+        manyfold = load_manyfold_package()
+        text_buffer = manyfold.DelimitedMessageBuffer(mode="text")
+
+        self.assertEqual(text_buffer.append(b"caf\xc3"), ())
+        self.assertEqual(text_buffer.append(b"\xa9\n"), ("café",))
+
     def test_json_event_decoder_returns_sensor_events(self) -> None:
         manyfold = load_manyfold_package()
         clock = manyfold.ManualClock(5.0)
