@@ -14,7 +14,6 @@ This repository now contains a first-pass implementation scaffold for the
 - `python/manyfold/embedded.py`: RFC 21 embedded device profile helpers and validation
 - `python/manyfold/reference_examples.py`: RFC 23 reference example suite registry
 - `examples/`: executable API examples that are also covered by the test suite
-- `proto/manyfold/v1/wiregraph.proto`: extracted protobuf schema scaffold from the RFC appendix
 
 ## Status
 

@@ -160,7 +160,7 @@ APPENDIX_STATUS = {
     ),
     "Protobuf wire schema appendix": (
         "x",
-        "The extracted schema scaffold is in the repository.",
+        "The RFC appendix remains the source for the schema sketch.",
     ),
     "Glossary, examples, appendices, and normative language": (
         "x",
