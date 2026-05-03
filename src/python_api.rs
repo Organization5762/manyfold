@@ -265,7 +265,9 @@ impl PyVariant {
     }
     #[classattr]
     fn Event() -> PyVariant {
-        Self { inner: Variant::Event }
+        Self {
+            inner: Variant::Event,
+        }
     }
     #[classattr]
     fn Health() -> PyVariant {
