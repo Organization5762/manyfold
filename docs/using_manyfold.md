@@ -94,6 +94,30 @@ Use `.on_main_thread()` for work that must run on the frame thread,
 `.on_background_thread()` or `.on_pooled_thread()` for shared worker pools, and
 `.on_isolated_thread()` for a node that must be the only work on its thread.
 
+## Stats
+
+Stats layer onto a stream pipeline and publish derived values like any other
+route:
+
+```python
+temperature_value = route(
+    owner="sensor",
+    family="environment",
+    stream="temperature_value",
+    schema=Schema.float(name="Temperature"),
+)
+average_temperature = route(
+    owner="sensor",
+    family="environment",
+    stream="average_temperature",
+    schema=Schema.float(name="AverageTemperature"),
+)
+
+graph.observe(temperature_value, replay_latest=False).moving_average(
+    window_size=3
+).connect(average_temperature)
+```
+
 ## Add Execution Components
 
 A capacitor makes downstream demand explicit:

@@ -162,6 +162,16 @@ class Schema(Generic[T]):
         )
 
     @classmethod
+    def float(cls, *, name: str, version: int = 1) -> Schema[float]:
+        """Create a schema for ASCII-encoded floating point values."""
+        return cls(
+            schema_id=name,
+            version=version,
+            encode=lambda value: repr(float(value)).encode("ascii"),
+            decode=lambda payload: float(payload.decode("ascii")),
+        )
+
+    @classmethod
     def protobuf(
         cls,
         message_type: ProtobufMessageType[TProto],

@@ -4588,6 +4588,56 @@ class GraphReactiveTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             graph_module.Schema.bytes("Temperature")
 
+    def test_float_schema_round_trips_ascii_float_values(self) -> None:
+        graph_module = load_graph_module()
+
+        schema = graph_module.Schema.float(name="Temperature")
+
+        self.assertEqual(schema.schema_id, "Temperature")
+        self.assertEqual(schema.decode(schema.encode(72.4)), 72.4)
+
+    def test_route_pipeline_moving_average_publishes_to_route(self) -> None:
+        graph_module = load_graph_module()
+        source = graph_module.route(
+            owner="sensor",
+            family="environment",
+            stream="temperature",
+            schema=graph_module.Schema.float(name="Temperature"),
+        )
+        average = graph_module.route(
+            owner="sensor",
+            family="environment",
+            stream="average_temperature",
+            schema=graph_module.Schema.float(name="AverageTemperature"),
+        )
+        graph = graph_module.Graph()
+
+        connection = graph.observe(source, replay_latest=False).moving_average(
+            window_size=3
+        ).connect(average)
+        graph.publish(source, 72.4)
+        graph.publish(source, 72.9)
+        graph.publish(source, 73.7)
+        connection.dispose()
+
+        latest = graph.latest(average)
+        assert latest is not None
+        self.assertAlmostEqual(latest.value, 73.0)
+        self.assertEqual(latest.closed.seq_source, 6)
+
+    def test_route_pipeline_moving_average_rejects_non_positive_window(self) -> None:
+        graph_module = load_graph_module()
+        source = graph_module.route(
+            owner="sensor",
+            family="environment",
+            stream="temperature",
+            schema=graph_module.Schema.float(name="Temperature"),
+        )
+        graph = graph_module.Graph()
+
+        with self.assertRaisesRegex(ValueError, "average window size must be positive"):
+            graph.observe(source).moving_average(window_size=0)
+
     def test_route_preserves_existing_schema_version_without_override(self) -> None:
         graph_module = load_graph_module()
         primitives = sys.modules["manyfold.primitives"]

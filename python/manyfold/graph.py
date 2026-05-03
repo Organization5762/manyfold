@@ -72,6 +72,7 @@ from .primitives import (
     sink as sink,
     source as source,
 )
+from .stats import Average
 
 T = TypeVar("T")
 TIn = TypeVar("TIn")
@@ -1625,6 +1626,27 @@ class RoutePipeline(Generic[T]):
             node,
             lambda value: (True, node.transform(value)),
         )
+
+    def moving_average(
+        self,
+        *,
+        window_size: int,
+        name: str | None = None,
+    ) -> RoutePipeline[float]:
+        """Install a graph-visible moving average over numeric route values."""
+        average = Average(window_size=window_size)
+        values: deque[float] = deque(maxlen=average.window_size)
+        node = MapNode(
+            name or self._graph._next_pipeline_node_name("moving-average"),
+            lambda value: float(value),
+            thread_placement=self._thread_placement,
+        )
+
+        def apply(value: T) -> tuple[bool, float]:
+            values.append(node.transform(value))
+            return True, average(tuple(values))
+
+        return self._graph._connect_transform_pipeline(self, node, apply)
 
     def on_main_thread(self) -> RoutePipeline[T]:
         """Schedule all following pipeline nodes on the main frame thread."""
