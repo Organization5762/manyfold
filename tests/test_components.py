@@ -54,6 +54,19 @@ class ComponentTests(unittest.TestCase):
             ],
         )
 
+    def test_keyspace_keys_orders_entries_without_values(self) -> None:
+        manyfold = load_manyfold_package()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            keyspace = manyfold.FileStore(temp_dir).prefix("safe")
+
+            keyspace.put("/", value=b"slash")
+            keyspace.put("0", value=b"zero")
+            keyspace.put("A", value=b"upper")
+            keys = keyspace.keys()
+
+        self.assertEqual(keys, (("/",), ("0",), ("A",)))
+
     def test_file_store_keeps_special_key_parts_inside_root(self) -> None:
         manyfold = load_manyfold_package()
 
@@ -151,6 +164,38 @@ class ComponentTests(unittest.TestCase):
         self.assertEqual([record.index for record in records], [1, 2])
         self.assertEqual([record.value for record in records], [(1, 10), (2, 20)])
         self.assertEqual(replayed, [(1, 10), (2, 20)])
+
+    def test_event_log_append_finds_next_index_without_decoding_history(self) -> None:
+        manyfold = load_manyfold_package()
+        schema = manyfold.Schema(
+            schema_id="Command",
+            version=1,
+            encode=lambda value: value.encode("ascii"),
+            decode=lambda payload: (
+                "next"
+                if payload == b"next"
+                else (_ for _ in ()).throw(AssertionError("decoded legacy record"))
+            ),
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            keyspace = manyfold.FileStore(temp_dir).prefix("commands")
+            keyspace.put("00000000000000000001", value=b"legacy")
+            log = manyfold.EventLog("commands", keyspace, schema)
+            graph = manyfold.Graph()
+            committed: list[str] = []
+            log_subscription = log.install(graph)
+            committed_subscription = graph.observe(
+                log.output(), replay_latest=False
+            ).subscribe(lambda envelope: committed.append(envelope.value))
+
+            graph.publish(log.input(), "next")
+            log_subscription.dispose()
+            committed_subscription.dispose()
+            stored_next = keyspace.get("00000000000000000002")
+
+        self.assertEqual(committed, ["next"])
+        self.assertEqual(stored_next, b"next")
 
     def test_snapshot_store_writes_latest_value_and_publishes_output(self) -> None:
         manyfold = load_manyfold_package()

@@ -136,26 +136,36 @@ class Keyspace:
 
     def scan(self, *parts: KeyPart) -> tuple[StoreEntry, ...]:
         """Return all entries below a keyspace-relative prefix."""
-        full_prefix = self.key(*parts)
+        return tuple(
+            StoreEntry(
+                key=relative_key,
+                full_key=full_key,
+                value=path.read_bytes(),
+            )
+            for relative_key, full_key, path in self._iter_value_paths(self.key(*parts))
+        )
+
+    def keys(self, *parts: KeyPart) -> tuple[Key, ...]:
+        """Return all relative keys below a prefix without reading stored bytes."""
+        return tuple(
+            relative_key
+            for relative_key, _full_key, _path in self._iter_value_paths(self.key(*parts))
+        )
+
+    def _iter_value_paths(self, full_prefix: Key) -> Iterator[tuple[Key, Key, Path]]:
         root = self._directory_path(full_prefix)
         if not root.exists():
-            return ()
-        entries: list[StoreEntry] = []
+            return
+        entries: list[tuple[Key, Key, Path]] = []
         for path in root.rglob(_VALUE_FILENAME):
             full_key = self._key_from_value_path(path)
             if not _has_prefix(full_key, full_prefix):
                 continue
             relative_key = full_key[len(self.parts) :]
-            entries.append(
-                StoreEntry(
-                    key=relative_key,
-                    full_key=full_key,
-                    value=path.read_bytes(),
-                )
-            )
+            entries.append((relative_key, full_key, path))
         # Sort decoded keys once so callers see stable logical ordering rather than
         # filesystem-specific percent-encoded path ordering.
-        return tuple(sorted(entries, key=lambda entry: entry.full_key))
+        yield from sorted(entries, key=lambda entry: entry[1])
 
     def _directory_path(self, key: Key) -> Path:
         path = self.store.root
@@ -252,8 +262,12 @@ class EventLog(Generic[T]):
         return records
 
     def _next_index(self) -> int:
-        records = self.records()
-        return 1 if not records else records[-1].index + 1
+        indexes = (
+            int(key[0])
+            for key in self.keyspace.keys()
+            if len(key) == 1 and key[0].isdigit()
+        )
+        return max(indexes, default=0) + 1
 
 
 class SnapshotStore(Generic[T]):
