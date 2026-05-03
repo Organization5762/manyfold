@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import json
 from dataclasses import dataclass
 from json import JSONDecodeError
@@ -475,7 +476,36 @@ class Memory:
                         raise ValueError(
                             f"memory file {self.path} line {line_number} is missing {field}"
                         )
+                self._validate_raw_record(record, line_number)
                 yield record
+
+    def _validate_raw_record(self, record: dict[str, Any], line_number: int) -> None:
+        for field in ("route", "schema_id", "payload_b64"):
+            if not isinstance(record[field], str):
+                raise ValueError(
+                    f"memory file {self.path} line {line_number} field {field} "
+                    "must be a string"
+                )
+        for field in ("seq_source", "schema_version"):
+            if not _is_plain_int(record[field]):
+                raise ValueError(
+                    f"memory file {self.path} line {line_number} field {field} "
+                    "must be an integer"
+                )
+        if record["control_epoch"] is not None and not _is_plain_int(
+            record["control_epoch"]
+        ):
+            raise ValueError(
+                f"memory file {self.path} line {line_number} field control_epoch "
+                "must be an integer or null"
+            )
+        try:
+            base64.b64decode(record["payload_b64"], validate=True)
+        except binascii.Error as exc:
+            raise ValueError(
+                f"memory file {self.path} line {line_number} field payload_b64 "
+                "must be valid base64"
+            ) from exc
 
     @staticmethod
     def _event_key(record: dict[str, Any]) -> tuple[str, int, str, int | None]:
@@ -798,6 +828,10 @@ def _decode_key_part(part: str) -> str:
 
 def _has_prefix(key: Key, prefix: Key) -> bool:
     return key[: len(prefix)] == prefix
+
+
+def _is_plain_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
 
 
 def _format_log_index(index: int) -> str:

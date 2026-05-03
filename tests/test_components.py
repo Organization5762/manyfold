@@ -397,6 +397,64 @@ class ComponentTests(unittest.TestCase):
             ):
                 manyfold.Memory(path)
 
+    def test_memory_chip_reports_invalid_record_field_type_with_path_and_line(
+        self,
+    ) -> None:
+        manyfold = load_manyfold_package()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "memory.jsonl"
+            path.write_text(
+                json.dumps(
+                    {
+                        "route": "read/logical/demo/memory/bytes/meta@MemoryBytes.v1",
+                        "seq_source": "1",
+                        "control_epoch": None,
+                        "schema_id": "MemoryBytes",
+                        "schema_version": 1,
+                        "payload_b64": "",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(
+                ValueError,
+                r"memory file .*memory\.jsonl line 1 field seq_source "
+                r"must be an integer",
+            ):
+                manyfold.Memory(path)
+
+    def test_memory_chip_reports_invalid_record_payload_base64_with_path_and_line(
+        self,
+    ) -> None:
+        manyfold = load_manyfold_package()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "memory.jsonl"
+            path.write_text(
+                json.dumps(
+                    {
+                        "route": "read/logical/demo/memory/bytes/meta@MemoryBytes.v1",
+                        "seq_source": 1,
+                        "control_epoch": None,
+                        "schema_id": "MemoryBytes",
+                        "schema_version": 1,
+                        "payload_b64": "not base64!",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(
+                ValueError,
+                r"memory file .*memory\.jsonl line 1 field payload_b64 "
+                r"must be valid base64",
+            ):
+                manyfold.Memory(path)
+
 
 if __name__ == "__main__":
     unittest.main()
