@@ -1193,7 +1193,7 @@ impl GraphCore {
             ),
             QueryKindCore::Trace => {
                 let mut items = self.latest.values().cloned().collect::<Vec<_>>();
-                items.sort_by_key(|item| item.seq_source);
+                items.sort_by_key(|item| (item.seq_source, item.route.display()));
                 QueryResultCore::Trace(items)
             }
             QueryKindCore::Replay(route) => {
@@ -1210,10 +1210,15 @@ impl GraphCore {
                         ));
                     }
                 }
-                for (name, mailbox) in &self.mailboxes {
-                    if mailbox.descriptor.capacity == 0 {
-                        issues.push(format!("Mailbox {name} must declare positive capacity"));
-                    }
+                let mut invalid_mailboxes = self
+                    .mailboxes
+                    .iter()
+                    .filter(|(_, mailbox)| mailbox.descriptor.capacity == 0)
+                    .map(|(name, _)| name)
+                    .collect::<Vec<_>>();
+                invalid_mailboxes.sort();
+                for name in invalid_mailboxes {
+                    issues.push(format!("Mailbox {name} must declare positive capacity"));
                 }
                 QueryResultCore::ValidateGraph(issues)
             }
@@ -1331,6 +1336,96 @@ mod tests {
             panic!("unexpected query result");
         };
         assert_eq!(issues.len(), 1);
+    }
+
+    #[test]
+    fn trace_orders_same_sequence_events_by_route_display() {
+        let alpha = sample_route(
+            Plane::Read,
+            Layer::Logical,
+            "alpha",
+            "telemetry",
+            "sample",
+            Variant::Meta,
+        );
+        let beta = sample_route(
+            Plane::Read,
+            Layer::Logical,
+            "beta",
+            "telemetry",
+            "sample",
+            Variant::Meta,
+        );
+        let mut graph = GraphCore::default();
+        let producer = ProducerRefCore {
+            producer_id: "app".to_string(),
+            kind: ProducerKind::Application,
+        };
+
+        graph.write(&beta, b"beta".to_vec(), producer.clone(), None);
+        graph.write(&alpha, b"alpha".to_vec(), producer, None);
+
+        let QueryResultCore::Trace(items) = graph.query(QueryKindCore::Trace) else {
+            panic!("unexpected query result");
+        };
+        let displays = items
+            .iter()
+            .map(|item| item.route.display())
+            .collect::<Vec<_>>();
+        assert_eq!(displays, vec![alpha.display(), beta.display()]);
+    }
+
+    #[test]
+    fn validate_graph_reports_mailboxes_by_name() {
+        let mut graph = GraphCore::default();
+        for name in ["zeta", "alpha"] {
+            let ingress = sample_route(
+                Plane::Write,
+                Layer::Internal,
+                "mailbox",
+                "mailbox",
+                name,
+                Variant::Request,
+            );
+            let egress = sample_route(
+                Plane::Read,
+                Layer::Internal,
+                "mailbox",
+                "mailbox",
+                name,
+                Variant::Meta,
+            );
+            graph.register_mailbox(
+                name.to_string(),
+                MailboxCore {
+                    ingress,
+                    egress,
+                    descriptor: MailboxDescriptorCore {
+                        delivery_mode: DeliveryMode::MpscSerial,
+                        ordering_policy: OrderingPolicy::Fifo,
+                        overflow_policy: OverflowPolicy::Block,
+                        capacity: 0,
+                    },
+                    queue: VecDeque::new(),
+                    blocked_writes: 0,
+                    dropped_messages: 0,
+                    coalesced_messages: 0,
+                    delivered_messages: 0,
+                },
+            );
+        }
+
+        let QueryResultCore::ValidateGraph(issues) = graph.query(QueryKindCore::ValidateGraph)
+        else {
+            panic!("unexpected query result");
+        };
+        assert_eq!(
+            issues,
+            vec![
+                "Mailbox alpha must declare positive capacity",
+                "Mailbox zeta must declare positive capacity",
+            ]
+        );
     }
 
     #[test]
