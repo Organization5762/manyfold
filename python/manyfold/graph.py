@@ -31,7 +31,7 @@ from typing import (
     runtime_checkable,
 )
 
-from . import _rx as rx
+from . import _rx as rx, reactive_threads
 from ._manyfold_rust import (
     ClosedEnvelope,
     ControlLoop as NativeControlLoop,
@@ -56,7 +56,7 @@ from ._manyfold_rust import (
 )
 from ._rx import Observable, operators as ops
 from ._rx.disposable import Disposable
-from ._rx.scheduler import TimeoutScheduler
+from ._rx.scheduler import EventLoopScheduler, TimeoutScheduler
 from ._rx.subject import Subject
 from .primitives import (
     OwnerName,
@@ -137,7 +137,6 @@ class CoalesceLatestNode(Generic[T]):
 
         def subscribe(observer: ObserverLike[T], scheduler: object | None = None) -> Any:
             del scheduler
-            from .reactive_threads import coalesce_scheduler
 
             lock = RLock()
             pending: Any = _NO_PENDING
@@ -174,7 +173,7 @@ class CoalesceLatestNode(Generic[T]):
                     else:
                         return
                 due_time = now + window_seconds
-                timer = coalesce_scheduler().schedule_relative(
+                timer = reactive_threads.coalesce_scheduler().schedule_relative(
                     window_seconds,
                     lambda *_: flush(),
                 )
@@ -221,7 +220,7 @@ class CoalesceLatestNode(Generic[T]):
                 on_next,
                 on_error,
                 on_completed,
-                scheduler=coalesce_scheduler(),
+                scheduler=reactive_threads.coalesce_scheduler(),
             )
 
             def dispose() -> None:
@@ -3304,8 +3303,6 @@ class Graph:
         if placement is None:
             return observable
         if placement.kind == "main":
-            from . import reactive_threads
-
             return reactive_threads.deliver_on_frame_thread(observable)
 
         def subscribe(
@@ -3328,9 +3325,6 @@ class Graph:
         self,
         placement: NodeThreadPlacement,
     ) -> tuple[object, bool]:
-        from . import reactive_threads
-        from ._rx.scheduler import EventLoopScheduler
-
         if placement.kind == "background":
             return reactive_threads.background_scheduler(), False
         if placement.kind == "pooled":
