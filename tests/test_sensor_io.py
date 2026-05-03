@@ -102,6 +102,16 @@ class SensorIoTests(unittest.TestCase):
         self.assertEqual(text_buffer.append(b"caf\xc3"), ())
         self.assertEqual(text_buffer.append(b"\xa9\n"), ("café",))
 
+    def test_delimited_message_buffer_handles_multi_byte_delimiters(self) -> None:
+        manyfold = load_manyfold_package()
+        byte_buffer = manyfold.DelimitedMessageBuffer(delimiter=b"\r\n")
+        text_buffer = manyfold.DelimitedMessageBuffer(delimiter=b"::", mode="text")
+
+        self.assertEqual(byte_buffer.append(b"one\r\ntwo"), (b"one",))
+        self.assertEqual(byte_buffer.append(b"\r\n"), (b"two",))
+        self.assertEqual(text_buffer.append("alpha::beta"), ("alpha",))
+        self.assertEqual(text_buffer.append("::"), ("beta",))
+
     def test_delimited_message_buffer_rejects_empty_delimiter(self) -> None:
         manyfold = load_manyfold_package()
 
