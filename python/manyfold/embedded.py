@@ -38,6 +38,10 @@ class FirmwareAgentProfile:
             issues.append("firmware agent must provide transport framing")
         if not self.shadow_reporting:
             issues.append("firmware agent should expose shadow reporting")
+        if not self.local_filtering:
+            issues.append("firmware agent should support local filtering")
+        if not self.local_aggregation:
+            issues.append("firmware agent should support local aggregation")
         if not self.ring_buffer_staging:
             issues.append("firmware agent should stage through a ring buffer")
         return tuple(issues)
