@@ -84,6 +84,20 @@ class ReactiveThreadsTests(unittest.TestCase):
             2,
         )
 
+    def test_latency_snapshot_reports_percentiles_from_sorted_samples(self) -> None:
+        recorder = self.reactive_threads._LatencyRecorder()
+
+        for delay_s in (0.005, 0.001, 0.010, 0.002):
+            recorder.record("stream", delay_s)
+
+        stats = recorder.snapshot()["stream"]
+
+        self.assertEqual(stats.count, 4)
+        self.assertEqual(stats.p50_ms, 2.0)
+        self.assertEqual(stats.p95_ms, 10.0)
+        self.assertEqual(stats.p99_ms, 10.0)
+        self.assertEqual(stats.max_ms, 10.0)
+
     def test_disposed_frame_thread_delivery_drops_queued_callbacks(self) -> None:
         source = self.rx.Subject()
         values: list[int] = []

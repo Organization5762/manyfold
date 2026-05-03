@@ -85,13 +85,7 @@ class _LatencyRecorder:
                 if values
             }
         return {
-            stream_name: DeliveryLatencyStats(
-                count=len(values),
-                p50_ms=_percentile_ms(values, 0.50),
-                p95_ms=_percentile_ms(values, 0.95),
-                p99_ms=_percentile_ms(values, 0.99),
-                max_ms=max(values) * 1000.0,
-            )
+            stream_name: _latency_stats(values)
             for stream_name, values in history.items()
         }
 
@@ -376,10 +370,20 @@ def share_sequence(sequence: Iterable[T]) -> Observable[T]:
     return rx.from_iterable(sequence).pipe(ops.share())
 
 
-def _percentile_ms(values: tuple[float, ...], percentile: float) -> float:
+def _latency_stats(values: tuple[float, ...]) -> DeliveryLatencyStats:
     ordered = sorted(values)
-    index = max(0, math.ceil(percentile * len(ordered)) - 1)
-    return ordered[index] * 1000.0
+    return DeliveryLatencyStats(
+        count=len(ordered),
+        p50_ms=_percentile_ms(ordered, 0.50),
+        p95_ms=_percentile_ms(ordered, 0.95),
+        p99_ms=_percentile_ms(ordered, 0.99),
+        max_ms=ordered[-1] * 1000.0,
+    )
+
+
+def _percentile_ms(ordered_values: list[float], percentile: float) -> float:
+    index = max(0, math.ceil(percentile * len(ordered_values)) - 1)
+    return ordered_values[index] * 1000.0
 
 
 def _env_int(
