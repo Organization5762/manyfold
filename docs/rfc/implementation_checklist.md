@@ -37,5 +37,5 @@ Generated from `docs/rfc/wiregraph_rfc_rev2.md` by `manyfold-rfc-checklist`.
 - [ ] Metadata/payload split with lazy payload opening (Envelope split exists, lazy payload open-on-demand now works, route-level payload-demand accounting is available, both replay retention and payload-store eviction now follow explicit per-route policy in the Python layer, route-local audit snapshots now summarize producers, subscribers, related writes, and taint repairs, and retained lineage now tracks trace/causality/correlation ids with trace-query support, but broader envelope semantics are still pending.)
 - [x] Query plane modeled as streams (Query request/response routes now behave like normal streams.)
 - [x] No ad hoc strings in the typed runtime API (Typed refs are already the primary runtime surface.)
-- [x] Protobuf wire schema appendix (The extracted schema scaffold is in the repository.)
+- [x] Protobuf wire schema appendix (The RFC appendix remains the source for the schema sketch.)
 - [x] Glossary, examples, appendices, and normative language (The RFC document already includes these sections.)
