@@ -7,6 +7,8 @@ import unittest
 from dataclasses import dataclass
 from pathlib import Path
 
+import reactivex as rx
+
 from tests.test_support import load_manyfold_package
 
 
@@ -581,7 +583,6 @@ class SensorIoTests(unittest.TestCase):
 
     def test_reactive_sensor_source_publishes_observable_samples(self) -> None:
         manyfold = load_manyfold_package()
-        import reactivex as rx
 
         graph = manyfold.Graph()
         clock = manyfold.ManualClock(2.0)
@@ -637,7 +638,6 @@ class SensorIoTests(unittest.TestCase):
 
     def test_peripheral_adapter_publishes_heart_style_envelopes(self) -> None:
         manyfold = load_manyfold_package()
-        import reactivex as rx
 
         @dataclass
         class FakeTag:
@@ -700,9 +700,38 @@ class SensorIoTests(unittest.TestCase):
         self.assertEqual(latest.value.identity.id, "imu-1")
         self.assertEqual(latest.value.identity.tags[0].variant, "accelerometer")
 
+    def test_peripheral_adapter_subscribes_before_starting_hot_peripheral(self) -> None:
+        manyfold = load_manyfold_package()
+
+        class FakePeripheral:
+            def __init__(self) -> None:
+                self.observe = rx.Subject()
+                self.run_count = 0
+
+            def run(self) -> None:
+                self.run_count += 1
+                self.observe.on_next({"temperature": 21})
+
+        graph = manyfold.Graph()
+        route = _route(manyfold, "hot_peripheral_event", manyfold.sensor_event_schema())
+        peripheral = FakePeripheral()
+        handle = manyfold.PeripheralAdapter(
+            peripheral=peripheral,
+            route=route,
+            event_type="peripheral.temperature",
+            clock=manyfold.ManualClock(3.0),
+            group="ambient",
+        ).install(graph)
+        handle.dispose()
+        latest = graph.latest(route)
+
+        self.assertEqual(peripheral.run_count, 1)
+        self.assertIsNotNone(latest)
+        assert latest is not None
+        self.assertEqual(latest.value.data, {"temperature": 21})
+
     def test_duplex_sensor_peripheral_forwards_control_route(self) -> None:
         manyfold = load_manyfold_package()
-        import reactivex as rx
 
         class FakePeripheral:
             def __init__(self) -> None:

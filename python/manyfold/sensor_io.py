@@ -1238,9 +1238,6 @@ class PeripheralAdapter:
         _adopt_group(self.sequence, self.group)
 
     def install(self, graph: Graph) -> PeripheralAdapterHandle:
-        if self.run_on_install:
-            _call_if_present(self.peripheral, "run")
-
         def on_next(item: Any) -> None:
             identity = self.identity or _identity_from_peripheral_item(item, self.group)
             payload = self._payload_for_item(item, identity)
@@ -1263,6 +1260,14 @@ class PeripheralAdapter:
             control_subscription = graph.observe(
                 self.control_route, replay_latest=False
             ).subscribe(on_control)
+        if self.run_on_install:
+            try:
+                _call_if_present(self.peripheral, "run")
+            except BaseException:
+                subscription.dispose()
+                if control_subscription is not None:
+                    control_subscription.dispose()
+                raise
         return PeripheralAdapterHandle(
             adapter=self,
             graph=graph,
