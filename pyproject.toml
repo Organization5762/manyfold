@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "manyfold"
-version = "0.1.6"
+version = "0.1.7"
 description = "PyO3-backed Manyfold RFC scaffolding and in-memory runtime."
 readme = "README.md"
 requires-python = ">=3.10"

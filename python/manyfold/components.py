@@ -411,10 +411,21 @@ class Memory:
         """Publish remembered values for ``route_ref`` into ``graph``."""
         records = self.records(route_ref)
         for record in records:
-            graph.publish(
+            envelope = graph.publish(
                 route_ref,
                 record.value,
                 control_epoch=record.control_epoch,
+            )
+            payload_b64 = base64.b64encode(route_ref.schema.encode(record.value)).decode(
+                "ascii"
+            )
+            self._seen.add(
+                (
+                    envelope.closed.route.display(),
+                    envelope.closed.seq_source,
+                    payload_b64,
+                    envelope.closed.control_epoch,
+                )
             )
         return records
 
