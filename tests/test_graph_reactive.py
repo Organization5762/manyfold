@@ -4653,6 +4653,35 @@ class GraphReactiveTests(unittest.TestCase):
 
         self.assertFalse(any("Unsafe write-back loop" in issue for issue in issues))
 
+    def test_validate_graph_reports_unprotected_feedback_path_when_boundary_exists(
+        self,
+    ) -> None:
+        graph_module = load_graph_module()
+        binding = graph_module.WriteBindings.logical(
+            graph_module.OwnerName("motor"),
+            graph_module.StreamFamily("speed"),
+            graph_module.StreamName("target"),
+            graph_module.Schema.bytes(name="MotorSpeed"),
+        )
+        bridge = graph_module.route(
+            plane=graph_module.Plane.State,
+            layer=graph_module.Layer.Internal,
+            owner=graph_module.OwnerName("boundary"),
+            family=graph_module.StreamFamily("loop"),
+            stream=graph_module.StreamName("delay"),
+            variant=graph_module.Variant.State,
+            schema=graph_module.Schema.bytes(name="MotorSpeed"),
+        )
+        graph = graph_module.Graph()
+
+        graph.publish(binding, b"500")
+        graph.connect(source=binding.effective, sink=bridge)
+        graph.connect(source=bridge, sink=binding.request)
+        graph.connect(source=binding.effective, sink=binding.request)
+        issues = list(graph.validate_graph())
+
+        self.assertTrue(any("Unsafe write-back loop" in issue for issue in issues))
+
     def test_route_accepts_wrapped_identity_namespace_and_schema_class(self) -> None:
         graph_module = load_graph_module()
         primitives = sys.modules["manyfold.primitives"]

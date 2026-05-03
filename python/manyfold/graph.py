@@ -4485,7 +4485,7 @@ class Graph:
             for feedback_source in feedback_sources:
                 if not self._path_exists(adjacency, feedback_source, request):
                     continue
-                if self._path_has_boundary(
+                if not self._path_has_unprotected_feedback(
                     adjacency, route_refs, feedback_source, request
                 ):
                     continue
@@ -4514,7 +4514,7 @@ class Graph:
         return False
 
     @staticmethod
-    def _path_has_boundary(
+    def _path_has_unprotected_feedback(
         adjacency: dict[str, set[str]],
         route_refs: dict[str, RouteRef],
         start: str,
@@ -4525,7 +4525,7 @@ class Graph:
         while pending:
             current, has_boundary = pending.pop()
             if current == goal:
-                if has_boundary:
+                if not has_boundary:
                     return True
                 continue
             state = (current, has_boundary)
