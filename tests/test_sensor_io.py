@@ -608,6 +608,33 @@ class SensorIoTests(unittest.TestCase):
         self.assertEqual(handle.group, "imu")
         self.assertEqual([event.source_id for event in tap.snapshot()], ["imu", "imu"])
 
+    def test_sensor_debug_tap_retains_bounded_history(self) -> None:
+        manyfold = load_manyfold_package()
+        clock = manyfold.ManualClock(10.0)
+        tap = manyfold.SensorDebugTap(clock=clock, history_size=2)
+
+        for source_id in ("one", "two", "three"):
+            clock.advance(1.0)
+            tap.publish(
+                stage=manyfold.SensorDebugStage.RAW,
+                stream_name="temperature",
+                source_id=source_id,
+                payload={"source": source_id},
+                upstream_ids=("sensor", source_id),
+            )
+
+        snapshot = tap.snapshot()
+
+        self.assertEqual([event.source_id for event in snapshot], ["two", "three"])
+        self.assertEqual([event.timestamp for event in snapshot], [12.0, 13.0])
+        self.assertEqual(snapshot[-1].upstream_ids, ("sensor", "three"))
+
+    def test_sensor_debug_tap_rejects_empty_history(self) -> None:
+        manyfold = load_manyfold_package()
+
+        with self.assertRaisesRegex(ValueError, "history_size must be positive"):
+            manyfold.SensorDebugTap(history_size=0)
+
     def test_peripheral_adapter_publishes_heart_style_envelopes(self) -> None:
         manyfold = load_manyfold_package()
         import reactivex as rx

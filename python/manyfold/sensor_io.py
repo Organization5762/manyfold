@@ -664,6 +664,11 @@ class SensorDebugTap:
     history_size: int = 512
     _history: deque[SensorDebugEnvelope] = field(default_factory=deque, init=False, repr=False)
 
+    def __post_init__(self) -> None:
+        if self.history_size <= 0:
+            raise ValueError("history_size must be positive")
+        self._history = deque(maxlen=self.history_size)
+
     def publish(
         self,
         *,
@@ -682,6 +687,8 @@ class SensorDebugTap:
             upstream_ids=tuple(upstream_ids),
         )
         if self._history.maxlen != self.history_size:
+            if self.history_size <= 0:
+                raise ValueError("history_size must be positive")
             self._history = deque(self._history, maxlen=self.history_size)
         self._history.append(envelope)
         return envelope
