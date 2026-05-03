@@ -178,6 +178,7 @@ class ReferenceExampleSuiteTests(unittest.TestCase):
         self.assertIn("FileStore", manyfold.__all__)
         self.assertIn("Keyspace", manyfold.__all__)
         self.assertIn("EventLog", manyfold.__all__)
+        self.assertIn("EventStream", manyfold.__all__)
         self.assertIn("SnapshotStore", manyfold.__all__)
         self.assertIn("EmbeddedDeviceProfile", manyfold.__all__)
         self.assertIn("EmbeddedBulkSensor", manyfold.__all__)

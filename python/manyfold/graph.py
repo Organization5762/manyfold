@@ -308,6 +308,138 @@ class CallbackObservable(Generic[T]):
         return stream_from(self)
 
 
+class EventStream(Generic[T]):
+    """Hot push stream for callback-driven event producers."""
+
+    def __init__(self) -> None:
+        self._lock = Lock()
+        self._subscribers: dict[int, Callable[[T], None]] = {}
+        self._next_subscription_id = 0
+
+    @property
+    def lock(self) -> Lock:
+        return self._lock
+
+    def emit(self, value: T) -> None:
+        with self._lock:
+            subscribers = tuple(self._subscribers.values())
+        for subscriber in subscribers:
+            subscriber(value)
+
+    def on_next(self, value: T) -> None:
+        self.emit(value)
+
+    def observable(self) -> StreamNode[T]:
+        return cast(StreamNode[T], self)
+
+    def subscribe(
+        self,
+        observer: ObserverLike[T] | Callable[[T], None] | None = None,
+        on_error: Callable[[Exception], None] | None = None,
+        on_completed: Callable[[], None] | None = None,
+        scheduler: object | None = None,
+        *,
+        on_next: Callable[[T], None] | None = None,
+    ) -> SubscriptionLike:
+        del on_error, on_completed, scheduler
+        callback = on_next or observer
+        if callback is None:
+            def resolved_callback(_value: T) -> None:
+                return None
+
+        elif callable(callback):
+            resolved_callback = callback
+        else:
+            resolved_callback = callback.on_next
+        with self._lock:
+            subscription_id = self._next_subscription_id
+            self._next_subscription_id += 1
+            self._subscribers[subscription_id] = resolved_callback
+        return _EventStreamSubscription(self, subscription_id)
+
+    def pipe(self, *operators: Any) -> StreamNode[Any]:
+        return stream_from(self).pipe(*operators)
+
+    def share(self) -> StreamNode[T]:
+        return cast(StreamNode[T], stream_from(self).share())
+
+    def map(self, transform: Callable[[T], U]) -> Observable[U]:
+        return stream_from(self).map(transform).share()
+
+    def filter(self, predicate: Callable[[T], bool]) -> Observable[T]:
+        return stream_from(self).filter(predicate).share()
+
+    def scan(
+        self,
+        accumulator: Callable[[Any, T], Any],
+        *,
+        seed: Any = None,
+    ) -> Observable[Any]:
+        return stream_from(self).scan(accumulator, seed=seed).share()
+
+    def start_with(self, *values: Any) -> Observable[Any]:
+        return stream_from(self).start_with(*values).share()
+
+    def distinct_until_changed(
+        self,
+        key_mapper: Callable[[T], Any] | None = None,
+        comparer: Callable[[Any, Any], bool] | None = None,
+    ) -> Observable[T]:
+        return (
+            stream_from(self)
+            .distinct_until_changed(key_mapper=key_mapper, comparer=comparer)
+            .share()
+        )
+
+    def do_action(
+        self,
+        on_next: Callable[[T], None] | None = None,
+        on_error: Callable[[Exception], None] | None = None,
+        on_completed: Callable[[], None] | None = None,
+    ) -> Observable[T]:
+        return (
+            stream_from(self)
+            .do_action(
+                on_next=on_next,
+                on_error=on_error,
+                on_completed=on_completed,
+            )
+            .share()
+        )
+
+    def pairwise(self) -> Observable[tuple[T, T]]:
+        return stream_from(self).pairwise().share()
+
+    def take(self, count: int) -> Observable[T]:
+        return stream_from(self).take(count).share()
+
+    def with_latest_from(self, *sources: ObservableLike[Any]) -> Observable[Any]:
+        return stream_from(self).with_latest_from(*sources).share()
+
+    def flat_map(self, project: Callable[[T], ObservableLike[Any]]) -> Observable[Any]:
+        return stream_from(self).flat_map(project).share()
+
+    def switch_latest(self) -> Observable[Any]:
+        return stream_from(self).switch_latest().share()
+
+    def _unsubscribe(self, subscription_id: int) -> None:
+        with self._lock:
+            self._subscribers.pop(subscription_id, None)
+
+
+class _EventStreamSubscription:
+    def __init__(self, stream: EventStream[Any], subscription_id: int) -> None:
+        self._stream = stream
+        self._subscription_id = subscription_id
+        self._disposed = False
+
+    def dispose(self) -> None:
+        if self._disposed:
+            return
+        self._disposed = True
+        self._stream._unsubscribe(self._subscription_id)
+
+
 class _LatencyRecorder:
     def __init__(self, history_size: int = DEFAULT_DELIVERY_LATENCY_HISTORY_SIZE) -> None:
         self._history_size = history_size

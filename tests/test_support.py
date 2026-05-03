@@ -989,6 +989,7 @@ def load_manyfold_package():
         "EmbeddedDeviceProfile": embedded.EmbeddedDeviceProfile,
         "EmbeddedRuntimeRules": embedded.EmbeddedRuntimeRules,
         "EmbeddedScalarSensor": embedded.EmbeddedScalarSensor,
+        "EventStream": graph.EventStream,
         "EventLog": components.EventLog,
         "EventLogRecord": components.EventLogRecord,
         "EventLogRoutes": components.EventLogRoutes,

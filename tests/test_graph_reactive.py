@@ -745,6 +745,33 @@ class GraphReactiveTests(unittest.TestCase):
 
         self.assertEqual(seen, [1, 3, 6])
 
+    def test_event_stream_emits_to_subscribers_and_disposes(self) -> None:
+        graph_module = load_graph_module()
+        source = graph_module.EventStream()
+        seen: list[int] = []
+
+        subscription = source.subscribe(seen.append)
+        source.emit(1)
+        source.on_next(2)
+        subscription.dispose()
+        source.emit(3)
+
+        self.assertEqual(seen, [1, 2])
+
+    def test_event_stream_exposes_fluent_stream_operators(self) -> None:
+        graph_module = load_graph_module()
+        source = graph_module.EventStream()
+        seen: list[int] = []
+
+        source.map(lambda value: value * 2).start_with(1).scan(
+            lambda total, value: total + value,
+            seed=0,
+        ).subscribe(seen.append)
+        source.emit(2)
+        source.emit(3)
+
+        self.assertEqual(seen, [1, 5, 11])
+
     def test_stream_from_can_unwrap_typed_envelopes(self) -> None:
         graph_module = load_graph_module()
         schema = int_schema(graph_module, "Number")
