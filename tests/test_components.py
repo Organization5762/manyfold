@@ -168,6 +168,18 @@ class ComponentTests(unittest.TestCase):
             ((1, "set mode=auto"), (2, "set temp=21")),
         )
 
+    def test_consensus_log_round_trips_multiline_commands(self) -> None:
+        manyfold = load_manyfold_package()
+        graph = manyfold.Graph()
+        consensus = manyfold.Consensus.install(graph)
+        command = "set pipe=a|b\nset mode=auto"
+
+        consensus.tick(1)
+        consensus.tick(2)
+        consensus.propose(1, command)
+
+        self.assertEqual(consensus.latest_log(), ((1, command),))
+
     def test_consensus_component_validates_candidate_membership(self) -> None:
         manyfold = load_manyfold_package()
 

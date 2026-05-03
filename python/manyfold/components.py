@@ -856,9 +856,7 @@ def _replicated_log_schema() -> Schema[ReplicatedLog]:
     return Schema(
         schema_id="RaftReplicatedLog",
         version=1,
-        encode=lambda value: "\n".join(
-            f"{index}|{command}" for index, command in value
-        ).encode("utf-8"),
+        encode=lambda value: json.dumps(value, separators=(",", ":")).encode("utf-8"),
         decode=lambda payload: _decode_replicated_log(payload),
     )
 
@@ -867,6 +865,9 @@ def _decode_replicated_log(payload: bytes) -> ReplicatedLog:
     text = payload.decode("utf-8")
     if not text:
         return ()
+    if text.startswith("["):
+        entries = json.loads(text)
+        return tuple((int(index), str(command)) for index, command in entries)
     return tuple(_decode_append_entry(line.encode("utf-8")) for line in text.splitlines())
 
 
