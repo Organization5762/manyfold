@@ -14,6 +14,7 @@ PACKAGE_DIR = REPO_ROOT / "python" / "manyfold"
 PYTHON_ROOT = REPO_ROOT / "python"
 MODULES_TO_RESET = (
     "manyfold",
+    "manyfold._testing",
     "manyfold.primitives",
     "manyfold.graph",
     "manyfold.embedded",
@@ -21,7 +22,6 @@ MODULES_TO_RESET = (
     "manyfold.lego_catalog",
     "manyfold.sensor_io",
     "manyfold.reference_examples",
-    "manyfold.reactive_threads",
     "manyfold._rx",
     "manyfold._rx.abc",
     "manyfold._rx.disposable",
@@ -972,6 +972,7 @@ def load_manyfold_package():
     exports = {
         "all_legos": lego_catalog.all_legos,
         "BackoffPolicy": sensor_io.BackoffPolicy,
+        "BehaviorSubject": graph.BehaviorSubject,
         "BoundedRingBuffer": sensor_io.BoundedRingBuffer,
         "ChangeFilter": sensor_io.ChangeFilter,
         "Clock": sensor_io.Clock,
@@ -996,7 +997,11 @@ def load_manyfold_package():
         "Capacitor": graph.Capacitor,
         "CallbackNode": graph.CallbackNode,
         "CoalesceLatestNode": graph.CoalesceLatestNode,
+        "CombineLatestNode": graph.CombineLatestNode,
+        "ConstantNode": graph.ConstantNode,
+        "EmptyNode": graph.EmptyNode,
         "DelimitedMessageBuffer": sensor_io.DelimitedMessageBuffer,
+        "drain_frame_thread_queue": graph.drain_frame_thread_queue,
         "DoubleBuffer": sensor_io.DoubleBuffer,
         "DuplexSensorPeripheral": sensor_io.DuplexSensorPeripheral,
         "FilterNode": graph.FilterNode,
@@ -1007,6 +1012,8 @@ def load_manyfold_package():
         "GraphConnection": graph.GraphConnection,
         "GraphAccessNode": sensor_io.GraphAccessNode,
         "HealthStatus": sensor_io.HealthStatus,
+        "Interval": graph.Interval,
+        "IntervalNode": graph.IntervalNode,
         "JoinInput": graph.JoinInput,
         "JsonEventDecoder": sensor_io.JsonEventDecoder,
         "Keyspace": components.Keyspace,
@@ -1015,7 +1022,9 @@ def load_manyfold_package():
         "LifecycleBinding": graph.LifecycleBinding,
         "LineageRecord": graph.LineageRecord,
         "LoggingNode": graph.LoggingNode,
+        "MainThreadNode": graph.MainThreadNode,
         "MapNode": graph.MapNode,
+        "MergeNode": graph.MergeNode,
         "LocalDurableSpool": sensor_io.LocalDurableSpool,
         "LocalSensorSource": sensor_io.LocalSensorSource,
         "Lego": lego_catalog.Lego,
@@ -1081,11 +1090,15 @@ def load_manyfold_package():
         "Source": primitives.Source,
         "StopToken": sensor_io.StopToken,
         "StoreEntry": components.StoreEntry,
+        "StreamConnectMode": graph.StreamConnectMode,
         "StreamFamily": primitives.StreamFamily,
         "StreamName": primitives.StreamName,
+        "StreamShareSettings": graph.StreamShareSettings,
+        "StreamShareStrategy": graph.StreamShareStrategy,
         "TaintDomain": rust.TaintDomain,
         "TaintMark": rust.TaintMark,
         "TaintRepair": graph.TaintRepair,
+        "Timer": graph.Timer,
         "TypedEnvelope": primitives.TypedEnvelope,
         "TypedRoute": primitives.TypedRoute,
         "Variant": rust.Variant,
@@ -1100,6 +1113,7 @@ def load_manyfold_package():
         "get_lego": lego_catalog.get_lego,
         "health_status_schema": sensor_io.health_status_schema,
         "instrument_stream": graph.instrument_stream,
+        "share_stream": graph.share_stream,
         "route": primitives.route,
         "legos_by_layer": lego_catalog.legos_by_layer,
         "legos_by_role": lego_catalog.legos_by_role,
@@ -1108,6 +1122,7 @@ def load_manyfold_package():
         "sink": primitives.sink,
         "source": primitives.source,
         "SystemClock": sensor_io.SystemClock,
+        "shutdown": graph.shutdown,
         "ThresholdFilter": sensor_io.ThresholdFilter,
         "xor_checksum": sensor_io.xor_checksum,
     }
@@ -1146,3 +1161,8 @@ def load_example_module(name: str):
 def load_manyfold_graph_module():
     load_manyfold_package()
     return sys.modules["manyfold.graph"]
+
+
+def load_manyfold_testing_module():
+    load_manyfold_package()
+    return importlib.import_module("manyfold._testing")

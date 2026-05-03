@@ -46,3 +46,59 @@ from reactivex import (
 from reactivex.subject import Subject as Subject
 
 from . import abc as abc
+
+
+def _install_fluent_observable_methods() -> None:
+    def _map(self: Observable, mapper):  # type: ignore[no-untyped-def]
+        return self.pipe(operators.map(mapper))
+
+    def _filter(self: Observable, predicate):  # type: ignore[no-untyped-def]
+        return self.pipe(operators.filter(predicate))
+
+    def _scan(self: Observable, accumulator, seed=None):  # type: ignore[no-untyped-def]
+        return self.pipe(operators.scan(accumulator, seed=seed))
+
+    def _share(self: Observable):  # type: ignore[no-untyped-def]
+        return self.pipe(operators.share())
+
+    def _start_with(self: Observable, *values):  # type: ignore[no-untyped-def]
+        return self.pipe(operators.start_with(*values))
+
+    def _distinct_until_changed(  # type: ignore[no-untyped-def]
+        self: Observable,
+        key_mapper=None,
+        comparer=None,
+    ):
+        return self.pipe(
+            operators.distinct_until_changed(
+                key_mapper=key_mapper,
+                comparer=comparer,
+            )
+        )
+
+    def _do_action(self: Observable, **kwargs):  # type: ignore[no-untyped-def]
+        return self.pipe(operators.do_action(**kwargs))
+
+    def _pairwise(self: Observable):  # type: ignore[no-untyped-def]
+        return self.pipe(operators.pairwise())
+
+    def _with_latest_from(self: Observable, *sources):  # type: ignore[no-untyped-def]
+        return self.pipe(operators.with_latest_from(*sources))
+
+    methods = {
+        "map": _map,
+        "filter": _filter,
+        "scan": _scan,
+        "share": _share,
+        "start_with": _start_with,
+        "distinct_until_changed": _distinct_until_changed,
+        "do_action": _do_action,
+        "pairwise": _pairwise,
+        "with_latest_from": _with_latest_from,
+    }
+    for name, method in methods.items():
+        if not hasattr(Observable, name):
+            setattr(Observable, name, method)
+
+
+_install_fluent_observable_methods()

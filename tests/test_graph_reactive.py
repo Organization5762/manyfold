@@ -1,17 +1,21 @@
 from __future__ import annotations
 
-import importlib
 import sys
 import threading
 import time
 import unittest
 from dataclasses import dataclass
+from datetime import timedelta
 
-from tests.test_support import load_manyfold_graph_module
+from tests.test_support import load_manyfold_graph_module, load_manyfold_testing_module
 
 
 def load_graph_module():
     return load_manyfold_graph_module()
+
+
+def load_testing_module():
+    return load_manyfold_testing_module()
 
 
 def int_schema(graph_module, schema_id: str):
@@ -222,8 +226,8 @@ class GraphReactiveTests(unittest.TestCase):
 
     def test_pipeline_can_place_following_nodes_on_main_thread(self) -> None:
         graph_module = load_graph_module()
-        reactive_threads = importlib.import_module("manyfold.reactive_threads")
-        reactive_threads.reset_reactive_threading_state_for_tests()
+        testing_module = load_testing_module()
+        testing_module.reset_reactive_threading_state()
         route = graph_module.route(
             plane=graph_module.Plane.Read,
             layer=graph_module.Layer.Logical,
@@ -235,23 +239,110 @@ class GraphReactiveTests(unittest.TestCase):
         )
         graph = graph_module.Graph()
         seen: list[int] = []
-        connection = graph.observe(route, replay_latest=False).on_main_thread().callback(
-            seen.append,
-            name="collect-main",
+        connection = (
+            graph.observe(route, replay_latest=False)
+            .then_on_main_thread()
+            .callback(
+                seen.append,
+                name="collect-main",
+            )
         )
 
         try:
             graph.publish(route, 3)
 
             self.assertEqual(seen, [])
-            self.assertEqual(reactive_threads.drain_frame_thread_queue(), 1)
+            self.assertEqual(graph_module.drain_frame_thread_queue(), 1)
             self.assertEqual(seen, [3])
             node = next(graph.diagram_nodes())
             self.assertEqual(node.thread_placement.kind, "main")
             self.assertIn("main_thread", graph.render_diagram(group_by=("thread",)))
         finally:
             connection.remove()
-            reactive_threads.reset_reactive_threading_state_for_tests()
+            testing_module.reset_reactive_threading_state()
+
+    def test_timer_main_thread_placement_only_applies_to_future_work(self) -> None:
+        graph_module = load_graph_module()
+        testing_module = load_testing_module()
+        testing_module.reset_reactive_threading_state()
+        ticks = graph_module.Timer(timedelta(hours=1))
+        seen: list[int] = []
+        connection = ticks.then_on_main_thread().callback(seen.append)
+
+        try:
+            ticks.graph.publish(ticks.route, 1)
+
+            self.assertEqual(seen, [])
+            self.assertEqual(graph_module.drain_frame_thread_queue(), 1)
+            self.assertEqual(seen, [1])
+            nodes = tuple(ticks.graph.diagram_nodes())
+            self.assertEqual(nodes[0].thread_placement.kind, "background")
+            self.assertEqual(nodes[1].thread_placement.kind, "main")
+        finally:
+            connection.remove()
+            testing_module.reset_reactive_threading_state()
+
+    def test_timer_supports_fluent_distinct_until_changed(self) -> None:
+        graph_module = load_graph_module()
+        ticks = graph_module.Timer(timedelta(hours=1))
+        done = threading.Event()
+        seen: list[int] = []
+        connection = (
+            ticks.then_on_background_thread()
+            .map(lambda value: value % 2, name="parity")
+            .distinct_until_changed(name="dedupe-parity")
+            .callback(lambda value: (seen.append(value), done.set()))
+        )
+
+        try:
+            ticks.graph.publish(ticks.route, 0)
+            ticks.graph.publish(ticks.route, 2)
+            ticks.graph.publish(ticks.route, 3)
+            ticks.graph.publish(ticks.route, 5)
+            ticks.graph.publish(ticks.route, 6)
+
+            self.assertTrue(done.wait(timeout=2), "fluent timer pipeline did not run")
+            deadline = time.monotonic() + 2
+            while len(seen) < 3 and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertEqual(seen, [0, 1, 0])
+            nodes = tuple(ticks.graph.diagram_nodes())
+            self.assertEqual(nodes[1].thread_placement.kind, "background")
+            self.assertEqual(nodes[2].name, "dedupe-parity")
+        finally:
+            connection.remove()
+
+    def test_constant_node_emits_static_value_to_each_subscriber(self) -> None:
+        graph_module = load_graph_module()
+        node = graph_module.ConstantNode({"mode": "static"})
+        first: list[dict[str, str]] = []
+        second: list[dict[str, str]] = []
+        observable = node.observable()
+
+        observable.subscribe(first.append)
+        observable.subscribe(second.append)
+
+        self.assertIsInstance(observable, graph_module.BehaviorSubject)
+        self.assertEqual(first, [{"mode": "static"}])
+        self.assertEqual(second, [{"mode": "static"}])
+
+    def test_constant_node_replays_into_live_composition(self) -> None:
+        graph_module = load_graph_module()
+        static = graph_module.ConstantNode(7).observable()
+        live = graph_module.Subject()
+        seen: list[tuple[int, str]] = []
+
+        static.subscribe(lambda _value: None)
+        subscription = graph_module.CombineLatestNode().observable(
+            static,
+            live,
+        ).subscribe(seen.append)
+        try:
+            live.on_next("ready")
+
+            self.assertEqual(seen, [(7, "ready")])
+        finally:
+            subscription.dispose()
 
     def test_pipeline_can_place_following_nodes_on_pooled_thread(self) -> None:
         graph_module = load_graph_module()
@@ -275,9 +366,13 @@ class GraphReactiveTests(unittest.TestCase):
             seen.append(value)
             done.set()
 
-        connection = graph.observe(route, replay_latest=False).on_pooled_thread().callback(
-            collect,
-            name="collect-pooled",
+        connection = (
+            graph.observe(route, replay_latest=False)
+            .then_on_pooled_thread()
+            .callback(
+                collect,
+                name="collect-pooled",
+            )
         )
 
         try:
@@ -313,7 +408,7 @@ class GraphReactiveTests(unittest.TestCase):
 
         connection = (
             graph.observe(route, replay_latest=False)
-            .on_isolated_thread("exclusive-node")
+            .then_on_isolated_thread("exclusive-node")
             .map(
                 transform,
                 name="exclusive-map",
@@ -415,6 +510,221 @@ class GraphReactiveTests(unittest.TestCase):
                 for message in logs.output
             )
         )
+
+    def test_merge_node_merges_source_streams(self) -> None:
+        graph_module = load_graph_module()
+        left = graph_module.Subject()
+        right = graph_module.Subject()
+        seen: list[int] = []
+
+        subscription = graph_module.MergeNode.merge(left, right).subscribe(seen.append)
+        try:
+            left.on_next(1)
+            right.on_next(2)
+            left.on_next(3)
+
+            self.assertEqual(seen, [1, 2, 3])
+        finally:
+            subscription.dispose()
+
+    def test_combine_latest_node_combines_source_streams(self) -> None:
+        graph_module = load_graph_module()
+        left = graph_module.Subject()
+        right = graph_module.Subject()
+        seen: list[tuple[int, str]] = []
+
+        subscription = graph_module.CombineLatestNode().observable(
+            left,
+            right,
+        ).subscribe(seen.append)
+        try:
+            left.on_next(1)
+            right.on_next("a")
+            left.on_next(2)
+            right.on_next("b")
+
+            self.assertEqual(seen, [(1, "a"), (2, "a"), (2, "b")])
+        finally:
+            subscription.dispose()
+
+    def test_interval_source_uses_fluent_pipeline_nodes(self) -> None:
+        graph_module = load_graph_module()
+        seen: list[int] = []
+
+        connection = graph_module.Interval(
+            period=timedelta(milliseconds=1),
+            name="ticks",
+        ).map(lambda value: value + 1, name="plus-one").callback(seen.append)
+        try:
+            deadline = time.monotonic() + 1
+            while len(seen) < 2 and time.monotonic() < deadline:
+                time.sleep(0.01)
+
+            self.assertGreaterEqual(len(seen), 2)
+            self.assertEqual(seen[0], 1)
+        finally:
+            connection.remove()
+
+    def test_graph_interval_exposes_source_node_in_diagram(self) -> None:
+        graph_module = load_graph_module()
+        graph = graph_module.Graph()
+        seen: list[int] = []
+
+        connection = graph.interval(
+            timedelta(milliseconds=1),
+            name="ticks",
+        ).callback(seen.append, name="collect")
+        try:
+            deadline = time.monotonic() + 1
+            while not seen and time.monotonic() < deadline:
+                time.sleep(0.01)
+
+            self.assertTrue(seen)
+            self.assertEqual(
+                [node.name for node in graph.diagram_nodes()],
+                ["ticks", "collect"],
+            )
+        finally:
+            connection.remove()
+
+    def test_main_thread_node_defers_observable_delivery_until_frame_drain(self) -> None:
+        graph_module = load_graph_module()
+        testing_module = load_testing_module()
+        testing_module.reset_reactive_threading_state()
+        source = graph_module.Subject()
+        seen: list[int] = []
+
+        graph_module.MainThreadNode().observable(source).subscribe(seen.append)
+        source.on_next(7)
+
+        self.assertEqual(seen, [])
+        self.assertEqual(graph_module.drain_frame_thread_queue(), 1)
+        self.assertEqual(seen, [7])
+
+    def test_share_stream_replays_latest_when_configured(self) -> None:
+        graph_module = load_graph_module()
+        source = graph_module.Subject()
+        shared = graph_module.share_stream(
+            source,
+            stream_name="numbers",
+            settings=graph_module.StreamShareSettings(
+                strategy=graph_module.StreamShareStrategy.REPLAY_LATEST,
+            ),
+        )
+
+        first: list[int] = []
+        shared.subscribe(first.append)
+        source.on_next(1)
+        source.on_next(2)
+
+        second: list[int] = []
+        shared.subscribe(second.append)
+        source.on_next(3)
+
+        self.assertEqual(first, [1, 2, 3])
+        self.assertEqual(second, [2, 3])
+
+    def test_share_stream_auto_connect_avoids_resubscribe(self) -> None:
+        graph_module = load_graph_module()
+        subscribe_count = 0
+
+        def subscribe(observer, scheduler=None):
+            nonlocal subscribe_count
+            del scheduler
+            subscribe_count += 1
+            observer.on_next(subscribe_count)
+            return graph_module.Disposable()
+
+        shared = graph_module.share_stream(
+            graph_module.rx.create(subscribe),
+            stream_name="auto-connect",
+            settings=graph_module.StreamShareSettings(
+                strategy=graph_module.StreamShareStrategy.REPLAY_LATEST_AUTO_CONNECT,
+            ),
+        )
+
+        first: list[int] = []
+        subscription = shared.subscribe(first.append)
+        subscription.dispose()
+
+        second: list[int] = []
+        shared.subscribe(second.append)
+
+        self.assertEqual(subscribe_count, 1)
+        self.assertEqual(first, [1])
+        self.assertEqual(second, [1])
+
+    def test_share_stream_replays_configured_buffer(self) -> None:
+        graph_module = load_graph_module()
+        source = graph_module.Subject()
+        shared = graph_module.share_stream(
+            source,
+            stream_name="buffered",
+            settings=graph_module.StreamShareSettings(
+                strategy=graph_module.StreamShareStrategy.REPLAY_BUFFER,
+                replay_buffer=2,
+            ),
+        )
+
+        shared.subscribe(lambda _value: None)
+        source.on_next(1)
+        source.on_next(2)
+        source.on_next(3)
+
+        seen: list[int] = []
+        shared.subscribe(seen.append)
+
+        self.assertEqual(seen, [2, 3])
+
+    def test_share_stream_refcount_grace_delays_disconnect(self) -> None:
+        graph_module = load_graph_module()
+        subscribe_count = 0
+
+        def subscribe(observer, scheduler=None):
+            nonlocal subscribe_count
+            del scheduler
+            subscribe_count += 1
+            observer.on_next(subscribe_count)
+            return graph_module.Disposable()
+
+        shared = graph_module.share_stream(
+            graph_module.rx.create(subscribe),
+            stream_name="grace",
+            settings=graph_module.StreamShareSettings(
+                strategy=graph_module.StreamShareStrategy.REPLAY_LATEST,
+                refcount_grace_ms=30,
+            ),
+        )
+
+        shared.subscribe().dispose()
+        shared.subscribe().dispose()
+
+        self.assertEqual(subscribe_count, 1)
+
+        time.sleep(0.05)
+        shared.subscribe().dispose()
+
+        self.assertEqual(subscribe_count, 2)
+
+    def test_share_stream_coalesces_latest_when_configured(self) -> None:
+        graph_module = load_graph_module()
+        source = graph_module.Subject()
+        shared = graph_module.share_stream(
+            source,
+            stream_name="coalesce",
+            settings=graph_module.StreamShareSettings(
+                strategy=graph_module.StreamShareStrategy.SHARE,
+                coalesce_window_ms=20,
+            ),
+        )
+        seen: list[int] = []
+        shared.subscribe(seen.append)
+
+        source.on_next(1)
+        source.on_next(2)
+        time.sleep(0.05)
+
+        self.assertEqual(seen, [2])
 
     def test_observe_pipeline_installs_logging_node(self) -> None:
         graph_module = load_graph_module()

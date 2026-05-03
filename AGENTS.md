@@ -58,6 +58,7 @@ uv run python -m unittest tests.test_components.ComponentTests.test_file_store_a
 ## Working Rules
 
 - Prefer existing object-shaped API patterns over stringly helpers.
+- Never place imports inside functions or methods. Keep imports at module scope so dependencies are visible and stable.
 - Add or update tests for every meaningful behavior change.
 - Keep public API documentation and docstrings current when behavior changes.
 - Keep the top-level `manyfold` namespace narrow; advanced helpers belong under

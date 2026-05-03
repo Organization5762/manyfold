@@ -10,11 +10,15 @@ from __future__ import annotations
 
 import json
 import logging
+import math
+import queue
 import time
 from collections import deque
 from dataclasses import dataclass, field, replace
+from datetime import timedelta
+from enum import Enum
 from itertools import count
-from threading import RLock, Timer
+from threading import Lock, RLock, Thread, Timer as ThreadingTimer, get_ident
 from typing import (
     Any,
     Callable,
@@ -24,6 +28,7 @@ from typing import (
     Protocol,
     Sequence,
     Sequence as TypingSequence,
+    TypeAlias,
     TypeVar,
     Union,
     cast,
@@ -57,7 +62,7 @@ from ._manyfold_rust import (
 from ._rx import Observable, operators as ops
 from ._rx.disposable import Disposable
 from ._rx.scheduler import TimeoutScheduler
-from ._rx.subject import Subject
+from ._rx.subject import BehaviorSubject, Subject
 from .primitives import (
     OwnerName,
     ReadThenWriteNextEpochStep,
@@ -96,7 +101,16 @@ _THREAD_PLACEMENT_KINDS = frozenset(
 _POOLED_THREAD_SCHEDULERS = frozenset(("background", "blocking_io", "input"))
 _NO_PENDING: Any = object()
 _STATS_SCHEDULER = TimeoutScheduler()
+_REPLAY_SCHEDULER = TimeoutScheduler()
+_SHARE_GRACE_SCHEDULER = TimeoutScheduler()
+_COALESCE_SCHEDULER = TimeoutScheduler()
+FRAME_THREAD_LATENCY_STREAM = "frame_thread_handoff"
+DEFAULT_DELIVERY_LATENCY_HISTORY_SIZE = 2048
+_FRAME_THREAD_QUEUE: deque["_FrameThreadTask"] = deque()
+_FRAME_THREAD_QUEUE_LOCK = Lock()
+_FRAME_THREAD_IDENT: int | None = None
 logger = logging.getLogger(__name__)
+shutdown: Subject[Any] = Subject()
 
 
 @runtime_checkable
@@ -122,6 +136,560 @@ class ObservableLike(Protocol[T]):
     ) -> SubscriptionLike: ...
 
 
+StreamNode: TypeAlias = ObservableLike[T]
+
+
+class ConnectableObservableLike(ObservableLike[T], Protocol[T]):
+    def connect(self, scheduler: object | None = None) -> SubscriptionLike: ...
+
+    def pipe(self, *operators: Any) -> Observable[T]: ...
+
+    def auto_connect(self, subscriber_count: int = 1) -> Observable[T]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class DeliveryLatencyStats:
+    """Percentile summary of stream delivery latency."""
+
+    count: int
+    p50_ms: float
+    p95_ms: float
+    p99_ms: float
+    max_ms: float
+
+
+@dataclass
+class _FrameThreadTask:
+    callback: Callable[[], None]
+    enqueued_monotonic: float
+
+
+class _LatencyRecorder:
+    def __init__(self, history_size: int = DEFAULT_DELIVERY_LATENCY_HISTORY_SIZE) -> None:
+        self._history_size = history_size
+        self._history: dict[str, deque[float]] = {}
+        self._lock = Lock()
+
+    def record(self, stream_name: str, delay_s: float) -> None:
+        with self._lock:
+            values = self._history.setdefault(
+                stream_name,
+                deque(maxlen=self._history_size),
+            )
+            values.append(max(delay_s, 0.0))
+
+    def snapshot(self) -> dict[str, DeliveryLatencyStats]:
+        with self._lock:
+            history = {
+                stream_name: tuple(values)
+                for stream_name, values in self._history.items()
+                if values
+            }
+        return {
+            stream_name: _latency_stats(values)
+            for stream_name, values in history.items()
+        }
+
+    def clear(self) -> None:
+        with self._lock:
+            self._history.clear()
+
+
+_LATENCY_RECORDER = _LatencyRecorder()
+
+
+def _interval_in_background(period: timedelta, *, name: str | None = None) -> Observable[int]:
+    """Emit integer ticks from a recurring timer until disposed or shut down."""
+
+    period_seconds = period.total_seconds()
+    if period_seconds < 0:
+        raise ValueError("period must be non-negative")
+
+    def subscribe(observer: ObserverLike[int], scheduler: object | None = None) -> Any:
+        del scheduler
+        lock = Lock()
+        disposed = False
+        tick = 0
+        timer: ThreadingTimer | None = None
+
+        def dispose() -> None:
+            nonlocal disposed, timer
+            with lock:
+                disposed = True
+                if timer is not None:
+                    timer.cancel()
+                    timer = None
+
+        def emit() -> None:
+            nonlocal tick
+            with lock:
+                if disposed:
+                    return
+                value = tick
+                tick += 1
+            observer.on_next(value)
+            schedule()
+
+        def schedule() -> None:
+            nonlocal timer
+            with lock:
+                if disposed:
+                    return
+                timer = ThreadingTimer(period_seconds, emit)
+                timer.daemon = True
+                if name is not None:
+                    timer.name = name
+                timer.start()
+
+        shutdown_subscription = shutdown.subscribe(lambda _: dispose())
+        schedule()
+
+        def dispose_all() -> None:
+            dispose()
+            shutdown_subscription.dispose()
+
+        return Disposable(dispose_all)
+
+    return rx.create(subscribe)
+
+
+def deliver_on_frame_thread(source: Observable[T]) -> Observable[T]:
+    """Queue source emissions until ``drain_frame_thread_queue`` is called."""
+
+    def subscribe(observer: ObserverLike[T], scheduler: object | None = None) -> Any:
+        disposed = False
+        dispose_lock = Lock()
+
+        def deliver(callback: Callable[[], None]) -> None:
+            def run() -> None:
+                with dispose_lock:
+                    if disposed:
+                        return
+                callback()
+
+            _enqueue_frame_thread_task(run)
+
+        subscription = source.subscribe(
+            on_next=lambda value: deliver(lambda: observer.on_next(value)),
+            on_error=lambda error: deliver(lambda: observer.on_error(error)),
+            on_completed=lambda: deliver(observer.on_completed),
+            scheduler=scheduler,
+        )
+
+        def dispose() -> None:
+            nonlocal disposed
+            with dispose_lock:
+                disposed = True
+            subscription.dispose()
+
+        return Disposable(dispose)
+
+    return rx.create(subscribe)
+
+
+def drain_frame_thread_queue(max_items: int | None = None) -> int:
+    """Run pending frame-thread callbacks and return the number drained."""
+
+    global _FRAME_THREAD_IDENT
+    _FRAME_THREAD_IDENT = get_ident()
+    drained = 0
+    while True:
+        with _FRAME_THREAD_QUEUE_LOCK:
+            if not _FRAME_THREAD_QUEUE:
+                break
+            task = _FRAME_THREAD_QUEUE.popleft()
+        _LATENCY_RECORDER.record(
+            FRAME_THREAD_LATENCY_STREAM,
+            time.monotonic() - task.enqueued_monotonic,
+        )
+        task.callback()
+        drained += 1
+        if max_items is not None and drained >= max_items:
+            break
+    return drained
+
+
+def on_frame_thread() -> bool:
+    """Return whether the current thread last drained the frame-thread queue."""
+
+    return _FRAME_THREAD_IDENT == get_ident()
+
+
+def delivery_latency_snapshot() -> dict[str, DeliveryLatencyStats]:
+    """Return latency summaries for queued frame-thread deliveries."""
+
+    return _LATENCY_RECORDER.snapshot()
+
+
+def _start_with_once(value: U) -> Callable[[Observable[T]], Observable[Any]]:
+    """Prepend one value to a stream for each subscription."""
+
+    def start(source: Observable[T]) -> Observable[Any]:
+        return source.pipe(ops.start_with(value))
+
+    return start
+
+
+def _pipe_in_background(
+    source: Observable[T],
+    *operators: Any,
+    starting_value: Any = _NO_PENDING,
+) -> Observable[Any]:
+    """Apply operators to a source and share the resulting observable."""
+
+    resolved_operators = operators
+    if starting_value is not _NO_PENDING:
+        resolved_operators = (*operators, _start_with_once(starting_value))
+    return source.pipe(*resolved_operators, ops.share())
+
+
+def _pipe_in_blocking_io(source: Observable[T], *operators: Any) -> Observable[Any]:
+    """Subscribe to a source on a background thread without exposing schedulers."""
+
+    def subscribe(observer: ObserverLike[Any], scheduler: object | None = None) -> Any:
+        del scheduler
+        disposed = False
+        dispose_lock = Lock()
+        inner: Any | None = None
+
+        def run() -> None:
+            nonlocal inner
+            inner = source.pipe(*operators).subscribe(
+                lambda value: _call_if_live(lambda: observer.on_next(value)),
+                lambda error: _call_if_live(lambda: observer.on_error(error)),
+                lambda: _call_if_live(observer.on_completed),
+            )
+
+        def _call_if_live(callback: Callable[[], None]) -> None:
+            with dispose_lock:
+                if disposed:
+                    return
+            callback()
+
+        thread = Thread(target=run, name="manyfold-blocking-io", daemon=True)
+        thread.start()
+
+        def dispose() -> None:
+            nonlocal disposed
+            with dispose_lock:
+                disposed = True
+            if inner is not None:
+                inner.dispose()
+
+        return Disposable(dispose)
+
+    return rx.create(subscribe).pipe(ops.share())
+
+
+def _pipe_in_main_thread(source: Observable[T], *operators: Any) -> Observable[Any]:
+    """Deliver source emissions on the frame thread, apply operators, and share."""
+
+    return deliver_on_frame_thread(source).pipe(*operators, ops.share())
+
+
+def _reset_reactive_threading_state_for_tests() -> None:
+    """Reset frame-thread queues and latency state."""
+
+    global _FRAME_THREAD_IDENT
+    with _FRAME_THREAD_QUEUE_LOCK:
+        _FRAME_THREAD_QUEUE.clear()
+    _FRAME_THREAD_IDENT = None
+    _LATENCY_RECORDER.clear()
+
+
+def share_sequence(values: Sequence[T]) -> Observable[T]:
+    """Expose a finite sequence as a shared observable."""
+
+    return rx.from_iterable(values).pipe(ops.share())
+
+
+def _enqueue_frame_thread_task(callback: Callable[[], None]) -> None:
+    with _FRAME_THREAD_QUEUE_LOCK:
+        _FRAME_THREAD_QUEUE.append(
+            _FrameThreadTask(
+                callback=callback,
+                enqueued_monotonic=time.monotonic(),
+            )
+        )
+
+
+def _latency_stats(values: Sequence[float]) -> DeliveryLatencyStats:
+    sorted_values = sorted(values)
+    return DeliveryLatencyStats(
+        count=len(sorted_values),
+        p50_ms=_percentile_ms(sorted_values, 0.50),
+        p95_ms=_percentile_ms(sorted_values, 0.95),
+        p99_ms=_percentile_ms(sorted_values, 0.99),
+        max_ms=sorted_values[-1] * 1000,
+    )
+
+
+def _percentile_ms(sorted_values: Sequence[float], percentile: float) -> float:
+    if not sorted_values:
+        return 0.0
+    index = min(
+        len(sorted_values) - 1,
+        max(0, math.ceil(percentile * len(sorted_values)) - 1),
+    )
+    return sorted_values[index] * 1000
+
+
+def _observe_on_thread(source: Observable[T], name: str) -> Observable[T]:
+    def subscribe(observer: ObserverLike[T], scheduler: object | None = None) -> Any:
+        del scheduler
+        events: queue.Queue[tuple[str, Any]] = queue.Queue()
+        disposed = False
+        dispose_lock = Lock()
+
+        def worker() -> None:
+            while True:
+                kind, value = events.get()
+                with dispose_lock:
+                    if disposed:
+                        return
+                if kind == "next":
+                    observer.on_next(value)
+                elif kind == "error":
+                    observer.on_error(value)
+                    return
+                elif kind == "completed":
+                    observer.on_completed()
+                    return
+
+        thread = Thread(target=worker, name=name, daemon=True)
+        thread.start()
+        subscription = source.subscribe(
+            lambda value: events.put(("next", value)),
+            lambda error: events.put(("error", error)),
+            lambda: events.put(("completed", None)),
+        )
+
+        def dispose() -> None:
+            nonlocal disposed
+            with dispose_lock:
+                disposed = True
+            subscription.dispose()
+            events.put(("completed", None))
+
+        return Disposable(dispose)
+
+    return rx.create(subscribe)
+
+
+class StreamShareStrategy(Enum):
+    """Supported policies for sharing a local observable."""
+
+    SHARE = "share"
+    SHARE_AUTO_CONNECT = "share_auto_connect"
+    REPLAY_LATEST = "replay_latest"
+    REPLAY_LATEST_AUTO_CONNECT = "replay_latest_auto_connect"
+    REPLAY_BUFFER = "replay_buffer"
+    REPLAY_BUFFER_AUTO_CONNECT = "replay_buffer_auto_connect"
+
+
+class StreamConnectMode(Enum):
+    """Connect timing for ref-counted shared observables."""
+
+    LAZY = "lazy"
+    EAGER = "eager"
+
+
+@dataclass(frozen=True)
+class StreamShareSettings:
+    """Configuration for sharing process-local observables."""
+
+    strategy: StreamShareStrategy = StreamShareStrategy.REPLAY_LATEST
+    coalesce_window_ms: int = 0
+    stats_log_ms: int = 0
+    replay_window_ms: int | None = None
+    replay_buffer: int = 16
+    auto_connect_min_subscribers: int = 1
+    refcount_min_subscribers: int = 1
+    refcount_grace_ms: int = 0
+    connect_mode: StreamConnectMode = StreamConnectMode.LAZY
+
+    def __post_init__(self) -> None:
+        if self.coalesce_window_ms < 0:
+            raise ValueError("coalesce_window_ms must be non-negative")
+        if self.stats_log_ms < 0:
+            raise ValueError("stats_log_ms must be non-negative")
+        if self.replay_window_ms is not None and self.replay_window_ms <= 0:
+            raise ValueError("replay_window_ms must be positive when set")
+        if self.replay_buffer < 1:
+            raise ValueError("replay_buffer must be positive")
+        if self.auto_connect_min_subscribers < 1:
+            raise ValueError("auto_connect_min_subscribers must be positive")
+        if self.refcount_min_subscribers < 1:
+            raise ValueError("refcount_min_subscribers must be positive")
+        if self.refcount_grace_ms < 0:
+            raise ValueError("refcount_grace_ms must be non-negative")
+
+
+def share_stream(
+    source: ObservableLike[T],
+    *,
+    stream_name: str,
+    settings: StreamShareSettings | None = None,
+) -> Observable[T]:
+    """Share an observable with optional coalescing, replay, and instrumentation."""
+    resolved_settings = settings or StreamShareSettings()
+    shared_source = CoalesceLatestNode(
+        name=f"{stream_name}.coalesce_latest",
+        window_ms=resolved_settings.coalesce_window_ms,
+        stream_name=stream_name,
+    ).observable(source)
+    replay_window_seconds = (
+        None
+        if resolved_settings.replay_window_ms is None
+        else resolved_settings.replay_window_ms / 1000
+    )
+
+    def replay(buffer_size: int) -> ConnectableObservableLike[T]:
+        if replay_window_seconds is None:
+            return cast(
+                ConnectableObservableLike[T],
+                shared_source.pipe(ops.replay(buffer_size=buffer_size)),
+            )
+        return cast(
+            ConnectableObservableLike[T],
+            shared_source.pipe(
+                ops.replay(
+                    buffer_size=buffer_size,
+                    window=replay_window_seconds,
+                    scheduler=_REPLAY_SCHEDULER,
+                ),
+            ),
+        )
+
+    strategy = resolved_settings.strategy
+    if strategy is StreamShareStrategy.SHARE:
+        if (
+            resolved_settings.refcount_grace_ms > 0
+            or resolved_settings.refcount_min_subscribers > 1
+        ):
+            result = _share_with_refcount_grace(
+                cast(ConnectableObservableLike[T], shared_source.pipe(ops.publish())),
+                grace_ms=resolved_settings.refcount_grace_ms,
+                min_subscribers=resolved_settings.refcount_min_subscribers,
+                connect_mode=resolved_settings.connect_mode,
+                stream_name=stream_name,
+            )
+        else:
+            result = shared_source.pipe(ops.share())
+    elif strategy is StreamShareStrategy.SHARE_AUTO_CONNECT:
+        result = shared_source.pipe(ops.publish()).auto_connect(
+            resolved_settings.auto_connect_min_subscribers
+        )
+    elif strategy is StreamShareStrategy.REPLAY_LATEST:
+        result = _share_replayed_stream(
+            replay(1),
+            settings=resolved_settings,
+            stream_name=stream_name,
+        )
+    elif strategy is StreamShareStrategy.REPLAY_LATEST_AUTO_CONNECT:
+        result = replay(1).auto_connect(resolved_settings.auto_connect_min_subscribers)
+    elif strategy is StreamShareStrategy.REPLAY_BUFFER:
+        result = _share_replayed_stream(
+            replay(resolved_settings.replay_buffer),
+            settings=resolved_settings,
+            stream_name=stream_name,
+        )
+    elif strategy is StreamShareStrategy.REPLAY_BUFFER_AUTO_CONNECT:
+        result = replay(resolved_settings.replay_buffer).auto_connect(
+            resolved_settings.auto_connect_min_subscribers
+        )
+    else:
+        raise ValueError(f"Unknown stream share strategy: {strategy}")
+    return instrument_stream(
+        result,
+        stream_name=stream_name,
+        log_interval_ms=resolved_settings.stats_log_ms,
+    )
+
+
+def _share_replayed_stream(
+    replayed: ConnectableObservableLike[T],
+    *,
+    settings: StreamShareSettings,
+    stream_name: str,
+) -> Observable[T]:
+    if settings.refcount_grace_ms > 0 or settings.refcount_min_subscribers > 1:
+        return _share_with_refcount_grace(
+            replayed,
+            grace_ms=settings.refcount_grace_ms,
+            min_subscribers=settings.refcount_min_subscribers,
+            connect_mode=settings.connect_mode,
+            stream_name=stream_name,
+        )
+    return replayed.pipe(ops.ref_count())
+
+
+def _share_with_refcount_grace(
+    connectable: ConnectableObservableLike[T],
+    *,
+    grace_ms: int,
+    min_subscribers: int,
+    connect_mode: StreamConnectMode,
+    stream_name: str,
+) -> Observable[T]:
+    lock = RLock()
+    connection: SubscriptionLike | None = None
+    disconnect_timer: SubscriptionLike | None = None
+    subscriber_count = 0
+
+    def disconnect() -> None:
+        nonlocal connection, disconnect_timer
+        with lock:
+            disconnect_timer = None
+            if connection is None or subscriber_count >= min_subscribers:
+                return
+            logger.debug("Disconnecting %s after refcount grace window", stream_name)
+            connection.dispose()
+            connection = None
+
+    def subscribe(observer: ObserverLike[T], scheduler: object | None = None) -> Any:
+        nonlocal connection, disconnect_timer, subscriber_count
+        with lock:
+            subscriber_count += 1
+            if disconnect_timer is not None:
+                disconnect_timer.dispose()
+                disconnect_timer = None
+            if (
+                connection is None
+                and connect_mode is StreamConnectMode.EAGER
+                and subscriber_count >= min_subscribers
+            ):
+                connection = connectable.connect()
+
+        subscription = connectable.subscribe(observer, scheduler=scheduler)
+        if connect_mode is StreamConnectMode.LAZY:
+            with lock:
+                if connection is None and subscriber_count >= min_subscribers:
+                    connection = connectable.connect()
+
+        def dispose() -> None:
+            nonlocal subscriber_count, disconnect_timer
+            subscription.dispose()
+            with lock:
+                subscriber_count -= 1
+                if subscriber_count >= min_subscribers or connection is None:
+                    return
+                if grace_ms <= 0:
+                    disconnect()
+                    return
+                if disconnect_timer is not None:
+                    disconnect_timer.dispose()
+                    disconnect_timer = None
+                disconnect_timer = _SHARE_GRACE_SCHEDULER.schedule_relative(
+                    grace_ms / 1000,
+                    lambda *_: disconnect(),
+                )
+
+        return Disposable(dispose)
+
+    return rx.create(subscribe)
+
+
 @dataclass(frozen=True)
 class CoalesceLatestNode(Generic[T]):
     """Coalesce bursty stream updates to the latest value per time window."""
@@ -136,12 +704,11 @@ class CoalesceLatestNode(Generic[T]):
 
         def subscribe(observer: ObserverLike[T], scheduler: object | None = None) -> Any:
             del scheduler
-            from .reactive_threads import coalesce_scheduler
 
             lock = RLock()
             pending: Any = _NO_PENDING
             timer: Any | None = None
-            fallback_timer: Timer | None = None
+            fallback_timer: ThreadingTimer | None = None
             due_time: float | None = None
             window_seconds = self.window_ms / 1000
 
@@ -173,11 +740,11 @@ class CoalesceLatestNode(Generic[T]):
                     else:
                         return
                 due_time = now + window_seconds
-                timer = coalesce_scheduler().schedule_relative(
+                timer = _COALESCE_SCHEDULER.schedule_relative(
                     window_seconds,
                     lambda *_: flush(),
                 )
-                fallback_timer = Timer(window_seconds, flush)
+                fallback_timer = ThreadingTimer(window_seconds, flush)
                 fallback_timer.daemon = True
                 fallback_timer.start()
 
@@ -220,7 +787,7 @@ class CoalesceLatestNode(Generic[T]):
                 on_next,
                 on_error,
                 on_completed,
-                scheduler=coalesce_scheduler(),
+                scheduler=_COALESCE_SCHEDULER,
             )
 
             def dispose() -> None:
@@ -312,6 +879,89 @@ class LoggingNode(Generic[T]):
             return Disposable(dispose)
 
         return rx.create(subscribe)
+
+
+@dataclass(frozen=True)
+class ConstantNode(Generic[T]):
+    """Source node that holds and replays one constant value to each subscriber."""
+
+    value: T
+    name: str = "constant"
+
+    def observable(self) -> StreamNode[T]:
+        return BehaviorSubject(self.value)
+
+
+@dataclass(frozen=True)
+class EmptyNode(Generic[T]):
+    """Source node that intentionally emits no values."""
+
+    name: str = "empty"
+
+    def observable(self) -> StreamNode[T]:
+        return rx.empty()
+
+    def subscribe(
+        self,
+        observer: ObserverLike[T] | Callable[[T], None] | None = None,
+        on_error: Callable[[Exception], None] | None = None,
+        on_completed: Callable[[], None] | None = None,
+        scheduler: object | None = None,
+    ) -> SubscriptionLike:
+        return self.observable().subscribe(
+            observer,
+            on_error,
+            on_completed,
+            scheduler=scheduler,
+        )
+
+
+@dataclass(frozen=True)
+class MainThreadNode(Generic[T]):
+    """Deliver an observable through Manyfold's frame-thread queue."""
+
+    name: str = "main-thread"
+
+    def observable(self, source: ObservableLike[T]) -> Observable[T]:
+        return deliver_on_frame_thread(cast(Observable[T], source))
+
+
+@dataclass(frozen=True)
+class MergeNode(Generic[T]):
+    """Merge several stream sources into one stream node."""
+
+    name: str = "merge"
+
+    @classmethod
+    def merge(cls, *sources: ObservableLike[T]) -> StreamNode[T]:
+        """Merge several stream sources without explicitly constructing a node."""
+        return cls().observable(*sources)
+
+    def observable(self, *sources: ObservableLike[T]) -> StreamNode[T]:
+        return rx.merge(*cast(tuple[Observable[T], ...], sources)).pipe(ops.share())
+
+
+@dataclass(frozen=True)
+class CombineLatestNode(Generic[T]):
+    """Combine the latest values from several stream sources into tuples."""
+
+    name: str = "combine-latest"
+
+    def observable(self, *sources: ObservableLike[Any]) -> StreamNode[tuple[Any, ...]]:
+        return rx.combine_latest(*cast(tuple[Observable[Any], ...], sources)).pipe(
+            ops.share()
+        )
+
+
+@dataclass(frozen=True)
+class IntervalNode:
+    """Source node that emits monotonically increasing ticks on Manyfold scheduling."""
+
+    name: str
+    period: timedelta
+
+    def observable(self) -> Observable[int]:
+        return _interval_in_background(self.period, name=self.name)
 
 
 def instrument_stream(
@@ -1416,12 +2066,16 @@ class _ThreadPlaceableNode:
         """Return a copy of this node with explicit thread placement."""
         return replace(self, thread_placement=placement)
 
-    def on_main_thread(self) -> Any:
-        """Run this node on the main frame thread."""
+    def then_on_main_thread(self) -> Any:
+        """Run this node when reached as downstream main-frame work."""
         return self.with_thread_placement(NodeThreadPlacement.main_thread())
 
-    def on_background_thread(self, *, isolated: bool = False) -> Any:
-        """Run this node on a background thread."""
+    def on_main_thread(self) -> Any:
+        """Compatibility alias for ``then_on_main_thread``."""
+        return self.then_on_main_thread()
+
+    def then_on_background_thread(self, *, isolated: bool = False) -> Any:
+        """Run this node when reached as downstream background work."""
         placement = (
             NodeThreadPlacement.isolated_thread()
             if isolated
@@ -1429,15 +2083,30 @@ class _ThreadPlaceableNode:
         )
         return self.with_thread_placement(placement)
 
-    def on_isolated_thread(self, name: str | None = None) -> Any:
-        """Run this node as the only work on a dedicated thread."""
+    def on_background_thread(self, *, isolated: bool = False) -> Any:
+        """Compatibility alias for ``then_on_background_thread``."""
+        return self.then_on_background_thread(isolated=isolated)
+
+    def then_on_isolated_thread(self, name: str | None = None) -> Any:
+        """Run this node when reached on a dedicated downstream thread."""
         return self.with_thread_placement(NodeThreadPlacement.isolated_thread(name))
 
-    def on_pooled_thread(self, scheduler_name: str = "background") -> Any:
-        """Run this node on a named shared thread pool."""
-        return self.with_thread_placement(
-            NodeThreadPlacement.pooled_thread(scheduler_name)
-        )
+    def on_isolated_thread(self, name: str | None = None) -> Any:
+        """Compatibility alias for ``then_on_isolated_thread``."""
+        return self.then_on_isolated_thread(name)
+
+    def then_on_pooled_thread(self, pool_name: str = "background") -> Any:
+        """Run this node when reached on a named downstream thread pool."""
+        return self.with_thread_placement(NodeThreadPlacement.pooled_thread(pool_name))
+
+    def on_pooled_thread(
+        self,
+        scheduler_name: str = "background",
+        *,
+        pool_name: str | None = None,
+    ) -> Any:
+        """Compatibility alias for ``then_on_pooled_thread``."""
+        return self.then_on_pooled_thread(pool_name or scheduler_name)
 
 
 @dataclass(frozen=True)
@@ -1590,6 +2259,36 @@ class RoutePipeline(Generic[T]):
             lambda value: (node.predicate(value), value),
         )
 
+    def distinct_until_changed(
+        self,
+        key_mapper: Callable[[T], Any] | None = None,
+        *,
+        name: str | None = None,
+    ) -> RoutePipeline[T]:
+        """Install a graph-visible distinct-until-changed node."""
+        has_last = False
+        last_key: Any = None
+
+        def predicate(value: T) -> bool:
+            nonlocal has_last, last_key
+            key = key_mapper(value) if key_mapper is not None else value
+            if has_last and key == last_key:
+                return False
+            has_last = True
+            last_key = key
+            return True
+
+        node = FilterNode(
+            name or self._graph._next_pipeline_node_name("distinct-until-changed"),
+            predicate,
+            thread_placement=self._thread_placement,
+        )
+        return self._graph._connect_transform_pipeline(
+            self,
+            node,
+            lambda value: (node.predicate(value), value),
+        )
+
     def log(
         self,
         *,
@@ -1625,12 +2324,24 @@ class RoutePipeline(Generic[T]):
             lambda value: (True, node.transform(value)),
         )
 
-    def on_main_thread(self) -> RoutePipeline[T]:
-        """Schedule all following pipeline nodes on the main frame thread."""
+    def then_on_main_thread(self) -> RoutePipeline[T]:
+        """Place future pipeline computations on the main frame thread.
+
+        This does not move the current source. For example, ``Timer(...)`` still
+        ticks from its timer source; only maps, filters, callbacks, and other
+        downstream computations added after this call are handed to the frame
+        thread.
+        """
         return self._with_thread_placement(NodeThreadPlacement.main_thread())
 
-    def on_background_thread(self, *, isolated: bool = False) -> RoutePipeline[T]:
-        """Schedule all following pipeline nodes on background execution."""
+    def on_main_thread(self) -> RoutePipeline[T]:
+        """Compatibility alias for ``then_on_main_thread``."""
+        return self.then_on_main_thread()
+
+    def then_on_background_thread(
+        self, *, isolated: bool = False
+    ) -> RoutePipeline[T]:
+        """Place future pipeline computations on background execution."""
         placement = (
             NodeThreadPlacement.isolated_thread()
             if isolated
@@ -1638,27 +2349,46 @@ class RoutePipeline(Generic[T]):
         )
         return self._with_thread_placement(placement)
 
-    def on_isolated_thread(self, name: str | None = None) -> RoutePipeline[T]:
-        """Schedule each following node on its own dedicated thread."""
+    def on_background_thread(self, *, isolated: bool = False) -> RoutePipeline[T]:
+        """Compatibility alias for ``then_on_background_thread``."""
+        return self.then_on_background_thread(isolated=isolated)
+
+    def then_on_isolated_thread(self, name: str | None = None) -> RoutePipeline[T]:
+        """Place future pipeline computations on a dedicated thread."""
         return self._with_thread_placement(NodeThreadPlacement.isolated_thread(name))
+
+    def on_isolated_thread(self, name: str | None = None) -> RoutePipeline[T]:
+        """Compatibility alias for ``then_on_isolated_thread``."""
+        return self.then_on_isolated_thread(name)
+
+    def then_on_pooled_thread(
+        self,
+        pool_name: str = "background",
+    ) -> RoutePipeline[T]:
+        """Place future pipeline computations on a named shared thread pool."""
+        return self._with_thread_placement(NodeThreadPlacement.pooled_thread(pool_name))
 
     def on_pooled_thread(
         self,
         scheduler_name: str = "background",
+        *,
+        pool_name: str | None = None,
     ) -> RoutePipeline[T]:
-        """Schedule all following nodes on a named shared thread pool."""
-        return self._with_thread_placement(
-            NodeThreadPlacement.pooled_thread(scheduler_name)
-        )
+        """Compatibility alias for ``then_on_pooled_thread``."""
+        return self.then_on_pooled_thread(pool_name or scheduler_name)
 
     def subscribe(
         self,
-        observer: ObserverLike[T] | Callable[[T], None] | None = None,
+        observer: ObserverLike[Any] | Callable[[Any], None] | None = None,
         on_error: Callable[[Exception], None] | None = None,
         on_completed: Callable[[], None] | None = None,
         scheduler: object | None = None,
+        *,
+        on_next: Callable[[Any], None] | None = None,
     ) -> SubscriptionLike:
         """Compatibility shim for existing Rx-style callers."""
+        if on_next is not None:
+            observer = on_next
         return self._graph._observe_observable(
             self._route_ref,
             replay_latest=self._replay_latest,
@@ -1670,6 +2400,15 @@ class RoutePipeline(Generic[T]):
             on_completed,
             scheduler=scheduler,
         )
+
+    def pipe(self, *operators: Any) -> Observable[Any]:
+        """Expose this graph pipeline as an observable for Rx-style composition."""
+        return self._graph._pipeline_value_observable(
+            self._route_ref,
+            replay_latest=self._replay_latest,
+            subscriber_id=self._subscriber_id,
+            thread_placement=self._thread_placement,
+        ).pipe(*operators)
 
     def _connect_route(
         self,
@@ -1709,6 +2448,157 @@ class RoutePipeline(Generic[T]):
             )
 
         return apply
+
+
+class Interval:
+    """Graph-backed interval source with the same fluent node API as route pipelines."""
+
+    def __init__(
+        self,
+        period: timedelta,
+        *,
+        graph: Graph | None = None,
+        name: str = "interval",
+    ) -> None:
+        self._graph = graph or Graph()
+        self._pipeline = self._graph._connect_interval_pipeline(
+            IntervalNode(name=name, period=period)
+        )
+
+    @property
+    def graph(self) -> Graph:
+        return self._graph
+
+    @property
+    def route(self) -> RouteLike:
+        return self._pipeline.route
+
+    def callback(
+        self,
+        receive: Callable[[int], None],
+        *,
+        name: str | None = None,
+    ) -> GraphConnection:
+        return self._pipeline.callback(receive, name=name)
+
+    def coalesce_latest(
+        self,
+        *,
+        window_ms: int,
+        name: str | None = None,
+        stream_name: str | None = None,
+    ) -> RoutePipeline[int]:
+        return self._pipeline.coalesce_latest(
+            window_ms=window_ms,
+            name=name,
+            stream_name=stream_name,
+        )
+
+    def filter(
+        self,
+        predicate: Callable[[int], bool],
+        *,
+        name: str | None = None,
+    ) -> RoutePipeline[int]:
+        return self._pipeline.filter(predicate, name=name)
+
+    def distinct_until_changed(
+        self,
+        key_mapper: Callable[[int], Any] | None = None,
+        *,
+        name: str | None = None,
+    ) -> RoutePipeline[int]:
+        return self._pipeline.distinct_until_changed(key_mapper, name=name)
+
+    def log(
+        self,
+        *,
+        interval_ms: int,
+        name: str | None = None,
+        stream_name: str | None = None,
+    ) -> RoutePipeline[int]:
+        return self._pipeline.log(
+            interval_ms=interval_ms,
+            name=name,
+            stream_name=stream_name,
+        )
+
+    def map(
+        self,
+        transform: Callable[[int], U],
+        *,
+        name: str | None = None,
+    ) -> RoutePipeline[U]:
+        return self._pipeline.map(transform, name=name)
+
+    def on_main_thread(self) -> RoutePipeline[int]:
+        """Compatibility alias for ``then_on_main_thread``."""
+        return self.then_on_main_thread()
+
+    def then_on_main_thread(self) -> RoutePipeline[int]:
+        """Place future timer pipeline computations on the main frame thread.
+
+        The timer itself may tick from its source thread; only downstream work
+        added after this call moves to the frame thread.
+        """
+        return self._pipeline.then_on_main_thread()
+
+    def on_background_thread(self, *, isolated: bool = False) -> RoutePipeline[int]:
+        """Compatibility alias for ``then_on_background_thread``."""
+        return self.then_on_background_thread(isolated=isolated)
+
+    def then_on_background_thread(
+        self, *, isolated: bool = False
+    ) -> RoutePipeline[int]:
+        """Place future timer pipeline computations on background execution."""
+        return self._pipeline.then_on_background_thread(isolated=isolated)
+
+    def on_isolated_thread(self, name: str | None = None) -> RoutePipeline[int]:
+        """Compatibility alias for ``then_on_isolated_thread``."""
+        return self.then_on_isolated_thread(name)
+
+    def then_on_isolated_thread(self, name: str | None = None) -> RoutePipeline[int]:
+        """Place future timer pipeline computations on a dedicated thread."""
+        return self._pipeline.then_on_isolated_thread(name)
+
+    def then_on_pooled_thread(self, pool_name: str = "background") -> RoutePipeline[int]:
+        """Place future timer pipeline computations on a named thread pool."""
+        return self._pipeline.then_on_pooled_thread(pool_name)
+
+    def on_pooled_thread(
+        self,
+        scheduler_name: str = "background",
+        *,
+        pool_name: str | None = None,
+    ) -> RoutePipeline[int]:
+        """Compatibility alias for ``then_on_pooled_thread``."""
+        return self.then_on_pooled_thread(pool_name or scheduler_name)
+
+    def subscribe(
+        self,
+        observer: ObserverLike[int] | Callable[[int], None] | None = None,
+        on_error: Callable[[Exception], None] | None = None,
+        on_completed: Callable[[], None] | None = None,
+        scheduler: object | None = None,
+        *,
+        on_next: Callable[[int], None] | None = None,
+    ) -> SubscriptionLike:
+        if on_next is not None:
+            observer = on_next
+        return self._pipeline.subscribe(
+            observer,
+            on_error,
+            on_completed,
+            scheduler=scheduler,
+        )
+
+    def pipe(self, *operators: Any) -> Observable[Any]:
+        """Expose this timer pipeline as an observable for Rx-style composition."""
+        return self._pipeline.pipe(*operators)
+
+
+class Timer(Interval):
+    """Graph-backed timer source for fluent stream composition."""
 
 
 class Graph:
@@ -3129,6 +4019,15 @@ class Graph:
             subscriber_id=subscriber_id,
         )
 
+    def interval(
+        self,
+        period: timedelta,
+        *,
+        name: str = "interval",
+    ) -> RoutePipeline[int]:
+        """Start a graph-owned interval source pipeline."""
+        return self._connect_interval_pipeline(IntervalNode(name=name, period=period))
+
     def _observe_observable(
         self,
         route_ref: RouteLike,
@@ -3251,50 +4150,11 @@ class Graph:
         if placement is None:
             return observable
         if placement.kind == "main":
-            from . import reactive_threads
-
-            return reactive_threads.deliver_on_frame_thread(observable)
-
-        def subscribe(
-            observer: ObserverLike[Any],
-            scheduler: object | None = None,
-        ) -> SubscriptionLike:
-            thread_scheduler, owns_scheduler = self._thread_scheduler_for(placement)
-            inner = observable.pipe(ops.observe_on(thread_scheduler)).subscribe(
-                observer,
-                scheduler=scheduler,
-            )
-            return _ThreadPlacementSubscription(
-                inner,
-                owned_scheduler=thread_scheduler if owns_scheduler else None,
-            )
-
-        return rx.create(subscribe)
-
-    def _thread_scheduler_for(
-        self,
-        placement: NodeThreadPlacement,
-    ) -> tuple[object, bool]:
-        from . import reactive_threads
-        from ._rx.scheduler import EventLoopScheduler
-
-        if placement.kind == "background":
-            return reactive_threads.background_scheduler(), False
-        if placement.kind == "pooled":
-            if placement.scheduler_name == "blocking_io":
-                return reactive_threads.blocking_io_scheduler(), False
-            if placement.scheduler_name == "input":
-                return reactive_threads.input_scheduler(), False
-            return reactive_threads.background_scheduler(), False
-        thread_name = placement.thread_name or self._next_pipeline_node_name("isolated")
-        return (
-            EventLoopScheduler(
-                thread_factory=reactive_threads.create_default_thread_factory(
-                    thread_name,
-                )
-            ),
-            True,
-        )
+            return deliver_on_frame_thread(observable)
+        thread_name = placement.display()
+        if placement.kind == "isolated":
+            thread_name = placement.thread_name or self._next_pipeline_node_name("isolated")
+        return _observe_on_thread(observable, thread_name)
 
     def _pipeline_output_route(self, node_name: str) -> TypedRoute[Any]:
         route_id = next(_PIPELINE_ROUTE_IDS)
@@ -3441,6 +4301,32 @@ class Graph:
             output,
             replay_latest=False,
             connections=(*pipeline._connections, connection),
+        )
+
+    def _connect_interval_pipeline(self, node: IntervalNode) -> RoutePipeline[int]:
+        output = self._pipeline_output_route(node.name)
+        self.register_diagram_node(
+            node.name,
+            output_routes=(output,),
+            thread_placement=NodeThreadPlacement.background_thread(),
+        )
+
+        def publish(value: int) -> None:
+            self.publish(output, value)
+
+        subscription = node.observable().subscribe(publish)
+        connection = GraphConnection(
+            self,
+            name=node.name,
+            subscriptions=(subscription,),
+            nodes=(node.name,),
+        )
+        return RoutePipeline(
+            self,
+            output,
+            replay_latest=False,
+            connections=(connection,),
+            thread_placement=None,
         )
 
     def _connect_logging_pipeline(
@@ -3845,12 +4731,12 @@ class Graph:
             )
             self._extend_taints(emitted, taints)
 
-        source_sub = self.observe(
+        source_sub = self._observe_observable(
             source, replay_latest=self._source_replay_latest(source)
         ).subscribe(retain)
         self._subscriptions.append(source_sub)
         if demand is not None:
-            signal_sub = self.observe(demand, replay_latest=False).subscribe(
+            signal_sub = self._observe_observable(demand, replay_latest=False).subscribe(
                 lambda _item: discharge_one()
             )
             self._subscriptions.append(signal_sub)
@@ -3916,7 +4802,7 @@ class Graph:
                 return
             emit(value, closed, lineage, taints)
 
-        source_sub = self.observe(
+        source_sub = self._observe_observable(
             source, replay_latest=self._source_replay_latest(source)
         ).subscribe(on_source)
         self._subscriptions.append(source_sub)
@@ -3926,7 +4812,7 @@ class Graph:
                 if latest is not None:
                     emit(*latest)
 
-            signal_sub = self.observe(release, replay_latest=False).subscribe(
+            signal_sub = self._observe_observable(release, replay_latest=False).subscribe(
                 on_signal
             )
             self._subscriptions.append(signal_sub)
@@ -3979,8 +4865,8 @@ class Graph:
             self.publish(output, pulse, control_epoch=progress)
             emitted_since_reset = True
 
-        reset_sub = self.observe(reset_by, replay_latest=True).subscribe(on_reset)
-        clock_sub = self.observe(clock, replay_latest=False).subscribe(on_clock)
+        reset_sub = self._observe_observable(reset_by, replay_latest=True).subscribe(on_reset)
+        clock_sub = self._observe_observable(clock, replay_latest=False).subscribe(on_clock)
         self._subscriptions.append(reset_sub)
         self._subscriptions.append(clock_sub)
         return watchdog
@@ -4917,7 +5803,7 @@ class Graph:
                 self._item_taints(item),
             )
 
-        return self.observe(source).subscribe(on_next)  # type: ignore[arg-type]
+        return self._observe_observable(source).subscribe(on_next)  # type: ignore[arg-type]
 
     def filter(
         self,
@@ -4944,7 +5830,7 @@ class Graph:
                     observer.on_next(value)
 
             self._replay_latest_value(source, on_next)
-            return self.observe(source, replay_latest=False).subscribe(
+            return self._observe_observable(source, replay_latest=False).subscribe(
                 on_next, scheduler=scheduler
             )  # type: ignore[arg-type]
 
@@ -4996,12 +5882,12 @@ class Graph:
             if trigger is not None:
                 self._replay_latest_value(trigger, emit_window)
 
-            source_sub = self.observe(source, replay_latest=False).subscribe(
+            source_sub = self._observe_observable(source, replay_latest=False).subscribe(
                 on_next, scheduler=scheduler
             )  # type: ignore[arg-type]
             if trigger is None:
                 return source_sub
-            trigger_sub = self.observe(trigger, replay_latest=False).subscribe(
+            trigger_sub = self._observe_observable(trigger, replay_latest=False).subscribe(
                 emit_window, scheduler=scheduler
             )  # type: ignore[arg-type]
 
@@ -5158,12 +6044,12 @@ class Graph:
             if watermark is not None:
                 self._replay_latest_value(watermark, on_watermark)
 
-            source_sub = self.observe(source, replay_latest=False).subscribe(
+            source_sub = self._observe_observable(source, replay_latest=False).subscribe(
                 on_next, scheduler=scheduler
             )  # type: ignore[arg-type]
             if watermark is None:
                 return source_sub
-            watermark_sub = self.observe(watermark, replay_latest=False).subscribe(
+            watermark_sub = self._observe_observable(watermark, replay_latest=False).subscribe(
                 on_watermark, scheduler=scheduler
             )  # type: ignore[arg-type]
 
@@ -5243,10 +6129,10 @@ class Graph:
             self._replay_latest_value(left, on_left)
             self._replay_latest_value(right, on_right)
 
-            left_sub = self.observe(left, replay_latest=False).subscribe(
+            left_sub = self._observe_observable(left, replay_latest=False).subscribe(
                 on_left, scheduler=scheduler
             )  # type: ignore[arg-type]
-            right_sub = self.observe(right, replay_latest=False).subscribe(
+            right_sub = self._observe_observable(right, replay_latest=False).subscribe(
                 on_right, scheduler=scheduler
             )  # type: ignore[arg-type]
 
@@ -5293,10 +6179,10 @@ class Graph:
 
             self._replay_latest_value(right_state, on_right)
 
-            left_sub = self.observe(left, replay_latest=False).subscribe(
+            left_sub = self._observe_observable(left, replay_latest=False).subscribe(
                 on_left, scheduler=scheduler
             )  # type: ignore[arg-type]
-            right_sub = self.observe(right_state, replay_latest=False).subscribe(
+            right_sub = self._observe_observable(right_state, replay_latest=False).subscribe(
                 on_right, scheduler=scheduler
             )  # type: ignore[arg-type]
 
@@ -5363,10 +6249,10 @@ class Graph:
                     if abs(seq - left_seq) <= within:
                         observer.on_next(combine(left_value, value))
 
-            left_sub = self.observe(left, replay_latest=False).subscribe(
+            left_sub = self._observe_observable(left, replay_latest=False).subscribe(
                 on_left, scheduler=scheduler
             )  # type: ignore[arg-type]
-            right_sub = self.observe(right, replay_latest=False).subscribe(
+            right_sub = self._observe_observable(right, replay_latest=False).subscribe(
                 on_right, scheduler=scheduler
             )  # type: ignore[arg-type]
 
@@ -5432,7 +6318,7 @@ class Graph:
                     self._item_taints(item),
                 )
 
-        return self.observe(source).subscribe(on_next)  # type: ignore[arg-type]
+        return self._observe_observable(source).subscribe(on_next)  # type: ignore[arg-type]
 
     def repair_taints(
         self,
@@ -5491,7 +6377,7 @@ class Graph:
                 output,
             )
 
-        return self.observe(source).subscribe(on_next)  # type: ignore[arg-type]
+        return self._observe_observable(source).subscribe(on_next)  # type: ignore[arg-type]
 
     def plan_join(self, name: str, left: JoinInput, right: JoinInput) -> JoinPlan:
         """Plan a join and reject illegal cross-partition cases.

@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass
 from importlib import import_module
+from importlib.util import find_spec
 from pathlib import Path
 from typing import Any, Callable
 
@@ -18,7 +19,7 @@ except ImportError:
 
 ensure_repo_import_paths()
 
-try:
+if find_spec("examples") is not None:
     from examples import (
         REFERENCE_EXAMPLE_NUMBERS,
         ExampleCatalogEntry,
@@ -26,9 +27,7 @@ try:
         catalog_entry,
         reference_example_metadata,
     )
-except ModuleNotFoundError as exc:
-    if exc.name != "examples":
-        raise
+else:
     REFERENCE_EXAMPLE_NUMBERS: tuple[int, ...] = ()
     ExampleCatalogEntry = Any
     ReferenceExampleGap = Any
