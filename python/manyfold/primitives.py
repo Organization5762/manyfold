@@ -19,8 +19,6 @@ from typing import (
     runtime_checkable,
 )
 
-from reactivex import Observable, operators as ops
-
 from ._manyfold_rust import (
     ClosedEnvelope,
     Layer,
@@ -30,6 +28,7 @@ from ._manyfold_rust import (
     SchemaRef,
     Variant,
 )
+from ._rx import Observable, operators as ops
 
 T = TypeVar("T")
 TRead = TypeVar("TRead")

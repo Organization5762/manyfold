@@ -26,10 +26,7 @@ from typing import (
     runtime_checkable,
 )
 
-import reactivex as rx
-from reactivex import Observable
-from reactivex.subject import Subject
-
+from . import _rx as rx
 from ._manyfold_rust import (
     ClosedEnvelope,
     ControlLoop as NativeControlLoop,
@@ -52,6 +49,8 @@ from ._manyfold_rust import (
     WritablePort as NativeWritablePort,
     WriteBinding,
 )
+from ._rx import Observable
+from ._rx.subject import Subject
 from .primitives import (
     OwnerName,
     ReadThenWriteNextEpochStep,

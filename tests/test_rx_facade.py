@@ -55,6 +55,18 @@ class RxFacadeTests(unittest.TestCase):
         with self.assertRaises(ModuleNotFoundError):
             importlib.import_module("manyfold.rx")
 
+    def test_core_modules_use_private_facade(self) -> None:
+        load_manyfold_package()
+        graph_module = importlib.import_module("manyfold.graph")
+        primitives_module = importlib.import_module("manyfold.primitives")
+        rx_module = importlib.import_module("manyfold._rx")
+        subject_module = importlib.import_module("manyfold._rx.subject")
+
+        self.assertIs(graph_module.rx, rx_module)
+        self.assertIs(primitives_module.Observable, rx_module.Observable)
+        self.assertNotIn("reactivex", graph_module.__dict__)
+        self.assertIs(graph_module.Subject, subject_module.Subject)
+
 
 if __name__ == "__main__":
     unittest.main()
