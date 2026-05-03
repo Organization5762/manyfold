@@ -2,12 +2,7 @@ from __future__ import annotations
 
 from typing import TypedDict
 
-from manyfold import Graph
-from manyfold import Layer
-from manyfold import Plane
-from manyfold import Schema
-from manyfold import TaintDomain
-from manyfold import Variant
+from manyfold import Graph, Layer, Plane, Schema, TaintDomain, Variant
 
 from ._shared import example_route
 

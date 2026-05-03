@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
 import tempfile
 import unittest
+from dataclasses import dataclass
+from pathlib import Path
 
 from tests.test_support import load_manyfold_package
 

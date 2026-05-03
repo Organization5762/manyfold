@@ -3,15 +3,17 @@ from __future__ import annotations
 from collections import deque
 from typing import TypedDict
 
-from manyfold import Graph
-from manyfold import Layer
-from manyfold import OwnerName
-from manyfold import Plane
-from manyfold import Schema
-from manyfold import StreamFamily
-from manyfold import StreamName
-from manyfold import Variant
-from manyfold import route
+from manyfold import (
+    Graph,
+    Layer,
+    OwnerName,
+    Plane,
+    Schema,
+    StreamFamily,
+    StreamName,
+    Variant,
+    route,
+)
 
 
 class ObservePublishExampleResult(TypedDict):

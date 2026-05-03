@@ -1,17 +1,18 @@
 from __future__ import annotations
 
-import reactivex as rx
 from typing import TypedDict
 
-from manyfold import EmbeddedDeviceProfile
-from manyfold import Graph
-from manyfold import Layer
-from manyfold import OwnerName
-from manyfold import StreamFamily
-from manyfold import StreamName
+import reactivex as rx
+from manyfold import (
+    EmbeddedDeviceProfile,
+    Graph,
+    Layer,
+    OwnerName,
+    StreamFamily,
+    StreamName,
+)
 
-from ._shared import int_schema
-from ._shared import sibling_route
+from ._shared import int_schema, sibling_route
 
 
 class UartTemperatureSensorExampleResult(TypedDict):

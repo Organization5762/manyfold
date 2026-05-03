@@ -8,60 +8,64 @@ RFC checklist coverage.
 
 from __future__ import annotations
 
-from collections import deque
-from dataclasses import dataclass
-from dataclasses import field
-from dataclasses import replace
 import json
-from typing import cast
-from typing import Any
-from typing import Callable
-from typing import Hashable
-from typing import Iterator
-from typing import Protocol
-from typing import Sequence as TypingSequence
-from typing import Sequence
-from typing import TypeVar
-from typing import Union
-from typing import overload
-from typing import runtime_checkable
+from collections import deque
+from dataclasses import dataclass, field, replace
+from typing import (
+    Any,
+    Callable,
+    Hashable,
+    Iterator,
+    Protocol,
+    Sequence,
+    Sequence as TypingSequence,
+    TypeVar,
+    Union,
+    cast,
+    overload,
+    runtime_checkable,
+)
 
 import reactivex as rx
 from reactivex import Observable
 from reactivex.subject import Subject
 
-from ._manyfold_rust import ControlLoop as NativeControlLoop
-from ._manyfold_rust import ClosedEnvelope
-from ._manyfold_rust import CreditSnapshot
-from ._manyfold_rust import Graph as NativeGraph
-from ._manyfold_rust import Mailbox as NativeMailbox
-from ._manyfold_rust import MailboxDescriptor as NativeMailboxDescriptor
-from ._manyfold_rust import NamespaceRef
-from ._manyfold_rust import Plane
-from ._manyfold_rust import PortDescriptor
-from ._manyfold_rust import ProducerKind
-from ._manyfold_rust import ProducerRef
-from ._manyfold_rust import ReadablePort as NativeReadablePort
-from ._manyfold_rust import RouteRef
-from ._manyfold_rust import SchemaRef
-from ._manyfold_rust import TaintDomain
-from ._manyfold_rust import TaintMark
-from ._manyfold_rust import Variant
-from ._manyfold_rust import WritablePort as NativeWritablePort
-from ._manyfold_rust import WriteBinding
-from ._manyfold_rust import Layer
-from .primitives import OwnerName
-from .primitives import ReadThenWriteNextEpochStep
-from .primitives import Schema
-from .primitives import Sink
-from .primitives import Source
-from .primitives import StreamFamily
-from .primitives import StreamName
-from .primitives import TypedEnvelope
-from .primitives import TypedRoute
-from .primitives import route
-from .primitives import sink
-from .primitives import source
+from ._manyfold_rust import (
+    ClosedEnvelope,
+    ControlLoop as NativeControlLoop,
+    CreditSnapshot,
+    Graph as NativeGraph,
+    Layer,
+    Mailbox as NativeMailbox,
+    MailboxDescriptor as NativeMailboxDescriptor,
+    NamespaceRef,
+    Plane,
+    PortDescriptor,
+    ProducerKind,
+    ProducerRef,
+    ReadablePort as NativeReadablePort,
+    RouteRef,
+    SchemaRef,
+    TaintDomain,
+    TaintMark,
+    Variant,
+    WritablePort as NativeWritablePort,
+    WriteBinding,
+)
+from .primitives import (
+    OwnerName,
+    ReadThenWriteNextEpochStep,
+    Schema,
+    Sink,
+    Source,
+    StreamFamily,
+    StreamName,
+    TypedEnvelope,
+    TypedRoute,
+    route,
+    sink as sink,
+    source as source,
+)
 
 T = TypeVar("T")
 TIn = TypeVar("TIn")
@@ -3190,10 +3194,12 @@ class Graph:
                 binding.reported.display(),
                 binding.effective.display(),
             )
-            for source in feedback_sources:
-                if not self._path_exists(adjacency, source, request):
+            for feedback_source in feedback_sources:
+                if not self._path_exists(adjacency, feedback_source, request):
                     continue
-                if self._path_has_boundary(adjacency, route_refs, source, request):
+                if self._path_has_boundary(
+                    adjacency, route_refs, feedback_source, request
+                ):
                     continue
                 ack_seen = (
                     binding.ack is not None and self.latest(binding.ack) is not None
@@ -3201,7 +3207,7 @@ class Graph:
                 if ack_seen:
                     continue
                 issues.append(
-                    f"Unsafe write-back loop from {source} to {request} lacks mailbox, internal boundary, epoch guard, or ack barrier"
+                    f"Unsafe write-back loop from {feedback_source} to {request} lacks mailbox, internal boundary, epoch guard, or ack barrier"
                 )
         return issues
 
@@ -4453,13 +4459,13 @@ class Graph:
             threshold=primitive.threshold,
             ack_policy=primitive.ack_policy,
         )
-        for source in normalized.sources:
-            self.register_port(source)
+        for mesh_source in normalized.sources:
+            self.register_port(mesh_source)
         for destination in normalized.destinations:
             self.register_port(destination)
-        for source in normalized.sources:
+        for mesh_source in normalized.sources:
             for destination in normalized.destinations:
-                self.connect(source=source, sink=destination)
+                self.connect(source=mesh_source, sink=destination)
         self._mesh_primitives[normalized.name] = normalized
         self._emit_debug_event(
             "topology", f"registered mesh primitive {normalized.kind}:{normalized.name}"

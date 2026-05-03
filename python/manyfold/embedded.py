@@ -3,18 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Generic
-from typing import TypeVar
+from typing import Generic, TypeVar
 
-from ._manyfold_rust import Layer
-from ._manyfold_rust import Plane
-from ._manyfold_rust import Variant
-from .primitives import OwnerName
-from .primitives import Schema
-from .primitives import StreamFamily
-from .primitives import StreamName
-from .primitives import TypedRoute
-from .primitives import route
+from ._manyfold_rust import Layer, Plane, Variant
+from .primitives import OwnerName, Schema, StreamFamily, StreamName, TypedRoute, route
 
 T = TypeVar("T")
 TMeta = TypeVar("TMeta")
