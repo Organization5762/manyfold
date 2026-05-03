@@ -438,6 +438,7 @@ class Memory:
         for record in self._iter_raw_records():
             if record.get("route") != route_display:
                 continue
+            self._validate_record_schema(record, route_ref)
             payload = base64.b64decode(record["payload_b64"])
             yield MemoryRecord(
                 route_display=route_display,
@@ -506,6 +507,22 @@ class Memory:
                 f"memory file {self.path} line {line_number} field payload_b64 "
                 "must be valid base64"
             ) from exc
+
+    def _validate_record_schema(
+        self,
+        record: dict[str, Any],
+        route_ref: TypedRoute[Any],
+    ) -> None:
+        if (
+            record["schema_id"] == route_ref.schema.schema_id
+            and record["schema_version"] == route_ref.schema.version
+        ):
+            return
+        raise ValueError(
+            f"memory file {self.path} has schema {record['schema_id']} "
+            f"v{record['schema_version']} for route {route_ref.display()}, "
+            f"expected {route_ref.schema.schema_id} v{route_ref.schema.version}"
+        )
 
     @staticmethod
     def _event_key(record: dict[str, Any]) -> tuple[str, int, str, int | None]:

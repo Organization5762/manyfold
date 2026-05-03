@@ -477,6 +477,46 @@ class ComponentTests(unittest.TestCase):
             ):
                 manyfold.Memory(path)
 
+    def test_memory_chip_rejects_route_schema_id_mismatch_before_decoding(self) -> None:
+        manyfold = load_manyfold_package()
+        producer_route = manyfold.route(
+            plane=manyfold.Plane.Read,
+            layer=manyfold.Layer.Logical,
+            owner=manyfold.OwnerName("demo"),
+            family=manyfold.StreamFamily("memory"),
+            stream=manyfold.StreamName("payload"),
+            variant=manyfold.Variant.Meta,
+            schema=manyfold.Schema.bytes("OriginalBytes"),
+        )
+        consumer_route = manyfold.route(
+            plane=manyfold.Plane.Read,
+            layer=manyfold.Layer.Logical,
+            owner=manyfold.OwnerName("demo"),
+            family=manyfold.StreamFamily("memory"),
+            stream=manyfold.StreamName("payload"),
+            variant=manyfold.Variant.Meta,
+            schema=manyfold.Schema(
+                schema_id="OtherPayload",
+                version=1,
+                encode=lambda value: str(value).encode("ascii"),
+                decode=lambda _payload: 0,
+            ),
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "memory.jsonl"
+            graph = manyfold.Graph()
+            memory = manyfold.Memory(path)
+            subscription = memory.remember(graph, producer_route, replay_latest=False)
+            graph.publish(producer_route, b"not-an-int")
+            subscription.dispose()
+
+            with self.assertRaisesRegex(
+                ValueError,
+                r"schema OriginalBytes v1 .* expected OtherPayload v1",
+            ):
+                manyfold.Memory(path).records(consumer_route)
+
 
 if __name__ == "__main__":
     unittest.main()
