@@ -66,6 +66,7 @@ from .graph import (
     LazyPayloadSource as LazyPayloadSource,
     LifecycleBinding as LifecycleBinding,
     LineageRecord as LineageRecord,
+    LoggingNode as LoggingNode,
     MailboxSnapshot as MailboxSnapshot,
     MapNode as MapNode,
     NodeThreadPlacement as NodeThreadPlacement,
@@ -81,6 +82,7 @@ from .graph import (
     Watchdog as Watchdog,
     WatermarkSnapshot as WatermarkSnapshot,
     WriteBindings as WriteBindings,
+    instrument_stream as instrument_stream,
 )
 from .lego_catalog import (
     Lego as Lego,
@@ -205,6 +207,7 @@ __all__ = [
     "Lego",
     "LifecycleBinding",
     "LineageRecord",
+    "LoggingNode",
     "MapNode",
     "NodeThreadPlacement",
     "LocalDurableSpool",
@@ -298,6 +301,7 @@ __all__ = [
     "get_lego",
     "health_status_schema",
     "implemented_reference_examples",
+    "instrument_stream",
     "legos_by_layer",
     "legos_by_role",
     "reference_example_suite",
