@@ -58,6 +58,23 @@ Observation is useful for application callbacks. When a callback starts to hide
 state, pressure, policy, or replay behavior, model that behavior as a graph
 component instead.
 
+Pipelines can also make thread placement graph-visible. A placement applies to
+everything downstream in that fluent chain until another placement is selected:
+
+```python
+subscription = (
+    graph.observe(temperature, replay_latest=False)
+    .on_main_thread()
+    .map(lambda value: value.strip(), name="trim")
+    .on_pooled_thread()
+    .callback(print, name="print-temperature")
+)
+```
+
+Use `.on_main_thread()` for work that must run on the frame thread,
+`.on_background_thread()` or `.on_pooled_thread()` for shared worker pools, and
+`.on_isolated_thread()` for a node that must be the only work on its thread.
+
 ## Add Execution Components
 
 A capacitor makes downstream demand explicit:
@@ -119,4 +136,3 @@ Then use the catalog:
 ```sh
 uv run manyfold-example-catalog --list reference
 ```
-

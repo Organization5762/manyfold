@@ -61,6 +61,8 @@ print(latest.value)
 
 - Typed routes for logical signals.
 - Replayable latest-value reads and Rx-style observation.
+- Graph-visible node thread placement for main, background, pooled, or isolated
+  execution.
 - Graph-visible capacitors, resistors, watchdogs, mailboxes, windows, and joins.
 - Explicit demand, retention, lazy payload access, and write-shadow state.
 - Lineage, taints, route audit snapshots, and topology queries.
