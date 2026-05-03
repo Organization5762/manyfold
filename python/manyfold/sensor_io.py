@@ -564,6 +564,12 @@ class DelimitedMessageBuffer:
         repr=False,
     )
 
+    def __post_init__(self) -> None:
+        if not self.delimiter:
+            raise ValueError("delimiter must not be empty")
+        if self.mode not in ("bytes", "text"):
+            raise ValueError("mode must be 'bytes' or 'text'")
+
     @property
     def buffer_size(self) -> int:
         if self.mode == "text":
@@ -1206,8 +1212,12 @@ def _changed_enough(new: Any, old: Any, threshold: float) -> bool:
         keys = set(new) | set(old)
         return any(_changed_enough(new.get(key), old.get(key), threshold) for key in keys)
     if isinstance(new, tuple) and isinstance(old, tuple):
+        if len(new) != len(old):
+            return True
         return any(_changed_enough(n, o, threshold) for n, o in zip(new, old))
     if isinstance(new, list) and isinstance(old, list):
+        if len(new) != len(old):
+            return True
         return any(_changed_enough(n, o, threshold) for n, o in zip(new, old))
     if isinstance(new, (int, float)) and isinstance(old, (int, float)):
         return abs(float(new) - float(old)) > threshold

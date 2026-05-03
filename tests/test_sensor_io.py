@@ -79,6 +79,18 @@ class SensorIoTests(unittest.TestCase):
         self.assertEqual(text_buffer.append(b"caf\xc3"), ())
         self.assertEqual(text_buffer.append(b"\xa9\n"), ("café",))
 
+    def test_delimited_message_buffer_rejects_empty_delimiter(self) -> None:
+        manyfold = load_manyfold_package()
+
+        with self.assertRaisesRegex(ValueError, "delimiter must not be empty"):
+            manyfold.DelimitedMessageBuffer(delimiter=b"")
+
+    def test_delimited_message_buffer_rejects_unknown_mode(self) -> None:
+        manyfold = load_manyfold_package()
+
+        with self.assertRaisesRegex(ValueError, "mode must be 'bytes' or 'text'"):
+            manyfold.DelimitedMessageBuffer(mode="lines")  # type: ignore[arg-type]
+
     def test_json_event_decoder_returns_sensor_events(self) -> None:
         manyfold = load_manyfold_package()
         clock = manyfold.ManualClock(5.0)
@@ -250,6 +262,16 @@ class SensorIoTests(unittest.TestCase):
             ],
             [True, False, True],
         )
+
+    def test_threshold_filter_accepts_list_and_tuple_shape_changes(self) -> None:
+        manyfold = load_manyfold_package()
+        tuple_threshold = manyfold.ThresholdFilter[tuple[float, ...]](threshold=0.5)
+        list_threshold = manyfold.ThresholdFilter[list[float]](threshold=0.5)
+
+        self.assertTrue(tuple_threshold.accepts((1.0,)))
+        self.assertTrue(tuple_threshold.accepts((1.0, 0.0)))
+        self.assertTrue(list_threshold.accepts([1.0, 2.0]))
+        self.assertTrue(list_threshold.accepts([1.0]))
 
     def test_local_sensor_source_publishes_sensor_samples(self) -> None:
         manyfold = load_manyfold_package()
