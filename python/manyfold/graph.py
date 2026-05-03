@@ -78,6 +78,9 @@ InspectableRoute = Union[RouteLike, NativeReadablePort, NativeWritablePort]
 EnvelopeIterator = Iterator[ClosedEnvelope]
 StateT = TypeVar("StateT")
 TRight = TypeVar("TRight")
+DIAGRAM_GROUP_FIELDS = frozenset(
+    ("plane", "layer", "owner", "family", "stream", "variant")
+)
 
 
 @runtime_checkable
@@ -147,6 +150,16 @@ class Middleware:
     preserves_envelope_identity: bool = True
     updates_taints: bool = True
     updates_causality: bool = True
+
+
+@dataclass(frozen=True)
+class DiagramNode:
+    """Lightweight graph-visible node used by diagram renderers."""
+
+    name: str
+    input_routes: tuple[str, ...] = ()
+    output_routes: tuple[str, ...] = ()
+    group: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1095,6 +1108,8 @@ class Graph:
         self._mesh_primitives: dict[str, MeshPrimitive] = {}
         self._query_services: dict[str, QueryServiceRoutes] = {}
         self._debug_routes: dict[str, RouteRef] = {}
+        self._diagram_nodes: dict[str, DiagramNode] = {}
+        self._diagram_routes: dict[str, RouteRef] = {}
         self._audit_events: list[DebugEvent] = []
         self._capability_grants: dict[tuple[str, str], CapabilityGrant] = {}
         self._route_visibility: dict[str, str] = {}
@@ -3160,6 +3175,204 @@ class Graph:
     def topology(self) -> Iterator[tuple[str, str]]:
         """Return graph edges as `(source, sink)` display pairs."""
         return iter(tuple(self._graph.topology()))
+
+    def register_diagram_node(
+        self,
+        name: str,
+        *,
+        input_routes: Sequence[RouteLike] = (),
+        output_routes: Sequence[RouteLike] = (),
+        group: str | None = None,
+    ) -> DiagramNode:
+        """Register a graph-visible node for topology diagrams."""
+        for route_ref in tuple(input_routes) + tuple(output_routes):
+            coerced = self._coerce_route_ref(route_ref)
+            self._diagram_routes[coerced.display()] = coerced
+        node = DiagramNode(
+            name=name,
+            input_routes=tuple(self._route_key(route) for route in input_routes),
+            output_routes=tuple(self._route_key(route) for route in output_routes),
+            group=group,
+        )
+        self._diagram_nodes[name] = node
+        return node
+
+    def diagram_nodes(self) -> Iterator[DiagramNode]:
+        """Return graph-visible nodes registered for diagram rendering."""
+        return iter(tuple(self._diagram_nodes.values()))
+
+    def diagram(
+        self,
+        *,
+        format: str = "mermaid",
+        direction: str = "LR",
+        group_by: Sequence[str] = ("owner",),
+    ) -> str:
+        """Render the graph topology as a small human-readable diagram."""
+        return self.render_diagram(
+            format=format,
+            direction=direction,
+            group_by=group_by,
+        )
+
+    def render_diagram(
+        self,
+        *,
+        format: str = "mermaid",
+        direction: str = "LR",
+        group_by: Sequence[str] = ("owner",),
+    ) -> str:
+        """Render topology edges as a Mermaid flowchart.
+
+        Grouping is intentionally descriptor-driven. Callers can cluster by any
+        stable route field such as ``("layer", "owner")`` without manually
+        placing nodes.
+        """
+        resolved_format = format.lower()
+        if resolved_format not in ("mermaid", "mermaid_flowchart"):
+            raise ValueError("only Mermaid diagram rendering is supported")
+        unknown_fields = tuple(
+            field for field in group_by if field not in DIAGRAM_GROUP_FIELDS
+        )
+        if unknown_fields:
+            raise ValueError(
+                "unsupported diagram group fields: " + ", ".join(unknown_fields)
+            )
+
+        edges = self._diagram_edges()
+        node_names = tuple(sorted({name for edge in edges for name in edge}))
+        node_ids = {
+            node_name: f"n{index}"
+            for index, node_name in enumerate(node_names)
+        }
+        route_refs = {
+            **{route.display(): route for route in self.catalog()},
+            **self._diagram_routes,
+        }
+        metadata = {
+            node_name: self._diagram_node_metadata(node_name, route_refs)
+            for node_name in node_names
+        }
+
+        lines = [f"flowchart {direction}"]
+        if not node_names:
+            lines.append("  %% graph has no topology edges")
+            return "\n".join(lines)
+
+        grouped_nodes: dict[tuple[str, ...], list[str]] = {}
+        ungrouped_nodes: list[str] = []
+        for node_name in node_names:
+            group_key = tuple(metadata[node_name].get(field, "") for field in group_by)
+            if group_key and any(group_key):
+                grouped_nodes.setdefault(group_key, []).append(node_name)
+            else:
+                ungrouped_nodes.append(node_name)
+
+        group_index = 0
+        for group_key in sorted(grouped_nodes):
+            group_label = " / ".join(part for part in group_key if part)
+            lines.append(
+                f"  subgraph g{group_index}[\"{self._diagram_escape(group_label)}\"]"
+            )
+            for node_name in grouped_nodes[group_key]:
+                lines.append(
+                    self._diagram_node_line(node_ids[node_name], metadata[node_name])
+                )
+            lines.append("  end")
+            group_index += 1
+
+        for node_name in ungrouped_nodes:
+            lines.append(
+                self._diagram_node_line(node_ids[node_name], metadata[node_name])
+            )
+
+        for source_name, sink_name in edges:
+            lines.append(f"  {node_ids[source_name]} --> {node_ids[sink_name]}")
+        return "\n".join(lines)
+
+    def _diagram_edges(self) -> tuple[tuple[str, str], ...]:
+        edges = list(self.topology())
+        for node in self._diagram_nodes.values():
+            node_key = self._diagram_registered_node_key(node.name)
+            edges.extend((route, node_key) for route in node.input_routes)
+            edges.extend((node_key, route) for route in node.output_routes)
+        return tuple(edges)
+
+    @staticmethod
+    def _diagram_registered_node_key(name: str) -> str:
+        return f"node:{name}"
+
+    def _diagram_node_metadata(
+        self,
+        node_name: str,
+        route_refs: dict[str, RouteRef],
+    ) -> dict[str, str]:
+        if node_name.startswith("node:"):
+            node = self._diagram_nodes.get(node_name.removeprefix("node:"))
+            if node is not None:
+                return self._diagram_registered_node_metadata(node)
+        return self._diagram_route_metadata(node_name, route_refs)
+
+    def _diagram_registered_node_metadata(self, node: DiagramNode) -> dict[str, str]:
+        group = node.group or "nodes"
+        return {
+            "display": self._diagram_registered_node_key(node.name),
+            "plane": "node",
+            "layer": "node",
+            "owner": group,
+            "family": group,
+            "stream": node.name,
+            "variant": "node",
+            "label": node.name,
+        }
+
+    def _diagram_route_metadata(
+        self,
+        route_display: str,
+        route_refs: dict[str, RouteRef],
+    ) -> dict[str, str]:
+        route_ref = route_refs.get(route_display)
+        if route_ref is None:
+            return {
+                "display": route_display,
+                "plane": "",
+                "layer": "",
+                "owner": "",
+                "family": "",
+                "stream": route_display,
+                "variant": "",
+                "label": route_display,
+            }
+        plane = self._diagram_value(route_ref.namespace.plane)
+        layer = self._diagram_value(route_ref.namespace.layer)
+        owner = self._diagram_value(route_ref.namespace.owner)
+        family = self._diagram_value(route_ref.family)
+        stream = self._diagram_value(route_ref.stream)
+        variant = self._diagram_value(route_ref.variant).lower()
+        label = f"{family}.{stream}<br/>{variant}"
+        return {
+            "display": route_display,
+            "plane": plane,
+            "layer": layer,
+            "owner": owner,
+            "family": family,
+            "stream": stream,
+            "variant": variant,
+            "label": label,
+        }
+
+    @staticmethod
+    def _diagram_value(value: Any) -> str:
+        raw = getattr(value, "value", value)
+        return str(raw)
+
+    @staticmethod
+    def _diagram_escape(value: str) -> str:
+        return value.replace("\\", "\\\\").replace('"', '\\"')
+
+    def _diagram_node_line(self, node_id: str, metadata: dict[str, str]) -> str:
+        label = self._diagram_escape(metadata["label"])
+        return f"    {node_id}[\"{label}\"]"
 
     def validate_graph(self) -> Iterator[str]:
         """Return graph validation issues detected by the native layer and wrapper semantics."""

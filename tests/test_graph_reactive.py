@@ -1614,6 +1614,55 @@ class GraphReactiveTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             graph.resistor(source, sink)
 
+    def test_diagram_renders_topology_as_mermaid(self) -> None:
+        graph_module = load_graph_module()
+
+        source_route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Raw,
+            owner=graph_module.OwnerName("heart.switch"),
+            family=graph_module.StreamFamily("peripheral"),
+            stream=graph_module.StreamName("serial"),
+            variant=graph_module.Variant.Meta,
+            schema=graph_module.Schema.bytes("SwitchSerial"),
+        )
+        sink_route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart.switch"),
+            family=graph_module.StreamFamily("peripheral"),
+            stream=graph_module.StreamName("state"),
+            variant=graph_module.Variant.State,
+            schema=graph_module.Schema.bytes("SwitchState"),
+        )
+        graph = graph_module.Graph()
+        graph.connect(source=source_route, sink=sink_route)
+
+        diagram = graph.diagram(group_by=("layer", "owner"))
+
+        self.assertIn("flowchart LR", diagram)
+        self.assertIn('["raw / heart.switch"]', diagram)
+        self.assertIn('["logical / heart.switch"]', diagram)
+        self.assertIn('["peripheral.serial<br/>meta"]', diagram)
+        self.assertIn('["peripheral.state<br/>state"]', diagram)
+        self.assertIn("-->", diagram)
+
+    def test_empty_diagram_is_still_renderable(self) -> None:
+        graph_module = load_graph_module()
+        graph = graph_module.Graph()
+
+        self.assertEqual(
+            graph.render_diagram(),
+            "flowchart LR\n  %% graph has no topology edges",
+        )
+
+    def test_diagram_rejects_unknown_group_fields(self) -> None:
+        graph_module = load_graph_module()
+        graph = graph_module.Graph()
+
+        with self.assertRaises(ValueError):
+            graph.diagram(group_by=("rack",))
+
     def test_resistor_gates_values_with_gate_predicate(self) -> None:
         graph_module = load_graph_module()
 

@@ -340,6 +340,18 @@ class ManagedGraphNode:
             raise ValueError("on_control is required when control_route is provided")
 
     def install(self, graph: Graph) -> ManagedGraphNodeHandle:
+        diagram_outputs = tuple(self.output_routes) + (
+            (self.error_route,) if self.error_route is not None else ()
+        )
+        graph.register_diagram_node(
+            self.name,
+            input_routes=()
+            if self.control_route is None
+            else (self.control_route,),
+            output_routes=diagram_outputs,
+            group=self.group,
+        )
+
         def on_error(exc: BaseException, attempt: int) -> None:
             if self.error_route is not None:
                 graph.publish(self.error_route, self.map_error(exc, attempt))
