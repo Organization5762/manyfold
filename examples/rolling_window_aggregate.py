@@ -29,7 +29,7 @@ def run_example() -> RollingWindowAggregateExampleResult:
         family="tick",
         stream="watermark",
         variant=Variant.Event,
-        schema=Schema.bytes("WatermarkTick"),
+        schema=Schema.bytes(name="WatermarkTick"),
     )
     sampled_temperature = example_route(
         plane=Plane.Read,

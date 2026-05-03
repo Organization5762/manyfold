@@ -32,7 +32,7 @@ def run_example() -> ObservePublishExampleResult:
         family=StreamFamily("sensor"),
         stream=StreamName("accel"),
         variant=Variant.Meta,
-        schema=Schema.bytes("Accel"),
+        schema=Schema.bytes(name="Accel"),
     )
     observed_route = route(
         plane=Plane.Read,
@@ -41,7 +41,7 @@ def run_example() -> ObservePublishExampleResult:
         family=StreamFamily("sensor"),
         stream=StreamName("accel_observed"),
         variant=Variant.Meta,
-        schema=Schema.bytes("Accel"),
+        schema=Schema.bytes(name="Accel"),
     )
     graph.capacitor(
         source=accel_route,

@@ -42,7 +42,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("sensor"),
             stream=graph_module.StreamName("accel"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("Accel"),
+            schema=graph_module.Schema.bytes(name="Accel"),
         )
         graph = graph_module.Graph()
 
@@ -66,7 +66,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("sensor"),
             stream=graph_module.StreamName("gyro"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("Gyro"),
+            schema=graph_module.Schema.bytes(name="Gyro"),
         )
         graph = graph_module.Graph()
 
@@ -95,7 +95,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("sensor"),
             stream=graph_module.StreamName("faulty_replay"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("FaultyReplay"),
+            schema=graph_module.Schema.bytes(name="FaultyReplay"),
         )
         graph = graph_module.Graph()
 
@@ -119,7 +119,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("speed"),
             stream=graph_module.StreamName("command"),
             variant=graph_module.Variant.Request,
-            schema=graph_module.Schema.bytes("SpeedCommand"),
+            schema=graph_module.Schema.bytes(name="SpeedCommand"),
         )
         graph = graph_module.Graph()
 
@@ -455,7 +455,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("speed"),
             stream=graph_module.StreamName("pid"),
             variant=graph_module.Variant.Request,
-            schema=graph_module.Schema.bytes("SpeedPid"),
+            schema=graph_module.Schema.bytes(name="SpeedPid"),
         )
         step = graph_module.ReadThenWriteNextEpochStep.map(
             name="Step",
@@ -484,7 +484,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("sensor"),
             stream=graph_module.StreamName("accel"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("Accel"),
+            schema=graph_module.Schema.bytes(name="Accel"),
         )
         right = graph_module.route(
             plane=graph_module.Plane.Read,
@@ -493,7 +493,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("sensor"),
             stream=graph_module.StreamName("gyro"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("Gyro"),
+            schema=graph_module.Schema.bytes(name="Gyro"),
         )
         graph = graph_module.Graph()
 
@@ -522,7 +522,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("sensor"),
             stream=graph_module.StreamName("accel"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("Accel"),
+            schema=graph_module.Schema.bytes(name="Accel"),
         )
         right = graph_module.route(
             plane=graph_module.Plane.State,
@@ -531,7 +531,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("device"),
             stream=graph_module.StreamName("calibration"),
             variant=graph_module.Variant.State,
-            schema=graph_module.Schema.bytes("Calibration"),
+            schema=graph_module.Schema.bytes(name="Calibration"),
         )
         graph = graph_module.Graph()
 
@@ -560,7 +560,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("sensor"),
             stream=graph_module.StreamName("accel"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("Accel"),
+            schema=graph_module.Schema.bytes(name="Accel"),
         )
         right = graph_module.route(
             plane=graph_module.Plane.Read,
@@ -569,7 +569,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("device"),
             stream=graph_module.StreamName("selection"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("Selection"),
+            schema=graph_module.Schema.bytes(name="Selection"),
         )
         graph = graph_module.Graph()
 
@@ -601,7 +601,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("sensor"),
             stream=graph_module.StreamName("accel"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("Accel"),
+            schema=graph_module.Schema.bytes(name="Accel"),
         )
         right = graph_module.route(
             plane=graph_module.Plane.Read,
@@ -610,7 +610,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("sensor"),
             stream=graph_module.StreamName("gyro"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("Gyro"),
+            schema=graph_module.Schema.bytes(name="Gyro"),
         )
         graph = graph_module.Graph()
 
@@ -684,7 +684,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("sensor"),
             stream=graph_module.StreamName("raw"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("CounterBytes"),
+            schema=graph_module.Schema.bytes(name="CounterBytes"),
         )
         output = graph_module.route(
             plane=graph_module.Plane.State,
@@ -725,7 +725,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("trace"),
             stream=graph_module.StreamName("entropy"),
             variant=graph_module.Variant.Event,
-            schema=graph_module.Schema.bytes("EntropyBytes"),
+            schema=graph_module.Schema.bytes(name="EntropyBytes"),
         )
         output = graph_module.route(
             plane=graph_module.Plane.State,
@@ -734,7 +734,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("trace"),
             stream=graph_module.StreamName("entropy_state"),
             variant=graph_module.Variant.State,
-            schema=graph_module.Schema.bytes("EntropyState"),
+            schema=graph_module.Schema.bytes(name="EntropyState"),
         )
         graph = graph_module.Graph()
 
@@ -770,7 +770,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("trace"),
             stream=graph_module.StreamName("entropy"),
             variant=graph_module.Variant.Event,
-            schema=graph_module.Schema.bytes("EntropyBytes"),
+            schema=graph_module.Schema.bytes(name="EntropyBytes"),
         )
         output = graph_module.route(
             plane=graph_module.Plane.State,
@@ -779,7 +779,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("trace"),
             stream=graph_module.StreamName("entropy_state"),
             variant=graph_module.Variant.State,
-            schema=graph_module.Schema.bytes("EntropyState"),
+            schema=graph_module.Schema.bytes(name="EntropyState"),
         )
         graph = graph_module.Graph()
 
@@ -844,7 +844,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("uart"),
             stream=graph_module.StreamName("line"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("UartLine"),
+            schema=graph_module.Schema.bytes(name="UartLine"),
         )
         graph = graph_module.Graph()
         matched: list[bytes] = []
@@ -931,7 +931,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("sensor"),
             stream=graph_module.StreamName("temperature"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("TemperatureBytes"),
+            schema=graph_module.Schema.bytes(name="TemperatureBytes"),
         )
         graph = graph_module.Graph()
         graph.publish(route, b"20")
@@ -955,7 +955,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("sensor"),
             stream=graph_module.StreamName("temperature"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("Temperature"),
+            schema=graph_module.Schema.bytes(name="Temperature"),
         )
         graph = graph_module.Graph()
 
@@ -1058,7 +1058,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("sensor"),
             stream=graph_module.StreamName("temperature"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("TemperatureBytes"),
+            schema=graph_module.Schema.bytes(name="TemperatureBytes"),
         )
         graph = graph_module.Graph()
 
@@ -1123,7 +1123,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("tick"),
             stream=graph_module.StreamName("watermark"),
             variant=graph_module.Variant.Event,
-            schema=graph_module.Schema.bytes("WatermarkTick"),
+            schema=graph_module.Schema.bytes(name="WatermarkTick"),
         )
         graph = graph_module.Graph()
 
@@ -1159,7 +1159,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("tick"),
             stream=graph_module.StreamName("watermark"),
             variant=graph_module.Variant.Event,
-            schema=graph_module.Schema.bytes("WatermarkTick"),
+            schema=graph_module.Schema.bytes(name="WatermarkTick"),
         )
         graph = graph_module.Graph()
         graph.publish(route, 20)
@@ -1271,7 +1271,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("tick"),
             stream=graph_module.StreamName("watermark"),
             variant=graph_module.Variant.Event,
-            schema=graph_module.Schema.bytes("WatermarkTick"),
+            schema=graph_module.Schema.bytes(name="WatermarkTick"),
         )
         graph = graph_module.Graph()
 
@@ -1302,7 +1302,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("sensor"),
             stream=graph_module.StreamName("temperature"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("Temperature"),
+            schema=graph_module.Schema.bytes(name="Temperature"),
         )
         graph = graph_module.Graph()
 
@@ -1331,7 +1331,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("tick"),
             stream=graph_module.StreamName("watermark"),
             variant=graph_module.Variant.Event,
-            schema=graph_module.Schema.bytes("WatermarkTick"),
+            schema=graph_module.Schema.bytes(name="WatermarkTick"),
         )
         graph = graph_module.Graph()
 
@@ -1441,7 +1441,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("sensor"),
             stream=graph_module.StreamName("accel"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("AccelBytes"),
+            schema=graph_module.Schema.bytes(name="AccelBytes"),
         )
         right = graph_module.route(
             plane=graph_module.Plane.Read,
@@ -1450,7 +1450,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("sensor"),
             stream=graph_module.StreamName("gyro"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("GyroBytes"),
+            schema=graph_module.Schema.bytes(name="GyroBytes"),
         )
         graph = graph_module.Graph()
         graph.publish(left, b"2")
@@ -1487,7 +1487,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("sensor"),
             stream=graph_module.StreamName("gyro"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("GyroBytes"),
+            schema=graph_module.Schema.bytes(name="GyroBytes"),
         )
         graph = graph_module.Graph()
         graph.publish(left, 2)
@@ -1556,7 +1556,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("sensor"),
             stream=graph_module.StreamName("accel"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("AccelBytes"),
+            schema=graph_module.Schema.bytes(name="AccelBytes"),
         )
         right = graph_module.route(
             plane=graph_module.Plane.Read,
@@ -1565,7 +1565,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("sensor"),
             stream=graph_module.StreamName("gyro"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("GyroBytes"),
+            schema=graph_module.Schema.bytes(name="GyroBytes"),
         )
         graph = graph_module.Graph()
 
@@ -1683,7 +1683,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("sensor"),
             stream=graph_module.StreamName("accel"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("AccelBytes"),
+            schema=graph_module.Schema.bytes(name="AccelBytes"),
         )
         right_state = graph_module.route(
             plane=graph_module.Plane.State,
@@ -1692,7 +1692,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("device"),
             stream=graph_module.StreamName("calibration"),
             variant=graph_module.Variant.State,
-            schema=graph_module.Schema.bytes("CalibrationBytes"),
+            schema=graph_module.Schema.bytes(name="CalibrationBytes"),
         )
         graph = graph_module.Graph()
 
@@ -1785,7 +1785,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("tick"),
             stream=graph_module.StreamName("drain"),
             variant=graph_module.Variant.Event,
-            schema=graph_module.Schema.bytes("DrainTick"),
+            schema=graph_module.Schema.bytes(name="DrainTick"),
         )
         graph = graph_module.Graph()
         graph.capacitor(
@@ -1837,7 +1837,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("tick"),
             stream=graph_module.StreamName("drain"),
             variant=graph_module.Variant.Event,
-            schema=graph_module.Schema.bytes("DrainTick"),
+            schema=graph_module.Schema.bytes(name="DrainTick"),
         )
         graph = graph_module.Graph()
 
@@ -1944,7 +1944,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("peripheral"),
             stream=graph_module.StreamName("serial"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("SwitchSerial"),
+            schema=graph_module.Schema.bytes(name="SwitchSerial"),
         )
         sink_route = graph_module.route(
             plane=graph_module.Plane.Read,
@@ -1953,7 +1953,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("peripheral"),
             stream=graph_module.StreamName("state"),
             variant=graph_module.Variant.State,
-            schema=graph_module.Schema.bytes("SwitchState"),
+            schema=graph_module.Schema.bytes(name="SwitchState"),
         )
         graph = graph_module.Graph()
         graph.connect(source=source_route, sink=sink_route)
@@ -2043,7 +2043,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("leader"),
             stream=graph_module.StreamName("heartbeat_seen"),
             variant=graph_module.Variant.State,
-            schema=graph_module.Schema.bytes("Heartbeat"),
+            schema=graph_module.Schema.bytes(name="Heartbeat"),
         )
         clock = graph_module.route(
             plane=graph_module.Plane.Read,
@@ -2052,7 +2052,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("clock"),
             stream=graph_module.StreamName("election_tick"),
             variant=graph_module.Variant.Event,
-            schema=graph_module.Schema.bytes("Tick"),
+            schema=graph_module.Schema.bytes(name="Tick"),
         )
         timeout = graph_module.route(
             plane=graph_module.Plane.Read,
@@ -2061,7 +2061,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("election"),
             stream=graph_module.StreamName("timeout"),
             variant=graph_module.Variant.Event,
-            schema=graph_module.Schema.bytes("Timeout"),
+            schema=graph_module.Schema.bytes(name="Timeout"),
         )
         graph = graph_module.Graph()
 
@@ -2095,7 +2095,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("sensor"),
             stream=graph_module.StreamName("accel"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("AccelBytes"),
+            schema=graph_module.Schema.bytes(name="AccelBytes"),
         )
         sampled = graph_module.route(
             plane=graph_module.Plane.Read,
@@ -2104,7 +2104,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("sensor"),
             stream=graph_module.StreamName("accel_sampled"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("AccelBytes"),
+            schema=graph_module.Schema.bytes(name="AccelBytes"),
         )
         demand = graph_module.route(
             plane=graph_module.Plane.State,
@@ -2113,7 +2113,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("tick"),
             stream=graph_module.StreamName("drain"),
             variant=graph_module.Variant.Event,
-            schema=graph_module.Schema.bytes("DrainTick"),
+            schema=graph_module.Schema.bytes(name="DrainTick"),
         )
         graph = graph_module.Graph()
         graph.capacitor(
@@ -2174,7 +2174,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("tick"),
             stream=graph_module.StreamName("drain"),
             variant=graph_module.Variant.Event,
-            schema=graph_module.Schema.bytes("DrainTick"),
+            schema=graph_module.Schema.bytes(name="DrainTick"),
         )
         graph = graph_module.Graph()
 
@@ -2209,7 +2209,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("sensor"),
             stream=graph_module.StreamName("raw"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("CounterBytes"),
+            schema=graph_module.Schema.bytes(name="CounterBytes"),
         )
         state_route = graph_module.route(
             plane=graph_module.Plane.State,
@@ -2256,7 +2256,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("state"),
             stream=graph_module.StreamName("latest_bytes"),
             variant=graph_module.Variant.State,
-            schema=graph_module.Schema.bytes("CounterBytes"),
+            schema=graph_module.Schema.bytes(name="CounterBytes"),
         )
         graph = graph_module.Graph()
         observed = []
@@ -2285,7 +2285,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("trace"),
             stream=graph_module.StreamName("entropy"),
             variant=graph_module.Variant.Event,
-            schema=graph_module.Schema.bytes("EntropyBytes"),
+            schema=graph_module.Schema.bytes(name="EntropyBytes"),
         )
         state_route = graph_module.route(
             plane=graph_module.Plane.State,
@@ -2294,7 +2294,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("trace"),
             stream=graph_module.StreamName("latest_entropy"),
             variant=graph_module.Variant.State,
-            schema=graph_module.Schema.bytes("EntropyState"),
+            schema=graph_module.Schema.bytes(name="EntropyState"),
         )
         graph = graph_module.Graph()
 
@@ -2327,7 +2327,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("trace"),
             stream=graph_module.StreamName("entropy"),
             variant=graph_module.Variant.Event,
-            schema=graph_module.Schema.bytes("EntropyBytes"),
+            schema=graph_module.Schema.bytes(name="EntropyBytes"),
         )
         state_route = graph_module.route(
             plane=graph_module.Plane.State,
@@ -2336,7 +2336,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("trace"),
             stream=graph_module.StreamName("latest_entropy"),
             variant=graph_module.Variant.State,
-            schema=graph_module.Schema.bytes("EntropyState"),
+            schema=graph_module.Schema.bytes(name="EntropyState"),
         )
         graph = graph_module.Graph()
 
@@ -2367,7 +2367,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("sensor"),
             stream=graph_module.StreamName("raw"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("ImuBytes"),
+            schema=graph_module.Schema.bytes(name="ImuBytes"),
         )
         repaired = graph_module.route(
             plane=graph_module.Plane.Read,
@@ -2376,7 +2376,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("sensor"),
             stream=graph_module.StreamName("time_repaired"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("ImuBytes"),
+            schema=graph_module.Schema.bytes(name="ImuBytes"),
         )
         graph = graph_module.Graph()
 
@@ -2437,7 +2437,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("trace"),
             stream=graph_module.StreamName("entropy"),
             variant=graph_module.Variant.Event,
-            schema=graph_module.Schema.bytes("EntropyBytes"),
+            schema=graph_module.Schema.bytes(name="EntropyBytes"),
         )
         repaired = graph_module.route(
             plane=graph_module.Plane.Read,
@@ -2446,7 +2446,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("trace"),
             stream=graph_module.StreamName("entropy_repaired"),
             variant=graph_module.Variant.Event,
-            schema=graph_module.Schema.bytes("EntropyBytes"),
+            schema=graph_module.Schema.bytes(name="EntropyBytes"),
         )
         graph = graph_module.Graph()
 
@@ -2486,7 +2486,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("trace"),
             stream=graph_module.StreamName("entropy"),
             variant=graph_module.Variant.Event,
-            schema=graph_module.Schema.bytes("EntropyBytes"),
+            schema=graph_module.Schema.bytes(name="EntropyBytes"),
         )
         graph = graph_module.Graph()
 
@@ -2513,7 +2513,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("sensor"),
             stream=graph_module.StreamName("raw"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("ImuBytes"),
+            schema=graph_module.Schema.bytes(name="ImuBytes"),
         )
         repaired = graph_module.route(
             plane=graph_module.Plane.Read,
@@ -2522,7 +2522,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("sensor"),
             stream=graph_module.StreamName("time_repaired"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("ImuBytes"),
+            schema=graph_module.Schema.bytes(name="ImuBytes"),
         )
         graph = graph_module.Graph()
 
@@ -2574,7 +2574,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("sensor"),
             stream=graph_module.StreamName("accel"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("Accel"),
+            schema=graph_module.Schema.bytes(name="Accel"),
         )
         graph = graph_module.Graph()
         graph.publish(
@@ -2753,7 +2753,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("sensor"),
             stream=graph_module.StreamName("accel"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("Accel"),
+            schema=graph_module.Schema.bytes(name="Accel"),
         )
         graph = graph_module.Graph()
         graph.configure_retention(
@@ -2785,7 +2785,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("trace"),
             stream=graph_module.StreamName("entropy"),
             variant=graph_module.Variant.Event,
-            schema=graph_module.Schema.bytes("EntropyBytes"),
+            schema=graph_module.Schema.bytes(name="EntropyBytes"),
         )
         graph = graph_module.Graph()
 
@@ -2809,7 +2809,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("sensor"),
             stream=graph_module.StreamName("gyro"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("Gyro"),
+            schema=graph_module.Schema.bytes(name="Gyro"),
         )
         graph = graph_module.Graph()
         graph.configure_retention(
@@ -2865,7 +2865,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("sensor"),
             stream=graph_module.StreamName("accel"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("Accel"),
+            schema=graph_module.Schema.bytes(name="Accel"),
         )
         graph = graph_module.Graph()
         graph.publish(route, b"sample")
@@ -2909,7 +2909,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("sensor"),
             stream=graph_module.StreamName("accel"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("Accel"),
+            schema=graph_module.Schema.bytes(name="Accel"),
         )
         graph = graph_module.Graph()
         graph.publish(route, b"sample")
@@ -2941,7 +2941,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("sensor"),
             stream=graph_module.StreamName("accel"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("Accel"),
+            schema=graph_module.Schema.bytes(name="Accel"),
         )
         sink = graph_module.route(
             plane=graph_module.Plane.Read,
@@ -2950,7 +2950,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("sensor"),
             stream=graph_module.StreamName("accel_copy"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("Accel"),
+            schema=graph_module.Schema.bytes(name="Accel"),
         )
         graph = graph_module.Graph()
 
@@ -2999,7 +2999,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("scan"),
             stream=graph_module.StreamName("frame"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("LidarFrame"),
+            schema=graph_module.Schema.bytes(name="LidarFrame"),
         )
         graph = graph_module.Graph()
         opens = 0
@@ -3059,7 +3059,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("scan"),
             stream=graph_module.StreamName("frame"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("LidarFrame"),
+            schema=graph_module.Schema.bytes(name="LidarFrame"),
         )
         graph = graph_module.Graph()
 
@@ -3110,7 +3110,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("scan"),
             stream=graph_module.StreamName("frame"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("LidarFrame"),
+            schema=graph_module.Schema.bytes(name="LidarFrame"),
         )
         graph = graph_module.Graph()
 
@@ -3148,7 +3148,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("frame"),
             stream=graph_module.StreamName("preview"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("PreviewFrame"),
+            schema=graph_module.Schema.bytes(name="PreviewFrame"),
         )
         graph = graph_module.Graph()
         opens = 0
@@ -3183,7 +3183,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("trace"),
             stream=graph_module.StreamName("blob"),
             variant=graph_module.Variant.Event,
-            schema=graph_module.Schema.bytes("TraceBlob"),
+            schema=graph_module.Schema.bytes(name="TraceBlob"),
         )
         graph = graph_module.Graph()
 
@@ -3216,7 +3216,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("scan"),
             stream=graph_module.StreamName("frame"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("LidarFrame"),
+            schema=graph_module.Schema.bytes(name="LidarFrame"),
         )
         graph = graph_module.Graph()
 
@@ -3255,7 +3255,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("speed"),
             stream=graph_module.StreamName("target"),
             variant=graph_module.Variant.Request,
-            schema=graph_module.Schema.bytes("MotorTarget"),
+            schema=graph_module.Schema.bytes(name="MotorTarget"),
         )
         graph = graph_module.Graph()
 
@@ -3278,7 +3278,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("scan"),
             stream=graph_module.StreamName("frame"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("LidarFrame"),
+            schema=graph_module.Schema.bytes(name="LidarFrame"),
         )
         graph = graph_module.Graph()
 
@@ -3319,7 +3319,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("scan"),
             stream=graph_module.StreamName("frame"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("LidarFrame"),
+            schema=graph_module.Schema.bytes(name="LidarFrame"),
         )
         sink = graph_module.route(
             plane=graph_module.Plane.Write,
@@ -3328,7 +3328,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("speed"),
             stream=graph_module.StreamName("target"),
             variant=graph_module.Variant.Request,
-            schema=graph_module.Schema.bytes("MotorTarget"),
+            schema=graph_module.Schema.bytes(name="MotorTarget"),
         )
         graph = graph_module.Graph()
 
@@ -3361,7 +3361,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("scan"),
             stream=graph_module.StreamName("frame"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("LidarFrame"),
+            schema=graph_module.Schema.bytes(name="LidarFrame"),
         )
         graph = graph_module.Graph()
 
@@ -3386,7 +3386,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("telemetry"),
             stream=graph_module.StreamName("source"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("SourceTelemetry"),
+            schema=graph_module.Schema.bytes(name="SourceTelemetry"),
         )
         sink = graph_module.route(
             plane=graph_module.Plane.State,
@@ -3395,7 +3395,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("telemetry"),
             stream=graph_module.StreamName("sink"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("SinkTelemetry"),
+            schema=graph_module.Schema.bytes(name="SinkTelemetry"),
         )
         graph = graph_module.Graph()
         graph.configure_flow_defaults(
@@ -3445,7 +3445,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("mailbox"),
             stream=graph_module.StreamName("producer"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("MailboxProducer"),
+            schema=graph_module.Schema.bytes(name="MailboxProducer"),
         )
         graph = graph_module.Graph()
         mailbox = graph.mailbox(
@@ -3473,7 +3473,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("mailbox"),
             stream=graph_module.StreamName("producer"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("MailboxProducer"),
+            schema=graph_module.Schema.bytes(name="MailboxProducer"),
         )
         graph = graph_module.Graph()
         mailbox = graph.mailbox(
@@ -3510,7 +3510,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("mailbox"),
             stream=graph_module.StreamName("producer"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("MailboxProducer"),
+            schema=graph_module.Schema.bytes(name="MailboxProducer"),
         )
         graph = graph_module.Graph()
         mailbox = graph.mailbox(
@@ -3546,7 +3546,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("mailbox"),
             stream=graph_module.StreamName("producer"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("MailboxProducer"),
+            schema=graph_module.Schema.bytes(name="MailboxProducer"),
         )
         graph = graph_module.Graph()
         mailbox = graph.mailbox(
@@ -3574,7 +3574,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("mailbox"),
             stream=graph_module.StreamName("producer"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("MailboxProducer"),
+            schema=graph_module.Schema.bytes(name="MailboxProducer"),
         )
         graph = graph_module.Graph()
         mailbox = graph.mailbox(
@@ -3607,7 +3607,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("temperature"),
             stream=graph_module.StreamName("ambient"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("AmbientTemperature"),
+            schema=graph_module.Schema.bytes(name="AmbientTemperature"),
         )
         graph = graph_module.Graph()
 
@@ -3630,7 +3630,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("temperature"),
             stream=graph_module.StreamName("ambient"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("AmbientTemperature"),
+            schema=graph_module.Schema.bytes(name="AmbientTemperature"),
         )
         graph = graph_module.Graph()
 
@@ -3646,7 +3646,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("mailbox"),
             stream=graph_module.StreamName("producer"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("MailboxProducer"),
+            schema=graph_module.Schema.bytes(name="MailboxProducer"),
         )
         graph = graph_module.Graph()
         mailbox = graph.mailbox(
@@ -3687,7 +3687,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("mailbox"),
             stream=graph_module.StreamName("producer"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("MailboxProducer"),
+            schema=graph_module.Schema.bytes(name="MailboxProducer"),
         )
         graph = graph_module.Graph()
         mailbox = graph.mailbox(
@@ -3724,7 +3724,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("mailbox"),
             stream=graph_module.StreamName("producer"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("MailboxProducer"),
+            schema=graph_module.Schema.bytes(name="MailboxProducer"),
         )
         graph = graph_module.Graph()
         mailbox = graph.mailbox("default_bridge")
@@ -3750,7 +3750,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("mailbox"),
             stream=graph_module.StreamName("producer"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("MailboxProducer"),
+            schema=graph_module.Schema.bytes(name="MailboxProducer"),
         )
         consumer_route = graph_module.route(
             plane=graph_module.Plane.Write,
@@ -3759,7 +3759,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("mailbox"),
             stream=graph_module.StreamName("consumer"),
             variant=graph_module.Variant.Request,
-            schema=graph_module.Schema.bytes("MailboxConsumer"),
+            schema=graph_module.Schema.bytes(name="MailboxConsumer"),
         )
         graph = graph_module.Graph()
         mailbox = graph.mailbox(
@@ -3799,7 +3799,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("mailbox"),
             stream=graph_module.StreamName("producer"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("MailboxProducer"),
+            schema=graph_module.Schema.bytes(name="MailboxProducer"),
         )
         first_graph = graph_module.Graph()
         mailbox = first_graph.mailbox("foreign_bridge")
@@ -3817,7 +3817,7 @@ class GraphReactiveTests(unittest.TestCase):
             graph_module.OwnerName("light"),
             graph_module.StreamFamily("brightness"),
             graph_module.StreamName("level"),
-            graph_module.Schema.bytes("Brightness"),
+            graph_module.Schema.bytes(name="Brightness"),
         )
         graph = graph_module.Graph()
 
@@ -3845,7 +3845,7 @@ class GraphReactiveTests(unittest.TestCase):
             graph_module.OwnerName("fan"),
             graph_module.StreamFamily("speed"),
             graph_module.StreamName("target"),
-            graph_module.Schema.bytes("FanSpeed"),
+            graph_module.Schema.bytes(name="FanSpeed"),
         )
         graph = graph_module.Graph()
 
@@ -3870,7 +3870,7 @@ class GraphReactiveTests(unittest.TestCase):
             graph_module.OwnerName("light"),
             graph_module.StreamFamily("brightness"),
             graph_module.StreamName("level"),
-            graph_module.Schema.bytes("Brightness"),
+            graph_module.Schema.bytes(name="Brightness"),
         )
         graph = graph_module.Graph()
 
@@ -3906,7 +3906,7 @@ class GraphReactiveTests(unittest.TestCase):
             graph_module.OwnerName("pump"),
             graph_module.StreamFamily("flow"),
             graph_module.StreamName("target"),
-            graph_module.Schema.bytes("PumpFlow"),
+            graph_module.Schema.bytes(name="PumpFlow"),
         )
         graph = graph_module.Graph()
 
@@ -3933,7 +3933,7 @@ class GraphReactiveTests(unittest.TestCase):
             graph_module.OwnerName("pump"),
             graph_module.StreamFamily("flow"),
             graph_module.StreamName("target"),
-            graph_module.Schema.bytes("PumpFlow"),
+            graph_module.Schema.bytes(name="PumpFlow"),
         )
         graph = graph_module.Graph()
 
@@ -3966,7 +3966,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("temperature"),
             stream=graph_module.StreamName("target"),
             variant=graph_module.Variant.Request,
-            schema=graph_module.Schema.bytes("TemperatureTarget"),
+            schema=graph_module.Schema.bytes(name="TemperatureTarget"),
         )
         ack = graph_module.route(
             plane=graph_module.Plane.Write,
@@ -3975,7 +3975,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("temperature"),
             stream=graph_module.StreamName("target"),
             variant=graph_module.Variant.Ack,
-            schema=graph_module.Schema.bytes("TemperatureTargetAck"),
+            schema=graph_module.Schema.bytes(name="TemperatureTargetAck"),
         )
         graph = graph_module.Graph()
 
@@ -4007,7 +4007,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("temperature"),
             stream=graph_module.StreamName("typed_target"),
             variant=graph_module.Variant.Request,
-            schema=graph_module.Schema.bytes("TypedTemperatureTarget"),
+            schema=graph_module.Schema.bytes(name="TypedTemperatureTarget"),
         )
         ack = graph_module.route(
             plane=graph_module.Plane.Write,
@@ -4016,7 +4016,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("temperature"),
             stream=graph_module.StreamName("typed_target"),
             variant=graph_module.Variant.Ack,
-            schema=graph_module.Schema.bytes("TypedTemperatureTargetAck"),
+            schema=graph_module.Schema.bytes(name="TypedTemperatureTargetAck"),
         )
         graph = graph_module.Graph()
 
@@ -4048,7 +4048,7 @@ class GraphReactiveTests(unittest.TestCase):
             graph_module.OwnerName("pump"),
             graph_module.StreamFamily("flow"),
             graph_module.StreamName("target"),
-            graph_module.Schema.bytes("PumpFlow"),
+            graph_module.Schema.bytes(name="PumpFlow"),
         )
         graph = graph_module.Graph()
 
@@ -4102,7 +4102,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("temperature"),
             stream=graph_module.StreamName("target"),
             variant=graph_module.Variant.Request,
-            schema=graph_module.Schema.bytes("TemperatureTarget"),
+            schema=graph_module.Schema.bytes(name="TemperatureTarget"),
         )
         graph = graph_module.Graph()
 
@@ -4129,7 +4129,7 @@ class GraphReactiveTests(unittest.TestCase):
             graph_module.OwnerName("counter"),
             graph_module.StreamFamily("counter"),
             graph_module.StreamName("value"),
-            graph_module.Schema.bytes("CounterValue"),
+            graph_module.Schema.bytes(name="CounterValue"),
         )
         graph = graph_module.Graph()
 
@@ -4175,7 +4175,7 @@ class GraphReactiveTests(unittest.TestCase):
             graph_module.OwnerName("counter"),
             graph_module.StreamFamily("loop"),
             graph_module.StreamName("count"),
-            graph_module.Schema.bytes("CounterValue"),
+            graph_module.Schema.bytes(name="CounterValue"),
         )
         graph = graph_module.Graph()
 
@@ -4204,7 +4204,7 @@ class GraphReactiveTests(unittest.TestCase):
             graph_module.OwnerName("light"),
             graph_module.StreamFamily("brightness"),
             graph_module.StreamName("level"),
-            graph_module.Schema.bytes("Brightness"),
+            graph_module.Schema.bytes(name="Brightness"),
         )
         graph = graph_module.Graph()
 
@@ -4260,9 +4260,9 @@ class GraphReactiveTests(unittest.TestCase):
         lifecycle = graph.lifecycle(
             graph_module.OwnerName("device"),
             graph_module.StreamFamily("imu_left"),
-            intent_schema=graph_module.Schema.bytes("LifecycleIntent"),
-            observation_schema=graph_module.Schema.bytes("LifecycleObservation"),
-            health_schema=graph_module.Schema.bytes("LifecycleHealth"),
+            intent_schema=graph_module.Schema.bytes(name="LifecycleIntent"),
+            observation_schema=graph_module.Schema.bytes(name="LifecycleObservation"),
+            health_schema=graph_module.Schema.bytes(name="LifecycleHealth"),
         )
 
         graph.publish(lifecycle, b"CONNECTED")
@@ -4296,7 +4296,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("scan"),
             stream=graph_module.StreamName("frame"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("LidarFrame"),
+            schema=graph_module.Schema.bytes(name="LidarFrame"),
         )
         graph = graph_module.Graph()
 
@@ -4343,7 +4343,7 @@ class GraphReactiveTests(unittest.TestCase):
             graph_module.OwnerName("fan"),
             graph_module.StreamFamily("speed"),
             graph_module.StreamName("target"),
-            graph_module.Schema.bytes("FanSpeed"),
+            graph_module.Schema.bytes(name="FanSpeed"),
         )
         graph = graph_module.Graph()
 
@@ -4389,7 +4389,7 @@ class GraphReactiveTests(unittest.TestCase):
             graph_module.OwnerName("heater"),
             graph_module.StreamFamily("temperature"),
             graph_module.StreamName("target"),
-            graph_module.Schema.bytes("TemperatureTarget"),
+            graph_module.Schema.bytes(name="TemperatureTarget"),
         )
         graph = graph_module.Graph()
 
@@ -4410,7 +4410,7 @@ class GraphReactiveTests(unittest.TestCase):
             graph_module.OwnerName("light"),
             graph_module.StreamFamily("brightness"),
             graph_module.StreamName("level"),
-            graph_module.Schema.bytes("Brightness"),
+            graph_module.Schema.bytes(name="Brightness"),
         )
         graph = graph_module.Graph()
 
@@ -4433,7 +4433,7 @@ class GraphReactiveTests(unittest.TestCase):
             graph_module.OwnerName("heater"),
             graph_module.StreamFamily("temperature"),
             graph_module.StreamName("target"),
-            graph_module.Schema.bytes("TemperatureTarget"),
+            graph_module.Schema.bytes(name="TemperatureTarget"),
         )
         graph = graph_module.Graph()
 
@@ -4457,7 +4457,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("brightness"),
             stream=graph_module.StreamName("set"),
             variant=graph_module.Variant.Request,
-            schema=graph_module.Schema.bytes("Brightness"),
+            schema=graph_module.Schema.bytes(name="Brightness"),
         )
         graph = graph_module.Graph()
 
@@ -4472,7 +4472,7 @@ class GraphReactiveTests(unittest.TestCase):
             graph_module.OwnerName("motor"),
             graph_module.StreamFamily("speed"),
             graph_module.StreamName("target"),
-            graph_module.Schema.bytes("MotorSpeed"),
+            graph_module.Schema.bytes(name="MotorSpeed"),
         )
         graph = graph_module.Graph()
 
@@ -4490,7 +4490,7 @@ class GraphReactiveTests(unittest.TestCase):
             graph_module.OwnerName("motor"),
             graph_module.StreamFamily("speed"),
             graph_module.StreamName("target"),
-            graph_module.Schema.bytes("MotorSpeed"),
+            graph_module.Schema.bytes(name="MotorSpeed"),
         )
         bridge = graph_module.route(
             plane=graph_module.Plane.State,
@@ -4499,7 +4499,7 @@ class GraphReactiveTests(unittest.TestCase):
             family=graph_module.StreamFamily("loop"),
             stream=graph_module.StreamName("delay"),
             variant=graph_module.Variant.State,
-            schema=graph_module.Schema.bytes("MotorSpeed"),
+            schema=graph_module.Schema.bytes(name="MotorSpeed"),
         )
         graph = graph_module.Graph()
 
@@ -4558,6 +4558,36 @@ class GraphReactiveTests(unittest.TestCase):
         self.assertEqual(proto_route.schema.schema_id, "FakeProto")
         self.assertEqual(proto_route.schema.encode(FakeProto(b"x")), b"x")
 
+    def test_route_defaults_to_basic_read_logical_meta_with_string_identity(
+        self,
+    ) -> None:
+        graph_module = load_graph_module()
+        primitives = sys.modules["manyfold.primitives"]
+
+        route = primitives.route(
+            owner="sensor",
+            family="environment",
+            stream="temperature",
+            schema=graph_module.Schema.bytes(name="Temperature"),
+        )
+
+        self.assertEqual(
+            route.display(),
+            "read.logical.sensor.environment.temperature.meta.v1",
+        )
+        self.assertIs(route.plane, graph_module.Plane.Read)
+        self.assertIs(route.layer, graph_module.Layer.Logical)
+        self.assertIs(route.variant, graph_module.Variant.Meta)
+
+    def test_bytes_schema_requires_name_keyword(self) -> None:
+        graph_module = load_graph_module()
+
+        schema = graph_module.Schema.bytes(name="Temperature")
+
+        self.assertEqual(schema.schema_id, "Temperature")
+        with self.assertRaises(TypeError):
+            graph_module.Schema.bytes("Temperature")
+
     def test_route_preserves_existing_schema_version_without_override(self) -> None:
         graph_module = load_graph_module()
         primitives = sys.modules["manyfold.primitives"]
@@ -4573,7 +4603,7 @@ class GraphReactiveTests(unittest.TestCase):
                 stream="duty_cycle",
                 variant=graph_module.Variant.Request,
             ),
-            schema=graph_module.Schema.bytes("PwmDutyCycle", version=7),
+            schema=graph_module.Schema.bytes(name="PwmDutyCycle", version=7),
         )
 
         self.assertEqual(route.display(), "write.logical.led.pwm.duty_cycle.request.v7")
@@ -4596,7 +4626,7 @@ class GraphReactiveTests(unittest.TestCase):
                 stream="duty_cycle",
                 variant=graph_module.Variant.Request,
             ),
-            schema=graph_module.Schema.bytes("OldPwmDutyCycle", version=7),
+            schema=graph_module.Schema.bytes(name="OldPwmDutyCycle", version=7),
             schema_id="PwmDutyCycle",
         )
 
@@ -4619,7 +4649,7 @@ class GraphReactiveTests(unittest.TestCase):
                 stream="duty_cycle",
                 variant=graph_module.Variant.Request,
             ),
-            schema=graph_module.Schema.bytes("OldPwmDutyCycle", version=7),
+            schema=graph_module.Schema.bytes(name="OldPwmDutyCycle", version=7),
             schema_id="PwmDutyCycle",
             version=8,
         )
@@ -4687,7 +4717,7 @@ class GraphReactiveTests(unittest.TestCase):
             graph_module.OwnerName("light"),
             graph_module.StreamFamily("brightness"),
             graph_module.StreamName("level"),
-            graph_module.Schema.bytes("Brightness", version=3),
+            graph_module.Schema.bytes(name="Brightness", version=3),
         )
 
         self.assertEqual(
@@ -4716,12 +4746,12 @@ class GraphReactiveTests(unittest.TestCase):
         binding = graph_module.WriteBindings.lifecycle(
             graph_module.OwnerName("device"),
             graph_module.StreamFamily("imu_left"),
-            intent_schema=graph_module.Schema.bytes("LifecycleIntent", version=2),
+            intent_schema=graph_module.Schema.bytes(name="LifecycleIntent", version=2),
             observation_schema=graph_module.Schema.bytes(
-                "LifecycleObservation", version=2
+                name="LifecycleObservation", version=2
             ),
-            ack_schema=graph_module.Schema.bytes("LifecycleAck", version=2),
-            health_schema=graph_module.Schema.bytes("LifecycleHealth", version=2),
+            ack_schema=graph_module.Schema.bytes(name="LifecycleAck", version=2),
+            health_schema=graph_module.Schema.bytes(name="LifecycleHealth", version=2),
         )
 
         self.assertEqual(
@@ -4757,9 +4787,9 @@ class GraphReactiveTests(unittest.TestCase):
         lifecycle = graph.lifecycle(
             graph_module.OwnerName("device"),
             graph_module.StreamFamily("radio"),
-            intent_schema=graph_module.Schema.bytes("LifecycleIntent"),
-            observation_schema=graph_module.Schema.bytes("LifecycleObservation"),
-            ack_schema=graph_module.Schema.bytes("LifecycleAck"),
+            intent_schema=graph_module.Schema.bytes(name="LifecycleIntent"),
+            observation_schema=graph_module.Schema.bytes(name="LifecycleObservation"),
+            ack_schema=graph_module.Schema.bytes(name="LifecycleAck"),
         )
 
         graph.publish(lifecycle, b"DISCOVERABLE")

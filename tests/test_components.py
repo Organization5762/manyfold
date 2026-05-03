@@ -323,7 +323,7 @@ class ComponentTests(unittest.TestCase):
             family=manyfold.StreamFamily("memory"),
             stream=manyfold.StreamName("bytes"),
             variant=manyfold.Variant.Meta,
-            schema=manyfold.Schema.bytes("MemoryBytes"),
+            schema=manyfold.Schema.bytes(name="MemoryBytes"),
         )
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -349,7 +349,7 @@ class ComponentTests(unittest.TestCase):
             family=manyfold.StreamFamily("memory"),
             stream=manyfold.StreamName("bytes"),
             variant=manyfold.Variant.Meta,
-            schema=manyfold.Schema.bytes("MemoryBytes"),
+            schema=manyfold.Schema.bytes(name="MemoryBytes"),
         )
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -381,7 +381,7 @@ class ComponentTests(unittest.TestCase):
             family=manyfold.StreamFamily("memory"),
             stream=manyfold.StreamName("bytes"),
             variant=manyfold.Variant.Meta,
-            schema=manyfold.Schema.bytes("MemoryBytes"),
+            schema=manyfold.Schema.bytes(name="MemoryBytes"),
         )
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -414,7 +414,7 @@ class ComponentTests(unittest.TestCase):
             family=manyfold.StreamFamily("memory"),
             stream=manyfold.StreamName("bytes"),
             variant=manyfold.Variant.Meta,
-            schema=manyfold.Schema.bytes("MemoryBytes"),
+            schema=manyfold.Schema.bytes(name="MemoryBytes"),
         )
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -551,7 +551,7 @@ class ComponentTests(unittest.TestCase):
             family=manyfold.StreamFamily("memory"),
             stream=manyfold.StreamName("payload"),
             variant=manyfold.Variant.Meta,
-            schema=manyfold.Schema.bytes("OriginalBytes"),
+            schema=manyfold.Schema.bytes(name="OriginalBytes"),
         )
         consumer_route = manyfold.route(
             plane=manyfold.Plane.Read,

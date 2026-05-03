@@ -14,26 +14,28 @@ __all__ = [
 
 _README_INTRO_LINES = (
     "The `examples/` directory is organized as a short path through the mental",
-    "model. Start with a route, add explicit demand, then move into joins,",
-    "watermarks, planning, and taint-aware runtime behavior. The supported",
+    "model. Start with a route, derive values, add explicit demand, then move",
+    "into joins, watermarks, planning, consensus, and taint-aware runtime behavior. The supported",
     "examples are validated by the regular `unittest` run so they do not drift",
     "away from the API.",
 )
 
 _README_OUTRO_LINES = (
     "More involved operator, query, transport, mesh, and security coverage stays",
-    "in `tests/test_graph_reactive.py`, with archived exploratory scripts kept",
-    "under `examples/archived/`. The example manifest, README featured-example",
+    "in [tests/test_graph_reactive.py](tests/test_graph_reactive.py), with archived exploratory scripts kept",
+    "under [examples/archived/](examples/archived/). The example manifest, README featured-example",
     "list, and RFC reference suite all derive from the shared example catalog,",
     "so supported versus archived status lives in one place.",
 )
 
 _README_EXAMPLE_GROUPS = {
-    "simple_latest": "Start here: create one typed route and read it back",
+    "simple_latest": "Start here: publish changing state and read the latest value",
+    "average_temperature": "Layer computation: publish derived values",
     "rate_matched_sensor": "Control the flow: make downstream demand visible",
     "imu_fusion_join": "Fuse streams: coordinate independent sensors",
     "rolling_window_aggregate": "Reason in time: release data by watermark progress",
     "cross_partition_join": "Scale the graph: plan repartition work explicitly",
+    "raft_demo": "Capstone: wire a Raft-shaped consensus component",
     "ephemeral_entropy_stream": "Audit the hard parts: mark nondeterminism on purpose",
 }
 
@@ -78,8 +80,13 @@ class ReferenceExampleGap:
 EXAMPLE_CATALOG: tuple[ExampleCatalogEntry, ...] = (
     ExampleCatalogEntry(
         "simple_latest",
-        "Smallest publish/read-back example.",
+        "Smallest changing-signal publish/read-back example.",
         readme_order=1,
+    ),
+    ExampleCatalogEntry(
+        "average_temperature",
+        "Compute and publish a rolling average from temperature samples.",
+        readme_order=2,
     ),
     ExampleCatalogEntry("observe_publish", "Observe a route while publishing updates."),
     ExampleCatalogEntry("pipe_route", "Pipe an Rx source directly into a route."),
@@ -99,7 +106,7 @@ EXAMPLE_CATALOG: tuple[ExampleCatalogEntry, ...] = (
     ExampleCatalogEntry(
         "imu_fusion_join",
         "Capacitors stage accelerometer and gyro streams before an event-time join.",
-        readme_order=3,
+        readme_order=4,
         reference_number=2,
         reference_title="IMU fusion join",
     ),
@@ -130,7 +137,7 @@ EXAMPLE_CATALOG: tuple[ExampleCatalogEntry, ...] = (
     ExampleCatalogEntry(
         "cross_partition_join",
         "A repartition join with skew metrics and planner output.",
-        readme_order=5,
+        readme_order=6,
         reference_number=7,
         reference_title="Cross-partition join",
     ),
@@ -143,25 +150,26 @@ EXAMPLE_CATALOG: tuple[ExampleCatalogEntry, ...] = (
     ExampleCatalogEntry(
         "raft_demo",
         "The Consensus component wires Raft election defaults from graph primitives.",
+        readme_order=7,
         reference_number=9,
         reference_title="Raft demo",
     ),
     ExampleCatalogEntry(
         "ephemeral_entropy_stream",
         "Per-request entropy derivation that taints determinism explicitly.",
-        readme_order=6,
+        readme_order=8,
         reference_number=10,
         reference_title="Ephemeral entropy stream",
     ),
     ExampleCatalogEntry(
         "rate_matched_sensor",
         "A one-slot capacitor coalesces bursty reads behind explicit demand.",
-        readme_order=2,
+        readme_order=3,
     ),
     ExampleCatalogEntry(
         "rolling_window_aggregate",
         "A capacitor discharges samples behind explicit event-time watermarks.",
-        readme_order=4,
+        readme_order=5,
     ),
     ExampleCatalogEntry(
         "archived.windowed_join",
@@ -305,8 +313,9 @@ def render_readme_featured_examples() -> str:
         if group := _README_EXAMPLE_GROUPS.get(entry.module_name):
             lines.append("")
             lines.append(f"**{group}**")
+        example_path = f"examples/{entry.module_name.replace('.', '/')}.py"
         lines.append(
-            f"- `examples/{entry.module_name.replace('.', '/')}.py`: {entry.summary}"
+            f"- [{example_path}]({example_path}): {entry.summary}"
         )
     lines.append("")
     lines.extend(_README_OUTRO_LINES)

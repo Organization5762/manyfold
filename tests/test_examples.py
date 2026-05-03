@@ -87,7 +87,10 @@ class ExampleTests(unittest.TestCase):
 
         referenced_modules = tuple(
             match.group(1)
-            for match in re.finditer(r"`examples/([a-z0-9][a-z0-9_]*)\.py`", readme)
+            for match in re.finditer(
+                r"\[examples/([a-z0-9][a-z0-9_]*)\.py\]\(examples/\1\.py\)",
+                readme,
+            )
         )
 
         self.assertEqual(
@@ -95,7 +98,7 @@ class ExampleTests(unittest.TestCase):
             README_EXAMPLE_MODULES,
         )
         self.assertTrue(set(referenced_modules).issubset(SUPPORTED_EXAMPLE_MODULES))
-        self.assertIn("`examples/archived/`", readme)
+        self.assertIn("[examples/archived/](examples/archived/)", readme)
         self.assertIn("shared example catalog", readme)
 
     def test_examples_package_re_exports_catalog_symbols_and_types(self) -> None:
@@ -674,13 +677,13 @@ class ExampleTests(unittest.TestCase):
         entropy = catalog_entry("ephemeral_entropy_stream")
         rolling = catalog_entry("rolling_window_aggregate")
 
-        self.assertEqual(cross_partition.readme_order, 5)
+        self.assertEqual(cross_partition.readme_order, 6)
         self.assertEqual(cross_partition.reference_number, 7)
         self.assertEqual(cross_partition.reference_title, "Cross-partition join")
-        self.assertEqual(entropy.readme_order, 6)
+        self.assertEqual(entropy.readme_order, 8)
         self.assertEqual(entropy.reference_number, 10)
         self.assertEqual(entropy.reference_title, "Ephemeral entropy stream")
-        self.assertEqual(rolling.readme_order, 4)
+        self.assertEqual(rolling.readme_order, 5)
         self.assertFalse(rolling.is_reference_example)
 
     def test_catalog_entries_expose_shared_import_and_file_paths(self) -> None:
@@ -783,9 +786,9 @@ class ExampleTests(unittest.TestCase):
         rendered = render_readme_featured_examples().splitlines()
 
         bullet_lines = tuple(
-            line.removeprefix("- `examples/").split(".py`:", 1)[0].replace("/", ".")
+            line.removeprefix("- [examples/").split(".py]", 1)[0].replace("/", ".")
             for line in rendered
-            if line.startswith("- `examples/")
+            if line.startswith("- [examples/")
         )
 
         self.assertEqual(bullet_lines, README_EXAMPLE_MODULES)
@@ -942,7 +945,7 @@ class ExampleTests(unittest.TestCase):
         original_catalog = catalog_module.EXAMPLE_CATALOG
         try:
             catalog_module.EXAMPLE_CATALOG = tuple(
-                replace(entry, readme_order=7)
+                replace(entry, readme_order=10)
                 if entry.module_name == "ephemeral_entropy_stream"
                 else entry
                 for entry in original_catalog
@@ -1226,8 +1229,16 @@ class ExampleTests(unittest.TestCase):
     def test_simple_latest_example(self) -> None:
         result = load_example_module("simple_latest").run_example()
 
-        self.assertEqual(result["latest_payload"], b"hello")
-        self.assertEqual(result["latest_seq"], 1)
+        self.assertEqual(result["latest_payload"], b"72.9F")
+        self.assertEqual(result["latest_seq"], 2)
+
+    def test_average_temperature_example(self) -> None:
+        result = load_example_module("average_temperature").run_example()
+
+        self.assertEqual(result["samples"], (b"72.4F", b"72.9F", b"73.7F"))
+        self.assertEqual(result["averages"], (b"72.4F", b"72.7F", b"73.0F"))
+        self.assertEqual(result["latest_average"], b"73.0F")
+        self.assertEqual(result["latest_seq"], 3)
 
     def test_observe_publish_example(self) -> None:
         result = load_example_module("observe_publish").run_example()

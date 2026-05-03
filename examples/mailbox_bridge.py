@@ -27,7 +27,7 @@ def run_example() -> MailboxBridgeExampleResult:
         family="mailbox",
         stream="producer",
         variant=Variant.Meta,
-        schema=Schema.bytes("MailboxProducer"),
+        schema=Schema.bytes(name="MailboxProducer"),
     )
 
     consumer_route = example_route(
@@ -37,7 +37,7 @@ def run_example() -> MailboxBridgeExampleResult:
         family="mailbox",
         stream="consumer",
         variant=Variant.Request,
-        schema=Schema.bytes("MailboxConsumer"),
+        schema=Schema.bytes(name="MailboxConsumer"),
     )
 
     graph.connect(source=producer_route, sink=mailbox)

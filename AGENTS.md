@@ -60,6 +60,9 @@ uv run python -m unittest tests.test_components.ComponentTests.test_file_store_a
 - Prefer existing object-shaped API patterns over stringly helpers.
 - Add or update tests for every meaningful behavior change.
 - Keep public API documentation and docstrings current when behavior changes.
+- When documentation examples print or otherwise produce output, show a sample
+  output block next to the example. Link to example files with Markdown links
+  instead of only wrapping paths in code ticks.
 - Keep the top-level `manyfold` namespace narrow; advanced helpers belong under
   `manyfold.graph` or in semi-private helpers.
 - Organize files in this rough order: constants, public methods, then private

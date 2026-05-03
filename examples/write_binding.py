@@ -11,7 +11,7 @@ def run_example() -> dict[str, bytes]:
         owner=OwnerName("counter"),
         family=StreamFamily("counter"),
         stream=StreamName("value"),
-        schema=Schema.bytes("CounterValue"),
+        schema=Schema.bytes(name="CounterValue"),
     )
 
     graph.publish(binding, b"42")

@@ -152,9 +152,10 @@ class Schema(Generic[T]):
         )
 
     @classmethod
-    def bytes(cls, schema_id: str, version: int = 1) -> Schema[bytes]:
+    def bytes(cls, *, name: str, version: int = 1) -> Schema[bytes]:
+        """Create a schema for byte payloads with a readable domain name."""
         return cls(
-            schema_id=schema_id,
+            schema_id=name,
             version=version,
             encode=bytes,
             decode=bytes,
@@ -257,6 +258,18 @@ def sink(route: TypedRoute[T] | RouteRef) -> Sink[T]:
 SchemaLike = Any
 
 
+def _coerce_owner_name(owner: OwnerName | str) -> OwnerName:
+    return owner if isinstance(owner, OwnerName) else OwnerName(owner)
+
+
+def _coerce_stream_family(family: StreamFamily | str) -> StreamFamily:
+    return family if isinstance(family, StreamFamily) else StreamFamily(family)
+
+
+def _coerce_stream_name(stream: StreamName | str) -> StreamName:
+    return stream if isinstance(stream, StreamName) else StreamName(stream)
+
+
 def _coerce_schema(
     schema: SchemaLike[T],
     *,
@@ -283,7 +296,7 @@ def _coerce_schema(
         return cast(
             Schema[T],
             Schema.bytes(
-                schema_id=schema_id, version=1 if version is None else version
+                name=schema_id, version=1 if version is None else version
             ),
         )
     return cast(
@@ -299,13 +312,13 @@ def _coerce_schema(
 @overload
 def route(
     *,
-    plane: Plane,
-    layer: Layer,
-    owner: OwnerName,
-    family: StreamFamily,
-    stream: StreamName,
-    variant: Variant,
+    owner: OwnerName | str,
+    family: StreamFamily | str,
+    stream: StreamName | str,
     schema: SchemaLike[T],
+    plane: Plane = Plane.Read,
+    layer: Layer = Layer.Logical,
+    variant: Variant = Variant.Meta,
     schema_id: str | None = None,
     version: int | None = None,
 ) -> TypedRoute[T]: ...
@@ -326,9 +339,9 @@ def route(
     *,
     plane: Plane | None = None,
     layer: Layer | None = None,
-    owner: OwnerName | None = None,
-    family: StreamFamily | None = None,
-    stream: StreamName | None = None,
+    owner: OwnerName | str | None = None,
+    family: StreamFamily | str | None = None,
+    stream: StreamName | str | None = None,
     variant: Variant | None = None,
     namespace: RouteNamespace | None = None,
     identity: RouteIdentity | None = None,
@@ -342,6 +355,9 @@ def route(
             raise ValueError("pass either namespace or plane/layer, not both")
         plane = namespace.plane
         layer = namespace.layer
+    else:
+        plane = Plane.Read if plane is None else plane
+        layer = Layer.Logical if layer is None else layer
     if identity is not None:
         if (
             owner is not None
@@ -356,14 +372,16 @@ def route(
         family = identity.family
         stream = identity.stream
         variant = identity.variant
-    if None in (plane, layer, owner, family, stream, variant):
+    else:
+        variant = Variant.Meta if variant is None else variant
+    if any(value is None for value in (plane, layer, owner, family, stream, variant)):
         raise ValueError("route requires namespace and identity information")
     return TypedRoute(
         plane=cast(Plane, plane),
         layer=cast(Layer, layer),
-        owner=cast(OwnerName, owner),
-        family=cast(StreamFamily, family),
-        stream=cast(StreamName, stream),
+        owner=_coerce_owner_name(cast(OwnerName | str, owner)),
+        family=_coerce_stream_family(cast(StreamFamily | str, family)),
+        stream=_coerce_stream_name(cast(StreamName | str, stream)),
         variant=cast(Variant, variant),
         schema=_coerce_schema(schema, schema_id=schema_id, version=version),
     )

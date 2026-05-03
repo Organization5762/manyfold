@@ -706,7 +706,7 @@ class SensorIoTests(unittest.TestCase):
         graph = manyfold.Graph()
         source = _route(manyfold, "raw", _int_schema(manyfold, "Raw"))
         sink = _route(manyfold, "sampled", _int_schema(manyfold, "Sampled"))
-        demand = _route(manyfold, "demand", manyfold.Schema.bytes("Demand"))
+        demand = _route(manyfold, "demand", manyfold.Schema.bytes(name="Demand"))
         emitted: list[int] = []
 
         manyfold.RateMatchedSensor(

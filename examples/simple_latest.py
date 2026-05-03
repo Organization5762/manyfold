@@ -2,17 +2,7 @@ from __future__ import annotations
 
 from typing import TypedDict
 
-from manyfold import (
-    Graph,
-    Layer,
-    OwnerName,
-    Plane,
-    Schema,
-    StreamFamily,
-    StreamName,
-    Variant,
-    route,
-)
+from manyfold import Graph, Schema, route
 
 
 class SimpleLatestExampleResult(TypedDict):
@@ -21,20 +11,18 @@ class SimpleLatestExampleResult(TypedDict):
 
 
 def run_example() -> SimpleLatestExampleResult:
-    """Smallest end-to-end example: publish one value, then read it back."""
+    """Publish changing state, then read back the current value."""
     graph = Graph()
-    route_ref = route(
-        plane=Plane.Read,
-        layer=Layer.Logical,
-        owner=OwnerName("demo"),
-        family=StreamFamily("example"),
-        stream=StreamName("latest"),
-        variant=Variant.Meta,
-        schema=Schema.bytes("DemoLatest"),
+    temperature = route(
+        owner="sensor",
+        family="environment",
+        stream="temperature",
+        schema=Schema.bytes(name="Temperature"),
     )
 
-    graph.publish(route_ref, b"hello")
-    latest = graph.latest(route_ref)
+    graph.publish(temperature, b"72.4F")
+    graph.publish(temperature, b"72.9F")
+    latest = graph.latest(temperature)
     assert latest is not None
 
     return {

@@ -19,7 +19,7 @@ class MailboxApiTests(unittest.TestCase):
             family=graph_module.StreamFamily("events"),
             stream=graph_module.StreamName("raw"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("SensorEvent"),
+            schema=graph_module.Schema.bytes(name="SensorEvent"),
         )
         sink = graph_module.route(
             plane=graph_module.Plane.Write,
@@ -28,7 +28,7 @@ class MailboxApiTests(unittest.TestCase):
             family=graph_module.StreamFamily("mailbox"),
             stream=graph_module.StreamName("ingest"),
             variant=graph_module.Variant.Request,
-            schema=graph_module.Schema.bytes("WorkerInbox"),
+            schema=graph_module.Schema.bytes(name="WorkerInbox"),
         )
         graph = graph_module.Graph()
         mailbox = graph.mailbox(
@@ -69,7 +69,7 @@ class MailboxApiTests(unittest.TestCase):
             family=graph_module.StreamFamily("events"),
             stream=graph_module.StreamName("raw"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("SensorEvent"),
+            schema=graph_module.Schema.bytes(name="SensorEvent"),
         )
         graph = graph_module.Graph()
         mailbox = graph.mailbox(
@@ -105,7 +105,7 @@ class MailboxApiTests(unittest.TestCase):
             family=graph_module.StreamFamily("events"),
             stream=graph_module.StreamName("raw"),
             variant=graph_module.Variant.Meta,
-            schema=graph_module.Schema.bytes("SensorEvent"),
+            schema=graph_module.Schema.bytes(name="SensorEvent"),
         )
         graph = graph_module.Graph()
         mailbox = graph.mailbox(
@@ -141,7 +141,7 @@ class MailboxApiTests(unittest.TestCase):
                     family=graph_module.StreamFamily("events"),
                     stream=graph_module.StreamName(overflow_policy),
                     variant=graph_module.Variant.Meta,
-                    schema=graph_module.Schema.bytes("SensorEvent"),
+                    schema=graph_module.Schema.bytes(name="SensorEvent"),
                 )
                 graph = graph_module.Graph()
                 mailbox = graph.mailbox(

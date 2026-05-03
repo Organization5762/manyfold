@@ -34,7 +34,7 @@ def run_example() -> ReadThenWriteNextEpochStepExampleResult:
         family=StreamFamily("speed"),
         stream=StreamName("next_epoch_command"),
         variant=Variant.Request,
-        schema=Schema.bytes("SpeedCommand"),
+        schema=Schema.bytes(name="SpeedCommand"),
     )
     staged_route = route(
         plane=Plane.Read,
@@ -43,7 +43,7 @@ def run_example() -> ReadThenWriteNextEpochStepExampleResult:
         family=StreamFamily("speed"),
         stream=StreamName("staged_next_epoch_command"),
         variant=Variant.Meta,
-        schema=Schema.bytes("SpeedCommand"),
+        schema=Schema.bytes(name="SpeedCommand"),
     )
     step = ReadThenWriteNextEpochStep.map(
         name="ReadThenWriteNextEpochSpeedStep",

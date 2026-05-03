@@ -30,7 +30,7 @@ def run_example() -> BroadcastMirrorExampleResult:
         family=StreamFamily("mirror"),
         stream=StreamName("state"),
         variant=Variant.State,
-        schema=Schema.bytes("MirrorState"),
+        schema=Schema.bytes(name="MirrorState"),
     )
     mirror_a_route = route(
         plane=Plane.State,
@@ -39,7 +39,7 @@ def run_example() -> BroadcastMirrorExampleResult:
         family=StreamFamily("mirror"),
         stream=StreamName("mirror_a"),
         variant=Variant.State,
-        schema=Schema.bytes("MirrorState"),
+        schema=Schema.bytes(name="MirrorState"),
     )
     mirror_b_route = route(
         plane=Plane.State,
@@ -48,7 +48,7 @@ def run_example() -> BroadcastMirrorExampleResult:
         family=StreamFamily("mirror"),
         stream=StreamName("mirror_b"),
         variant=Variant.State,
-        schema=Schema.bytes("MirrorState"),
+        schema=Schema.bytes(name="MirrorState"),
     )
 
     mirror_a: deque[bytes] = deque()

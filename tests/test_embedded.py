@@ -22,7 +22,7 @@ class EmbeddedProfileTests(unittest.TestCase):
             owner=manyfold.OwnerName("uart-temp"),
             family=manyfold.StreamFamily("sensor"),
             stream=manyfold.StreamName("temperature"),
-            schema=manyfold.Schema.bytes("Temperature"),
+            schema=manyfold.Schema.bytes(name="Temperature"),
         )
 
         self.assertEqual(sensor.validate(), ())
@@ -36,9 +36,9 @@ class EmbeddedProfileTests(unittest.TestCase):
             owner=manyfold.OwnerName("lidar"),
             family=manyfold.StreamFamily("scan"),
             metadata_stream=manyfold.StreamName("meta"),
-            metadata_schema=manyfold.Schema.bytes("LidarMeta"),
+            metadata_schema=manyfold.Schema.bytes(name="LidarMeta"),
             payload_stream=manyfold.StreamName("payload"),
-            payload_schema=manyfold.Schema.bytes("LidarPayload"),
+            payload_schema=manyfold.Schema.bytes(name="LidarPayload"),
         )
 
         self.assertIn(
@@ -72,7 +72,7 @@ class EmbeddedProfileTests(unittest.TestCase):
             owner=manyfold.OwnerName("uart-temp"),
             family=manyfold.StreamFamily("sensor"),
             stream=manyfold.StreamName("temperature"),
-            schema=manyfold.Schema.bytes("Temperature"),
+            schema=manyfold.Schema.bytes(name="Temperature"),
         )
 
         self.assertIn(
