@@ -1,5 +1,9 @@
 # manyfold
 
+<p align="center">
+  <img src="docs/assets/manyfold-topology-graph.png" alt="A schematic manyfold graph layered over a topological surface" width="560">
+</p>
+
 This repository now contains a first-pass implementation scaffold for the
 `docs/rfc/wiregraph_rfc_rev2.md` Manyfold RFC.
 
@@ -98,6 +102,27 @@ becoming a composition unit: it has one required input stream (`read`), one
 required output route (`output`), and one shared derived stream (`write`). Any
 subscriber to `write` observes the same emitted values that the graph sees when
 the step is installed and started.
+
+## The Shape of a Running Graph
+
+Manyfold treats a reactive program as more than a flat node-and-edge diagram. A
+graph is laid onto a topology: ownership, stream families, routes, planes,
+layers, retention rules, demand, and write shadows all describe where a signal
+belongs and how it can be reached. Once those relationships are explicit, the
+graph has depth.
+
+That depth is the useful mental model. Nodes that are grouped together are not
+just visually close; they occupy a higher-level runtime surface. A route can sit
+on an application layer, a device layer, a transport plane, or an audit plane.
+A capacitor can lift pressure into visible storage. A write binding can separate
+request, shadow, reported, and effective state into related strata. A lineage
+query can cut through those strata and explain how an output came to exist.
+
+In that sense, a graph laid on a topology becomes a 3D object. The Z axis is
+not decorative; it is the structure created by grouping, layering, ownership,
+and operational policy. Manyfold's API is meant to preserve that shape so a
+small script can grow into an inspectable runtime without flattening its
+meaning into anonymous queues and callback chains.
 
 ## Why This Approach Is Useful
 

@@ -54,6 +54,7 @@ from .embedded import (
 from .graph import (
     Capacitor as Capacitor,
     ControlLoops as ControlLoops,
+    DiagramNode as DiagramNode,
     FlowPolicy as FlowPolicy,
     FlowSnapshot as FlowSnapshot,
     Graph as Graph,
@@ -211,6 +212,7 @@ __all__ = [
     "DelimitedMessageBuffer",
     "DetectionNode",
     "DetectionNodeHandle",
+    "DiagramNode",
     "DoubleBuffer",
     "DuplexSensorPeripheral",
     "PayloadDemandSnapshot",

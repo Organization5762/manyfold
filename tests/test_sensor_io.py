@@ -374,6 +374,29 @@ class SensorIoTests(unittest.TestCase):
 
         self.assertEqual(received, [7])
 
+    def test_managed_graph_node_appears_in_diagram(self) -> None:
+        manyfold = load_manyfold_package()
+        graph = manyfold.Graph()
+        output = _route(manyfold, "diagram_output", _int_schema(manyfold, "Output"))
+        errors = _route(manyfold, "diagram_errors", _exception_schema(manyfold))
+
+        manyfold.ManagedGraphNode(
+            name="diagram-source",
+            body=lambda stop, _graph: stop.set(),
+            output_routes=(output,),
+            error_route=errors,
+            group="sensor",
+            start_immediately=False,
+        ).install(graph)
+
+        diagram = graph.diagram(group_by=("layer", "owner"))
+
+        self.assertIn('["node / sensor"]', diagram)
+        self.assertIn('["diagram-source"]', diagram)
+        self.assertIn('["io.diagram_output<br/>meta"]', diagram)
+        self.assertIn('["io.diagram_errors<br/>meta"]', diagram)
+        self.assertEqual(len(list(graph.diagram_nodes())), 1)
+
     def test_detection_node_publishes_each_detected_item(self) -> None:
         manyfold = load_manyfold_package()
         graph = manyfold.Graph()
