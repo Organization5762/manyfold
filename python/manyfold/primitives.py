@@ -8,6 +8,7 @@ enough to deserve first-class status.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import cached_property
 from itertools import count
 from threading import Lock
 from typing import (
@@ -200,9 +201,9 @@ class TypedRoute(Generic[T]):
     variant: Variant
     schema: Schema[T]
 
-    @property
+    @cached_property
     def route_ref(self) -> RouteRef:
-        """Materialize the native route reference only when needed."""
+        """Materialize the native route reference once when needed."""
         return RouteRef(
             NamespaceRef(plane=self.plane, layer=self.layer, owner=self.owner.value),
             family=self.family.value,
