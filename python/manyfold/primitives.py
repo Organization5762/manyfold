@@ -8,6 +8,8 @@ enough to deserve first-class status.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from itertools import count
+from threading import Lock
 from typing import (
     Any,
     Callable,
@@ -34,6 +36,9 @@ T = TypeVar("T")
 TRead = TypeVar("TRead")
 TWrite = TypeVar("TWrite")
 TProto = TypeVar("TProto", bound="ProtobufMessage")
+_ANY_SCHEMA_IDS = count(1)
+_ANY_SCHEMA_LOCK = Lock()
+_ANY_SCHEMA_VALUES: dict[str, Any] = {}
 
 
 @runtime_checkable
@@ -117,6 +122,34 @@ class Schema(Generic[T]):
     version: int
     encode: Callable[[T], bytes]
     decode: Callable[[bytes], T]
+
+    @classmethod
+    def any(cls, schema_id: str = "Any", version: int = 1) -> Schema[Any]:
+        """Create a process-local schema for arbitrary Python objects.
+
+        The encoded bytes are opaque object references valid only inside the
+        current Python process. Use this for in-memory graph streams carrying
+        local handles or rich Python objects; do not use it for durable storage
+        or cross-process transport.
+        """
+
+        def encode(value: Any) -> bytes:
+            with _ANY_SCHEMA_LOCK:
+                key = str(next(_ANY_SCHEMA_IDS))
+                _ANY_SCHEMA_VALUES[key] = value
+            return key.encode("ascii")
+
+        def decode(payload: bytes) -> Any:
+            key = payload.decode("ascii")
+            with _ANY_SCHEMA_LOCK:
+                return _ANY_SCHEMA_VALUES[key]
+
+        return cls(
+            schema_id=schema_id,
+            version=version,
+            encode=encode,
+            decode=decode,
+        )
 
     @classmethod
     def bytes(cls, schema_id: str, version: int = 1) -> Schema[bytes]:
