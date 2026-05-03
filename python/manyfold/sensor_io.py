@@ -812,7 +812,7 @@ class DelimitedMessageBuffer:
     _bytes_buffer: bytearray = field(default_factory=bytearray, init=False, repr=False)
     _text_buffer: str = field(default="", init=False, repr=False)
     _text_decoder: codecs.IncrementalDecoder = field(
-        default_factory=lambda: codecs.getincrementaldecoder("utf-8")(errors="ignore"),
+        default_factory=lambda: codecs.getincrementaldecoder("utf-8")(errors="strict"),
         init=False,
         repr=False,
     )
@@ -899,7 +899,10 @@ class JsonEventDecoder:
 
     def decode(self, message: bytes | bytearray | str) -> SensorEvent | None:
         raw = message.encode("utf-8") if isinstance(message, str) else bytes(message)
-        text = raw.decode("utf-8", errors="ignore").strip()
+        try:
+            text = raw.decode("utf-8").strip()
+        except UnicodeDecodeError:
+            return None
         if not text:
             return None
         try:

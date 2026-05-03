@@ -104,6 +104,13 @@ class SensorIoTests(unittest.TestCase):
         self.assertEqual(text_buffer.append(b"caf\xc3"), ())
         self.assertEqual(text_buffer.append(b"\xa9\n"), ("café",))
 
+    def test_delimited_message_buffer_rejects_invalid_utf8_text(self) -> None:
+        manyfold = load_manyfold_package()
+        text_buffer = manyfold.DelimitedMessageBuffer(mode="text")
+
+        with self.assertRaises(UnicodeDecodeError):
+            text_buffer.append(b"ok\xff\n")
+
     def test_delimited_message_buffer_handles_multi_byte_delimiters(self) -> None:
         manyfold = load_manyfold_package()
         byte_buffer = manyfold.DelimitedMessageBuffer(delimiter=b"\r\n")
@@ -154,6 +161,15 @@ class SensorIoTests(unittest.TestCase):
         self.assertEqual(event.identity.id, "imu-1")
         self.assertEqual(event.identity.group, "ambient")
         self.assertEqual(event.metadata, {"quality": "ok"})
+
+    def test_json_event_decoder_rejects_invalid_utf8(self) -> None:
+        manyfold = load_manyfold_package()
+        decoder = manyfold.JsonEventDecoder()
+
+        event = decoder.decode(b'{"event_type":"sensor.note","data":"ok"}\xff')
+
+        self.assertIsNone(event)
+        self.assertEqual(decoder.sequence.peek(), 0)
 
     def test_sensor_event_schema_round_trips_identity_and_raw_bytes(self) -> None:
         manyfold = load_manyfold_package()
