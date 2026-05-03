@@ -1,17 +1,24 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, TypeVar
+from typing import TypeVar
 
-if TYPE_CHECKING:
-    from manyfold import Layer, Plane, Schema, TypedRoute, Variant
+from manyfold import (
+    Layer,
+    OwnerName,
+    Plane,
+    Schema,
+    StreamFamily,
+    StreamName,
+    TypedRoute,
+    Variant,
+    route,
+)
 
 T = TypeVar("T")
 
 
 def int_schema(schema_id: str, version: int = 1) -> "Schema[int]":
     """ASCII integer schema used by the executable examples."""
-    from manyfold import Schema
-
     return Schema(
         schema_id=schema_id,
         version=version,
@@ -31,8 +38,6 @@ def example_route(
     schema: "Schema[T]",
 ) -> "TypedRoute[T]":
     """Build a typed route for the executable examples with string inputs."""
-    from manyfold import OwnerName, StreamFamily, StreamName, route
-
     return route(
         plane=plane,
         layer=layer,
@@ -56,8 +61,6 @@ def sibling_route(
     schema: "Schema[T] | None" = None,
 ) -> "TypedRoute[T]":
     """Clone one example route while overriding only the changed fields."""
-    from manyfold import OwnerName, StreamFamily, StreamName, route
-
     return route(
         plane=base.plane if plane is None else plane,
         layer=base.layer if layer is None else layer,

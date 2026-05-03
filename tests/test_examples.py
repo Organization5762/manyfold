@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import importlib.util
 import re
 import subprocess
@@ -1161,6 +1162,20 @@ class ExampleTests(unittest.TestCase):
         self.assertEqual(schema.version, 3)
         self.assertEqual(schema.encode(42), b"42")
         self.assertEqual(schema.decode(b"42"), 42)
+
+    def test_shared_example_helpers_keep_dependencies_at_module_scope(self) -> None:
+        source_path = Path(__file__).resolve().parents[1] / "examples" / "_shared.py"
+        tree = ast.parse(source_path.read_text(encoding="utf-8"))
+
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            nested_imports = tuple(
+                child
+                for child in ast.walk(node)
+                if isinstance(child, (ast.Import, ast.ImportFrom))
+            )
+            self.assertEqual(nested_imports, (), msg=f"{node.name} has nested imports")
 
     def test_sync_readme_featured_examples_rejects_missing_or_reversed_markers(
         self,
