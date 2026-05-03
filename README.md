@@ -1,151 +1,63 @@
 # manyfold
 
 <p align="center">
-  <img src="docs/assets/manyfold-topology-graph.png" alt="A schematic manyfold graph layered over a topological surface" width="560">
+  <img src="docs/assets/manyfold-topology-graph.png" alt="A schematic logical board with overlapping graph regions and circuit-style routes" width="640">
 </p>
 
-This repository now contains a first-pass implementation scaffold for the
-`docs/rfc/wiregraph_rfc_rev2.md` Manyfold RFC.
+Manyfold is a component library for execution graphs.
 
-## Layout
+Its goal is to make graphs more usable and more grokkable: application signals,
+runtime state, flow control, time, retention, writes, payload access, and audit
+history should be representable as graph concerns instead of being hidden in
+callbacks, queue names, retry loops, and side-channel logs.
 
-- `pyproject.toml`: maturin/PyO3 Python packaging entrypoint
-- `Cargo.toml`: Rust crate for the native core and Python extension
-- `src/`: Rust in-memory runtime, typed refs, descriptors, envelopes, mailboxes, queries, and control-loop stubs
-- `python/manyfold/`: Python-facing ergonomic wrapper layer
-- `python/manyfold/primitives.py`: primary nouns and verbs for the Python API
-- `python/manyfold/components.py`: convenient components built from graph primitives
-- `python/manyfold/embedded.py`: RFC 21 embedded device profile helpers and validation
-- `python/manyfold/reference_examples.py`: RFC 23 reference example suite registry
-- `examples/`: executable API examples that are also covered by the test suite
+The concrete mental model is a logical board. Building a Manyfold graph should
+feel as direct as laying out a circuit board: routes are traces, ports are pads,
+mailboxes and buffers are components, planes and layers separate concerns, and
+overlapping graph regions make shared ownership, policy, and topology visible.
+The point is not to draw a prettier pipeline. The point is to preserve enough
+structure that an execution graph can be queried, shaped, replayed, audited,
+and explained.
 
-## Status
+This repository contains an RFC-stage implementation scaffold for the
+`docs/rfc/wiregraph_rfc_rev2.md` Manyfold RFC. It is not a production runtime
+yet, but the API direction is concrete enough to show the shape of the library.
 
-This is an RFC stub implementation, not a production runtime. The current code focuses on:
+## Logical Boards
 
-- typed namespace/route/schema identity objects,
-- explicit `ReadablePort`, `WritablePort`, `WriteBinding`, and `Mailbox` surfaces,
-- descriptor and envelope scaffolding,
-- graph-visible capacitor, resistor, and watchdog flow primitives,
-- mailbox credit, overflow, and queue inspection helpers,
-- guarded write scheduling with typed retry/backoff policies,
-- explicit write-shadow reconciliation with RFC-shaped coherence taints,
-- lifecycle bindings as specialized write/shadow bundles with auditable event and optional health routes,
-- explicit demand-driven rate matching for bursty streams,
-- watermark-aware event-time rolling windows and aggregations,
-- stream-table lookup joins against materialized state views,
-- route-level payload-demand accounting plus route-level payload-store retention semantics for lazy bulk payloads,
-- explicit per-route replay/retention policy overrides in the Python layer,
-- explicit taint-repair operators plus stream-bound taint and repair-note query inspection,
-- explicit event-lineage inspection by route, trace id, causality id, or correlation id,
-- route-local audit snapshots that summarize producers, subscribers, related write requests, and taint repairs,
-- catalog/latest/topology/validation query helpers,
-- a minimal `ControlLoop` epoch stub,
-- Python object-first routes and shared-stream `ReadThenWriteNextEpochStep` composition,
-- embedded device profile helpers for scalar and bulk sensors,
-- a named reference example suite that tracks the RFC examples and runs the supported subset,
-- Python bindings via PyO3 in the same layout as the referenced project style.
+A normal event-driven program often flattens its design into strings and
+callbacks: topic names, handler chains, queue settings, retry policies, and log
+correlation ids. Those are all graph facts, but they usually live outside the
+graph.
 
-## API Design Rules
+Manyfold pulls those facts into the graph. A `TypedRoute` names a signal with
+ownership, stream identity, variant, plane, layer, and schema. Components such
+as capacitors, resistors, watchdogs, mailboxes, windows, joins, stores, write
+bindings, taints, and lineage records then make execution concerns visible at
+the same level as nodes and edges.
 
-The repository follows four implementation rules:
+That is where the board metaphor matters. A circuit board is concrete because
+you can point at traces, pads, vias, planes, and components. Manyfold aims for
+the same concreteness in software execution graphs. A logical board should let
+you point at a route, see what owns it, inspect what pressure exists on it,
+follow how a write becomes effective state, and explain why an output exists.
 
-- write both very small examples and deeper behavioral tests;
-- prefer extensive docstrings, targeted comments for non-obvious logic, and README-level guidance;
-- add types aggressively and shape APIs around understandable objects rather than stringly calls;
-- keep the top-level `manyfold` namespace narrow, with advanced helpers living under `manyfold.graph` and helper internals prefixed with `_`.
+## Graphs With Depth
 
-The intended Python wrapper surface is deliberately narrow:
+A graph laid onto a topology is not really flat. Nodes that are grouped together
+occupy a region. Regions can overlap. Routes can cross boundaries. Some edges
+belong to application state, some to transport, some to storage, some to audit,
+and some to control policy.
 
-- build a `TypedRoute` with `OwnerName`, `StreamFamily`, `StreamName`, and `Schema`
-- build a `ReadThenWriteNextEpochStep` from a read stream and an output route
-- `graph.latest(route)` for snapshot reads
-- `graph.observe(route)` for Rx subscriptions
-- `graph.publish(route, payload)` for writes
-- `graph.pipe(source, route)` for wiring an Rx source into a route
-- `graph.install(step)` for attaching a `ReadThenWriteNextEpochStep`
-- `graph.run_control_loop(name)` for advancing a control loop once
-- `source(route)` and `sink(route)` for naming signal roles without adding runtime nodes
-- `graph.capacitor(source=..., sink=..., capacity=..., demand=..., immediate=...)` for active bounded storage that creates demand until full
-- `graph.resistor(source=..., sink=..., gate=..., release=...)` for explicit pass-through, gated, or release-pulsed flow shaping
-- `graph.watchdog(reset_by=..., output=..., after=..., clock=...)` for missing-flow detection such as Raft election timeouts
-- `graph.flow_snapshot(route_or_port)` for the current route credit view
-- `graph.describe_edge(source=..., sink=...)` for RFC-ordered edge flow descriptor composition
-- `graph.configure_flow_defaults(FlowPolicy(...))` for graph-wide edge flow defaults
-- `graph.configure_source_flow(route, FlowPolicy(...))` for source-side edge defaults
-- `graph.configure_sink_flow(route, FlowPolicy(...))` for sink-side edge requirements
-- `graph.scheduler_snapshot(route=None)` for queued guarded-write state and retry gates
-- `graph.mailbox_snapshot(mailbox)` for mailbox depth/overflow inspection
-- `graph.lifecycle(owner, family, intent_schema=...)` for RFC-shaped device/runtime lifecycle bindings
-- `graph.configure_retention(route, RouteRetentionPolicy(...))` for explicit replay/retention semantics
-- `graph.route_audit(route)` for route-local producer/subscriber/write/taint audit summaries
-- `graph.lineage(route=None, causality_id=..., correlation_id=...)` for retained causality/correlation inspection
-- `graph.filter(source, predicate=...)` for explicit typed metadata/value filtering
-- `graph.window(source, size=..., trigger=..., partition_by=...)` for rolling windows with optional trigger- and partition-scoped release
-- `graph.window_aggregate(source, size=..., aggregate=..., trigger=..., partition_by=...)` for rolling window aggregations with explicit trigger and partition policy
-- `graph.window_by_time(source, width=..., watermark=..., partition_by=...)` for event-time windows driven by explicit watermark progress with per-partition buffers
-- `graph.window_aggregate_by_time(source, width=..., aggregate=..., watermark=..., partition_by=...)` for watermark-aware event-time aggregations with partition-scoped state
-- `graph.lookup_join(left, right_state, combine=...)` for stream-table joins against materialized state
-- `graph.interval_join(left, right, within=..., combine=...)` for bounded streaming joins
-- `FileStore(root).prefix(...)` for FoundationDB-style byte keyspaces on local files
-- `EventLog(name, keyspace, schema)` for typed append/committed flow over a byte keyspace
-- `SnapshotStore(name, keyspace, schema)` for typed latest-value state over a byte keyspace
-- `Consensus.install(graph, ...)` for a default Raft-style leader-election component built from capacitors, resistors, and watchdogs
-- `Memory(path).remember(graph, route)` and `Memory(path).resume(graph, route)` for disk-backed route memory
+Manyfold treats that depth as part of the model. The Z axis is the structure
+created by grouping, layering, ownership, and operational policy:
 
-These route inputs are object-based rather than ad hoc strings. `Schema` also
-owns payload encoding/decoding, so `latest(route)` and `observe(route)` can
-return typed values instead of raw payload bytes.
+- a route can sit on an application layer, device layer, transport plane, or audit plane;
+- a capacitor can lift downstream pressure into visible bounded storage;
+- a write binding can separate request, shadow, reported, and effective state into related strata;
+- a lineage query can cut across those strata and explain how an output came to exist.
 
-`ReadThenWriteNextEpochStep` lives in the primary primitives module because it is
-becoming a composition unit: it has one required input stream (`read`), one
-required output route (`output`), and one shared derived stream (`write`). Any
-subscriber to `write` observes the same emitted values that the graph sees when
-the step is installed and started.
-
-## The Shape of a Running Graph
-
-Manyfold treats a reactive program as more than a flat node-and-edge diagram. A
-graph is laid onto a topology: ownership, stream families, routes, planes,
-layers, retention rules, demand, and write shadows all describe where a signal
-belongs and how it can be reached. Once those relationships are explicit, the
-graph has depth.
-
-That depth is the useful mental model. Nodes that are grouped together are not
-just visually close; they occupy a higher-level runtime surface. A route can sit
-on an application layer, a device layer, a transport plane, or an audit plane.
-A capacitor can lift pressure into visible storage. A write binding can separate
-request, shadow, reported, and effective state into related strata. A lineage
-query can cut through those strata and explain how an output came to exist.
-
-In that sense, a graph laid on a topology becomes a 3D object. The Z axis is
-not decorative; it is the structure created by grouping, layering, ownership,
-and operational policy. Manyfold's API is meant to preserve that shape so a
-small script can grow into an inspectable runtime without flattening its
-meaning into anonymous queues and callback chains.
-
-## Why This Approach Is Useful
-
-Manyfold is trying to make the moving parts of reactive systems visible without
-making application code feel like a distributed-systems paper. A normal
-event-driven program often hides the hardest questions in callbacks, queue
-names, string topics, and retry loops: who owns this signal, what schema is it,
-is the latest value replayable, what happens when the consumer is slower than
-the producer, did this write request take effect, and can we explain why this
-output exists?
-
-The current approach turns those questions into graph-shaped objects. A
-`TypedRoute` names a signal with an owner, family, stream, variant, plane, layer,
-and schema. `publish`, `latest`, `observe`, and `pipe` give the small everyday
-API. Capacitors, resistors, watchdogs, mailboxes, windows, joins, retention
-policies, write shadows, taints, and lineage records then add behavior in places
-where the graph can inspect it.
-
-That is the sales pitch: instead of building a clever pipeline that becomes
-opaque as soon as it works, you build a flow that can be queried, audited,
-paused, shaped, replayed, and explained. The implementation in this repository
-is still an RFC scaffold, but the API direction is already concrete enough to
-show what kinds of systems this style can support.
+Data-flow concerns become graph concerns. That is the core design rule.
 
 ## Start Here: A Flow Story
 
@@ -192,6 +104,78 @@ same values the graph sees.
 That is the mental model behind the examples: create a route, publish a value,
 shape demand, gate release, join streams, inspect time, and make writes
 auditable.
+
+## Current Surface
+
+The current scaffold focuses on:
+
+- typed namespace, route, and schema identity objects;
+- explicit `ReadablePort`, `WritablePort`, `WriteBinding`, and `Mailbox` surfaces;
+- graph-visible capacitor, resistor, and watchdog flow primitives;
+- mailbox credit, overflow, and queue inspection helpers;
+- guarded write scheduling with typed retry and backoff policies;
+- explicit write-shadow reconciliation with RFC-shaped coherence taints;
+- lifecycle bindings as write/shadow bundles with auditable event and optional health routes;
+- demand-driven rate matching for bursty streams;
+- watermark-aware event-time rolling windows and aggregations;
+- stream-table lookup joins and bounded streaming interval joins;
+- route-level payload-demand accounting for lazy bulk payloads;
+- per-route replay and retention policy overrides;
+- taint-repair operators plus stream-bound taint and repair-note inspection;
+- event-lineage inspection by route, trace id, causality id, or correlation id;
+- route-local audit snapshots for producers, subscribers, writes, and repairs;
+- catalog, latest-value, topology, validation, scheduler, and flow query helpers;
+- object-first Python routes and shared-stream `ReadThenWriteNextEpochStep` composition;
+- embedded device profile helpers for scalar and bulk sensors;
+- a named reference example suite that tracks the RFC examples.
+
+The intended Python wrapper surface is narrow:
+
+- build a `TypedRoute` with `OwnerName`, `StreamFamily`, `StreamName`, and `Schema`
+- build a `ReadThenWriteNextEpochStep` from a read stream and an output route
+- `graph.latest(route)` for snapshot reads
+- `graph.observe(route)` for Rx subscriptions
+- `graph.publish(route, payload)` for writes
+- `graph.pipe(source, route)` for wiring an Rx source into a route
+- `graph.install(step)` for attaching a `ReadThenWriteNextEpochStep`
+- `graph.run_control_loop(name)` for advancing a control loop once
+- `source(route)` and `sink(route)` for naming signal roles without adding runtime nodes
+- `graph.capacitor(source=..., sink=..., capacity=..., demand=..., immediate=...)` for active bounded storage that creates demand until full
+- `graph.resistor(source=..., sink=..., gate=..., release=...)` for explicit pass-through, gated, or release-pulsed flow shaping
+- `graph.watchdog(reset_by=..., output=..., after=..., clock=...)` for missing-flow detection such as Raft election timeouts
+- `graph.flow_snapshot(route_or_port)` for the current route credit view
+- `graph.describe_edge(source=..., sink=...)` for RFC-ordered edge flow descriptor composition
+- `graph.configure_flow_defaults(FlowPolicy(...))` for graph-wide edge flow defaults
+- `graph.configure_source_flow(route, FlowPolicy(...))` for source-side edge defaults
+- `graph.configure_sink_flow(route, FlowPolicy(...))` for sink-side edge requirements
+- `graph.scheduler_snapshot(route=None)` for queued guarded-write state and retry gates
+- `graph.mailbox_snapshot(mailbox)` for mailbox depth/overflow inspection
+- `graph.lifecycle(owner, family, intent_schema=...)` for RFC-shaped device/runtime lifecycle bindings
+- `graph.configure_retention(route, RouteRetentionPolicy(...))` for explicit replay/retention semantics
+- `graph.route_audit(route)` for route-local producer/subscriber/write/taint audit summaries
+- `graph.lineage(route=None, causality_id=..., correlation_id=...)` for retained causality/correlation inspection
+- `graph.filter(source, predicate=...)` for explicit typed metadata/value filtering
+- `graph.window(source, size=..., trigger=..., partition_by=...)` for rolling windows with optional trigger- and partition-scoped release
+- `graph.window_aggregate(source, size=..., aggregate=..., trigger=..., partition_by=...)` for rolling window aggregations with explicit trigger and partition policy
+- `graph.window_by_time(source, width=..., watermark=..., partition_by=...)` for event-time windows driven by explicit watermark progress with per-partition buffers
+- `graph.window_aggregate_by_time(source, width=..., aggregate=..., watermark=..., partition_by=...)` for watermark-aware event-time aggregations with partition-scoped state
+- `graph.lookup_join(left, right_state, combine=...)` for stream-table joins against materialized state
+- `graph.interval_join(left, right, within=..., combine=...)` for bounded streaming joins
+- `FileStore(root).prefix(...)` for FoundationDB-style byte keyspaces on local files
+- `EventLog(name, keyspace, schema)` for typed append/committed flow over a byte keyspace
+- `SnapshotStore(name, keyspace, schema)` for typed latest-value state over a byte keyspace
+- `Consensus.install(graph, ...)` for a default Raft-style leader-election component built from capacitors, resistors, and watchdogs
+- `Memory(path).remember(graph, route)` and `Memory(path).resume(graph, route)` for disk-backed route memory
+
+These route inputs are object-based rather than ad hoc strings. `Schema` also
+owns payload encoding/decoding, so `latest(route)` and `observe(route)` can
+return typed values instead of raw payload bytes.
+
+`ReadThenWriteNextEpochStep` lives in the primary primitives module because it is
+becoming a composition unit: it has one required input stream (`read`), one
+required output route (`output`), and one shared derived stream (`write`). Any
+subscriber to `write` observes the same emitted values that the graph sees when
+the step is installed and started.
 
 ## Use Cases Worth Building
 
@@ -288,6 +272,18 @@ under `examples/archived/`. The example manifest, README featured-example
 list, and RFC reference suite all derive from the shared example catalog,
 so supported versus archived status lives in one place.
 <!-- manyfold:featured-examples:end -->
+
+## Project Layout
+
+- `pyproject.toml`: maturin/PyO3 Python packaging entrypoint
+- `Cargo.toml`: Rust crate for the native core and Python extension
+- `src/`: Rust in-memory runtime, typed refs, descriptors, envelopes, mailboxes, queries, and control-loop stubs
+- `python/manyfold/`: Python-facing ergonomic wrapper layer
+- `python/manyfold/primitives.py`: primary nouns and verbs for the Python API
+- `python/manyfold/components.py`: convenient components built from graph primitives
+- `python/manyfold/embedded.py`: RFC 21 embedded device profile helpers and validation
+- `python/manyfold/reference_examples.py`: RFC 23 reference example suite registry
+- `examples/`: executable API examples that are also covered by the test suite
 
 ## Best Practices
 
