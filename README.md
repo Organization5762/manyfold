@@ -75,9 +75,7 @@ temperature = route(
     stream="temperature",
     schema=Schema.float(name="Temperature"),
 )
-average_temperature = route(
-    owner="sensor",
-    family="environment",
+average_temperature = temperature.derivative_route(
     stream="average_temperature",
     schema=Schema.float(name="AverageTemperature"),
 )

@@ -4579,6 +4579,53 @@ class GraphReactiveTests(unittest.TestCase):
         self.assertIs(route.layer, graph_module.Layer.Logical)
         self.assertIs(route.variant, graph_module.Variant.Meta)
 
+    def test_typed_route_builds_derivative_route_from_existing_context(self) -> None:
+        graph_module = load_graph_module()
+        source = graph_module.route(
+            owner="sensor",
+            family="environment",
+            stream="temperature",
+            schema=graph_module.Schema.float(name="Temperature"),
+        )
+
+        derivative = source.derivative_route(
+            stream="average_temperature",
+            schema=graph_module.Schema.float(name="AverageTemperature"),
+        )
+
+        self.assertEqual(
+            derivative.display(),
+            "read.logical.sensor.environment.average_temperature.meta.v1",
+        )
+        self.assertEqual(derivative.schema.schema_id, "AverageTemperature")
+        self.assertIs(derivative.owner, source.owner)
+        self.assertIs(derivative.family, source.family)
+        self.assertIs(derivative.plane, source.plane)
+        self.assertIs(derivative.layer, source.layer)
+        self.assertIs(derivative.variant, source.variant)
+
+    def test_typed_route_derivative_route_accepts_context_overrides(self) -> None:
+        graph_module = load_graph_module()
+        source = graph_module.route(
+            owner="sensor",
+            family="environment",
+            stream="temperature",
+            schema=graph_module.Schema.float(name="Temperature"),
+        )
+
+        derivative = source.derivative_route(
+            owner="analytics",
+            family="rollup",
+            stream="average_temperature",
+            variant=graph_module.Variant.State,
+            schema=graph_module.Schema.float(name="AverageTemperature"),
+        )
+
+        self.assertEqual(
+            derivative.display(),
+            "read.logical.analytics.rollup.average_temperature.state.v1",
+        )
+
     def test_bytes_schema_requires_name_keyword(self) -> None:
         graph_module = load_graph_module()
 
