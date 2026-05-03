@@ -190,6 +190,10 @@ class ReferenceExampleSuiteTests(unittest.TestCase):
             self.fail("module does not define __all__")
 
         self.assertEqual(exports_from(stub_module), exports_from(runtime_init_module))
+        self.assertEqual(
+            exports_from(runtime_init_module),
+            tuple(sorted(exports_from(runtime_init_module))),
+        )
 
     def test_manyfold_modules_keep_imports_at_module_scope(self) -> None:
         package_path = Path(__file__).resolve().parents[1] / "python" / "manyfold"
