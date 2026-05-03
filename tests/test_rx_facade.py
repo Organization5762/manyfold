@@ -49,6 +49,29 @@ class RxFacadeTests(unittest.TestCase):
 
         self.assertEqual(actual, exp("--1-2-|"))
 
+    def test_private_facade_modules_publish_stable_exports(self) -> None:
+        load_manyfold_package()
+        expected_exports = {
+            "manyfold._rx": ("Observable", "Subject", "from_iterable"),
+            "manyfold._rx.operators": ("map",),
+            "manyfold._rx.scheduler": ("TimeoutScheduler",),
+            "manyfold._rx.subject": ("BehaviorSubject", "Subject"),
+            "manyfold._rx.subject.behaviorsubject": ("BehaviorSubject",),
+            "manyfold._rx.subject.replaysubject": ("ReplaySubject",),
+            "manyfold._rx.subject.subject": ("Subject",),
+            "manyfold._rx.testing.marbles": ("marbles_testing",),
+        }
+
+        for module_name, names in expected_exports.items():
+            with self.subTest(module=module_name):
+                module = importlib.import_module(module_name)
+
+                self.assertEqual(module.__all__, tuple(sorted(module.__all__)))
+                self.assertTrue(all(not name.startswith("_") for name in module.__all__))
+                for name in names:
+                    self.assertIn(name, module.__all__)
+                    self.assertIs(getattr(module, name), module.__dict__[name])
+
     def test_public_rx_facade_is_not_available(self) -> None:
         load_manyfold_package()
 
