@@ -54,6 +54,7 @@ from .embedded import (
 from .graph import (
     CallbackNode as CallbackNode,
     Capacitor as Capacitor,
+    CoalesceLatestNode as CoalesceLatestNode,
     ControlLoops as ControlLoops,
     DiagramNode as DiagramNode,
     FilterNode as FilterNode,
@@ -173,6 +174,7 @@ __all__ = [
     "CallbackNode",
     "ChangeFilter",
     "ClosedEnvelope",
+    "CoalesceLatestNode",
     "Consensus",
     "ConsensusRoutes",
     "ControlLoop",

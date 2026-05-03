@@ -9,9 +9,11 @@ RFC checklist coverage.
 from __future__ import annotations
 
 import json
+import time
 from collections import deque
 from dataclasses import dataclass, field, replace
 from itertools import count
+from threading import RLock, Timer
 from typing import (
     Any,
     Callable,
@@ -52,6 +54,7 @@ from ._manyfold_rust import (
     WriteBinding,
 )
 from ._rx import Observable, operators as ops
+from ._rx.disposable import Disposable
 from ._rx.subject import Subject
 from .primitives import (
     OwnerName,
@@ -89,6 +92,7 @@ _THREAD_PLACEMENT_KINDS = frozenset(
     ("main", "background", "pooled", "isolated")
 )
 _POOLED_THREAD_SCHEDULERS = frozenset(("background", "blocking_io", "input"))
+_NO_PENDING: Any = object()
 
 
 @runtime_checkable
@@ -108,8 +112,124 @@ class ObservableLike(Protocol[T]):
     def subscribe(
         self,
         observer: ObserverLike[T] | Callable[[T], None] | None = None,
+        on_error: Callable[[Exception], None] | None = None,
+        on_completed: Callable[[], None] | None = None,
         scheduler: object | None = None,
     ) -> SubscriptionLike: ...
+
+
+@dataclass(frozen=True)
+class CoalesceLatestNode(Generic[T]):
+    """Coalesce bursty stream updates to the latest value per time window."""
+
+    name: str
+    window_ms: int
+    stream_name: str | None = None
+
+    def observable(self, source: ObservableLike[T]) -> Observable[T]:
+        if self.window_ms <= 0:
+            return cast(Observable[T], source)
+
+        def subscribe(observer: ObserverLike[T], scheduler: object | None = None) -> Any:
+            del scheduler
+            from .reactive_threads import coalesce_scheduler
+
+            lock = RLock()
+            pending: Any = _NO_PENDING
+            timer: Any | None = None
+            fallback_timer: Timer | None = None
+            due_time: float | None = None
+            window_seconds = self.window_ms / 1000
+
+            def cancel_timers() -> None:
+                nonlocal timer, fallback_timer
+                if timer is not None:
+                    timer.dispose()
+                    timer = None
+                if fallback_timer is not None:
+                    fallback_timer.cancel()
+                    fallback_timer = None
+
+            def flush() -> None:
+                nonlocal pending, due_time
+                with lock:
+                    value = pending
+                    pending = _NO_PENDING
+                    cancel_timers()
+                    due_time = None
+                if value is not _NO_PENDING:
+                    observer.on_next(value)
+
+            def schedule_flush(now: float) -> None:
+                nonlocal timer, fallback_timer, due_time
+                if timer is not None or fallback_timer is not None:
+                    if due_time is not None and now >= due_time:
+                        cancel_timers()
+                        due_time = None
+                    else:
+                        return
+                due_time = now + window_seconds
+                timer = coalesce_scheduler().schedule_relative(
+                    window_seconds,
+                    lambda *_: flush(),
+                )
+                fallback_timer = Timer(window_seconds, flush)
+                fallback_timer.daemon = True
+                fallback_timer.start()
+
+            def on_next(value: T) -> None:
+                nonlocal pending, due_time
+                now = time.monotonic()
+                flush_value: Any = _NO_PENDING
+                with lock:
+                    if (
+                        pending is not _NO_PENDING
+                        and due_time is not None
+                        and now >= due_time
+                    ):
+                        flush_value = pending
+                        pending = _NO_PENDING
+                        cancel_timers()
+                        due_time = None
+                    pending = value
+                    schedule_flush(now)
+                if flush_value is not _NO_PENDING:
+                    observer.on_next(flush_value)
+
+            def on_error(error: Exception) -> None:
+                nonlocal pending, due_time
+                with lock:
+                    cancel_timers()
+                    pending = _NO_PENDING
+                    due_time = None
+                observer.on_error(error)
+
+            def on_completed() -> None:
+                nonlocal due_time
+                with lock:
+                    cancel_timers()
+                    due_time = None
+                flush()
+                observer.on_completed()
+
+            subscription = source.subscribe(
+                on_next,
+                on_error,
+                on_completed,
+                scheduler=coalesce_scheduler(),
+            )
+
+            def dispose() -> None:
+                nonlocal pending, due_time
+                subscription.dispose()
+                with lock:
+                    pending = _NO_PENDING
+                    cancel_timers()
+                    due_time = None
+
+            return Disposable(dispose)
+
+        return rx.create(subscribe)
 
 
 @dataclass(frozen=True)
@@ -1324,6 +1444,21 @@ class RoutePipeline(Generic[T]):
             )
         )
 
+    def coalesce_latest(
+        self,
+        *,
+        window_ms: int,
+        name: str | None = None,
+        stream_name: str | None = None,
+    ) -> RoutePipeline[T]:
+        """Install a graph-visible latest-value coalescing node."""
+        node = CoalesceLatestNode(
+            name or self._graph._next_pipeline_node_name("coalesce-latest"),
+            window_ms=window_ms,
+            stream_name=stream_name,
+        )
+        return self._graph._connect_coalesce_latest_pipeline(self, node)
+
     def filter(
         self,
         predicate: Callable[[T], bool],
@@ -1511,6 +1646,7 @@ class Graph:
         self._pipeline_node_sequence = 0
         self._pipeline_factories: dict[str, Callable[..., Any]] = {
             "callback": CallbackNode,
+            "coalesce_latest": CoalesceLatestNode,
             "filter": FilterNode,
             "map": MapNode,
         }
@@ -3140,6 +3276,42 @@ class Graph:
             thread_placement=thread_placement,
         )
 
+    def _connect_coalesce_latest_pipeline(
+        self,
+        pipeline: RoutePipeline[T],
+        node: CoalesceLatestNode[T],
+    ) -> RoutePipeline[T]:
+        output = self._pipeline_output_route(node.name)
+        self.register_diagram_node(
+            node.name,
+            input_routes=(pipeline.route,),
+            output_routes=(output,),
+        )
+
+        def publish(value: T) -> None:
+            self.publish(output, value)
+
+        coalesced = node.observable(
+            self._pipeline_value_observable(
+                pipeline.route,
+                replay_latest=pipeline._replay_latest,
+                subscriber_id=pipeline._subscriber_id,
+            )
+        )
+        subscription = coalesced.subscribe(publish)
+        connection = GraphConnection(
+            self,
+            name=node.name,
+            subscriptions=(subscription,),
+            nodes=(node.name,),
+        )
+        return RoutePipeline(
+            self,
+            output,
+            replay_latest=False,
+            connections=(*pipeline._connections, connection),
+        )
+
     def _apply_registered_pipeline_operation(
         self,
         pipeline: RoutePipeline[Any],
@@ -3163,6 +3335,8 @@ class Graph:
                 node,
                 lambda value: (node.predicate(value), value),
             )
+        if isinstance(node, CoalesceLatestNode):
+            return self._connect_coalesce_latest_pipeline(pipeline, node)
         if isinstance(node, CallbackNode):
             return pipeline.connect(
                 node.with_thread_placement(

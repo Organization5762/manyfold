@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import sys
 import threading
+import time
 import unittest
 from dataclasses import dataclass
 
@@ -335,6 +336,56 @@ class GraphReactiveTests(unittest.TestCase):
             self.assertEqual(map_node.thread_placement.kind, "isolated")
             self.assertEqual(collect_node.thread_placement.kind, "isolated")
             self.assertEqual(collect_node.thread_placement.thread_name, "exclusive-node")
+        finally:
+            connection.remove()
+
+    def test_coalesce_latest_node_emits_latest_value_on_completion(self) -> None:
+        graph_module = load_graph_module()
+        node = graph_module.CoalesceLatestNode(
+            name="coalesce",
+            window_ms=1000,
+            stream_name="numbers",
+        )
+        seen: list[int] = []
+        source = graph_module.Subject()
+
+        node.observable(source).subscribe(seen.append)
+        source.on_next(1)
+        source.on_next(2)
+        source.on_next(3)
+        source.on_completed()
+
+        self.assertEqual(seen, [3])
+
+    def test_observe_pipeline_coalesces_latest_route_value(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("coalesce_numbers"),
+            variant=graph_module.Variant.Event,
+            schema=int_schema(graph_module, "CoalesceRuntimeNumber"),
+        )
+        graph = graph_module.Graph()
+        seen: list[int] = []
+
+        connection = graph.observe(route, replay_latest=False).coalesce_latest(
+            window_ms=10,
+            name="coalesce",
+            stream_name="numbers",
+        ).callback(seen.append)
+        try:
+            graph.publish(route, 1)
+            graph.publish(route, 2)
+            time.sleep(0.05)
+
+            self.assertEqual(seen, [2])
+            self.assertEqual(
+                [node.name for node in graph.diagram_nodes()],
+                ["coalesce", "callback-1"],
+            )
         finally:
             connection.remove()
 

@@ -124,6 +124,7 @@ class ReferenceExampleSuiteTests(unittest.TestCase):
         self.assertIn("source", manyfold.__all__)
         self.assertIn("sink", manyfold.__all__)
         self.assertIn("CallbackNode", manyfold.__all__)
+        self.assertIn("CoalesceLatestNode", manyfold.__all__)
         self.assertIn("FilterNode", manyfold.__all__)
         self.assertIn("GraphConnection", manyfold.__all__)
         self.assertIn("MapNode", manyfold.__all__)

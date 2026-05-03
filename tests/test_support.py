@@ -103,14 +103,20 @@ def install_reactivex_stub() -> None:
             self._dispose()
 
     class _CallbackObserver:
-        def __init__(self, on_next):
-            self.on_next = on_next
+        def __init__(self, on_next, on_error=None, on_completed=None):
+            self.on_next = on_next or (lambda _value: None)
+            self._on_error = on_error
+            self._on_completed = on_completed
 
         def on_error(self, error):
+            if self._on_error is not None:
+                self._on_error(error)
+                return
             raise error
 
         def on_completed(self):
-            return None
+            if self._on_completed is not None:
+                self._on_completed()
 
     class Observable:
         def __init__(self, subscribe):
@@ -119,9 +125,15 @@ def install_reactivex_stub() -> None:
         def __class_getitem__(cls, item):
             return cls
 
-        def subscribe(self, observer=None, scheduler=None):
+        def subscribe(
+            self,
+            observer=None,
+            on_error=None,
+            on_completed=None,
+            scheduler=None,
+        ):
             if callable(observer) and not hasattr(observer, "on_next"):
-                observer = _CallbackObserver(observer)
+                observer = _CallbackObserver(observer, on_error, on_completed)
             return self._subscribe(observer, scheduler)
 
         def pipe(self, *transforms):
@@ -134,9 +146,15 @@ def install_reactivex_stub() -> None:
         def __init__(self):
             self._observers = []
 
-        def subscribe(self, observer=None, scheduler=None):
+        def subscribe(
+            self,
+            observer=None,
+            on_error=None,
+            on_completed=None,
+            scheduler=None,
+        ):
             if callable(observer) and not hasattr(observer, "on_next"):
-                observer = _CallbackObserver(observer)
+                observer = _CallbackObserver(observer, on_error, on_completed)
             self._observers.append(observer)
 
             def unsubscribe() -> None:
@@ -154,8 +172,19 @@ def install_reactivex_stub() -> None:
             super().__init__()
             self._value = value
 
-        def subscribe(self, observer=None, scheduler=None):
-            subscription = super().subscribe(observer, scheduler=scheduler)
+        def subscribe(
+            self,
+            observer=None,
+            on_error=None,
+            on_completed=None,
+            scheduler=None,
+        ):
+            subscription = super().subscribe(
+                observer,
+                on_error,
+                on_completed,
+                scheduler=scheduler,
+            )
             if callable(observer) and not hasattr(observer, "on_next"):
                 observer(self._value)
             else:
@@ -182,6 +211,7 @@ def install_reactivex_stub() -> None:
         def subscribe(observer=None, scheduler=None):
             for item in items:
                 observer.on_next(item)
+            observer.on_completed()
             return Disposable()
 
         return Observable(subscribe)
@@ -965,6 +995,7 @@ def load_manyfold_package():
         "FirmwareAgentProfile": embedded.FirmwareAgentProfile,
         "Capacitor": graph.Capacitor,
         "CallbackNode": graph.CallbackNode,
+        "CoalesceLatestNode": graph.CoalesceLatestNode,
         "DelimitedMessageBuffer": sensor_io.DelimitedMessageBuffer,
         "DoubleBuffer": sensor_io.DoubleBuffer,
         "DuplexSensorPeripheral": sensor_io.DuplexSensorPeripheral,
