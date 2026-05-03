@@ -601,14 +601,14 @@ class GraphReactiveTests(unittest.TestCase):
         self.assertEqual(graph_module.drain_frame_thread_queue(), 1)
         self.assertEqual(seen, [7])
 
-    def test_share_stream_replays_latest_when_configured(self) -> None:
+    def test_materialize_stream_replays_latest_when_configured(self) -> None:
         graph_module = load_graph_module()
         source = graph_module.Subject()
-        shared = graph_module.share_stream(
+        shared = graph_module.materialize_stream(
             source,
             stream_name="numbers",
-            settings=graph_module.StreamShareSettings(
-                strategy=graph_module.StreamShareStrategy.REPLAY_LATEST,
+            settings=graph_module.StreamMaterializationSettings(
+                strategy=graph_module.StreamMaterializationStrategy.REPLAY_LATEST,
             ),
         )
 
@@ -624,7 +624,7 @@ class GraphReactiveTests(unittest.TestCase):
         self.assertEqual(first, [1, 2, 3])
         self.assertEqual(second, [2, 3])
 
-    def test_share_stream_auto_connect_avoids_resubscribe(self) -> None:
+    def test_materialize_stream_auto_connect_avoids_resubscribe(self) -> None:
         graph_module = load_graph_module()
         subscribe_count = 0
 
@@ -635,11 +635,11 @@ class GraphReactiveTests(unittest.TestCase):
             observer.on_next(subscribe_count)
             return graph_module.Disposable()
 
-        shared = graph_module.share_stream(
+        shared = graph_module.materialize_stream(
             graph_module.rx.create(subscribe),
             stream_name="auto-connect",
-            settings=graph_module.StreamShareSettings(
-                strategy=graph_module.StreamShareStrategy.REPLAY_LATEST_AUTO_CONNECT,
+            settings=graph_module.StreamMaterializationSettings(
+                strategy=graph_module.StreamMaterializationStrategy.REPLAY_LATEST_AUTO_CONNECT,
             ),
         )
 
@@ -654,14 +654,14 @@ class GraphReactiveTests(unittest.TestCase):
         self.assertEqual(first, [1])
         self.assertEqual(second, [1])
 
-    def test_share_stream_replays_configured_buffer(self) -> None:
+    def test_materialize_stream_replays_configured_buffer(self) -> None:
         graph_module = load_graph_module()
         source = graph_module.Subject()
-        shared = graph_module.share_stream(
+        shared = graph_module.materialize_stream(
             source,
             stream_name="buffered",
-            settings=graph_module.StreamShareSettings(
-                strategy=graph_module.StreamShareStrategy.REPLAY_BUFFER,
+            settings=graph_module.StreamMaterializationSettings(
+                strategy=graph_module.StreamMaterializationStrategy.REPLAY_BUFFER,
                 replay_buffer=2,
             ),
         )
@@ -676,7 +676,7 @@ class GraphReactiveTests(unittest.TestCase):
 
         self.assertEqual(seen, [2, 3])
 
-    def test_share_stream_refcount_grace_delays_disconnect(self) -> None:
+    def test_materialize_stream_refcount_grace_delays_disconnect(self) -> None:
         graph_module = load_graph_module()
         subscribe_count = 0
 
@@ -687,11 +687,11 @@ class GraphReactiveTests(unittest.TestCase):
             observer.on_next(subscribe_count)
             return graph_module.Disposable()
 
-        shared = graph_module.share_stream(
+        shared = graph_module.materialize_stream(
             graph_module.rx.create(subscribe),
             stream_name="grace",
-            settings=graph_module.StreamShareSettings(
-                strategy=graph_module.StreamShareStrategy.REPLAY_LATEST,
+            settings=graph_module.StreamMaterializationSettings(
+                strategy=graph_module.StreamMaterializationStrategy.REPLAY_LATEST,
                 refcount_grace_ms=30,
             ),
         )
@@ -706,14 +706,14 @@ class GraphReactiveTests(unittest.TestCase):
 
         self.assertEqual(subscribe_count, 2)
 
-    def test_share_stream_coalesces_latest_when_configured(self) -> None:
+    def test_materialize_stream_coalesces_latest_when_configured(self) -> None:
         graph_module = load_graph_module()
         source = graph_module.Subject()
-        shared = graph_module.share_stream(
+        shared = graph_module.materialize_stream(
             source,
             stream_name="coalesce",
-            settings=graph_module.StreamShareSettings(
-                strategy=graph_module.StreamShareStrategy.SHARE,
+            settings=graph_module.StreamMaterializationSettings(
+                strategy=graph_module.StreamMaterializationStrategy.FAN_OUT,
                 coalesce_window_ms=20,
             ),
         )
@@ -725,6 +725,72 @@ class GraphReactiveTests(unittest.TestCase):
         time.sleep(0.05)
 
         self.assertEqual(seen, [2])
+
+    def test_callback_observable_exposes_fluent_stream_operators(self) -> None:
+        graph_module = load_graph_module()
+        subscribers = []
+
+        def subscribe(observer, scheduler=None):
+            del scheduler
+            subscribers.append(observer)
+            return graph_module.NoopSubscription()
+
+        source = graph_module.CallbackObservable(subscribe)
+        seen: list[int] = []
+        source.start_with(1).scan(lambda total, value: total + value, seed=0).subscribe(
+            seen.append
+        )
+        subscribers[0].on_next(2)
+        subscribers[0].on_next(3)
+
+        self.assertEqual(seen, [1, 3, 6])
+
+    def test_stream_from_can_unwrap_typed_envelopes(self) -> None:
+        graph_module = load_graph_module()
+        schema = int_schema(graph_module, "Number")
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("count"),
+            variant=graph_module.Variant.State,
+            schema=schema,
+        )
+        graph = graph_module.Graph()
+        graph.publish(route, 7)
+
+        seen: list[int] = []
+        graph_module.stream_from(
+            graph.observe(route),
+            unwrap_envelopes=True,
+        ).subscribe(seen.append)
+
+        self.assertEqual(seen, [7])
+
+    def test_route_pipeline_exposes_local_fluent_stream_operators(self) -> None:
+        graph_module = load_graph_module()
+        schema = int_schema(graph_module, "Frame")
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("frame"),
+            variant=graph_module.Variant.State,
+            schema=schema,
+        )
+        graph = graph_module.Graph()
+        seen: list[int] = []
+
+        graph.observe(route, replay_latest=False).start_with(1).scan(
+            lambda total, value: total + value,
+            seed=0,
+        ).subscribe(seen.append)
+        graph.publish(route, 2)
+        graph.publish(route, 3)
+
+        self.assertEqual(seen, [1, 3, 6])
 
     def test_observe_pipeline_installs_logging_node(self) -> None:
         graph_module = load_graph_module()

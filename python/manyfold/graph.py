@@ -137,6 +137,7 @@ class ObservableLike(Protocol[T]):
 
 
 StreamNode: TypeAlias = ObservableLike[T]
+SubscribeCallback: TypeAlias = Callable[[ObserverLike[T], object | None], SubscriptionLike]
 
 
 class ConnectableObservableLike(ObservableLike[T], Protocol[T]):
@@ -162,6 +163,149 @@ class DeliveryLatencyStats:
 class _FrameThreadTask:
     callback: Callable[[], None]
     enqueued_monotonic: float
+
+
+class CallbackSubscription:
+    """Subscription backed by a plain dispose callback."""
+
+    def __init__(self, dispose: Callable[[], None]) -> None:
+        self._dispose = dispose
+        self._disposed = False
+
+    def dispose(self) -> None:
+        if self._disposed:
+            return
+        self._disposed = True
+        self._dispose()
+
+
+class CompositeSubscription:
+    """Dispose a group of subscriptions together."""
+
+    def __init__(self, subscriptions: Sequence[SubscriptionLike] = ()) -> None:
+        self._subscriptions = tuple(subscriptions)
+        self._disposed = False
+
+    def dispose(self) -> None:
+        if self._disposed:
+            return
+        self._disposed = True
+        for subscription in self._subscriptions:
+            subscription.dispose()
+
+
+class NoopSubscription:
+    """Subscription object for sources that have nothing to dispose."""
+
+    def dispose(self) -> None:
+        return None
+
+
+class _CallableObserver(Generic[T]):
+    def __init__(
+        self,
+        on_next: Callable[[T], None],
+        on_error: Callable[[Exception], None] | None = None,
+        on_completed: Callable[[], None] | None = None,
+    ) -> None:
+        self.on_next = on_next
+        self.on_error = on_error or self._ignore_error
+        self.on_completed = on_completed or self._ignore_completed
+
+    def _ignore_error(self, _error: Exception) -> None:
+        return None
+
+    def _ignore_completed(self) -> None:
+        return None
+
+
+class CallbackObservable(Generic[T]):
+    """Observable adapter for callback-first sources."""
+
+    def __init__(self, subscribe: SubscribeCallback[T]) -> None:
+        self._subscribe = subscribe
+
+    def subscribe(
+        self,
+        observer: ObserverLike[T] | Callable[[T], None] | None = None,
+        on_error: Callable[[Exception], None] | None = None,
+        on_completed: Callable[[], None] | None = None,
+        scheduler: object | None = None,
+        *,
+        on_next: Callable[[T], None] | None = None,
+    ) -> SubscriptionLike:
+        callback = on_next or observer
+        if callback is None:
+            resolved_observer: ObserverLike[T] = _CallableObserver(
+                lambda _value: None,
+                on_error,
+                on_completed,
+            )
+        elif callable(callback):
+            resolved_observer = _CallableObserver(callback, on_error, on_completed)
+        else:
+            resolved_observer = callback
+        return self._subscribe(resolved_observer, scheduler)
+
+    def pipe(self, *operators: Any) -> Observable[Any]:
+        return self._observable().pipe(*operators)
+
+    def map(self, transform: Callable[[T], U]) -> Observable[U]:
+        return self._observable().map(transform)
+
+    def filter(self, predicate: Callable[[T], bool]) -> Observable[T]:
+        return self._observable().filter(predicate)
+
+    def scan(
+        self,
+        accumulator: Callable[[Any, T], Any],
+        *,
+        seed: Any = None,
+    ) -> Observable[Any]:
+        return self._observable().scan(accumulator, seed=seed)
+
+    def start_with(self, *values: Any) -> Observable[Any]:
+        return self._observable().start_with(*values)
+
+    def distinct_until_changed(
+        self,
+        key_mapper: Callable[[T], Any] | None = None,
+        comparer: Callable[[Any, Any], bool] | None = None,
+    ) -> Observable[T]:
+        return self._observable().distinct_until_changed(
+            key_mapper=key_mapper,
+            comparer=comparer,
+        )
+
+    def do_action(
+        self,
+        on_next: Callable[[T], None] | None = None,
+        on_error: Callable[[Exception], None] | None = None,
+        on_completed: Callable[[], None] | None = None,
+    ) -> Observable[T]:
+        return self._observable().do_action(
+            on_next=on_next,
+            on_error=on_error,
+            on_completed=on_completed,
+        )
+
+    def pairwise(self) -> Observable[tuple[T, T]]:
+        return self._observable().pairwise()
+
+    def take(self, count: int) -> Observable[T]:
+        return self._observable().take(count)
+
+    def with_latest_from(self, *sources: ObservableLike[Any]) -> Observable[Any]:
+        return self._observable().with_latest_from(*sources)
+
+    def flat_map(self, project: Callable[[T], ObservableLike[Any]]) -> Observable[Any]:
+        return self._observable().flat_map(project)
+
+    def switch_latest(self) -> Observable[Any]:
+        return self._observable().switch_latest()
+
+    def _observable(self) -> Observable[T]:
+        return stream_from(self)
 
 
 class _LatencyRecorder:
@@ -397,10 +541,34 @@ def _reset_reactive_threading_state_for_tests() -> None:
     _LATENCY_RECORDER.clear()
 
 
-def share_sequence(values: Sequence[T]) -> Observable[T]:
-    """Expose a finite sequence as a shared observable."""
+def materialize_sequence(values: Sequence[T]) -> Observable[T]:
+    """Expose a finite sequence as a materialized observable."""
 
     return rx.from_iterable(values).pipe(ops.share())
+
+
+def stream_from(
+    source: ObservableLike[T],
+    *,
+    unwrap_envelopes: bool = False,
+) -> Observable[Any]:
+    """Adapt any subscribable stream to Manyfold's local observable surface."""
+
+    def subscribe(observer: ObserverLike[Any], scheduler: object | None = None) -> Any:
+        def emit(value: Any) -> None:
+            if unwrap_envelopes and hasattr(value, "closed") and hasattr(value, "value"):
+                observer.on_next(value.value)
+            else:
+                observer.on_next(value)
+
+        return source.subscribe(
+            emit,
+            observer.on_error,
+            observer.on_completed,
+            scheduler=scheduler,
+        )
+
+    return rx.create(subscribe)
 
 
 def _enqueue_frame_thread_task(callback: Callable[[], None]) -> None:
@@ -476,11 +644,11 @@ def _observe_on_thread(source: Observable[T], name: str) -> Observable[T]:
     return rx.create(subscribe)
 
 
-class StreamShareStrategy(Enum):
-    """Supported policies for sharing a local observable."""
+class StreamMaterializationStrategy(Enum):
+    """Supported policies for materializing a local observable."""
 
-    SHARE = "share"
-    SHARE_AUTO_CONNECT = "share_auto_connect"
+    FAN_OUT = "fan_out"
+    FAN_OUT_AUTO_CONNECT = "fan_out_auto_connect"
     REPLAY_LATEST = "replay_latest"
     REPLAY_LATEST_AUTO_CONNECT = "replay_latest_auto_connect"
     REPLAY_BUFFER = "replay_buffer"
@@ -488,17 +656,19 @@ class StreamShareStrategy(Enum):
 
 
 class StreamConnectMode(Enum):
-    """Connect timing for ref-counted shared observables."""
+    """Connect timing for ref-counted materialized observables."""
 
     LAZY = "lazy"
     EAGER = "eager"
 
 
 @dataclass(frozen=True)
-class StreamShareSettings:
-    """Configuration for sharing process-local observables."""
+class StreamMaterializationSettings:
+    """Configuration for materializing process-local observables."""
 
-    strategy: StreamShareStrategy = StreamShareStrategy.REPLAY_LATEST
+    strategy: StreamMaterializationStrategy = (
+        StreamMaterializationStrategy.REPLAY_LATEST
+    )
     coalesce_window_ms: int = 0
     stats_log_ms: int = 0
     replay_window_ms: int | None = None
@@ -525,14 +695,14 @@ class StreamShareSettings:
             raise ValueError("refcount_grace_ms must be non-negative")
 
 
-def share_stream(
+def materialize_stream(
     source: ObservableLike[T],
     *,
     stream_name: str,
-    settings: StreamShareSettings | None = None,
+    settings: StreamMaterializationSettings | None = None,
 ) -> Observable[T]:
-    """Share an observable with optional coalescing, replay, and instrumentation."""
-    resolved_settings = settings or StreamShareSettings()
+    """Materialize an observable with optional fan-out, replay, and instrumentation."""
+    resolved_settings = settings or StreamMaterializationSettings()
     shared_source = CoalesceLatestNode(
         name=f"{stream_name}.coalesce_latest",
         window_ms=resolved_settings.coalesce_window_ms,
@@ -562,7 +732,7 @@ def share_stream(
         )
 
     strategy = resolved_settings.strategy
-    if strategy is StreamShareStrategy.SHARE:
+    if strategy is StreamMaterializationStrategy.FAN_OUT:
         if (
             resolved_settings.refcount_grace_ms > 0
             or resolved_settings.refcount_min_subscribers > 1
@@ -576,30 +746,30 @@ def share_stream(
             )
         else:
             result = shared_source.pipe(ops.share())
-    elif strategy is StreamShareStrategy.SHARE_AUTO_CONNECT:
+    elif strategy is StreamMaterializationStrategy.FAN_OUT_AUTO_CONNECT:
         result = shared_source.pipe(ops.publish()).auto_connect(
             resolved_settings.auto_connect_min_subscribers
         )
-    elif strategy is StreamShareStrategy.REPLAY_LATEST:
+    elif strategy is StreamMaterializationStrategy.REPLAY_LATEST:
         result = _share_replayed_stream(
             replay(1),
             settings=resolved_settings,
             stream_name=stream_name,
         )
-    elif strategy is StreamShareStrategy.REPLAY_LATEST_AUTO_CONNECT:
+    elif strategy is StreamMaterializationStrategy.REPLAY_LATEST_AUTO_CONNECT:
         result = replay(1).auto_connect(resolved_settings.auto_connect_min_subscribers)
-    elif strategy is StreamShareStrategy.REPLAY_BUFFER:
+    elif strategy is StreamMaterializationStrategy.REPLAY_BUFFER:
         result = _share_replayed_stream(
             replay(resolved_settings.replay_buffer),
             settings=resolved_settings,
             stream_name=stream_name,
         )
-    elif strategy is StreamShareStrategy.REPLAY_BUFFER_AUTO_CONNECT:
+    elif strategy is StreamMaterializationStrategy.REPLAY_BUFFER_AUTO_CONNECT:
         result = replay(resolved_settings.replay_buffer).auto_connect(
             resolved_settings.auto_connect_min_subscribers
         )
     else:
-        raise ValueError(f"Unknown stream share strategy: {strategy}")
+        raise ValueError(f"Unknown stream materialization strategy: {strategy}")
     return instrument_stream(
         result,
         stream_name=stream_name,
@@ -610,7 +780,7 @@ def share_stream(
 def _share_replayed_stream(
     replayed: ConnectableObservableLike[T],
     *,
-    settings: StreamShareSettings,
+    settings: StreamMaterializationSettings,
     stream_name: str,
 ) -> Observable[T]:
     if settings.refcount_grace_ms > 0 or settings.refcount_min_subscribers > 1:
@@ -2376,6 +2546,54 @@ class RoutePipeline(Generic[T]):
     ) -> RoutePipeline[T]:
         """Compatibility alias for ``then_on_pooled_thread``."""
         return self.then_on_pooled_thread(pool_name or scheduler_name)
+
+    def start_with(self, *values: Any) -> Observable[Any]:
+        """Expose this pipeline with one or more leading values."""
+        return self.pipe(ops.start_with(*values))
+
+    def do_action(
+        self,
+        on_next: Callable[[T], None] | None = None,
+        on_error: Callable[[Exception], None] | None = None,
+        on_completed: Callable[[], None] | None = None,
+    ) -> Observable[T]:
+        """Expose this pipeline with side effects for stream notifications."""
+        return self.pipe(
+            ops.do_action(
+                on_next=on_next,
+                on_error=on_error,
+                on_completed=on_completed,
+            )
+        )
+
+    def scan(
+        self,
+        accumulator: Callable[[Any, T], Any],
+        *,
+        seed: Any = None,
+    ) -> Observable[Any]:
+        """Expose this pipeline with accumulated state."""
+        return self.pipe(ops.scan(accumulator, seed=seed))
+
+    def pairwise(self) -> Observable[tuple[T, T]]:
+        """Expose adjacent pairs from this pipeline."""
+        return self.pipe(ops.pairwise())
+
+    def take(self, count: int) -> Observable[T]:
+        """Expose the first ``count`` values from this pipeline."""
+        return self.pipe(ops.take(count))
+
+    def with_latest_from(self, *sources: ObservableLike[Any]) -> Observable[Any]:
+        """Expose this pipeline combined with latest values from other streams."""
+        return self.pipe(ops.with_latest_from(*sources))
+
+    def flat_map(self, project: Callable[[T], ObservableLike[Any]]) -> Observable[Any]:
+        """Expose this pipeline by merging projected inner streams."""
+        return self.pipe(ops.flat_map(project))
+
+    def switch_latest(self) -> Observable[Any]:
+        """Expose values from only the latest inner stream."""
+        return self.pipe(ops.switch_latest())
 
     def subscribe(
         self,

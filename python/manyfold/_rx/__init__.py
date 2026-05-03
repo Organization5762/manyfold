@@ -58,9 +58,6 @@ def _install_fluent_observable_methods() -> None:
     def _scan(self: Observable, accumulator, seed=None):  # type: ignore[no-untyped-def]
         return self.pipe(operators.scan(accumulator, seed=seed))
 
-    def _share(self: Observable):  # type: ignore[no-untyped-def]
-        return self.pipe(operators.share())
-
     def _start_with(self: Observable, *values):  # type: ignore[no-untyped-def]
         return self.pipe(operators.start_with(*values))
 
@@ -76,25 +73,47 @@ def _install_fluent_observable_methods() -> None:
             )
         )
 
-    def _do_action(self: Observable, **kwargs):  # type: ignore[no-untyped-def]
-        return self.pipe(operators.do_action(**kwargs))
+    def _do_action(  # type: ignore[no-untyped-def]
+        self: Observable,
+        on_next=None,
+        on_error=None,
+        on_completed=None,
+    ):
+        return self.pipe(
+            operators.do_action(
+                on_next=on_next,
+                on_error=on_error,
+                on_completed=on_completed,
+            )
+        )
 
     def _pairwise(self: Observable):  # type: ignore[no-untyped-def]
         return self.pipe(operators.pairwise())
 
+    def _take(self: Observable, count):  # type: ignore[no-untyped-def]
+        return self.pipe(operators.take(count))
+
     def _with_latest_from(self: Observable, *sources):  # type: ignore[no-untyped-def]
         return self.pipe(operators.with_latest_from(*sources))
+
+    def _flat_map(self: Observable, mapper):  # type: ignore[no-untyped-def]
+        return self.pipe(operators.flat_map(mapper))
+
+    def _switch_latest(self: Observable):  # type: ignore[no-untyped-def]
+        return self.pipe(operators.switch_latest())
 
     methods = {
         "map": _map,
         "filter": _filter,
         "scan": _scan,
-        "share": _share,
         "start_with": _start_with,
         "distinct_until_changed": _distinct_until_changed,
         "do_action": _do_action,
         "pairwise": _pairwise,
+        "take": _take,
         "with_latest_from": _with_latest_from,
+        "flat_map": _flat_map,
+        "switch_latest": _switch_latest,
     }
     for name, method in methods.items():
         if not hasattr(Observable, name):
