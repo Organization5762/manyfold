@@ -1201,14 +1201,25 @@ impl GraphCore {
             }
             QueryKindCore::ValidateGraph => {
                 let mut issues = Vec::new();
-                for (source, sink) in &self.edges {
-                    if source.schema != sink.schema {
-                        issues.push(format!(
-                            "Schema mismatch: {} -> {}",
-                            source.display(),
-                            sink.display()
-                        ));
-                    }
+                let mut schema_mismatches = self
+                    .edges
+                    .iter()
+                    .filter(|(source, sink)| source.schema != sink.schema)
+                    .map(|(source, sink)| {
+                        let source_display = source.display();
+                        let sink_display = sink.display();
+                        (
+                            source_display.clone(),
+                            sink_display.clone(),
+                            format!("Schema mismatch: {source_display} -> {sink_display}"),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                schema_mismatches.sort_by(|left, right| {
+                    (left.0.as_str(), left.1.as_str()).cmp(&(right.0.as_str(), right.1.as_str()))
+                });
+                for (_, _, issue) in schema_mismatches {
+                    issues.push(issue);
                 }
                 let mut invalid_mailboxes = self
                     .mailboxes
@@ -1336,6 +1347,68 @@ mod tests {
             panic!("unexpected query result");
         };
         assert_eq!(issues.len(), 1);
+    }
+
+    #[test]
+    fn validate_graph_reports_schema_mismatches_by_route_display() {
+        let z_source = sample_route(
+            Plane::Read,
+            Layer::Raw,
+            "zeta",
+            "imu",
+            "accel",
+            Variant::Meta,
+        );
+        let a_source = sample_route(
+            Plane::Read,
+            Layer::Raw,
+            "alpha",
+            "imu",
+            "accel",
+            Variant::Meta,
+        );
+        let mut z_sink = sample_route(
+            Plane::Read,
+            Layer::Logical,
+            "zeta",
+            "pose",
+            "estimate",
+            Variant::Meta,
+        );
+        let mut a_sink = sample_route(
+            Plane::Read,
+            Layer::Logical,
+            "alpha",
+            "pose",
+            "estimate",
+            Variant::Meta,
+        );
+        z_sink.schema.schema_id = "Pose".to_string();
+        a_sink.schema.schema_id = "Pose".to_string();
+
+        let mut graph = GraphCore::default();
+        graph.connect(&z_source, &z_sink);
+        graph.connect(&a_source, &a_sink);
+
+        let QueryResultCore::ValidateGraph(issues) = graph.query(QueryKindCore::ValidateGraph)
+        else {
+            panic!("unexpected query result");
+        };
+        assert_eq!(
+            issues,
+            vec![
+                format!(
+                    "Schema mismatch: {} -> {}",
+                    a_source.display(),
+                    a_sink.display()
+                ),
+                format!(
+                    "Schema mismatch: {} -> {}",
+                    z_source.display(),
+                    z_sink.display()
+                ),
+            ]
+        );
     }
 
     #[test]
