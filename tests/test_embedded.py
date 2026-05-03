@@ -46,6 +46,40 @@ class EmbeddedProfileTests(unittest.TestCase):
             sensor.validate(),
         )
 
+    def test_firmware_profile_reports_disabled_local_processing(self) -> None:
+        manyfold = load_manyfold_package()
+        profile = manyfold.FirmwareAgentProfile(
+            local_filtering=False,
+            local_aggregation=False,
+        )
+
+        self.assertEqual(
+            profile.required_issues(),
+            (
+                "firmware agent should support local filtering",
+                "firmware agent should support local aggregation",
+            ),
+        )
+
+    def test_sensor_validation_includes_firmware_local_processing_issues(
+        self,
+    ) -> None:
+        manyfold = load_manyfold_package()
+        profile = manyfold.EmbeddedDeviceProfile(
+            firmware=manyfold.FirmwareAgentProfile(local_filtering=False),
+        )
+        sensor = profile.scalar_sensor(
+            owner=manyfold.OwnerName("uart-temp"),
+            family=manyfold.StreamFamily("sensor"),
+            stream=manyfold.StreamName("temperature"),
+            schema=manyfold.Schema.bytes("Temperature"),
+        )
+
+        self.assertIn(
+            "firmware agent should support local filtering",
+            sensor.validate(),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
