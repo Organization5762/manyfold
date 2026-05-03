@@ -78,14 +78,17 @@ state, pressure, policy, or replay behavior, model that behavior as a graph
 component instead.
 
 Pipelines can also make thread placement graph-visible. A placement applies to
-everything downstream in that fluent chain until another placement is selected:
+everything downstream in that fluent chain until another placement is selected
+or restored:
 
 ```python
 subscription = (
     graph.observe(temperature, replay_latest=False)
+    .on_pooled_thread()
+    .map(lambda value: value.removeprefix("raw:"), name="parse")
     .on_main_thread()
     .map(lambda value: value.strip(), name="trim")
-    .on_pooled_thread()
+    .return_to_prior_thread()
     .callback(print, name="print-temperature")
 )
 ```
@@ -93,6 +96,8 @@ subscription = (
 Use `.on_main_thread()` for work that must run on the frame thread,
 `.on_background_thread()` or `.on_pooled_thread()` for shared worker pools, and
 `.on_isolated_thread()` for a node that must be the only work on its thread.
+Use `.return_to_prior_thread()` after a scoped operation to restore the previous
+explicit placement for following nodes.
 
 ## Stats
 

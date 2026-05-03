@@ -339,6 +339,72 @@ class GraphReactiveTests(unittest.TestCase):
         finally:
             connection.remove()
 
+    def test_pipeline_can_return_to_prior_thread_placement(self) -> None:
+        graph_module = load_graph_module()
+        reactive_threads = importlib.import_module("manyfold.reactive_threads")
+        reactive_threads.reset_reactive_threading_state_for_tests()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("return_thread_values"),
+            variant=graph_module.Variant.Event,
+            schema=int_schema(graph_module, "ReturnThreadRuntimeNumber"),
+        )
+        graph = graph_module.Graph()
+        main_thread_id = threading.get_ident()
+        pooled_seen = threading.Event()
+        callback_seen = threading.Event()
+        thread_ids: dict[str, int] = {}
+        values: list[int] = []
+
+        def pooled_step(value: int) -> int:
+            thread_ids["pooled"] = threading.get_ident()
+            pooled_seen.set()
+            return value + 1
+
+        def main_step(value: int) -> int:
+            thread_ids["main"] = threading.get_ident()
+            return value + 1
+
+        def collect(value: int) -> None:
+            thread_ids["callback"] = threading.get_ident()
+            values.append(value)
+            callback_seen.set()
+
+        connection = (
+            graph.observe(route, replay_latest=False)
+            .on_pooled_thread()
+            .map(pooled_step, name="pooled-step")
+            .on_main_thread()
+            .map(main_step, name="main-step")
+            .return_to_prior_thread()
+            .callback(collect, name="collect-prior")
+        )
+
+        try:
+            graph.publish(route, 10)
+            self.assertTrue(pooled_seen.wait(timeout=2), "pooled step did not run")
+            self.assertEqual(values, [])
+            self.assertEqual(reactive_threads.drain_frame_thread_queue(), 1)
+            self.assertTrue(callback_seen.wait(timeout=2), "callback did not run")
+
+            self.assertEqual(values, [12])
+            self.assertNotEqual(thread_ids["pooled"], main_thread_id)
+            self.assertEqual(thread_ids["main"], main_thread_id)
+            self.assertNotEqual(thread_ids["callback"], main_thread_id)
+            placements = {
+                node.name: node.thread_placement
+                for node in graph.diagram_nodes()
+            }
+            self.assertEqual(placements["pooled-step"].kind, "pooled")
+            self.assertEqual(placements["main-step"].kind, "main")
+            self.assertEqual(placements["collect-prior"].kind, "pooled")
+        finally:
+            connection.remove()
+            reactive_threads.reset_reactive_threading_state_for_tests()
+
     def test_coalesce_latest_node_emits_latest_value_on_completion(self) -> None:
         graph_module = load_graph_module()
         node = graph_module.CoalesceLatestNode(
@@ -388,6 +454,47 @@ class GraphReactiveTests(unittest.TestCase):
             )
         finally:
             connection.remove()
+
+    def test_coalesce_latest_preserves_main_thread_placement_downstream(self) -> None:
+        graph_module = load_graph_module()
+        reactive_threads = importlib.import_module("manyfold.reactive_threads")
+        reactive_threads.reset_reactive_threading_state_for_tests()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("main_thread_coalesced_values"),
+            variant=graph_module.Variant.Event,
+            schema=int_schema(graph_module, "MainThreadCoalescedRuntimeNumber"),
+        )
+        graph = graph_module.Graph()
+        seen: list[int] = []
+        connection = (
+            graph.observe(route, replay_latest=False)
+            .on_main_thread()
+            .coalesce_latest(window_ms=1, name="coalesce-main")
+            .callback(seen.append, name="collect-main-coalesced")
+        )
+
+        try:
+            graph.publish(route, 4)
+            self.assertEqual(seen, [])
+            self.assertEqual(reactive_threads.drain_frame_thread_queue(), 1)
+            time.sleep(0.05)
+
+            self.assertEqual(seen, [])
+            self.assertEqual(reactive_threads.drain_frame_thread_queue(), 1)
+            self.assertEqual(seen, [4])
+            placements = {
+                node.name: node.thread_placement
+                for node in graph.diagram_nodes()
+            }
+            self.assertEqual(placements["coalesce-main"].kind, "main")
+            self.assertEqual(placements["collect-main-coalesced"].kind, "main")
+        finally:
+            connection.remove()
+            reactive_threads.reset_reactive_threading_state_for_tests()
 
     def test_instrument_stream_logs_periodic_delivery_stats(self) -> None:
         graph_module = load_graph_module()
