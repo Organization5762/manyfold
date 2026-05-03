@@ -141,7 +141,7 @@ class Keyspace:
         if not root.exists():
             return ()
         entries: list[StoreEntry] = []
-        for path in sorted(root.rglob(_VALUE_FILENAME)):
+        for path in root.rglob(_VALUE_FILENAME):
             full_key = self._key_from_value_path(path)
             if not _has_prefix(full_key, full_prefix):
                 continue
@@ -153,6 +153,8 @@ class Keyspace:
                     value=path.read_bytes(),
                 )
             )
+        # Sort decoded keys once so callers see stable logical ordering rather than
+        # filesystem-specific percent-encoded path ordering.
         return tuple(sorted(entries, key=lambda entry: entry.full_key))
 
     def _directory_path(self, key: Key) -> Path:
