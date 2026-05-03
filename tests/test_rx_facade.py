@@ -7,10 +7,10 @@ from tests.test_support import load_manyfold_package
 
 
 class RxFacadeTests(unittest.TestCase):
-    def test_facade_exposes_core_stream_primitives(self) -> None:
+    def test_private_facade_exposes_core_stream_primitives(self) -> None:
         load_manyfold_package()
-        rx = importlib.import_module("manyfold.rx")
-        ops = importlib.import_module("manyfold.rx.operators")
+        rx = importlib.import_module("manyfold._rx")
+        ops = importlib.import_module("manyfold._rx.operators")
         values: list[int] = []
 
         subscription = rx.from_iterable([1, 2, 3]).pipe(
@@ -20,11 +20,11 @@ class RxFacadeTests(unittest.TestCase):
         self.assertTrue(callable(getattr(subscription, "dispose", None)))
         self.assertEqual(values, [2, 3, 4])
 
-    def test_facade_exposes_subjects_and_schedulers(self) -> None:
+    def test_private_facade_exposes_subjects_and_schedulers(self) -> None:
         load_manyfold_package()
-        scheduler_module = importlib.import_module("manyfold.rx.scheduler")
-        subject_module = importlib.import_module("manyfold.rx.subject")
-        behavior_module = importlib.import_module("manyfold.rx.subject.behaviorsubject")
+        scheduler_module = importlib.import_module("manyfold._rx.scheduler")
+        subject_module = importlib.import_module("manyfold._rx.subject")
+        behavior_module = importlib.import_module("manyfold._rx.subject.behaviorsubject")
         behavior_subject = subject_module.BehaviorSubject
 
         subject = behavior_subject(1)
@@ -40,14 +40,20 @@ class RxFacadeTests(unittest.TestCase):
             scheduler_module.TimeoutScheduler,
         )
 
-    def test_facade_exposes_marble_testing(self) -> None:
+    def test_private_facade_exposes_marble_testing(self) -> None:
         load_manyfold_package()
-        marble_module = importlib.import_module("manyfold.rx.testing.marbles")
+        marble_module = importlib.import_module("manyfold._rx.testing.marbles")
         with marble_module.marbles_testing() as (start, cold, _hot, exp):
             source = cold("--1-2-|")
             actual = start(source)
 
         self.assertEqual(actual, exp("--1-2-|"))
+
+    def test_public_rx_facade_is_not_available(self) -> None:
+        load_manyfold_package()
+
+        with self.assertRaises(ModuleNotFoundError):
+            importlib.import_module("manyfold.rx")
 
 
 if __name__ == "__main__":

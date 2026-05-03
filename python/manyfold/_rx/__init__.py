@@ -1,8 +1,8 @@
-"""Rx-compatible streaming facade for Manyfold consumers.
+"""Private Rx-compatible streaming facade for Manyfold internals.
 
 Manyfold still builds on RxPy for its in-process Python stream surface. This
-module gives downstream projects a Manyfold-owned import path while the
-underlying implementation evolves.
+module keeps the re-export surface available to internal code without making it
+part of the public ``manyfold`` namespace.
 """
 
 from reactivex import *  # noqa: F403
