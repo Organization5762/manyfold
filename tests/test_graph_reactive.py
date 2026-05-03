@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import importlib
 import sys
+import threading
 import unittest
 from dataclasses import dataclass
 
@@ -216,6 +218,125 @@ class GraphReactiveTests(unittest.TestCase):
         graph.publish(route, 5)
 
         self.assertEqual(seen, [5])
+
+    def test_pipeline_can_place_following_nodes_on_main_thread(self) -> None:
+        graph_module = load_graph_module()
+        reactive_threads = importlib.import_module("manyfold.reactive_threads")
+        reactive_threads.reset_reactive_threading_state_for_tests()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("main_thread_values"),
+            variant=graph_module.Variant.Event,
+            schema=int_schema(graph_module, "MainThreadRuntimeNumber"),
+        )
+        graph = graph_module.Graph()
+        seen: list[int] = []
+        connection = graph.observe(route, replay_latest=False).on_main_thread().callback(
+            seen.append,
+            name="collect-main",
+        )
+
+        try:
+            graph.publish(route, 3)
+
+            self.assertEqual(seen, [])
+            self.assertEqual(reactive_threads.drain_frame_thread_queue(), 1)
+            self.assertEqual(seen, [3])
+            node = next(graph.diagram_nodes())
+            self.assertEqual(node.thread_placement.kind, "main")
+            self.assertIn("main_thread", graph.render_diagram(group_by=("thread",)))
+        finally:
+            connection.remove()
+            reactive_threads.reset_reactive_threading_state_for_tests()
+
+    def test_pipeline_can_place_following_nodes_on_pooled_thread(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("pooled_values"),
+            variant=graph_module.Variant.Event,
+            schema=int_schema(graph_module, "PooledRuntimeNumber"),
+        )
+        graph = graph_module.Graph()
+        main_thread_id = threading.get_ident()
+        done = threading.Event()
+        seen: list[int] = []
+        thread_ids: list[int] = []
+
+        def collect(value: int) -> None:
+            thread_ids.append(threading.get_ident())
+            seen.append(value)
+            done.set()
+
+        connection = graph.observe(route, replay_latest=False).on_pooled_thread().callback(
+            collect,
+            name="collect-pooled",
+        )
+
+        try:
+            graph.publish(route, 4)
+
+            self.assertTrue(done.wait(timeout=2), "pooled callback did not run")
+            self.assertEqual(seen, [4])
+            self.assertNotEqual(thread_ids[0], main_thread_id)
+            node = next(graph.diagram_nodes())
+            self.assertEqual(node.thread_placement.kind, "pooled")
+        finally:
+            connection.remove()
+
+    def test_node_isolated_thread_placement_propagates_downstream(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("isolated_values"),
+            variant=graph_module.Variant.Event,
+            schema=int_schema(graph_module, "IsolatedRuntimeNumber"),
+        )
+        graph = graph_module.Graph()
+        done = threading.Event()
+        map_thread_names: list[str] = []
+        seen: list[int] = []
+
+        def transform(value: int) -> int:
+            map_thread_names.append(threading.current_thread().name)
+            return value + 1
+
+        connection = (
+            graph.observe(route, replay_latest=False)
+            .on_isolated_thread("exclusive-node")
+            .map(
+                transform,
+                name="exclusive-map",
+            )
+            .callback(lambda value: (seen.append(value), done.set()), name="collect")
+        )
+
+        try:
+            graph.publish(route, 4)
+
+            self.assertTrue(done.wait(timeout=2), "isolated callback did not run")
+            self.assertEqual(seen, [5])
+            self.assertEqual(map_thread_names, ["exclusive-node"])
+            map_node = next(
+                node for node in graph.diagram_nodes() if node.name == "exclusive-map"
+            )
+            collect_node = next(
+                node for node in graph.diagram_nodes() if node.name == "collect"
+            )
+            self.assertEqual(map_node.thread_placement.kind, "isolated")
+            self.assertEqual(collect_node.thread_placement.kind, "isolated")
+            self.assertEqual(collect_node.thread_placement.thread_name, "exclusive-node")
+        finally:
+            connection.remove()
 
     def test_read_then_write_next_epoch_step_installs_shared_write_stream(self) -> None:
         graph_module = load_graph_module()

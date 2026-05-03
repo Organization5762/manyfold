@@ -51,7 +51,7 @@ from ._manyfold_rust import (
     WritablePort as NativeWritablePort,
     WriteBinding,
 )
-from ._rx import Observable
+from ._rx import Observable, operators as ops
 from ._rx.subject import Subject
 from .primitives import (
     OwnerName,
@@ -82,9 +82,13 @@ EnvelopeIterator = Iterator[ClosedEnvelope]
 StateT = TypeVar("StateT")
 TRight = TypeVar("TRight")
 DIAGRAM_GROUP_FIELDS = frozenset(
-    ("plane", "layer", "owner", "family", "stream", "variant")
+    ("plane", "layer", "owner", "family", "stream", "variant", "thread")
 )
 _PIPELINE_ROUTE_IDS = count(1)
+_THREAD_PLACEMENT_KINDS = frozenset(
+    ("main", "background", "pooled", "isolated")
+)
+_POOLED_THREAD_SCHEDULERS = frozenset(("background", "blocking_io", "input"))
 
 
 @runtime_checkable
@@ -164,6 +168,54 @@ class DiagramNode:
     input_routes: tuple[str, ...] = ()
     output_routes: tuple[str, ...] = ()
     group: str | None = None
+    thread_placement: NodeThreadPlacement | None = None
+
+
+@dataclass(frozen=True)
+class NodeThreadPlacement:
+    """Declare which process-local thread context should run a graph node."""
+
+    kind: str
+    scheduler_name: str | None = None
+    thread_name: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.kind not in _THREAD_PLACEMENT_KINDS:
+            raise ValueError(f"unknown node thread placement: {self.kind}")
+        if (
+            self.kind == "pooled"
+            and self.scheduler_name not in _POOLED_THREAD_SCHEDULERS
+        ):
+            supported = ", ".join(sorted(_POOLED_THREAD_SCHEDULERS))
+            raise ValueError(f"unknown pooled scheduler: {self.scheduler_name}; use {supported}")
+
+    @classmethod
+    def main_thread(cls) -> NodeThreadPlacement:
+        """Return a placement that queues node work onto the main frame thread."""
+        return cls("main")
+
+    @classmethod
+    def background_thread(cls) -> NodeThreadPlacement:
+        """Return a placement that runs node work on the shared background pool."""
+        return cls("background", scheduler_name="background")
+
+    @classmethod
+    def pooled_thread(cls, scheduler_name: str = "background") -> NodeThreadPlacement:
+        """Return a placement that runs node work on a named shared pool."""
+        return cls("pooled", scheduler_name=scheduler_name)
+
+    @classmethod
+    def isolated_thread(cls, thread_name: str | None = None) -> NodeThreadPlacement:
+        """Return a placement that gives each installed node a dedicated thread."""
+        return cls("isolated", thread_name=thread_name)
+
+    def display(self) -> str:
+        """Return a stable label for diagnostics and diagram metadata."""
+        if self.kind == "pooled":
+            return f"pooled_thread:{self.scheduler_name}"
+        if self.kind == "isolated" and self.thread_name is not None:
+            return f"isolated_thread:{self.thread_name}"
+        return f"{self.kind}_thread"
 
 
 @dataclass(frozen=True)
@@ -1082,6 +1134,29 @@ class _TrackedSubscription:
         self._inner.dispose()
 
 
+class _ThreadPlacementSubscription:
+    def __init__(
+        self,
+        inner: SubscriptionLike,
+        *,
+        owned_scheduler: object | None = None,
+    ) -> None:
+        self._inner = inner
+        self._owned_scheduler = owned_scheduler
+        self._disposed = False
+
+    def dispose(self) -> None:
+        if self._disposed:
+            return
+        self._disposed = True
+        self._inner.dispose()
+        if self._owned_scheduler is None:
+            return
+        dispose = getattr(self._owned_scheduler, "dispose", None)
+        if callable(dispose):
+            dispose()
+
+
 class GraphConnection:
     """Handle for graph-installed observation topology."""
 
@@ -1118,28 +1193,62 @@ class GraphConnection:
         self.remove()
 
 
+class _ThreadPlaceableNode:
+    thread_placement: NodeThreadPlacement | None
+
+    def with_thread_placement(self, placement: NodeThreadPlacement | None) -> Any:
+        """Return a copy of this node with explicit thread placement."""
+        return replace(self, thread_placement=placement)
+
+    def on_main_thread(self) -> Any:
+        """Run this node on the main frame thread."""
+        return self.with_thread_placement(NodeThreadPlacement.main_thread())
+
+    def on_background_thread(self, *, isolated: bool = False) -> Any:
+        """Run this node on a background thread."""
+        placement = (
+            NodeThreadPlacement.isolated_thread()
+            if isolated
+            else NodeThreadPlacement.background_thread()
+        )
+        return self.with_thread_placement(placement)
+
+    def on_isolated_thread(self, name: str | None = None) -> Any:
+        """Run this node as the only work on a dedicated thread."""
+        return self.with_thread_placement(NodeThreadPlacement.isolated_thread(name))
+
+    def on_pooled_thread(self, scheduler_name: str = "background") -> Any:
+        """Run this node on a named shared thread pool."""
+        return self.with_thread_placement(
+            NodeThreadPlacement.pooled_thread(scheduler_name)
+        )
+
+
 @dataclass(frozen=True)
-class CallbackNode(Generic[T]):
+class CallbackNode(_ThreadPlaceableNode, Generic[T]):
     """Leaf graph node that delivers route updates to ordinary Python code."""
 
     name: str
     receive: Callable[[T], None]
+    thread_placement: NodeThreadPlacement | None = None
 
 
 @dataclass(frozen=True)
-class MapNode(Generic[TIn, TOut]):
+class MapNode(_ThreadPlaceableNode, Generic[TIn, TOut]):
     """Graph-visible map operation."""
 
     name: str
     transform: Callable[[TIn], TOut]
+    thread_placement: NodeThreadPlacement | None = None
 
 
 @dataclass(frozen=True)
-class FilterNode(Generic[T]):
+class FilterNode(_ThreadPlaceableNode, Generic[T]):
     """Graph-visible filter operation."""
 
     name: str
     predicate: Callable[[T], bool]
+    thread_placement: NodeThreadPlacement | None = None
 
 
 class RoutePipeline(Generic[T]):
@@ -1153,12 +1262,14 @@ class RoutePipeline(Generic[T]):
         replay_latest: bool = True,
         subscriber_id: str | None = None,
         connections: Sequence[GraphConnection] = (),
+        thread_placement: NodeThreadPlacement | None = None,
     ) -> None:
         self._graph = graph
         self._route_ref = route_ref
         self._replay_latest = replay_latest
         self._subscriber_id = subscriber_id
         self._connections = tuple(connections)
+        self._thread_placement = thread_placement
 
     @property
     def route(self) -> RouteLike:
@@ -1180,6 +1291,7 @@ class RoutePipeline(Generic[T]):
                 else CallbackNode(
                     name or self._graph._next_pipeline_node_name("callback"),
                     target,
+                    thread_placement=self._thread_placement,
                 )
             )
             connection = self._graph._connect_callback_pipeline(
@@ -1187,6 +1299,7 @@ class RoutePipeline(Generic[T]):
                 node,
                 replay_latest=self._replay_latest,
                 subscriber_id=self._subscriber_id,
+                thread_placement=node.thread_placement or self._thread_placement,
             )
         if not self._connections:
             return connection
@@ -1207,6 +1320,7 @@ class RoutePipeline(Generic[T]):
             CallbackNode(
                 name or self._graph._next_pipeline_node_name("callback"),
                 receive,
+                thread_placement=self._thread_placement,
             )
         )
 
@@ -1220,6 +1334,7 @@ class RoutePipeline(Generic[T]):
         node = FilterNode(
             name or self._graph._next_pipeline_node_name("filter"),
             predicate,
+            thread_placement=self._thread_placement,
         )
         return self._graph._connect_transform_pipeline(
             self,
@@ -1234,11 +1349,41 @@ class RoutePipeline(Generic[T]):
         name: str | None = None,
     ) -> RoutePipeline[U]:
         """Install a graph-visible map node and continue from its output."""
-        node = MapNode(name or self._graph._next_pipeline_node_name("map"), transform)
+        node = MapNode(
+            name or self._graph._next_pipeline_node_name("map"),
+            transform,
+            thread_placement=self._thread_placement,
+        )
         return self._graph._connect_transform_pipeline(
             self,
             node,
             lambda value: (True, node.transform(value)),
+        )
+
+    def on_main_thread(self) -> RoutePipeline[T]:
+        """Schedule all following pipeline nodes on the main frame thread."""
+        return self._with_thread_placement(NodeThreadPlacement.main_thread())
+
+    def on_background_thread(self, *, isolated: bool = False) -> RoutePipeline[T]:
+        """Schedule all following pipeline nodes on background execution."""
+        placement = (
+            NodeThreadPlacement.isolated_thread()
+            if isolated
+            else NodeThreadPlacement.background_thread()
+        )
+        return self._with_thread_placement(placement)
+
+    def on_isolated_thread(self, name: str | None = None) -> RoutePipeline[T]:
+        """Schedule each following node on its own dedicated thread."""
+        return self._with_thread_placement(NodeThreadPlacement.isolated_thread(name))
+
+    def on_pooled_thread(
+        self,
+        scheduler_name: str = "background",
+    ) -> RoutePipeline[T]:
+        """Schedule all following nodes on a named shared thread pool."""
+        return self._with_thread_placement(
+            NodeThreadPlacement.pooled_thread(scheduler_name)
         )
 
     def subscribe(
@@ -1253,6 +1398,7 @@ class RoutePipeline(Generic[T]):
             self._route_ref,
             replay_latest=self._replay_latest,
             subscriber_id=self._subscriber_id,
+            thread_placement=self._thread_placement,
         ).subscribe(
             observer,
             on_error,
@@ -1272,6 +1418,20 @@ class RoutePipeline(Generic[T]):
             replay_latest=self._replay_latest,
             subscriber_id=self._subscriber_id,
             name=name,
+            thread_placement=self._thread_placement,
+        )
+
+    def _with_thread_placement(
+        self,
+        placement: NodeThreadPlacement | None,
+    ) -> RoutePipeline[T]:
+        return RoutePipeline(
+            self._graph,
+            self._route_ref,
+            replay_latest=self._replay_latest,
+            subscriber_id=self._subscriber_id,
+            connections=self._connections,
+            thread_placement=placement,
         )
 
     def __getattr__(self, operation: str) -> Callable[..., Any]:
@@ -2708,6 +2868,7 @@ class Graph:
         *,
         replay_latest: bool = True,
         subscriber_id: str | None = None,
+        thread_placement: NodeThreadPlacement | None = None,
     ) -> Observable[Any]:
         """Compatibility observable for route updates.
 
@@ -2765,7 +2926,10 @@ class Graph:
                 resolved_subscriber_id,
             )
 
-        return rx.create(subscribe)
+        return self._thread_placed_observable(
+            rx.create(subscribe),
+            thread_placement,
+        )
 
     def register_pipeline_operation(
         self,
@@ -2785,6 +2949,7 @@ class Graph:
         *,
         replay_latest: bool,
         subscriber_id: str | None,
+        thread_placement: NodeThreadPlacement | None = None,
     ) -> Observable[Any]:
         native_route = self._coerce_route_ref(route_ref)
 
@@ -2806,7 +2971,63 @@ class Graph:
                 scheduler=scheduler,
             )
 
+        return self._thread_placed_observable(
+            rx.create(subscribe),
+            thread_placement,
+        )
+
+    def _thread_placed_observable(
+        self,
+        observable: Observable[Any],
+        placement: NodeThreadPlacement | None,
+    ) -> Observable[Any]:
+        if placement is None:
+            return observable
+        if placement.kind == "main":
+            from . import reactive_threads
+
+            return reactive_threads.deliver_on_frame_thread(observable)
+
+        def subscribe(
+            observer: ObserverLike[Any],
+            scheduler: object | None = None,
+        ) -> SubscriptionLike:
+            thread_scheduler, owns_scheduler = self._thread_scheduler_for(placement)
+            inner = observable.pipe(ops.observe_on(thread_scheduler)).subscribe(
+                observer,
+                scheduler=scheduler,
+            )
+            return _ThreadPlacementSubscription(
+                inner,
+                owned_scheduler=thread_scheduler if owns_scheduler else None,
+            )
+
         return rx.create(subscribe)
+
+    def _thread_scheduler_for(
+        self,
+        placement: NodeThreadPlacement,
+    ) -> tuple[object, bool]:
+        from . import reactive_threads
+        from ._rx.scheduler import EventLoopScheduler
+
+        if placement.kind == "background":
+            return reactive_threads.background_scheduler(), False
+        if placement.kind == "pooled":
+            if placement.scheduler_name == "blocking_io":
+                return reactive_threads.blocking_io_scheduler(), False
+            if placement.scheduler_name == "input":
+                return reactive_threads.input_scheduler(), False
+            return reactive_threads.background_scheduler(), False
+        thread_name = placement.thread_name or self._next_pipeline_node_name("isolated")
+        return (
+            EventLoopScheduler(
+                thread_factory=reactive_threads.create_default_thread_factory(
+                    thread_name,
+                )
+            ),
+            True,
+        )
 
     def _pipeline_output_route(self, node_name: str) -> TypedRoute[Any]:
         route_id = next(_PIPELINE_ROUTE_IDS)
@@ -2831,12 +3052,18 @@ class Graph:
         *,
         replay_latest: bool,
         subscriber_id: str | None,
+        thread_placement: NodeThreadPlacement | None,
     ) -> GraphConnection:
-        self.register_diagram_node(node.name, input_routes=(source,))
+        self.register_diagram_node(
+            node.name,
+            input_routes=(source,),
+            thread_placement=thread_placement,
+        )
         subscription = self._pipeline_value_observable(
             source,
             replay_latest=replay_latest,
             subscriber_id=subscriber_id,
+            thread_placement=thread_placement,
         ).subscribe(node.receive)
         return GraphConnection(
             self,
@@ -2853,6 +3080,7 @@ class Graph:
         replay_latest: bool,
         subscriber_id: str | None,
         name: str | None = None,
+        thread_placement: NodeThreadPlacement | None = None,
     ) -> GraphConnection:
         connection_name = name or self._next_pipeline_node_name("route")
         self.connect(source=source, sink=target)
@@ -2864,6 +3092,7 @@ class Graph:
             source,
             replay_latest=replay_latest,
             subscriber_id=subscriber_id,
+            thread_placement=thread_placement,
         ).subscribe(publish)
         return GraphConnection(
             self,
@@ -2878,10 +3107,12 @@ class Graph:
         apply: Callable[[Any], tuple[bool, Any]],
     ) -> RoutePipeline[Any]:
         output = self._pipeline_output_route(node.name)
+        thread_placement = node.thread_placement or pipeline._thread_placement
         self.register_diagram_node(
             node.name,
             input_routes=(pipeline.route,),
             output_routes=(output,),
+            thread_placement=thread_placement,
         )
 
         def on_next(value: Any) -> None:
@@ -2893,6 +3124,7 @@ class Graph:
             pipeline.route,
             replay_latest=pipeline._replay_latest,
             subscriber_id=pipeline._subscriber_id,
+            thread_placement=thread_placement,
         ).subscribe(on_next)
         connection = GraphConnection(
             self,
@@ -2905,6 +3137,7 @@ class Graph:
             output,
             replay_latest=False,
             connections=(*pipeline._connections, connection),
+            thread_placement=thread_placement,
         )
 
     def _apply_registered_pipeline_operation(
@@ -2931,7 +3164,11 @@ class Graph:
                 lambda value: (node.predicate(value), value),
             )
         if isinstance(node, CallbackNode):
-            return pipeline.connect(node)
+            return pipeline.connect(
+                node.with_thread_placement(
+                    node.thread_placement or pipeline._thread_placement
+                )
+            )
         raise TypeError(
             f"registered pipeline operation {operation!r} returned unsupported node {type(node).__name__}"
         )
@@ -3597,6 +3834,7 @@ class Graph:
         input_routes: Sequence[RouteLike] = (),
         output_routes: Sequence[RouteLike] = (),
         group: str | None = None,
+        thread_placement: NodeThreadPlacement | None = None,
     ) -> DiagramNode:
         """Register a graph-visible node for topology diagrams."""
         for route_ref in tuple(input_routes) + tuple(output_routes):
@@ -3607,6 +3845,7 @@ class Graph:
             input_routes=tuple(self._route_key(route) for route in input_routes),
             output_routes=tuple(self._route_key(route) for route in output_routes),
             group=group,
+            thread_placement=thread_placement,
         )
         self._diagram_nodes[name] = node
         return node
@@ -3748,6 +3987,11 @@ class Graph:
             "stream": node.name,
             "variant": "node",
             "label": node.name,
+            "thread": (
+                ""
+                if node.thread_placement is None
+                else node.thread_placement.display()
+            ),
         }
 
     def _diagram_route_metadata(
