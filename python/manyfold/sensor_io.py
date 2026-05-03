@@ -234,13 +234,245 @@ class ManagedRunLoopHandle:
         self.token.set()
 
     def join(self, timeout: float | None = None) -> None:
-        self.thread.join(timeout=timeout)
+        if self.thread.ident is not None:
+            self.thread.join(timeout=timeout)
 
     def dispose(self, timeout: float | None = None) -> None:
         if self.disposed:
             return
         self.stop()
         self.join(timeout=timeout)
+        self.disposed = True
+
+
+GraphNodeBody = Callable[[StopToken, Graph], None]
+GraphNodeControlHandler = Callable[[Any, Graph], None]
+GraphNodeErrorMapper = Callable[[BaseException, int], Any]
+Detector = Callable[[], Iterable[Any]]
+DetectionMapper = Callable[[Any], Any]
+DetectionCallback = Callable[[Any, "GraphAccessNode"], None]
+DetectionSpawner = Callable[[Any, "GraphAccessNode"], Any]
+
+
+@dataclass
+class GraphAccessNode:
+    """Graph mutation capability passed to nodes that can install other nodes.
+
+    Manyfold treats access to the graph itself as a node-like capability rather
+    than ambient authority. Spawner-style nodes receive this capability and use
+    it to publish detection facts or install downstream nodes, while ordinary
+    consumers continue to depend on routes.
+    """
+
+    graph: Graph
+    owned_handles: list[Any] = field(default_factory=list)
+
+    def publish(self, route: TypedRoute[Any], payload: Any) -> Any:
+        return self.graph.publish(route, payload)
+
+    def install(self, node: Any) -> Any:
+        handle = node.install(self.graph)
+        self.owned_handles.extend(_flatten_handles(handle))
+        return handle
+
+    def own(self, handles: Any) -> Any:
+        self.owned_handles.extend(_flatten_handles(handles))
+        return handles
+
+
+@dataclass
+class ManagedGraphNodeHandle:
+    """Installed self-running graph node with owned loop and subscriptions."""
+
+    node: ManagedGraphNode
+    graph: Graph
+    loop_handle: ManagedRunLoopHandle
+    control_subscription: SubscriptionLike | None = None
+    disposed: bool = False
+
+    @property
+    def group(self) -> str | None:
+        return self.node.group
+
+    def stop(self) -> None:
+        self.loop_handle.stop()
+
+    def join(self, timeout: float | None = None) -> None:
+        self.loop_handle.join(timeout=timeout)
+
+    def dispose(self, timeout: float | None = None) -> None:
+        if self.disposed:
+            return
+        if self.control_subscription is not None:
+            self.control_subscription.dispose()
+        self.loop_handle.dispose(timeout=timeout)
+        self.disposed = True
+
+
+@dataclass
+class ManagedGraphNode:
+    """Install a self-running local effect as a graph-visible node.
+
+    The node owns lifecycle/retry mechanics internally, while its public
+    boundary remains graph routes: the body publishes outputs, optional control
+    input is observed from a route, and exceptions can be published as normal
+    Python values on an error route for downstream functional handling.
+    """
+
+    name: str
+    body: GraphNodeBody
+    output_routes: tuple[TypedRoute[Any], ...] = ()
+    control_route: TypedRoute[Any] | None = None
+    error_route: TypedRoute[Any] | None = None
+    on_control: GraphNodeControlHandler | None = None
+    map_error: GraphNodeErrorMapper = lambda exc, _attempt: exc
+    retry: RetryPolicy = field(default_factory=lambda: RetryPolicy(max_attempts=1_000_000))
+    backoff: BackoffPolicy = field(default_factory=BackoffPolicy)
+    clock: Clock = field(default_factory=SystemClock)
+    group: str | None = None
+    start_immediately: bool = True
+    daemon: bool = True
+
+    def __post_init__(self) -> None:
+        _adopt_group(self.clock, self.group)
+        if self.control_route is not None and self.on_control is None:
+            raise ValueError("on_control is required when control_route is provided")
+
+    def install(self, graph: Graph) -> ManagedGraphNodeHandle:
+        def on_error(exc: BaseException, attempt: int) -> None:
+            if self.error_route is not None:
+                graph.publish(self.error_route, self.map_error(exc, attempt))
+
+        loop = ManagedRunLoop(
+            body=lambda stop: self.body(stop, graph),
+            retry=self.retry,
+            backoff=self.backoff,
+            on_error=on_error,
+            group=self.group,
+        )
+        control_subscription = None
+        if self.control_route is not None and self.on_control is not None:
+            control_subscription = graph.observe(
+                self.control_route,
+                replay_latest=False,
+            ).subscribe(lambda item: self.on_control(item, graph))
+
+        if self.start_immediately:
+            loop_handle = loop.start_thread(name=self.name, daemon=self.daemon)
+        else:
+            token = StopToken(group=self.group)
+            loop_handle = ManagedRunLoopHandle(
+                loop=loop,
+                token=token,
+                thread=threading.Thread(
+                    target=loop.run,
+                    args=(token,),
+                    name=self.name,
+                    daemon=self.daemon,
+                ),
+            )
+        return ManagedGraphNodeHandle(
+            node=self,
+            graph=graph,
+            loop_handle=loop_handle,
+            control_subscription=control_subscription,
+        )
+
+
+@dataclass
+class DetectionNode:
+    """Run a detector as a graph source.
+
+    A detector that finds nothing emits nothing. Detected items are optionally
+    mapped before publication. The node also receives graph access as an
+    explicit capability, so it can own downstream source nodes without making
+    graph mutation ambient or renderer-specific.
+    """
+
+    name: str
+    detector: Detector
+    output_route: TypedRoute[Any]
+    mapper: DetectionMapper = lambda item: item
+    on_detect: DetectionCallback | None = None
+    spawn: DetectionSpawner | None = None
+    error_route: TypedRoute[Any] | None = None
+    retry: RetryPolicy = field(default_factory=RetryPolicy.never)
+    backoff: BackoffPolicy = field(default_factory=BackoffPolicy)
+    group: str | None = None
+    start_immediately: bool = True
+    daemon: bool = True
+
+    def install(self, graph: Graph) -> "DetectionNodeHandle":
+        graph_access = GraphAccessNode(graph=graph)
+
+        def body(stop: StopToken, graph: Graph) -> None:
+            for item in self.detector():
+                if stop.is_set():
+                    break
+                if self.on_detect is not None:
+                    self.on_detect(item, graph_access)
+                graph_access.publish(self.output_route, self.mapper(item))
+                if self.spawn is not None:
+                    graph_access.own(self.spawn(item, graph_access))
+            stop.set()
+
+        node_handle = ManagedGraphNode(
+            name=self.name,
+            body=body,
+            output_routes=(self.output_route,),
+            error_route=self.error_route,
+            retry=self.retry,
+            backoff=self.backoff,
+            group=self.group,
+            start_immediately=self.start_immediately,
+            daemon=self.daemon,
+        ).install(graph)
+        return DetectionNodeHandle(
+            node=self,
+            graph=graph,
+            node_handle=node_handle,
+            graph_access=graph_access,
+        )
+
+
+@dataclass
+class DetectionNodeHandle:
+    """Installed detection node plus downstream nodes spawned by detections."""
+
+    node: DetectionNode
+    graph: Graph
+    node_handle: ManagedGraphNodeHandle
+    graph_access: GraphAccessNode
+    disposed: bool = False
+
+    @property
+    def spawned_handles(self) -> list[Any]:
+        return self.graph_access.owned_handles
+
+    @property
+    def loop_handle(self) -> ManagedRunLoopHandle:
+        return self.node_handle.loop_handle
+
+    @property
+    def group(self) -> str | None:
+        return self.node.group
+
+    def stop(self) -> None:
+        self.node_handle.stop()
+        for handle in tuple(self.spawned_handles):
+            _call_if_present(handle, "stop")
+
+    def join(self, timeout: float | None = None) -> None:
+        self.node_handle.join(timeout=timeout)
+        for handle in tuple(self.spawned_handles):
+            _call_if_present(handle, "join", timeout)
+
+    def dispose(self, timeout: float | None = None) -> None:
+        if self.disposed:
+            return
+        for handle in reversed(tuple(self.spawned_handles)):
+            _dispose_handle(handle, timeout=timeout)
+        self.node_handle.dispose(timeout=timeout)
         self.disposed = True
 
 
@@ -1327,20 +1559,47 @@ def _call_if_present(target: Any, name: str, *args: Any) -> Any:
     return None
 
 
+def _flatten_handles(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, (str, bytes, bytearray)):
+        return [value]
+    if isinstance(value, Iterable):
+        return [item for item in value if item is not None]
+    return [value]
+
+
+def _dispose_handle(handle: Any, *, timeout: float | None = None) -> None:
+    dispose = getattr(handle, "dispose", None)
+    if callable(dispose):
+        try:
+            dispose(timeout=timeout)
+        except TypeError:
+            dispose()
+        return
+    _call_if_present(handle, "stop")
+    _call_if_present(handle, "join", timeout)
+
+
 __all__ = [
     "BackoffPolicy",
     "BoundedRingBuffer",
     "ChangeFilter",
     "Clock",
     "DelimitedMessageBuffer",
+    "DetectionNode",
+    "DetectionNodeHandle",
     "DoubleBuffer",
     "DuplexSensorPeripheral",
     "FrameAssembler",
+    "GraphAccessNode",
     "HealthStatus",
     "JsonEventDecoder",
     "LocalDurableSpool",
     "LocalSensorSource",
     "ManualClock",
+    "ManagedGraphNode",
+    "ManagedGraphNodeHandle",
     "ManagedRunLoop",
     "ManagedRunLoopHandle",
     "PeripheralAdapter",

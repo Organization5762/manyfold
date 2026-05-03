@@ -18,6 +18,16 @@ def _int_schema(manyfold, schema_id: str = "Int"):
     )
 
 
+def _exception_schema(manyfold, schema_id: str = "Exception"):
+    def encode(value: BaseException) -> bytes:
+        return f"{type(value).__name__}:{value}".encode("utf-8")
+
+    def decode(payload: bytes) -> BaseException:
+        return RuntimeError(payload.decode("utf-8"))
+
+    return manyfold.Schema(schema_id=schema_id, version=1, encode=encode, decode=decode)
+
+
 def _route(manyfold, stream: str, schema):
     return manyfold.route(
         plane=manyfold.Plane.Read,
@@ -241,6 +251,155 @@ class SensorIoTests(unittest.TestCase):
 
         self.assertTrue(handle.disposed)
         self.assertFalse(handle.thread.is_alive())
+
+    def test_managed_graph_node_publishes_exceptions_to_error_route(self) -> None:
+        manyfold = load_manyfold_package()
+        graph = manyfold.Graph()
+        output = _route(manyfold, "node_output", _int_schema(manyfold, "NodeOutput"))
+        errors = _route(manyfold, "node_errors", _exception_schema(manyfold))
+        attempts = 0
+
+        def body(stop: manyfold.StopToken, graph: manyfold.Graph) -> None:
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise ValueError("not ready")
+            graph.publish(output, 42)
+            stop.set()
+
+        handle = manyfold.ManagedGraphNode(
+            name="sensor-node",
+            body=body,
+            output_routes=(output,),
+            error_route=errors,
+            retry=manyfold.SensorRetryPolicy(max_attempts=2),
+            backoff=manyfold.SensorBackoffPolicy.none(),
+            start_immediately=False,
+        ).install(graph)
+
+        handle.loop_handle.loop.run(handle.loop_handle.token)
+
+        latest_error = graph.latest(errors)
+        latest_output = graph.latest(output)
+        self.assertIsNotNone(latest_error)
+        self.assertIsNotNone(latest_output)
+        assert latest_error is not None
+        assert latest_output is not None
+        self.assertIsInstance(latest_error.value, RuntimeError)
+        self.assertIn("ValueError:not ready", str(latest_error.value))
+        self.assertEqual(latest_output.value, 42)
+
+    def test_managed_graph_node_observes_control_route(self) -> None:
+        manyfold = load_manyfold_package()
+        graph = manyfold.Graph()
+        control = _route(manyfold, "node_control", _int_schema(manyfold, "Control"))
+        received: list[int] = []
+
+        handle = manyfold.ManagedGraphNode(
+            name="controlled-node",
+            body=lambda stop, _graph: stop.set(),
+            control_route=control,
+            on_control=lambda item, _graph: received.append(item.value),
+            start_immediately=False,
+        ).install(graph)
+
+        graph.publish(control, 7)
+        handle.dispose(timeout=0)
+
+        self.assertEqual(received, [7])
+
+    def test_detection_node_publishes_each_detected_item(self) -> None:
+        manyfold = load_manyfold_package()
+        graph = manyfold.Graph()
+        detected = _route(manyfold, "detected_items", _int_schema(manyfold, "Detected"))
+        callbacks: list[int] = []
+
+        handle = manyfold.DetectionNode(
+            name="detect-integers",
+            detector=lambda: iter([1, 2, 3]),
+            output_route=detected,
+            mapper=lambda item: item * 10,
+            on_detect=lambda item, _access: callbacks.append(item),
+            start_immediately=False,
+        ).install(graph)
+
+        handle.loop_handle.loop.run(handle.loop_handle.token)
+
+        latest = graph.latest(detected)
+        self.assertIsNotNone(latest)
+        assert latest is not None
+        self.assertEqual(latest.value, 30)
+        self.assertEqual(callbacks, [1, 2, 3])
+
+    def test_detection_node_emits_nothing_when_nothing_is_detected(self) -> None:
+        manyfold = load_manyfold_package()
+        graph = manyfold.Graph()
+        detected = _route(
+            manyfold,
+            "empty_detection_items",
+            _int_schema(manyfold, "EmptyDetected"),
+        )
+
+        handle = manyfold.DetectionNode(
+            name="detect-none",
+            detector=lambda: iter(()),
+            output_route=detected,
+            start_immediately=False,
+        ).install(graph)
+
+        handle.loop_handle.loop.run(handle.loop_handle.token)
+
+        self.assertIsNone(graph.latest(detected))
+
+    def test_detection_node_can_spawn_downstream_sources(self) -> None:
+        manyfold = load_manyfold_package()
+        graph = manyfold.Graph()
+        detected = _route(
+            manyfold,
+            "spawn_detection_items",
+            _int_schema(manyfold, "SpawnDetected"),
+        )
+        downstream = _route(
+            manyfold,
+            "spawn_downstream_items",
+            _int_schema(manyfold, "SpawnDownstream"),
+        )
+
+        def spawn(item: int, access: manyfold.GraphAccessNode):
+            access.install(
+                manyfold.ManagedGraphNode(
+                    name=f"source-{item}",
+                    body=lambda stop, graph: (
+                        graph.publish(downstream, item * 100),
+                        stop.set(),
+                    ),
+                    output_routes=(downstream,),
+                    start_immediately=False,
+                )
+            )
+            return None
+
+        handle = manyfold.DetectionNode(
+            name="detect-and-spawn",
+            detector=lambda: iter([4]),
+            output_route=detected,
+            spawn=spawn,
+            start_immediately=False,
+        ).install(graph)
+
+        handle.loop_handle.loop.run(handle.loop_handle.token)
+        self.assertEqual(len(handle.spawned_handles), 1)
+        spawned = handle.spawned_handles[0]
+        spawned.loop_handle.loop.run(spawned.loop_handle.token)
+
+        latest_detection = graph.latest(detected)
+        latest_downstream = graph.latest(downstream)
+        self.assertIsNotNone(latest_detection)
+        self.assertIsNotNone(latest_downstream)
+        assert latest_detection is not None
+        assert latest_downstream is not None
+        self.assertEqual(latest_detection.value, 4)
+        self.assertEqual(latest_downstream.value, 400)
 
     def test_change_and_threshold_filters_reduce_noise(self) -> None:
         manyfold = load_manyfold_package()
