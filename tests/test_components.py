@@ -70,6 +70,28 @@ class ComponentTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "NUL"):
                 store.put("bad\x00key", value=b"nope")
 
+    def test_file_store_allows_key_part_matching_value_filename(self) -> None:
+        manyfold = load_manyfold_package()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            keyspace = manyfold.FileStore(temp_dir).prefix("safe")
+
+            keyspace.put("__value__.bin", value=b"nested")
+            keyspace.put(value=b"parent")
+            entries = keyspace.scan()
+            parent = keyspace.get()
+            nested = keyspace.get("__value__.bin")
+
+        self.assertEqual(parent, b"parent")
+        self.assertEqual(nested, b"nested")
+        self.assertEqual(
+            [(entry.key, entry.value) for entry in entries],
+            [
+                ((), b"parent"),
+                (("__value__.bin",), b"nested"),
+            ],
+        )
+
     def test_event_log_appends_commits_and_replays_typed_values(self) -> None:
         manyfold = load_manyfold_package()
         schema = manyfold.Schema(

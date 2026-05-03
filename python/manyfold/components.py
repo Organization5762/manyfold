@@ -122,14 +122,14 @@ class Keyspace:
     def get(self, *parts: KeyPart) -> bytes | None:
         """Return bytes for a keyspace-relative key, if present."""
         path = self._value_path(self.key(*parts))
-        if not path.exists():
+        if not path.is_file():
             return None
         return path.read_bytes()
 
     def delete(self, *parts: KeyPart) -> bool:
         """Delete one keyspace-relative key if it exists."""
         path = self._value_path(self.key(*parts))
-        if not path.exists():
+        if not path.is_file():
             return False
         path.unlink()
         return True
@@ -153,7 +153,7 @@ class Keyspace:
                     value=path.read_bytes(),
                 )
             )
-        return tuple(entries)
+        return tuple(sorted(entries, key=lambda entry: entry.full_key))
 
     def _directory_path(self, key: Key) -> Path:
         path = self.store.root
@@ -817,6 +817,8 @@ def _encode_key_part(part: str) -> str:
         return "%2E"
     if encoded == "..":
         return "%2E%2E"
+    if encoded == _VALUE_FILENAME:
+        return "%5F%5Fvalue%5F%5F%2Ebin"
     return encoded
 
 
