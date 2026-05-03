@@ -1237,6 +1237,15 @@ class ExampleTests(unittest.TestCase):
 
         self.assertAlmostEqual(result["latest_average"], 73.0)
         self.assertEqual(result["latest_seq"], 6)
+        self.assertEqual(result["moving_average_node"], "moving-average-1")
+        self.assertEqual(
+            result["moving_average_inputs"],
+            ("read.logical.sensor.environment.temperature.meta.v1",),
+        )
+        self.assertEqual(result["moving_average_storage"], "sliding_capacitor")
+        self.assertEqual(result["moving_average_window_size"], 3)
+        self.assertEqual(len(result["moving_average_outputs"]), 1)
+        self.assertIn("moving-average-1", result["moving_average_outputs"][0])
 
     def test_observe_publish_example(self) -> None:
         result = load_example_module("observe_publish").run_example()

@@ -116,6 +116,10 @@ graph.observe(temperature_value, replay_latest=False).moving_average(
 ).connect(average_temperature)
 ```
 
+`moving_average` renders as a graph-visible node with metadata such as
+`statistic="moving_average"`, `storage="sliding_capacitor"`, and the configured
+`window_size`.
+
 ## Add Execution Components
 
 A capacitor makes downstream demand explicit:

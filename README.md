@@ -90,17 +90,26 @@ subscription.dispose()
 latest_average = graph.latest(average_temperature)
 assert latest_average is not None
 print(f"average: {latest_average.value:.1f}F")
+
+node = next(
+    node
+    for node in graph.diagram_nodes()
+    if dict(node.metadata).get("statistic") == "moving_average"
+)
+print(dict(node.metadata))
 ```
 
 Output:
 
 ```text
 average: 73.0F
+{'statistic': 'moving_average', 'storage': 'sliding_capacitor', 'window_size': '3'}
 ```
 
 The shape is the same: computed values are just values published to another
-typed route. That keeps callbacks, derived state, and operational inspection in
-the same graph vocabulary.
+typed route. The moving average also renders as a graph-visible node backed by
+a sliding capacitor, so derived state and operational inspection stay in the
+same vocabulary.
 
 ### Model Consensus
 

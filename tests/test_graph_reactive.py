@@ -4665,12 +4665,27 @@ class GraphReactiveTests(unittest.TestCase):
         graph.publish(source, 72.4)
         graph.publish(source, 72.9)
         graph.publish(source, 73.7)
-        connection.dispose()
 
         latest = graph.latest(average)
         assert latest is not None
+        node = next(graph.diagram_nodes())
+        metadata = dict(node.metadata)
         self.assertAlmostEqual(latest.value, 73.0)
         self.assertEqual(latest.closed.seq_source, 6)
+        self.assertEqual(node.name, "moving-average-1")
+        self.assertEqual(
+            node.input_routes,
+            ("read.logical.sensor.environment.temperature.meta.v1",),
+        )
+        self.assertEqual(
+            node.output_routes,
+            ("read.internal.manyfold.graph.pipeline.moving-average-1-1.event.v1",),
+        )
+        self.assertEqual(metadata["statistic"], "moving_average")
+        self.assertEqual(metadata["storage"], "sliding_capacitor")
+        self.assertEqual(metadata["window_size"], "3")
+        connection.dispose()
+        self.assertEqual(tuple(graph.diagram_nodes()), ())
 
     def test_route_pipeline_moving_average_rejects_non_positive_window(self) -> None:
         graph_module = load_graph_module()

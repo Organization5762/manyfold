@@ -385,6 +385,7 @@ class DiagramNode:
     input_routes: tuple[str, ...] = ()
     output_routes: tuple[str, ...] = ()
     group: str | None = None
+    metadata: tuple[tuple[str, str], ...] = ()
     thread_placement: NodeThreadPlacement | None = None
 
 
@@ -1646,7 +1647,16 @@ class RoutePipeline(Generic[T]):
             values.append(node.transform(value))
             return True, average(tuple(values))
 
-        return self._graph._connect_transform_pipeline(self, node, apply)
+        return self._graph._connect_transform_pipeline(
+            self,
+            node,
+            apply,
+            metadata={
+                "statistic": "moving_average",
+                "storage": "sliding_capacitor",
+                "window_size": average.window_size,
+            },
+        )
 
     def on_main_thread(self) -> RoutePipeline[T]:
         """Schedule all following pipeline nodes on the main frame thread."""
@@ -3395,6 +3405,7 @@ class Graph:
         pipeline: RoutePipeline[Any],
         node: MapNode[Any, Any] | FilterNode[Any],
         apply: Callable[[Any], tuple[bool, Any]],
+        metadata: dict[str, Any] | None = None,
     ) -> RoutePipeline[Any]:
         output = self._pipeline_output_route(node.name)
         thread_placement = node.thread_placement or pipeline._thread_placement
@@ -3402,6 +3413,7 @@ class Graph:
             node.name,
             input_routes=(pipeline.route,),
             output_routes=(output,),
+            metadata=metadata,
             thread_placement=thread_placement,
         )
 
@@ -4204,9 +4216,13 @@ class Graph:
         input_routes: Sequence[RouteLike] = (),
         output_routes: Sequence[RouteLike] = (),
         group: str | None = None,
+        metadata: dict[str, Any] | None = None,
         thread_placement: NodeThreadPlacement | None = None,
     ) -> DiagramNode:
         """Register a graph-visible node for topology diagrams."""
+        metadata_items = tuple(
+            (str(key), str(value)) for key, value in (metadata or {}).items()
+        )
         for route_ref in tuple(input_routes) + tuple(output_routes):
             coerced = self._coerce_route_ref(route_ref)
             self._diagram_routes[coerced.display()] = coerced
@@ -4215,6 +4231,7 @@ class Graph:
             input_routes=tuple(self._route_key(route) for route in input_routes),
             output_routes=tuple(self._route_key(route) for route in output_routes),
             group=group,
+            metadata=metadata_items,
             thread_placement=thread_placement,
         )
         self._diagram_nodes[name] = node
