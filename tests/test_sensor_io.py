@@ -71,6 +71,18 @@ class SensorIoTests(unittest.TestCase):
         self.assertEqual(tuple(buffer), (1,))
         self.assertEqual(buffer.rejected, 1)
 
+    def test_bounded_ring_buffer_latest_counts_all_replaced_items(self) -> None:
+        manyfold = load_manyfold_package()
+        buffer = manyfold.BoundedRingBuffer[int](capacity=3, overflow="latest")
+
+        self.assertTrue(buffer.push(1))
+        self.assertTrue(buffer.push(2))
+        self.assertTrue(buffer.push(3))
+        self.assertTrue(buffer.push(4))
+
+        self.assertEqual(tuple(buffer), (4,))
+        self.assertEqual(buffer.dropped, 3)
+
     def test_delimited_message_buffer_reassembles_bytes_and_text(self) -> None:
         manyfold = load_manyfold_package()
         byte_buffer = manyfold.DelimitedMessageBuffer()

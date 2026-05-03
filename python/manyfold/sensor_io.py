@@ -509,10 +509,11 @@ class BoundedRingBuffer(Generic[T]):
             self.dropped += 1
             return False
         if self.overflow == "latest":
+            self.dropped += len(self._items)
             self._items.clear()
         else:
             self._items.popleft()
-        self.dropped += 1
+            self.dropped += 1
         self._items.append(item)
         return True
 
