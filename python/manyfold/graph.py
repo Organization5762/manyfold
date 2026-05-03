@@ -2005,6 +2005,16 @@ class Graph:
             return scheduled.target.request
         return self._coerce_route_ref(scheduled.target)
 
+    def _latest_closed(self, route_ref: RouteLike) -> ClosedEnvelope | None:
+        latest = self.latest(route_ref)
+        if isinstance(latest, TypedEnvelope):
+            return latest.closed
+        return latest
+
+    def _ack_observed_after(self, ack_route: RouteLike, baseline_seq: int) -> bool:
+        latest = self._latest_closed(ack_route)
+        return latest is not None and latest.seq_source > baseline_seq
+
     def _scheduled_write_snapshot(
         self,
         scheduled: ScheduledWrite,
@@ -2018,16 +2028,10 @@ class Graph:
         ack_observed = False
         next_retry_epoch = None
         if scheduled.attempt_count > 0 and scheduled.ack_route is not None:
-            latest_ack = self.latest(scheduled.ack_route)
-            ack_closed = (
-                None
-                if latest_ack is None
-                else latest_ack.closed
-                if isinstance(latest_ack, TypedEnvelope)
-                else latest_ack
+            ack_observed = self._ack_observed_after(
+                scheduled.ack_route,
+                scheduled.ack_baseline_seq,
             )
-            latest_ack_seq = -1 if ack_closed is None else ack_closed.seq_source
-            ack_observed = latest_ack_seq > scheduled.ack_baseline_seq
             if scheduled.retry_policy is not None:
                 next_retry_epoch = (
                     self._scheduler_epoch
@@ -3735,17 +3739,10 @@ class Graph:
         if retry_policy is not None and ack_route is None:
             raise ValueError(
                 "retry_policy requires an ack_route or a write binding with an ack route"
-            )
+        )
         ack_baseline_seq = -1
         if ack_route is not None:
-            latest_ack = self.latest(ack_route)
-            ack_closed = (
-                None
-                if latest_ack is None
-                else latest_ack.closed
-                if isinstance(latest_ack, TypedEnvelope)
-                else latest_ack
-            )
+            ack_closed = self._latest_closed(ack_route)
             ack_baseline_seq = -1 if ack_closed is None else ack_closed.seq_source
         scheduled = ScheduledWrite(
             target=target,
@@ -3794,16 +3791,10 @@ class Graph:
                 )
                 continue
             if scheduled.attempt_count > 0 and scheduled.ack_route is not None:
-                latest_ack = self.latest(scheduled.ack_route)
-                ack_closed = (
-                    None
-                    if latest_ack is None
-                    else latest_ack.closed
-                    if isinstance(latest_ack, TypedEnvelope)
-                    else latest_ack
-                )
-                latest_ack_seq = -1 if ack_closed is None else ack_closed.seq_source
-                if latest_ack_seq > scheduled.ack_baseline_seq:
+                if self._ack_observed_after(
+                    scheduled.ack_route,
+                    scheduled.ack_baseline_seq,
+                ):
                     self._emit_debug_event(
                         "scheduler",
                         f"acknowledged guarded write for {self._route_key(scheduled.target.request if isinstance(scheduled.target, WriteBinding) else scheduled.target)} after {scheduled.attempt_count} attempts",

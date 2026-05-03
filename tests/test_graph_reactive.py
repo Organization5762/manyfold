@@ -3665,6 +3665,48 @@ class GraphReactiveTests(unittest.TestCase):
             " ".join(event.detail for event in graph.audit(request)),
         )
 
+    def test_publish_guarded_accepts_typed_ack_route_baselines(self) -> None:
+        graph_module = load_graph_module()
+        request = graph_module.route(
+            plane=graph_module.Plane.Write,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heater"),
+            family=graph_module.StreamFamily("temperature"),
+            stream=graph_module.StreamName("typed_target"),
+            variant=graph_module.Variant.Request,
+            schema=graph_module.Schema.bytes("TypedTemperatureTarget"),
+        )
+        ack = graph_module.route(
+            plane=graph_module.Plane.Write,
+            layer=graph_module.Layer.Shadow,
+            owner=graph_module.OwnerName("heater"),
+            family=graph_module.StreamFamily("temperature"),
+            stream=graph_module.StreamName("typed_target"),
+            variant=graph_module.Variant.Ack,
+            schema=graph_module.Schema.bytes("TypedTemperatureTargetAck"),
+        )
+        graph = graph_module.Graph()
+
+        graph.publish(ack, b"old")
+        graph.publish_guarded(
+            request.route_ref,
+            b"22",
+            retry_policy=graph_module.RetryPolicy.immediate(max_attempts=3),
+            ack_route=ack,
+        )
+
+        self.assertEqual(len(graph.run_scheduler(epoch=1)), 1)
+        self.assertEqual(len(graph.run_scheduler(epoch=2)), 1)
+
+        graph.publish(ack, b"new")
+
+        self.assertEqual(graph.run_scheduler(epoch=3), ())
+        self.assertEqual(graph.latest(request).closed.seq_source, 2)
+        self.assertIn(
+            "acknowledged guarded write",
+            " ".join(event.detail for event in graph.audit(request)),
+        )
+
     def test_scheduler_snapshot_reports_guarded_write_state_and_retry_gates(
         self,
     ) -> None:
