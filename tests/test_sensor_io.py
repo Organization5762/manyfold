@@ -101,6 +101,12 @@ class SensorIoTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "mode must be 'bytes' or 'text'"):
             manyfold.DelimitedMessageBuffer(mode="lines")  # type: ignore[arg-type]
 
+    def test_delimited_message_buffer_rejects_invalid_text_delimiter(self) -> None:
+        manyfold = load_manyfold_package()
+
+        with self.assertRaisesRegex(ValueError, "text delimiter must be valid UTF-8"):
+            manyfold.DelimitedMessageBuffer(delimiter=b"\xff", mode="text")
+
     def test_json_event_decoder_returns_sensor_events(self) -> None:
         manyfold = load_manyfold_package()
         clock = manyfold.ManualClock(5.0)

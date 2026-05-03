@@ -801,6 +801,11 @@ class DelimitedMessageBuffer:
             raise ValueError("delimiter must not be empty")
         if self.mode not in ("bytes", "text"):
             raise ValueError("mode must be 'bytes' or 'text'")
+        if self.mode == "text":
+            try:
+                self.delimiter.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise ValueError("text delimiter must be valid UTF-8") from exc
 
     @property
     def buffer_size(self) -> int:
@@ -839,7 +844,7 @@ class DelimitedMessageBuffer:
 
     def _drain_text(self) -> list[str]:
         messages: list[str] = []
-        delimiter = self.delimiter.decode("utf-8", errors="ignore")
+        delimiter = self.delimiter.decode("utf-8")
         delimiter_len = len(delimiter)
         while True:
             index = self._text_buffer.find(delimiter)
