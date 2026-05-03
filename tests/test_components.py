@@ -34,6 +34,26 @@ class ComponentTests(unittest.TestCase):
             ],
         )
 
+    def test_file_store_scan_orders_entries_by_decoded_key_parts(self) -> None:
+        manyfold = load_manyfold_package()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            keyspace = manyfold.FileStore(temp_dir).prefix("safe")
+
+            keyspace.put("/", value=b"slash")
+            keyspace.put("0", value=b"zero")
+            keyspace.put("A", value=b"upper")
+            entries = keyspace.scan()
+
+        self.assertEqual(
+            [(entry.key, entry.value) for entry in entries],
+            [
+                (("/",), b"slash"),
+                (("0",), b"zero"),
+                (("A",), b"upper"),
+            ],
+        )
+
     def test_file_store_keeps_special_key_parts_inside_root(self) -> None:
         manyfold = load_manyfold_package()
 
