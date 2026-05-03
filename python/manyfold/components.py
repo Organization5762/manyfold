@@ -364,7 +364,9 @@ class Memory:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._seen: set[tuple[str, int, str, int | None]] = set()
+        self._seen: set[tuple[str, int, str, int | None]] = set(
+            self._event_key(record) for record in self._iter_raw_records()
+        )
 
     def remember(
         self,
@@ -450,6 +452,15 @@ class Memory:
                 stripped = line.strip()
                 if stripped:
                     yield json.loads(stripped)
+
+    @staticmethod
+    def _event_key(record: dict[str, Any]) -> tuple[str, int, str, int | None]:
+        return (
+            str(record["route"]),
+            int(record["seq_source"]),
+            str(record["payload_b64"]),
+            record.get("control_epoch"),
+        )
 
 
 class Consensus:

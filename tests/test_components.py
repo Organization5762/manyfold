@@ -317,6 +317,34 @@ class ComponentTests(unittest.TestCase):
         self.assertEqual([record.value for record in records], [b"restored"])
         self.assertEqual([record.control_epoch for record in records], [10])
 
+    def test_memory_chip_seeds_duplicate_filter_from_existing_file(self) -> None:
+        manyfold = load_manyfold_package()
+        route = manyfold.route(
+            plane=manyfold.Plane.Read,
+            layer=manyfold.Layer.Logical,
+            owner=manyfold.OwnerName("demo"),
+            family=manyfold.StreamFamily("memory"),
+            stream=manyfold.StreamName("bytes"),
+            variant=manyfold.Variant.Meta,
+            schema=manyfold.Schema.bytes("MemoryBytes"),
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "memory.jsonl"
+            graph = manyfold.Graph()
+            graph.publish(route, b"already-recorded", control_epoch=7)
+            first_memory = manyfold.Memory(path)
+            first_subscription = first_memory.remember(graph, route)
+            first_subscription.dispose()
+
+            second_memory = manyfold.Memory(path)
+            second_subscription = second_memory.remember(graph, route)
+            second_subscription.dispose()
+            records = manyfold.Memory(path).records(route)
+
+        self.assertEqual([record.value for record in records], [b"already-recorded"])
+        self.assertEqual([record.control_epoch for record in records], [7])
+
 
 if __name__ == "__main__":
     unittest.main()
