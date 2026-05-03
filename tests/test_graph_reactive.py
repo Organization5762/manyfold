@@ -1747,6 +1747,19 @@ class GraphReactiveTests(unittest.TestCase):
             "flowchart LR\n  %% graph has no topology edges",
         )
 
+    def test_diagram_renders_registered_node_without_edges(self) -> None:
+        graph_module = load_graph_module()
+        graph = graph_module.Graph()
+
+        graph.register_diagram_node("planner", group="control")
+
+        diagram = graph.render_diagram()
+
+        self.assertIn("flowchart LR", diagram)
+        self.assertIn('subgraph g0["control"]', diagram)
+        self.assertIn('["planner"]', diagram)
+        self.assertNotIn("graph has no topology edges", diagram)
+
     def test_diagram_rejects_unknown_group_fields(self) -> None:
         graph_module = load_graph_module()
         graph = graph_module.Graph()

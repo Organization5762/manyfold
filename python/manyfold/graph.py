@@ -3654,7 +3654,17 @@ class Graph:
             )
 
         edges = self._diagram_edges()
-        node_names = tuple(sorted({name for edge in edges for name in edge}))
+        node_names = tuple(
+            sorted(
+                {
+                    *(name for edge in edges for name in edge),
+                    *(
+                        self._diagram_registered_node_key(node.name)
+                        for node in self._diagram_nodes.values()
+                    ),
+                }
+            )
+        )
         node_ids = {
             node_name: f"n{index}"
             for index, node_name in enumerate(node_names)
