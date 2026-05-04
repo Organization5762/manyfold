@@ -1008,6 +1008,7 @@ def load_manyfold_package():
         "FrameAssembler": sensor_io.FrameAssembler,
         "Graph": graph.Graph,
         "GraphConnection": graph.GraphConnection,
+        "GraphContext": graph.GraphContext,
         "GraphAccessNode": sensor_io.GraphAccessNode,
         "HealthStatus": sensor_io.HealthStatus,
         "JoinInput": graph.JoinInput,

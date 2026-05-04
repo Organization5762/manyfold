@@ -1411,6 +1411,64 @@ class GraphConnection:
         self.remove()
 
 
+class GraphContext:
+    """Scoped graph-visible context that collects routes used inside a block."""
+
+    def __init__(
+        self,
+        graph: Graph,
+        *,
+        name: str,
+        group: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        if not name.strip():
+            raise ValueError("context name must not be blank")
+        self._graph = graph
+        self.name = name
+        self.group = group
+        self.metadata = {str(key): str(value) for key, value in (metadata or {}).items()}
+        self._entered = False
+
+    @property
+    def input_routes(self) -> tuple[str, ...]:
+        """Return routes this context consumes from its surrounding graph."""
+        return self.node.input_routes
+
+    @property
+    def output_routes(self) -> tuple[str, ...]:
+        """Return routes this context exposes to its surrounding graph."""
+        return self.node.output_routes
+
+    @property
+    def node(self) -> DiagramNode:
+        """Return the diagram node backing this context."""
+        node = self._graph._diagram_nodes.get(self.name)
+        if node is None:
+            raise RuntimeError(f"context {self.name!r} is not registered")
+        return node
+
+    def __enter__(self) -> GraphContext:
+        if self._entered:
+            raise RuntimeError(f"context {self.name!r} is already active")
+        self._graph._enter_context(self)
+        self._entered = True
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: Any,
+    ) -> bool:
+        del exc_type, exc, traceback
+        if not self._entered:
+            raise RuntimeError(f"context {self.name!r} is not active")
+        self._graph._exit_context(self)
+        self._entered = False
+        return False
+
+
 class _ThreadPlaceableNode:
     thread_placement: NodeThreadPlacement | None
 
@@ -1795,6 +1853,8 @@ class Graph:
         self._debug_routes: dict[str, RouteRef] = {}
         self._diagram_nodes: dict[str, DiagramNode] = {}
         self._diagram_routes: dict[str, RouteRef] = {}
+        self._context_stack: list[GraphContext] = []
+        self._context_edges: set[tuple[str, str]] = set()
         self._audit_events: list[DebugEvent] = []
         self._capability_grants: dict[tuple[str, str], CapabilityGrant] = {}
         self._route_visibility: dict[str, str] = {}
@@ -1864,6 +1924,111 @@ class Graph:
 
     def _route_key(self, route_ref: RouteLike) -> str:
         return self._coerce_route_ref(route_ref).display()
+
+    @staticmethod
+    def _context_route_role(route_ref: RouteRef) -> str | None:
+        if route_ref.namespace.plane == Plane.Debug:
+            return None
+        if route_ref.namespace.plane == Plane.Write or route_ref.variant == Variant.Request:
+            return "input"
+        return "output"
+
+    @staticmethod
+    def _append_unique(items: tuple[str, ...], item: str) -> tuple[str, ...]:
+        if item in items:
+            return items
+        return (*items, item)
+
+    def _remember_active_context_key(self, route_key: str, role: str) -> None:
+        if not self._context_stack:
+            return
+        if role not in {"input", "output"}:
+            raise ValueError(f"unknown context route role: {role}")
+        for context in self._context_stack:
+            node = self._diagram_nodes.get(context.name)
+            if node is None:
+                continue
+            if role == "input":
+                self._diagram_nodes[context.name] = replace(
+                    node,
+                    input_routes=self._append_unique(node.input_routes, route_key),
+                )
+            else:
+                self._diagram_nodes[context.name] = replace(
+                    node,
+                    output_routes=self._append_unique(node.output_routes, route_key),
+                )
+
+    def _remember_active_context_route(
+        self,
+        route_ref: RouteLike,
+        role: str | None = None,
+    ) -> None:
+        if not self._context_stack:
+            return
+        native_route = self._coerce_route_ref(route_ref)
+        resolved_role = self._context_route_role(native_route) if role is None else role
+        if resolved_role is None:
+            return
+        self._diagram_routes[native_route.display()] = native_route
+        self._remember_active_context_key(native_route.display(), resolved_role)
+
+    def _remember_active_context_routes(
+        self,
+        *,
+        input_routes: Sequence[RouteLike] = (),
+        output_routes: Sequence[RouteLike] = (),
+    ) -> None:
+        for route_ref in input_routes:
+            self._remember_active_context_route(route_ref, "input")
+        for route_ref in output_routes:
+            self._remember_active_context_route(route_ref, "output")
+
+    def _remember_active_context_node(self, name: str) -> None:
+        if not self._context_stack:
+            return
+        parent = self._context_stack[-1]
+        if parent.name == name:
+            return
+        self._context_edges.add((parent.name, name))
+
+    def _enter_context(self, context: GraphContext) -> None:
+        parent = self._context_stack[-1] if self._context_stack else None
+        context_metadata = dict(context.metadata)
+        context_metadata.setdefault("context", "true")
+        context_metadata["context_path"] = "/".join(
+            (*tuple(active.name for active in self._context_stack), context.name)
+        )
+        if parent is not None:
+            context_metadata["context_parent"] = parent.name
+            self._context_edges.add((parent.name, context.name))
+        self.register_diagram_node(
+            context.name,
+            group=context.group or "context",
+            metadata=context_metadata,
+        )
+        self._context_stack.append(context)
+
+    def _exit_context(self, context: GraphContext) -> None:
+        if not self._context_stack or self._context_stack[-1] is not context:
+            raise RuntimeError(f"context {context.name!r} exited out of order")
+        self._context_stack.pop()
+
+    def context(
+        self,
+        *,
+        name: str,
+        group: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> GraphContext:
+        """Return a scoped graph-visible context node.
+
+        Routes observed or connected as sources inside the scope are recorded as
+        context inputs. Routes published, registered as read/state ports, or
+        connected as sinks are recorded as context outputs. Nested contexts
+        expose their routes through each active parent context as well.
+        """
+        return GraphContext(self, name=name, group=group, metadata=metadata)
 
     def _next_pipeline_node_name(self, kind: str) -> str:
         self._pipeline_node_sequence += 1
@@ -3078,7 +3243,9 @@ class Graph:
 
     def register_port(self, route_ref: RouteLike) -> RouteRef:
         """Register a route in the native graph and return its concrete ref."""
-        return self._graph.register_port(self._coerce_route_ref(route_ref))
+        registered = self._graph.register_port(self._coerce_route_ref(route_ref))
+        self._remember_active_context_route(registered)
+        return registered
 
     def configure_retention(
         self,
@@ -3174,6 +3341,7 @@ class Graph:
         subscriber_id: str | None = None,
     ) -> RoutePipeline[Any]:
         """Start a graph-owned pipeline from a route."""
+        self._remember_active_context_route(route_ref, "input")
         return RoutePipeline(
             self,
             route_ref,
@@ -3650,10 +3818,12 @@ class Graph:
     ) -> TypedEnvelope[Any] | ClosedEnvelope:
         """Write one payload to a route and return the resulting envelope."""
         if isinstance(target, LifecycleBinding):
+            self._remember_active_context_route(target.request, "input")
             self._write_bindings[target.request.display()] = target.binding
             self._lifecycle_bindings[target.request.display()] = target
             target = target.binding
         if isinstance(target, WriteBinding):
+            self._remember_active_context_route(target.request, "input")
             binding = self._resolve_write_binding(target)
             self._graph.register_binding(binding.request.display(), binding)
             emitted = self._emit_native(
@@ -3689,6 +3859,7 @@ class Graph:
             return emitted[0]
         typed_target = self._typed_route(target)
         if typed_target is not None:
+            self._remember_active_context_route(typed_target.route_ref)
             encoded = typed_target.schema.encode(payload)
             emitted = self._emit_native(
                 typed_target.route_ref,
@@ -3712,8 +3883,10 @@ class Graph:
                 "write", f"published {typed_target.display()}", typed_target
             )
             return self._decode_envelope(typed_target, envelope)
+        native_target = self._coerce_route_ref(target)
+        self._remember_active_context_route(native_target)
         emitted = self._emit_native(
-            self._coerce_route_ref(target),
+            native_target,
             payload,
             producer=producer,
             control_epoch=control_epoch,
@@ -3747,6 +3920,7 @@ class Graph:
     ) -> ClosedEnvelope:
         """Publish metadata now and defer payload materialization until opened."""
         native_route = self._coerce_route_ref(target)
+        self._remember_active_context_route(native_route)
         emitted = self._emit_native(
             native_route, b"", producer=producer, control_epoch=control_epoch
         )
@@ -3791,6 +3965,14 @@ class Graph:
         self._mailbox_flow_policies[
             mailbox.egress.describe().route_display
         ] = mailbox_policy
+        self._remember_active_context_key(
+            mailbox.ingress.describe().route_display,
+            "input",
+        )
+        self._remember_active_context_key(
+            mailbox.egress.describe().route_display,
+            "output",
+        )
         return mailbox
 
     def connect(
@@ -3808,6 +3990,14 @@ class Graph:
         )
         native_sink = (
             sink if isinstance(sink, NativeMailbox) else self._coerce_route_ref(sink)
+        )
+        self._remember_active_context_key(
+            self._connectable_key(source, edge_role="source"),
+            "input",
+        )
+        self._remember_active_context_key(
+            self._connectable_key(sink, edge_role="sink"),
+            "output",
         )
         self._graph.connect(native_source, native_sink)
         if flow_policy is not None:
@@ -4256,6 +4446,11 @@ class Graph:
             thread_placement=thread_placement,
         )
         self._diagram_nodes[name] = node
+        self._remember_active_context_routes(
+            input_routes=input_routes,
+            output_routes=output_routes,
+        )
+        self._remember_active_context_node(name)
         return node
 
     def diagram_nodes(self) -> Iterator[DiagramNode]:
@@ -4367,6 +4562,13 @@ class Graph:
             node_key = self._diagram_registered_node_key(node.name)
             edges.extend((route, node_key) for route in node.input_routes)
             edges.extend((node_key, route) for route in node.output_routes)
+        edges.extend(
+            (
+                self._diagram_registered_node_key(parent),
+                self._diagram_registered_node_key(child),
+            )
+            for parent, child in sorted(self._context_edges)
+        )
         return tuple(edges)
 
     @staticmethod
@@ -4386,21 +4588,25 @@ class Graph:
 
     def _diagram_registered_node_metadata(self, node: DiagramNode) -> dict[str, str]:
         group = node.group or "nodes"
-        return {
-            "display": self._diagram_registered_node_key(node.name),
-            "plane": "node",
-            "layer": "node",
-            "owner": group,
-            "family": group,
-            "stream": node.name,
-            "variant": "node",
-            "label": node.name,
-            "thread": (
-                ""
-                if node.thread_placement is None
-                else node.thread_placement.display()
-            ),
-        }
+        metadata = dict(node.metadata)
+        metadata.update(
+            {
+                "display": self._diagram_registered_node_key(node.name),
+                "plane": "node",
+                "layer": "node",
+                "owner": group,
+                "family": group,
+                "stream": node.name,
+                "variant": "node",
+                "label": node.name,
+                "thread": (
+                    ""
+                    if node.thread_placement is None
+                    else node.thread_placement.display()
+                ),
+            }
+        )
+        return metadata
 
     def _diagram_route_metadata(
         self,
