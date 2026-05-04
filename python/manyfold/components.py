@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import threading
 from dataclasses import dataclass
 from json import JSONDecodeError
 from pathlib import Path
@@ -195,6 +196,7 @@ class EventLog(Generic[T]):
         self.name = name
         self.keyspace = keyspace
         self.schema = schema
+        self._append_lock = threading.Lock()
         self.routes = EventLogRoutes(
             append=_component_route(
                 plane=Plane.Write,
@@ -230,8 +232,12 @@ class EventLog(Generic[T]):
         """Append input values to the log, then publish committed values."""
 
         def on_next(envelope: TypedEnvelope[T]) -> None:
-            index = self._next_index()
-            self.keyspace.put(_format_log_index(index), value=self.schema.encode(envelope.value))
+            with self._append_lock:
+                index = self._next_index()
+                self.keyspace.put(
+                    _format_log_index(index),
+                    value=self.schema.encode(envelope.value),
+                )
             graph.publish(
                 self.routes.committed,
                 envelope.value,

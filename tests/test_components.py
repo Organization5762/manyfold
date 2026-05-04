@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -196,6 +198,40 @@ class ComponentTests(unittest.TestCase):
 
         self.assertEqual(committed, ["next"])
         self.assertEqual(stored_next, b"next")
+
+    def test_event_log_serializes_concurrent_appends(self) -> None:
+        manyfold = load_manyfold_package()
+
+        def encode(value: int) -> bytes:
+            time.sleep(0.01)
+            return str(value).encode("ascii")
+
+        schema = manyfold.Schema(
+            schema_id="ConcurrentCommand",
+            version=1,
+            encode=encode,
+            decode=lambda payload: int(payload.decode("ascii")),
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            keyspace = manyfold.FileStore(temp_dir).prefix("commands")
+            log = manyfold.EventLog("commands", keyspace, schema)
+            graph = manyfold.Graph()
+            subscription = log.install(graph)
+            publishers = tuple(
+                threading.Thread(target=graph.publish, args=(log.input(), index))
+                for index in range(12)
+            )
+
+            for publisher in publishers:
+                publisher.start()
+            for publisher in publishers:
+                publisher.join()
+            subscription.dispose()
+            records = log.records()
+
+        self.assertEqual([record.index for record in records], list(range(1, 13)))
+        self.assertEqual({record.value for record in records}, set(range(12)))
 
     def test_snapshot_store_writes_latest_value_and_publishes_output(self) -> None:
         manyfold = load_manyfold_package()
