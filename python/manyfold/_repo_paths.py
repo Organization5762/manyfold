@@ -49,11 +49,15 @@ def load_module_from_path(module_name: str, module_path: Path) -> ModuleType:
     spec = importlib.util.spec_from_file_location(module_name, module_path)
     if spec is None or spec.loader is None:
         raise ImportError(f"unable to load module {module_name!r} from {module_path}")
+    previous_module = sys.modules.get(module_name)
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
     try:
         spec.loader.exec_module(module)
     except Exception:
-        sys.modules.pop(module_name, None)
+        if previous_module is None:
+            sys.modules.pop(module_name, None)
+        else:
+            sys.modules[module_name] = previous_module
         raise
     return module
