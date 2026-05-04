@@ -99,6 +99,50 @@ Use `.on_main_thread()` for work that must run on the frame thread,
 Use `.return_to_prior_thread()` after a scoped operation to restore the previous
 explicit placement for following nodes.
 
+## Contexts
+
+Use `Graph.context(name=...)` when a set of routes and nodes should be exposed
+as one graph-visible part:
+
+```python
+from manyfold import Graph, Plane, Schema, Variant, route
+
+graph = Graph()
+command = route(
+    plane=Plane.Write,
+    owner="board",
+    family="control",
+    stream="command",
+    variant=Variant.Request,
+    schema=Schema.bytes(name="BoardCommand"),
+)
+reading = route(
+    owner="board",
+    family="sensor",
+    stream="reading",
+    schema=Schema.bytes(name="BoardReading"),
+)
+
+with graph.context(name="board") as board:
+    graph.observe(command, replay_latest=False)
+    graph.publish(reading, b"72.4F")
+
+print(board.input_routes)
+print(board.output_routes)
+```
+
+Output:
+
+```text
+('write.logical.board.control.command.request.v1',)
+('read.logical.board.sensor.reading.meta.v1',)
+```
+
+Nested contexts link child parts to their parents. Routes observed or connected
+as sources become inputs; routes published, registered as read/state ports, or
+connected as sinks become outputs. Diagram nodes registered inside a context
+are linked to that context in rendered diagrams.
+
 ## Stats
 
 Stats layer onto a stream pipeline and publish derived values like any other

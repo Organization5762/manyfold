@@ -2132,6 +2132,83 @@ class GraphReactiveTests(unittest.TestCase):
         self.assertIn('["planner"]', diagram)
         self.assertNotIn("graph has no topology edges", diagram)
 
+    def test_context_collects_scoped_route_inputs_and_outputs(self) -> None:
+        graph_module = load_graph_module()
+        command = graph_module.route(
+            plane=graph_module.Plane.Write,
+            owner="board",
+            family="control",
+            stream="command",
+            variant=graph_module.Variant.Request,
+            schema=str_schema(graph_module, "BoardCommand"),
+        )
+        reading = graph_module.route(
+            owner="board",
+            family="sensor",
+            stream="reading",
+            schema=int_schema(graph_module, "BoardReading"),
+        )
+        outside = graph_module.route(
+            owner="board",
+            family="sensor",
+            stream="outside",
+            schema=int_schema(graph_module, "OutsideReading"),
+        )
+        graph = graph_module.Graph()
+
+        with graph.context(name="board") as board:
+            graph.observe(command, replay_latest=False)
+            graph.publish(reading, 7)
+
+        graph.publish(outside, 9)
+
+        node = board.node
+        metadata = dict(node.metadata)
+        self.assertEqual(node.name, "board")
+        self.assertEqual(node.input_routes, (command.display(),))
+        self.assertEqual(node.output_routes, (reading.display(),))
+        self.assertEqual(metadata["context"], "true")
+        self.assertEqual(metadata["context_path"], "board")
+
+    def test_nested_context_links_child_part_to_parent_context(self) -> None:
+        graph_module = load_graph_module()
+        raw_accel = graph_module.route(
+            owner="imu",
+            family="accelerometer",
+            stream="raw",
+            schema=int_schema(graph_module, "RawAccel"),
+        )
+        filtered_accel = graph_module.route(
+            owner="imu",
+            family="accelerometer",
+            stream="filtered",
+            schema=int_schema(graph_module, "FilteredAccel"),
+        )
+        graph = graph_module.Graph()
+
+        with graph.context(name="board"):
+            with graph.context(name="accelerometer") as accelerometer:
+                graph.connect(source=raw_accel, sink=filtered_accel)
+
+        nodes = {node.name: node for node in graph.diagram_nodes()}
+        accelerometer_metadata = dict(accelerometer.node.metadata)
+
+        self.assertEqual(nodes["board"].input_routes, (raw_accel.display(),))
+        self.assertEqual(nodes["board"].output_routes, (filtered_accel.display(),))
+        self.assertEqual(nodes["accelerometer"].input_routes, (raw_accel.display(),))
+        self.assertEqual(
+            nodes["accelerometer"].output_routes,
+            (filtered_accel.display(),),
+        )
+        self.assertEqual(accelerometer_metadata["context_parent"], "board")
+        self.assertEqual(
+            accelerometer_metadata["context_path"],
+            "board/accelerometer",
+        )
+        diagram = graph.render_diagram()
+        self.assertIn('["board"]', diagram)
+        self.assertIn('["accelerometer"]', diagram)
+
     def test_diagram_rejects_unknown_group_fields(self) -> None:
         graph_module = load_graph_module()
         graph = graph_module.Graph()
