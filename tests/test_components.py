@@ -336,6 +336,10 @@ class ComponentTests(unittest.TestCase):
             (3, "node-a", "node-b", True),
         )
         self.assertEqual(
+            routes.append_entries.schema.decode(b"7|set pipe=a|b"),
+            (7, "set pipe=a|b"),
+        )
+        self.assertEqual(
             routes.quorum.schema.decode(b"3|node-a|node-a,node-b|1"),
             (3, "node-a", ("node-a", "node-b"), True),
         )
@@ -343,6 +347,15 @@ class ComponentTests(unittest.TestCase):
             routes.leader_state.schema.decode(b"node-a|3|1"),
             ("node-a", 3, True),
         )
+
+    def test_consensus_append_entry_schema_encodes_compact_json_tuple(self) -> None:
+        manyfold = load_manyfold_package()
+        route = manyfold.Consensus.default_routes().append_entries
+
+        payload = route.schema.encode((7, "set pipe=a|b\nset mode=auto"))
+
+        self.assertEqual(payload, b'[7,"set pipe=a|b\\nset mode=auto"]')
+        self.assertEqual(route.schema.decode(payload), (7, "set pipe=a|b\nset mode=auto"))
 
     def test_consensus_component_validates_candidate_membership(self) -> None:
         manyfold = load_manyfold_package()
