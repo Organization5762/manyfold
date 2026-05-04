@@ -145,6 +145,7 @@ class ExampleTests(unittest.TestCase):
 
         examples_package = __import__("examples")
 
+        self.assertIsInstance(examples_package.__all__, tuple)
         self.assertEqual(tuple(CATALOG_EXPORTS), tuple(examples_package.__all__))
         self.assertEqual(tuple(CATALOG_EXPORTS), tuple(catalog_module.__all__))
 
@@ -182,6 +183,7 @@ class ExampleTests(unittest.TestCase):
         exported_names = set(dir(examples_package))
 
         self.assertTrue(set(examples_package.__all__).issubset(exported_names))
+        self.assertEqual(dir(examples_package), sorted(exported_names))
 
     def test_catalog_cli_check_readme_runs_without_runpy_warning(self) -> None:
         result = subprocess.run(
