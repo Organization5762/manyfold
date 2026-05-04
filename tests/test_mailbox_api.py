@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 import unittest
 
-from tests.test_support import load_manyfold_graph_module
+from tests.test_support import load_manyfold_graph_module, subprocess_test_env
 
 
 def load_graph_module():
@@ -10,6 +12,41 @@ def load_graph_module():
 
 
 class MailboxApiTests(unittest.TestCase):
+    def test_native_flow_snapshot_exposes_largest_queue_depth(self) -> None:
+        script = """
+import manyfold
+
+graph = manyfold.Graph()
+producer = manyfold.route(
+    plane=manyfold.Plane.Read,
+    layer=manyfold.Layer.Logical,
+    owner=manyfold.OwnerName("sensor"),
+    family=manyfold.StreamFamily("mailbox"),
+    stream=manyfold.StreamName("producer"),
+    variant=manyfold.Variant.Meta,
+    schema=manyfold.Schema.bytes(name="MailboxProducer"),
+)
+mailbox = graph.mailbox(
+    "native-depth",
+    manyfold.MailboxDescriptor(capacity=2, overflow_policy="block"),
+)
+graph.connect(source=producer, sink=mailbox)
+graph.publish(producer, b"one")
+graph.publish(producer, b"two")
+graph.publish(producer, b"three")
+snapshot = graph.flow_snapshot(mailbox.ingress)
+assert snapshot.largest_queue_depth == 2, snapshot
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            check=False,
+            capture_output=True,
+            env=subprocess_test_env(),
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_mailbox_snapshot_exposes_semantics_and_delivery_counters(self) -> None:
         graph_module = load_graph_module()
         source = graph_module.route(

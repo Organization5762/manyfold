@@ -1617,6 +1617,7 @@ mod tests {
             .unwrap();
         assert_eq!(ingress_snapshot.available, 0);
         assert_eq!(ingress_snapshot.blocked_senders, 1);
+        assert_eq!(ingress_snapshot.largest_queue_depth, 1);
     }
 
     #[test]

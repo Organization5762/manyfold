@@ -1184,6 +1184,11 @@ impl CreditSnapshot {
     fn dropped_messages(&self) -> u64 {
         self.inner.dropped_messages
     }
+
+    #[getter]
+    fn largest_queue_depth(&self) -> usize {
+        self.inner.largest_queue_depth
+    }
 }
 
 #[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
