@@ -111,7 +111,7 @@ class ReactiveThreadsTests(unittest.TestCase):
         self.assertEqual(self.reactive_threads.drain_frame_thread_queue(), 1)
         self.assertEqual(values, [])
 
-    def test_pipe_helpers_apply_operators_and_share_streams(self) -> None:
+    def test_pipe_helpers_apply_operators_and_materialized_streams(self) -> None:
         background_values: list[int] = []
         self.reactive_threads.pipe_in_background(
             self.rx.from_iterable([1, 2, 3]),
@@ -153,10 +153,10 @@ class ReactiveThreadsTests(unittest.TestCase):
 
         self.assertEqual(values, [1, 2, 3])
 
-    def test_share_sequence_exposes_iterable_as_observable(self) -> None:
+    def test_materialize_sequence_exposes_iterable_as_observable(self) -> None:
         values: list[str] = []
 
-        self.reactive_threads.share_sequence(["a", "b"]).subscribe(values.append)
+        self.reactive_threads.materialize_sequence(["a", "b"]).subscribe(values.append)
 
         self.assertEqual(values, ["a", "b"])
 
