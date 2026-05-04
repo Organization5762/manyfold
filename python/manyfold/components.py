@@ -349,9 +349,11 @@ class SnapshotStore(Generic[T]):
 
     def publish_latest(self, graph: Graph) -> T | None:
         """Publish the durable latest value to the latest output route."""
-        value = self.latest()
-        if value is not None:
-            graph.publish(self.routes.latest, value)
+        payload = self.keyspace.get(self.key)
+        if payload is None:
+            return None
+        value = self.schema.decode(payload)
+        graph.publish(self.routes.latest, value)
         return value
 
 

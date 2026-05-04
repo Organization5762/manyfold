@@ -270,6 +270,24 @@ class ComponentTests(unittest.TestCase):
         assert latest is not None
         self.assertEqual(latest.value, 24)
 
+    def test_snapshot_store_publishes_persisted_none_latest_value(self) -> None:
+        manyfold = load_manyfold_package()
+        schema = manyfold.Schema.any("OptionalSnapshot")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            keyspace = manyfold.FileStore(temp_dir).prefix("optional")
+            snapshot = manyfold.SnapshotStore("optional_snapshot", keyspace, schema)
+            snapshot.write(None)
+
+            replay_graph = manyfold.Graph()
+            published = snapshot.publish_latest(replay_graph)
+            latest = replay_graph.latest(snapshot.output())
+
+        self.assertIsNone(published)
+        self.assertIsNotNone(latest)
+        assert latest is not None
+        self.assertIsNone(latest.value)
+
     def test_consensus_component_runs_default_leader_election(self) -> None:
         manyfold = load_manyfold_package()
         graph = manyfold.Graph()
