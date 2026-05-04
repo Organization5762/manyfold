@@ -49,6 +49,17 @@ class RxFacadeTests(unittest.TestCase):
 
         self.assertEqual(actual, exp("--1-2-|"))
 
+    def test_private_marble_facade_exports_only_testing_helpers(self) -> None:
+        load_manyfold_package()
+        marble_module = importlib.import_module("manyfold._rx.testing.marbles")
+
+        self.assertEqual(
+            marble_module.__all__,
+            ("MarblesContext", "marbles_testing", "messages_to_records"),
+        )
+        self.assertNotIn("warn", marble_module.__all__)
+        self.assertNotIn("typing", marble_module.__all__)
+
     def test_private_facade_modules_publish_stable_exports(self) -> None:
         load_manyfold_package()
         expected_exports = {
