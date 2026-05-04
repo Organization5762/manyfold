@@ -17,7 +17,9 @@ class Average:
             raise ValueError("average window size must be positive")
 
     def __call__(self, values: Sequence[float]) -> float:
-        if not values:
+        value_count = len(values)
+        if value_count == 0:
             raise ValueError("average requires at least one value")
-        window = values[-self.window_size :]
-        return sum(window) / len(window)
+        start = max(0, value_count - self.window_size)
+        window_count = value_count - start
+        return sum(values[index] for index in range(start, value_count)) / window_count
