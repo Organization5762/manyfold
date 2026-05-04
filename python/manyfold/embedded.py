@@ -11,6 +11,53 @@ from .primitives import OwnerName, Schema, StreamFamily, StreamName, TypedRoute,
 T = TypeVar("T")
 TMeta = TypeVar("TMeta")
 
+# Validation issue order is part of the ergonomics: callers can show the tuple
+# directly and get stable, high-priority setup fixes before softer advice.
+_FIRMWARE_ISSUE_CHECKS: tuple[tuple[str, str], ...] = (
+    ("route_descriptors", "firmware agent must provide route descriptors"),
+    ("sequence_numbering", "firmware agent must provide sequence numbering"),
+    ("source_timestamping", "firmware agent must timestamp close to the source"),
+    ("transport_framing", "firmware agent must provide transport framing"),
+    ("shadow_reporting", "firmware agent should expose shadow reporting"),
+    ("local_filtering", "firmware agent should support local filtering"),
+    ("local_aggregation", "firmware agent should support local aggregation"),
+    ("ring_buffer_staging", "firmware agent should stage through a ring buffer"),
+)
+_EMBEDDED_RUNTIME_ISSUE_CHECKS: tuple[tuple[str, str], ...] = (
+    ("timestamps_close_to_source", "embedded routes must timestamp close to the source"),
+    ("keep_isr_work_minimal", "embedded routes must keep ISR work minimal"),
+    (
+        "use_dma_or_async_peripherals",
+        "embedded routes should prefer DMA or async peripherals",
+    ),
+    ("bounded_ring_buffers", "embedded routes must use bounded ring buffers"),
+    (
+        "avoid_heap_on_hot_paths",
+        "embedded routes should avoid heap allocation on hot paths",
+    ),
+    (
+        "separate_metadata_and_payload_early",
+        "embedded routes should separate metadata and payload early",
+    ),
+    (
+        "preserve_device_and_ingest_time",
+        "embedded routes must preserve device time and ingest time separately",
+    ),
+)
+_BULK_RUNTIME_ISSUE_CHECKS: tuple[tuple[str, str], ...] = (
+    ("lazy_bulk_payload_open", "bulk payload opening should be lazy"),
+    (
+        "prefer_zero_copy_bulk_payloads",
+        "bulk payload paths should prefer zero-copy or shared memory strategies",
+    ),
+)
+
+
+def _disabled_issue_messages(
+    owner: object, checks: tuple[tuple[str, str], ...]
+) -> tuple[str, ...]:
+    return tuple(message for field, message in checks if not getattr(owner, field))
+
 
 @dataclass(frozen=True)
 class FirmwareAgentProfile:
@@ -27,24 +74,7 @@ class FirmwareAgentProfile:
     flash_backed_retention: bool = False
 
     def required_issues(self) -> tuple[str, ...]:
-        issues: list[str] = []
-        if not self.route_descriptors:
-            issues.append("firmware agent must provide route descriptors")
-        if not self.sequence_numbering:
-            issues.append("firmware agent must provide sequence numbering")
-        if not self.source_timestamping:
-            issues.append("firmware agent must timestamp close to the source")
-        if not self.transport_framing:
-            issues.append("firmware agent must provide transport framing")
-        if not self.shadow_reporting:
-            issues.append("firmware agent should expose shadow reporting")
-        if not self.local_filtering:
-            issues.append("firmware agent should support local filtering")
-        if not self.local_aggregation:
-            issues.append("firmware agent should support local aggregation")
-        if not self.ring_buffer_staging:
-            issues.append("firmware agent should stage through a ring buffer")
-        return tuple(issues)
+        return _disabled_issue_messages(self, _FIRMWARE_ISSUE_CHECKS)
 
 
 @dataclass(frozen=True)
@@ -63,33 +93,11 @@ class EmbeddedRuntimeRules:
     bulk_credit_policy: str = "bytes"
 
     def required_issues(self) -> tuple[str, ...]:
-        issues: list[str] = []
-        if not self.timestamps_close_to_source:
-            issues.append("embedded routes must timestamp close to the source")
-        if not self.keep_isr_work_minimal:
-            issues.append("embedded routes must keep ISR work minimal")
-        if not self.use_dma_or_async_peripherals:
-            issues.append("embedded routes should prefer DMA or async peripherals")
-        if not self.bounded_ring_buffers:
-            issues.append("embedded routes must use bounded ring buffers")
-        if not self.avoid_heap_on_hot_paths:
-            issues.append("embedded routes should avoid heap allocation on hot paths")
-        if not self.separate_metadata_and_payload_early:
-            issues.append("embedded routes should separate metadata and payload early")
-        if not self.preserve_device_and_ingest_time:
-            issues.append(
-                "embedded routes must preserve device time and ingest time separately"
-            )
-        return tuple(issues)
+        return _disabled_issue_messages(self, _EMBEDDED_RUNTIME_ISSUE_CHECKS)
 
     def bulk_issues(self) -> tuple[str, ...]:
         issues = list(self.required_issues())
-        if not self.lazy_bulk_payload_open:
-            issues.append("bulk payload opening should be lazy")
-        if not self.prefer_zero_copy_bulk_payloads:
-            issues.append(
-                "bulk payload paths should prefer zero-copy or shared memory strategies"
-            )
+        issues.extend(_disabled_issue_messages(self, _BULK_RUNTIME_ISSUE_CHECKS))
         if self.bulk_credit_policy != "bytes":
             issues.append(
                 "bulk payload routes must use byte credits instead of count credits"
