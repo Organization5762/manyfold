@@ -7,6 +7,7 @@ docs, and future components can talk about the same dependency graph.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 
@@ -241,6 +242,23 @@ _LEGOS = (
     Lego("KillSwitch", "control-plane", "application", "Emergency disable control.", ("FeatureFlag", "AuthPolicy")),
     Lego("FlowControl", "flow", "application", "Coordinates backpressure, admission, and limits.", ("RateLimiter", "Semaphore", "BoundedQueue")),
 )
+
+
+def _duplicate_names(names: Iterable[str]) -> tuple[str, ...]:
+    seen: set[str] = set()
+    duplicates: set[str] = set()
+    for name in names:
+        if name in seen:
+            duplicates.add(name)
+        else:
+            seen.add(name)
+    return tuple(sorted(duplicates))
+
+
+_DUPLICATE_NAMES = _duplicate_names(lego.name for lego in _LEGOS)
+if _DUPLICATE_NAMES:
+    duplicate = ", ".join(_DUPLICATE_NAMES)
+    raise RuntimeError(f"lego catalog declares duplicate names: {duplicate}")
 
 _BY_NAME = {lego.name: lego for lego in _LEGOS}
 _UNKNOWN_REQUIREMENTS = tuple(

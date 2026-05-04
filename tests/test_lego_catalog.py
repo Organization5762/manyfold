@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 import unittest
 
 from tests.test_support import load_manyfold_package
@@ -12,6 +13,18 @@ class LegoCatalogTests(unittest.TestCase):
 
         for lego in manyfold.all_legos():
             self.assertLessEqual(set(lego.requires), known, lego.name)
+
+    def test_catalog_names_are_unique(self) -> None:
+        manyfold = load_manyfold_package()
+        lego_catalog = sys.modules["manyfold.lego_catalog"]
+
+        names = [lego.name for lego in manyfold.all_legos()]
+
+        self.assertEqual(lego_catalog._duplicate_names(names), ())
+        self.assertEqual(
+            lego_catalog._duplicate_names(["Bytes", "Key", "Bytes", "Key"]),
+            ("Bytes", "Key"),
+        )
 
     def test_consensus_dependencies_are_lowered_components(self) -> None:
         manyfold = load_manyfold_package()
