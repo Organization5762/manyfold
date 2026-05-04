@@ -3298,6 +3298,35 @@ class GraphReactiveTests(unittest.TestCase):
                 requester_id="dashboard",
             )
 
+    def test_debug_routes_are_ordered_by_event_type(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("imu"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("accel"),
+            variant=graph_module.Variant.Meta,
+            schema=graph_module.Schema.bytes(name="Accel"),
+        )
+        graph = graph_module.Graph()
+
+        graph.publish(route, b"sample")
+        graph.register_link(graph_module.Link(name="tcp0", link_class="tcp"))
+        graph.add_middleware(
+            graph_module.Middleware(
+                name="trace",
+                kind="logging",
+                attachment_scope="route",
+                target=route.display(),
+            )
+        )
+
+        self.assertEqual(
+            [debug_route.stream for debug_route in graph.debug_routes()],
+            ["link_health", "middleware", "write"],
+        )
+
     def test_exported_route_allows_metadata_queries_without_explicit_grant(
         self,
     ) -> None:

@@ -6076,7 +6076,12 @@ class Graph:
 
     def debug_routes(self) -> Iterator[RouteRef]:
         """Return the well-known debug routes created so far."""
-        return iter(tuple(self._debug_routes.values()))
+        return iter(
+            tuple(
+                self._debug_routes[event_type]
+                for event_type in sorted(self._debug_routes)
+            )
+        )
 
     def audit(self, route_ref: RouteLike | None = None) -> Iterator[DebugEvent]:
         """Return retained audit/debug events, optionally filtered by route."""
