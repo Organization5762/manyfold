@@ -563,6 +563,10 @@ class Consensus:
         term: int = 3,
         election_timeout_ticks: int = 2,
     ) -> None:
+        if not nodes:
+            raise ValueError("nodes must contain at least one node")
+        if len(nodes) != len(set(nodes)):
+            raise ValueError("nodes must contain unique node identifiers")
         if candidate_id not in nodes:
             raise ValueError("candidate_id must be present in nodes")
         self.graph = graph

@@ -278,6 +278,26 @@ class ComponentTests(unittest.TestCase):
                 candidate_id="node-c",
             )
 
+    def test_consensus_component_requires_at_least_one_node(self) -> None:
+        manyfold = load_manyfold_package()
+
+        with self.assertRaisesRegex(ValueError, "at least one node"):
+            manyfold.Consensus(
+                manyfold.Graph(),
+                nodes=(),
+                candidate_id="node-a",
+            )
+
+    def test_consensus_component_rejects_duplicate_node_ids(self) -> None:
+        manyfold = load_manyfold_package()
+
+        with self.assertRaisesRegex(ValueError, "unique node identifiers"):
+            manyfold.Consensus(
+                manyfold.Graph(),
+                nodes=("node-a", "node-a", "node-b"),
+                candidate_id="node-a",
+            )
+
     def test_memory_chip_records_and_resumes_typed_route_values(self) -> None:
         manyfold = load_manyfold_package()
         route = manyfold.route(
