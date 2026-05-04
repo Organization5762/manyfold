@@ -6,6 +6,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
 from dataclasses import replace
 from pathlib import Path
@@ -601,6 +602,36 @@ class ExampleTests(unittest.TestCase):
                 module.load_module_from_path("manyfold_broken_load_test", broken_module)
 
         self.assertNotIn("manyfold_broken_load_test", sys.modules)
+
+    def test_repo_path_helpers_restore_existing_module_after_failed_load(self) -> None:
+        module_path = (
+            Path(__file__).resolve().parents[1]
+            / "python"
+            / "manyfold"
+            / "_repo_paths.py"
+        )
+        spec = importlib.util.spec_from_file_location("manyfold_repo_paths_test", module_path)
+        module = importlib.util.module_from_spec(spec)
+        assert spec is not None and spec.loader is not None
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            broken_module = Path(temp_dir) / "broken_module.py"
+            broken_module.write_text("raise RuntimeError('boom')\n", encoding="utf-8")
+            previous_module = types.ModuleType("manyfold_existing_load_test")
+            sys.modules["manyfold_existing_load_test"] = previous_module
+
+            try:
+                with self.assertRaisesRegex(RuntimeError, "boom"):
+                    module.load_module_from_path(
+                        "manyfold_existing_load_test",
+                        broken_module,
+                    )
+
+                self.assertIs(sys.modules["manyfold_existing_load_test"], previous_module)
+            finally:
+                sys.modules.pop("manyfold_existing_load_test", None)
 
     def test_catalog_main_check_and_write_modes_follow_generated_output(self) -> None:
         import examples._catalog as catalog_module
