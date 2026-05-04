@@ -46,6 +46,65 @@ class EmbeddedProfileTests(unittest.TestCase):
             sensor.validate(),
         )
 
+    def test_bulk_sensor_rejects_metadata_on_bulk_layer(self) -> None:
+        manyfold = load_manyfold_package()
+        sensor = manyfold.EmbeddedBulkSensor(
+            metadata_route=manyfold.route(
+                owner=manyfold.OwnerName("lidar"),
+                family=manyfold.StreamFamily("scan"),
+                stream=manyfold.StreamName("meta"),
+                layer=manyfold.Layer.Bulk,
+                variant=manyfold.Variant.Meta,
+                schema=manyfold.Schema.bytes(name="LidarMeta"),
+            ),
+            payload_route=manyfold.route(
+                owner=manyfold.OwnerName("lidar"),
+                family=manyfold.StreamFamily("scan"),
+                stream=manyfold.StreamName("payload"),
+                layer=manyfold.Layer.Bulk,
+                variant=manyfold.Variant.Payload,
+                schema=manyfold.Schema.bytes(name="LidarPayload"),
+            ),
+        )
+
+        self.assertIn(
+            "bulk sensor metadata must not use Layer.Bulk",
+            sensor.validate(),
+        )
+
+    def test_bulk_sensor_rejects_unpaired_payload_identity(self) -> None:
+        manyfold = load_manyfold_package()
+        sensor = manyfold.EmbeddedBulkSensor(
+            metadata_route=manyfold.route(
+                owner=manyfold.OwnerName("lidar"),
+                family=manyfold.StreamFamily("scan"),
+                stream=manyfold.StreamName("meta"),
+                layer=manyfold.Layer.Logical,
+                variant=manyfold.Variant.Meta,
+                schema=manyfold.Schema.bytes(name="LidarMeta"),
+            ),
+            payload_route=manyfold.route(
+                owner=manyfold.OwnerName("camera"),
+                family=manyfold.StreamFamily("frames"),
+                stream=manyfold.StreamName("payload"),
+                layer=manyfold.Layer.Bulk,
+                variant=manyfold.Variant.Payload,
+                schema=manyfold.Schema.bytes(name="LidarPayload"),
+            ),
+        )
+
+        self.assertEqual(
+            tuple(
+                issue
+                for issue in sensor.validate()
+                if "metadata and payload" in issue
+            ),
+            (
+                "bulk sensor metadata and payload owners must match",
+                "bulk sensor metadata and payload families must match",
+            ),
+        )
+
     def test_firmware_profile_reports_disabled_local_processing(self) -> None:
         manyfold = load_manyfold_package()
         profile = manyfold.FirmwareAgentProfile(

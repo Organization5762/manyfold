@@ -133,6 +133,8 @@ class EmbeddedBulkSensor(Generic[TMeta]):
         issues.extend(self.rules.bulk_issues())
         if self.metadata_route.plane != Plane.Read:
             issues.append("bulk sensor metadata must flow in the read plane")
+        if self.metadata_route.layer == Layer.Bulk:
+            issues.append("bulk sensor metadata must not use Layer.Bulk")
         if self.metadata_route.variant != Variant.Meta:
             issues.append("bulk sensor metadata must use Variant.Meta")
         if self.payload_route.plane != Plane.Read:
@@ -141,6 +143,10 @@ class EmbeddedBulkSensor(Generic[TMeta]):
             issues.append("bulk sensor payload must use Layer.Bulk")
         if self.payload_route.variant != Variant.Payload:
             issues.append("bulk sensor payload must use Variant.Payload")
+        if self.metadata_route.owner != self.payload_route.owner:
+            issues.append("bulk sensor metadata and payload owners must match")
+        if self.metadata_route.family != self.payload_route.family:
+            issues.append("bulk sensor metadata and payload families must match")
         return tuple(issues)
 
 
