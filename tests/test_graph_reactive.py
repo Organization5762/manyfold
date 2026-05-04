@@ -190,6 +190,56 @@ class GraphReactiveTests(unittest.TestCase):
         self.assertEqual(seen, [3])
         self.assertEqual(list(graph.diagram_nodes()), [])
 
+    def test_transform_pipeline_replays_existing_latest_to_callback(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("latest_number"),
+            variant=graph_module.Variant.Event,
+            schema=int_schema(graph_module, "LatestRuntimeNumber"),
+        )
+        graph = graph_module.Graph()
+        seen: list[int] = []
+
+        graph.publish(route, 4)
+        connection = graph.observe(route).map(lambda value: value * 2).callback(
+            seen.append
+        )
+
+        connection.remove()
+        self.assertEqual(seen, [8])
+
+    def test_transform_pipeline_replays_existing_latest_through_chained_nodes(
+        self,
+    ) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("latest_chain_number"),
+            variant=graph_module.Variant.Event,
+            schema=int_schema(graph_module, "LatestChainRuntimeNumber"),
+        )
+        graph = graph_module.Graph()
+        seen: list[int] = []
+
+        graph.publish(route, 2)
+        connection = (
+            graph.observe(route)
+            .map(lambda value: value + 3)
+            .filter(lambda value: value > 4)
+            .map(lambda value: value * 10)
+            .callback(seen.append)
+        )
+
+        connection.remove()
+        self.assertEqual(seen, [50])
+
     def test_registered_pipeline_operation_extends_fluent_route_pipeline(self) -> None:
         graph_module = load_graph_module()
         route = graph_module.route(

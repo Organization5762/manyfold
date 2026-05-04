@@ -3619,7 +3619,7 @@ class Graph:
         return RoutePipeline(
             self,
             output,
-            replay_latest=False,
+            replay_latest=True,
             connections=(*pipeline._connections, connection),
             thread_placement=thread_placement,
             previous_thread_placements=pipeline._previous_thread_placements,
@@ -3660,7 +3660,7 @@ class Graph:
         return RoutePipeline(
             self,
             output,
-            replay_latest=False,
+            replay_latest=True,
             connections=(*pipeline._connections, connection),
             thread_placement=thread_placement,
             previous_thread_placements=pipeline._previous_thread_placements,
@@ -3701,7 +3701,7 @@ class Graph:
         return RoutePipeline(
             self,
             output,
-            replay_latest=False,
+            replay_latest=True,
             connections=(*pipeline._connections, connection),
             thread_placement=thread_placement,
             previous_thread_placements=pipeline._previous_thread_placements,
