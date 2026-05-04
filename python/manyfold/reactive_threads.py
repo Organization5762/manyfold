@@ -94,7 +94,7 @@ class _LatencyRecorder:
             }
         return {
             stream_name: _latency_stats(values)
-            for stream_name, values in history.items()
+            for stream_name, values in sorted(history.items())
         }
 
     def clear(self) -> None:
@@ -487,6 +487,7 @@ __all__ = [
     "input_scheduler",
     "interval_in_background",
     "interval_scheduler",
+    "materialize_sequence",
     "on_frame_thread",
     "pipe_in_background",
     "pipe_in_main_thread",
@@ -495,7 +496,6 @@ __all__ = [
     "replay_scheduler",
     "reset_reactive_threading_state_for_tests",
     "scheduler_diagnostics",
-    "materialize_sequence",
     "start_with_once",
     "shutdown",
 ]

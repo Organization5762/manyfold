@@ -98,6 +98,14 @@ class ReactiveThreadsTests(unittest.TestCase):
         self.assertEqual(stats.p99_ms, 10.0)
         self.assertEqual(stats.max_ms, 10.0)
 
+    def test_latency_snapshot_orders_streams_by_name(self) -> None:
+        recorder = self.reactive_threads._LatencyRecorder()
+
+        recorder.record("z-stream", 0.001)
+        recorder.record("a-stream", 0.002)
+
+        self.assertEqual(list(recorder.snapshot()), ["a-stream", "z-stream"])
+
     def test_disposed_frame_thread_delivery_drops_queued_callbacks(self) -> None:
         source = self.rx.Subject()
         values: list[int] = []
