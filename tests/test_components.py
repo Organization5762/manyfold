@@ -481,6 +481,54 @@ class ComponentTests(unittest.TestCase):
         self.assertEqual([record.value for record in records], [b"first", b"first"])
         self.assertEqual([record.seq_source for record in records], [1, 1])
 
+    def test_memory_chip_serializes_concurrent_appends(self) -> None:
+        manyfold = load_manyfold_package()
+
+        def encode(value: int) -> bytes:
+            time.sleep(0.01)
+            return str(value).encode("ascii")
+
+        route = manyfold.route(
+            plane=manyfold.Plane.Read,
+            layer=manyfold.Layer.Logical,
+            owner=manyfold.OwnerName("demo"),
+            family=manyfold.StreamFamily("memory"),
+            stream=manyfold.StreamName("counter"),
+            variant=manyfold.Variant.Meta,
+            schema=manyfold.Schema(
+                schema_id="ConcurrentMemory",
+                version=1,
+                encode=encode,
+                decode=lambda payload: int(payload.decode("ascii")),
+            ),
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "memory.jsonl"
+            graph = manyfold.Graph()
+            memory = manyfold.Memory(path)
+            subscription = memory.remember(graph, route, replay_latest=False)
+            publishers = tuple(
+                threading.Thread(
+                    target=graph.publish,
+                    args=(route, index),
+                    kwargs={"control_epoch": index},
+                )
+                for index in range(12)
+            )
+
+            for publisher in publishers:
+                publisher.start()
+            for publisher in publishers:
+                publisher.join()
+            subscription.dispose()
+            lines = path.read_text(encoding="utf-8").splitlines()
+            records = manyfold.Memory(path).records(route)
+
+        self.assertEqual(len(lines), 12)
+        self.assertEqual({record.value for record in records}, set(range(12)))
+        self.assertEqual({record.control_epoch for record in records}, set(range(12)))
+
     def test_memory_chip_does_not_reappend_resumed_latest_value(self) -> None:
         manyfold = load_manyfold_package()
         route = manyfold.route(

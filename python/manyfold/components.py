@@ -388,6 +388,7 @@ class Memory:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._append_lock = threading.Lock()
         self._seen: set[tuple[str, int, str, int | None]] = set(
             self._event_key(record) for record in self._iter_raw_records()
         )
@@ -403,29 +404,30 @@ class Memory:
 
         def on_next(envelope: TypedEnvelope[T]) -> None:
             closed = envelope.closed
-            payload_b64 = base64.b64encode(route_ref.schema.encode(envelope.value)).decode(
-                "ascii"
-            )
-            event_key = (
-                closed.route.display(),
-                closed.seq_source,
-                payload_b64,
-                closed.control_epoch,
-            )
-            if event_key in self._seen:
-                return
-            self._seen.add(event_key)
-            record = {
-                "route": closed.route.display(),
-                "seq_source": closed.seq_source,
-                "control_epoch": closed.control_epoch,
-                "schema_id": route_ref.schema.schema_id,
-                "schema_version": route_ref.schema.version,
-                "payload_b64": payload_b64,
-            }
-            with self.path.open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps(record, sort_keys=True))
-                handle.write("\n")
+            with self._append_lock:
+                payload_b64 = base64.b64encode(
+                    route_ref.schema.encode(envelope.value)
+                ).decode("ascii")
+                event_key = (
+                    closed.route.display(),
+                    closed.seq_source,
+                    payload_b64,
+                    closed.control_epoch,
+                )
+                if event_key in self._seen:
+                    return
+                self._seen.add(event_key)
+                record = {
+                    "route": closed.route.display(),
+                    "seq_source": closed.seq_source,
+                    "control_epoch": closed.control_epoch,
+                    "schema_id": route_ref.schema.schema_id,
+                    "schema_version": route_ref.schema.version,
+                    "payload_b64": payload_b64,
+                }
+                with self.path.open("a", encoding="utf-8") as handle:
+                    handle.write(json.dumps(record, sort_keys=True))
+                    handle.write("\n")
 
         return graph.observe(route_ref, replay_latest=replay_latest).subscribe(on_next)
 
