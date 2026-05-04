@@ -80,6 +80,60 @@ class EmbeddedProfileTests(unittest.TestCase):
             sensor.validate(),
         )
 
+    def test_embedded_rule_issue_order_is_stable(self) -> None:
+        manyfold = load_manyfold_package()
+        firmware = manyfold.FirmwareAgentProfile(
+            route_descriptors=False,
+            sequence_numbering=False,
+            source_timestamping=False,
+            transport_framing=False,
+            shadow_reporting=False,
+            local_filtering=False,
+            local_aggregation=False,
+            ring_buffer_staging=False,
+        )
+        rules = manyfold.EmbeddedRuntimeRules(
+            timestamps_close_to_source=False,
+            keep_isr_work_minimal=False,
+            use_dma_or_async_peripherals=False,
+            bounded_ring_buffers=False,
+            avoid_heap_on_hot_paths=False,
+            separate_metadata_and_payload_early=False,
+            preserve_device_and_ingest_time=False,
+            lazy_bulk_payload_open=False,
+            prefer_zero_copy_bulk_payloads=False,
+            bulk_credit_policy="messages",
+        )
+
+        self.assertEqual(
+            firmware.required_issues(),
+            (
+                "firmware agent must provide route descriptors",
+                "firmware agent must provide sequence numbering",
+                "firmware agent must timestamp close to the source",
+                "firmware agent must provide transport framing",
+                "firmware agent should expose shadow reporting",
+                "firmware agent should support local filtering",
+                "firmware agent should support local aggregation",
+                "firmware agent should stage through a ring buffer",
+            ),
+        )
+        self.assertEqual(
+            rules.bulk_issues(),
+            (
+                "embedded routes must timestamp close to the source",
+                "embedded routes must keep ISR work minimal",
+                "embedded routes should prefer DMA or async peripherals",
+                "embedded routes must use bounded ring buffers",
+                "embedded routes should avoid heap allocation on hot paths",
+                "embedded routes should separate metadata and payload early",
+                "embedded routes must preserve device time and ingest time separately",
+                "bulk payload opening should be lazy",
+                "bulk payload paths should prefer zero-copy or shared memory strategies",
+                "bulk payload routes must use byte credits instead of count credits",
+            ),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
