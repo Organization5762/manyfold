@@ -704,7 +704,7 @@ def sensor_sample_schema(value_schema: Schema[T], schema_id: str | None = None) 
 
     def encode(sample: SensorSample[T]) -> bytes:
         value_payload = value_schema.encode(sample.value)
-        return json.dumps(
+        return _compact_json_bytes(
             {
                 "value": base64.b64encode(value_payload).decode("ascii"),
                 "source_timestamp": sample.source_timestamp,
@@ -712,10 +712,8 @@ def sensor_sample_schema(value_schema: Schema[T], schema_id: str | None = None) 
                 "sequence_number": sample.sequence_number,
                 "quality": sample.quality,
                 "status": sample.status,
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
+            }
+        )
 
     def decode(payload: bytes) -> SensorSample[T]:
         data = json.loads(payload.decode("utf-8"))
@@ -752,11 +750,9 @@ def sensor_event_schema(schema_id: str = "SensorEvent") -> Schema[SensorEvent]:
             else base64.b64encode(event.raw).decode("ascii"),
             "metadata": _json_safe(dict(event.metadata)),
         }
-        return json.dumps(
+        return _compact_json_bytes(
             payload,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
+        )
 
     def decode(payload: bytes) -> SensorEvent:
         data = json.loads(payload.decode("utf-8"))
@@ -778,17 +774,15 @@ def health_status_schema(schema_id: str = "HealthStatus") -> Schema[HealthStatus
     """Return a JSON schema for local sensor health events."""
 
     def encode(status: HealthStatus) -> bytes:
-        return json.dumps(
+        return _compact_json_bytes(
             {
                 "status": status.status,
                 "observed_at": status.observed_at,
                 "message": status.message,
                 "stale": status.stale,
                 "error_count": status.error_count,
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
+            }
+        )
 
     def decode(payload: bytes) -> HealthStatus:
         data = json.loads(payload.decode("utf-8"))
@@ -1489,6 +1483,12 @@ def _changed_enough(new: Any, old: Any, threshold: float) -> bool:
     if isinstance(new, (int, float)) and isinstance(old, (int, float)):
         return abs(float(new) - float(old)) > threshold
     return new != old
+
+
+def _compact_json_bytes(value: Mapping[str, Any]) -> bytes:
+    """Encode deterministic JSON for schemas that compare or persist bytes."""
+
+    return json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
 def _json_safe(value: Any) -> Any:
