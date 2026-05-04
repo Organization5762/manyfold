@@ -1,6 +1,6 @@
 [package]
 name = "manyfold"
-version = "0.1.20"
+version = "0.1.22"
 edition = "2021"
 description = "PyO3-backed Manyfold RFC scaffolding and in-memory runtime."
 license = "AGPL-3.0-only"
