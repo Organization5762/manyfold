@@ -240,6 +240,54 @@ class GraphReactiveTests(unittest.TestCase):
         connection.remove()
         self.assertEqual(seen, [50])
 
+    def test_callback_pipeline_removes_node_when_latest_replay_fails(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("failing_callback_latest"),
+            variant=graph_module.Variant.Event,
+            schema=int_schema(graph_module, "FailingCallbackRuntimeNumber"),
+        )
+        graph = graph_module.Graph()
+
+        graph.publish(route, 1)
+
+        def fail(_value: int) -> None:
+            raise RuntimeError("callback rejected latest")
+
+        with self.assertRaisesRegex(RuntimeError, "callback rejected latest"):
+            graph.observe(route).callback(fail, name="failing-callback")
+
+        self.assertEqual(list(graph.diagram_nodes()), [])
+        self.assertEqual(graph.subscribers(route), 0)
+
+    def test_transform_pipeline_removes_node_when_latest_replay_fails(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("failing_transform_latest"),
+            variant=graph_module.Variant.Event,
+            schema=int_schema(graph_module, "FailingTransformRuntimeNumber"),
+        )
+        graph = graph_module.Graph()
+
+        graph.publish(route, 1)
+
+        def fail(_value: int) -> int:
+            raise RuntimeError("transform rejected latest")
+
+        with self.assertRaisesRegex(RuntimeError, "transform rejected latest"):
+            graph.observe(route).map(fail, name="failing-map")
+
+        self.assertEqual(list(graph.diagram_nodes()), [])
+        self.assertEqual(graph.subscribers(route), 0)
+
     def test_registered_pipeline_operation_extends_fluent_route_pipeline(self) -> None:
         graph_module = load_graph_module()
         route = graph_module.route(

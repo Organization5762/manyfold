@@ -3541,12 +3541,16 @@ class Graph:
             input_routes=(source,),
             thread_placement=thread_placement,
         )
-        subscription = self._pipeline_value_observable(
-            source,
-            replay_latest=replay_latest,
-            subscriber_id=subscriber_id,
-            thread_placement=thread_placement,
-        ).subscribe(node.receive)
+        try:
+            subscription = self._pipeline_value_observable(
+                source,
+                replay_latest=replay_latest,
+                subscriber_id=subscriber_id,
+                thread_placement=thread_placement,
+            ).subscribe(node.receive)
+        except Exception:
+            self._diagram_nodes.pop(node.name, None)
+            raise
         return GraphConnection(
             self,
             name=node.name,
@@ -3604,12 +3608,16 @@ class Graph:
             if should_emit:
                 self.publish(output, next_value)
 
-        subscription = self._pipeline_value_observable(
-            pipeline.route,
-            replay_latest=pipeline._replay_latest,
-            subscriber_id=pipeline._subscriber_id,
-            thread_placement=thread_placement,
-        ).subscribe(on_next)
+        try:
+            subscription = self._pipeline_value_observable(
+                pipeline.route,
+                replay_latest=pipeline._replay_latest,
+                subscriber_id=pipeline._subscriber_id,
+                thread_placement=thread_placement,
+            ).subscribe(on_next)
+        except Exception:
+            self._diagram_nodes.pop(node.name, None)
+            raise
         connection = GraphConnection(
             self,
             name=node.name,
@@ -3650,7 +3658,11 @@ class Graph:
                 thread_placement=thread_placement,
             )
         )
-        subscription = coalesced.subscribe(publish)
+        try:
+            subscription = coalesced.subscribe(publish)
+        except Exception:
+            self._diagram_nodes.pop(node.name, None)
+            raise
         connection = GraphConnection(
             self,
             name=node.name,
@@ -3691,7 +3703,11 @@ class Graph:
                 thread_placement=thread_placement,
             )
         )
-        subscription = logged.subscribe(publish)
+        try:
+            subscription = logged.subscribe(publish)
+        except Exception:
+            self._diagram_nodes.pop(node.name, None)
+            raise
         connection = GraphConnection(
             self,
             name=node.name,
