@@ -965,13 +965,17 @@ def _append_entry_schema() -> Schema[AppendEntry]:
     return Schema(
         schema_id="RaftAppendEntry",
         version=1,
-        encode=lambda value: f"{value[0]}|{value[1]}".encode("utf-8"),
+        encode=lambda value: _encode_json_tuple(value),
         decode=lambda payload: _decode_append_entry(payload),
     )
 
 
 def _decode_append_entry(payload: bytes) -> AppendEntry:
-    index_text, command = payload.decode("utf-8").split("|", 1)
+    text = payload.decode("utf-8")
+    if text.startswith("["):
+        index, command = json.loads(text)
+        return (int(index), str(command))
+    index_text, command = text.split("|", 1)
     return (int(index_text), command)
 
 
