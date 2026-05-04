@@ -419,11 +419,6 @@ class ExampleTests(unittest.TestCase):
         module = importlib.util.module_from_spec(spec)
         assert spec is not None and spec.loader is not None
         sys.modules[spec.name] = module
-        spec.loader.exec_module(module)
-
-        repo_root = str(module.REPO_ROOT)
-        python_dir = str(module.PYTHON_DIR)
-        argv = ["--check-readme"]
 
         fake_catalog = type(sys)("examples.catalog")
         recorded: list[list[str] | None] = []
@@ -436,10 +431,15 @@ class ExampleTests(unittest.TestCase):
 
         original_sys_path = list(sys.path)
         try:
+            repo_root = str(module_path.parents[1])
+            python_dir = str(module_path.parent)
             sys.path = [
                 path for path in sys.path if path not in {repo_root, python_dir}
             ]
             with mock.patch.dict(sys.modules, {"examples.catalog": fake_catalog}):
+                spec.loader.exec_module(module)
+
+                argv = ["--check-readme"]
                 self.assertEqual(module.main(argv), 17)
 
                 self.assertEqual(recorded, [argv])
@@ -463,16 +463,6 @@ class ExampleTests(unittest.TestCase):
         fake_manyfold.__path__ = []  # type: ignore[attr-defined]
         fake_repo_paths = type(sys)("manyfold._repo_paths")
         fake_repo_paths.ensure_repo_import_paths = lambda: None
-
-        with mock.patch.dict(
-            sys.modules,
-            {
-                "manyfold": fake_manyfold,
-                "manyfold._repo_paths": fake_repo_paths,
-            },
-        ):
-            spec.loader.exec_module(module)
-
         fake_catalog = type(sys)("examples.catalog")
         recorded: list[list[str] | None] = []
 
@@ -482,8 +472,17 @@ class ExampleTests(unittest.TestCase):
 
         fake_catalog.main = fake_main
 
-        with mock.patch.dict(sys.modules, {"examples.catalog": fake_catalog}):
-            self.assertEqual(module.main(), 23)
+        with mock.patch.dict(
+            sys.modules,
+            {
+                "examples.catalog": fake_catalog,
+                "manyfold": fake_manyfold,
+                "manyfold._repo_paths": fake_repo_paths,
+            },
+        ):
+            spec.loader.exec_module(module)
+
+        self.assertEqual(module.main(), 23)
 
         self.assertEqual(recorded, [None])
 
@@ -1197,18 +1196,28 @@ class ExampleTests(unittest.TestCase):
         self.assertEqual(schema.decode(b"42"), 42)
 
     def test_shared_example_helpers_keep_dependencies_at_module_scope(self) -> None:
-        source_path = Path(__file__).resolve().parents[1] / "examples" / "_shared.py"
-        tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        repo_root = Path(__file__).resolve().parents[1]
 
-        for node in ast.walk(tree):
-            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
-            nested_imports = tuple(
-                child
-                for child in ast.walk(node)
-                if isinstance(child, (ast.Import, ast.ImportFrom))
-            )
-            self.assertEqual(nested_imports, (), msg=f"{node.name} has nested imports")
+        for source_path in (
+            repo_root / "examples" / "_shared.py",
+            repo_root / "python" / "manyfold_example_catalog.py",
+        ):
+            with self.subTest(path=source_path.relative_to(repo_root)):
+                tree = ast.parse(source_path.read_text(encoding="utf-8"))
+
+                for node in ast.walk(tree):
+                    if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        continue
+                    nested_imports = tuple(
+                        child
+                        for child in ast.walk(node)
+                        if isinstance(child, (ast.Import, ast.ImportFrom))
+                    )
+                    self.assertEqual(
+                        nested_imports,
+                        (),
+                        msg=f"{source_path}:{node.name} has nested imports",
+                    )
 
     def test_sync_readme_featured_examples_rejects_missing_or_reversed_markers(
         self,
