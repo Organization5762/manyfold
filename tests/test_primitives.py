@@ -23,6 +23,15 @@ class PrimitiveTests(unittest.TestCase):
             "read.logical.sensor.events.temperature.meta.v1",
         )
 
+    def test_route_reports_missing_identity_parts_in_stable_order(self) -> None:
+        manyfold = load_manyfold_package()
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "route requires: owner, family, stream",
+        ):
+            manyfold.route(schema=manyfold.Schema.float(name="Temperature"))
+
     def test_any_schema_rejects_unknown_process_local_tokens_clearly(self) -> None:
         manyfold = load_manyfold_package()
         schema = manyfold.Schema.any("RuntimeHandle")

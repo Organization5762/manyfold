@@ -354,6 +354,26 @@ def _coerce_schema(
     )
 
 
+def _missing_route_parts(
+    *,
+    plane: Plane | None,
+    layer: Layer | None,
+    owner: OwnerName | str | None,
+    family: StreamFamily | str | None,
+    stream: StreamName | str | None,
+    variant: Variant | None,
+) -> tuple[str, ...]:
+    parts = (
+        ("plane", plane),
+        ("layer", layer),
+        ("owner", owner),
+        ("family", family),
+        ("stream", stream),
+        ("variant", variant),
+    )
+    return tuple(name for name, value in parts if value is None)
+
+
 @overload
 def route(
     *,
@@ -419,8 +439,16 @@ def route(
         variant = identity.variant
     else:
         variant = Variant.Meta if variant is None else variant
-    if any(value is None for value in (plane, layer, owner, family, stream, variant)):
-        raise ValueError("route requires namespace and identity information")
+    missing = _missing_route_parts(
+        plane=plane,
+        layer=layer,
+        owner=owner,
+        family=family,
+        stream=stream,
+        variant=variant,
+    )
+    if missing:
+        raise ValueError(f"route requires: {', '.join(missing)}")
     return TypedRoute(
         plane=cast(Plane, plane),
         layer=cast(Layer, layer),
