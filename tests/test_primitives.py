@@ -23,6 +23,16 @@ class PrimitiveTests(unittest.TestCase):
             "read.logical.sensor.events.temperature.meta.v1",
         )
 
+    def test_any_schema_rejects_unknown_process_local_tokens_clearly(self) -> None:
+        manyfold = load_manyfold_package()
+        schema = manyfold.Schema.any("RuntimeHandle")
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "unknown process-local object token for schema 'RuntimeHandle'",
+        ):
+            schema.decode(b"missing")
+
 
 if __name__ == "__main__":
     unittest.main()

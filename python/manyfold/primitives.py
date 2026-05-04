@@ -136,6 +136,8 @@ class Schema(Generic[T]):
         """
 
         def encode(value: Any) -> bytes:
+            # Tokens are intentionally tiny because the process-local table owns
+            # the actual object lifetime and identity.
             with _ANY_SCHEMA_LOCK:
                 key = str(next(_ANY_SCHEMA_IDS))
                 _ANY_SCHEMA_VALUES[key] = value
@@ -144,7 +146,12 @@ class Schema(Generic[T]):
         def decode(payload: bytes) -> Any:
             key = payload.decode("ascii")
             with _ANY_SCHEMA_LOCK:
-                return _ANY_SCHEMA_VALUES[key]
+                try:
+                    return _ANY_SCHEMA_VALUES[key]
+                except KeyError as error:
+                    raise ValueError(
+                        f"unknown process-local object token for schema {schema_id!r}"
+                    ) from error
 
         return cls(
             schema_id=schema_id,
