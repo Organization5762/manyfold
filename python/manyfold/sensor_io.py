@@ -1433,7 +1433,13 @@ class LocalDurableSpool(Generic[T]):
         def append(sample: Any) -> None:
             graph.publish(log.input(), sample.value if hasattr(sample, "value") else sample)
 
-        source_subscription = graph.observe(source, replay_latest=False).subscribe(append)
+        try:
+            source_subscription = graph.observe(source, replay_latest=False).subscribe(
+                append
+            )
+        except Exception:
+            log_subscription.dispose()
+            raise
         return _CompositeSubscription((log_subscription, source_subscription))
 
     def replay(self, graph: Graph) -> tuple[T, ...]:

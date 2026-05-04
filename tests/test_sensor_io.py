@@ -929,6 +929,41 @@ class SensorIoTests(unittest.TestCase):
         self.assertEqual([sample.value for sample in replayed], [23])
         self.assertEqual([sample.sequence_number for sample in replayed], [1])
 
+    def test_local_durable_spool_cleans_up_log_when_source_subscribe_fails(self) -> None:
+        manyfold = load_manyfold_package()
+        sample_schema = manyfold.sensor_sample_schema(_int_schema(manyfold, "Temp"))
+        route = _route(manyfold, "failed_spooled_sample", sample_schema)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            keyspace = manyfold.FileStore(temp_dir).prefix("sensor", "spool")
+            graph = manyfold.Graph()
+            spool = manyfold.LocalDurableSpool("sensor_spool", keyspace, sample_schema)
+            log = spool.event_log()
+            original_observe = graph.observe
+
+            def failing_observe(route_ref, *args, **kwargs):
+                if route_ref == route:
+                    raise RuntimeError("source subscribe failed")
+                return original_observe(route_ref, *args, **kwargs)
+
+            graph.observe = failing_observe  # type: ignore[method-assign]
+
+            with self.assertRaisesRegex(RuntimeError, "source subscribe failed"):
+                spool.install(graph, route)
+
+            graph.publish(
+                log.input(),
+                manyfold.SensorSample(
+                    value=23,
+                    source_timestamp=1.0,
+                    ingest_timestamp=1.5,
+                    sequence_number=1,
+                ),
+            )
+            records = log.records()
+
+        self.assertEqual(records, ())
+
 
 if __name__ == "__main__":
     unittest.main()
