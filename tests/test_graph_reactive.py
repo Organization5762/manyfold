@@ -32,6 +32,15 @@ def str_schema(graph_module, schema_id: str):
     )
 
 
+class FailingObservable:
+    def __init__(self, message: str) -> None:
+        self.message = message
+
+    def subscribe(self, *args, **kwargs):
+        del args, kwargs
+        raise RuntimeError(self.message)
+
+
 class GraphReactiveTests(unittest.TestCase):
     def test_observe_replays_latest_and_pushes_future_writes(self) -> None:
         graph_module = load_graph_module()
@@ -1375,6 +1384,41 @@ class GraphReactiveTests(unittest.TestCase):
 
         self.assertEqual(windows, [[20, 21], [21, 22]])
 
+    def test_window_disposes_source_when_trigger_subscription_fails(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("imu"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("trigger_setup_temperature"),
+            variant=graph_module.Variant.Meta,
+            schema=int_schema(graph_module, "TriggerSetupTemperature"),
+        )
+        trigger = graph_module.route(
+            plane=graph_module.Plane.State,
+            layer=graph_module.Layer.Internal,
+            owner=graph_module.OwnerName("scheduler"),
+            family=graph_module.StreamFamily("tick"),
+            stream=graph_module.StreamName("trigger_setup_watermark"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="TriggerSetupWatermark"),
+        )
+        graph = graph_module.Graph()
+        original_observe = graph.observe
+
+        def observe_with_trigger_failure(route_ref, *args, **kwargs):
+            if route_ref == trigger:
+                return FailingObservable("trigger subscription failed")
+            return original_observe(route_ref, *args, **kwargs)
+
+        graph.observe = observe_with_trigger_failure  # type: ignore[method-assign]
+
+        with self.assertRaisesRegex(RuntimeError, "trigger subscription failed"):
+            graph.window(route, size=2, trigger=trigger).subscribe(lambda _items: None)
+
+        self.assertEqual(graph.subscribers(route), 0)
+
     def test_window_aggregate_supports_explicit_trigger_policy(self) -> None:
         graph_module = load_graph_module()
         route = graph_module.route(
@@ -1701,6 +1745,44 @@ class GraphReactiveTests(unittest.TestCase):
 
         self.assertEqual(joined, [12, 13, 14])
 
+    def test_join_latest_disposes_left_when_right_subscription_fails(self) -> None:
+        graph_module = load_graph_module()
+
+        left = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("imu"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("left_setup_failure"),
+            variant=graph_module.Variant.Meta,
+            schema=int_schema(graph_module, "LeftSetupFailure"),
+        )
+        right = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("imu"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("right_setup_failure"),
+            variant=graph_module.Variant.Meta,
+            schema=int_schema(graph_module, "RightSetupFailure"),
+        )
+        graph = graph_module.Graph()
+        original_observe = graph.observe
+
+        def observe_with_right_failure(route_ref, *args, **kwargs):
+            if route_ref == right:
+                return FailingObservable("right subscription failed")
+            return original_observe(route_ref, *args, **kwargs)
+
+        graph.observe = observe_with_right_failure  # type: ignore[method-assign]
+
+        with self.assertRaisesRegex(RuntimeError, "right subscription failed"):
+            graph.join_latest(left, right, combine=lambda a, b: a + b).subscribe(
+                lambda _value: None
+            )
+
+        self.assertEqual(graph.subscribers(left), 0)
+
     def test_join_latest_accepts_raw_route_refs_and_combines_bytes(self) -> None:
         graph_module = load_graph_module()
 
@@ -1895,6 +1977,47 @@ class GraphReactiveTests(unittest.TestCase):
         subscription.dispose()
 
         self.assertEqual(joined, [12, 14])
+
+    def test_interval_join_disposes_left_when_right_subscription_fails(self) -> None:
+        graph_module = load_graph_module()
+
+        left = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("imu"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("interval_left_setup_failure"),
+            variant=graph_module.Variant.Meta,
+            schema=int_schema(graph_module, "IntervalLeftSetupFailure"),
+        )
+        right = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("imu"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("interval_right_setup_failure"),
+            variant=graph_module.Variant.Meta,
+            schema=int_schema(graph_module, "IntervalRightSetupFailure"),
+        )
+        graph = graph_module.Graph()
+        original_observe = graph.observe
+
+        def observe_with_right_failure(route_ref, *args, **kwargs):
+            if route_ref == right:
+                return FailingObservable("right subscription failed")
+            return original_observe(route_ref, *args, **kwargs)
+
+        graph.observe = observe_with_right_failure  # type: ignore[method-assign]
+
+        with self.assertRaisesRegex(RuntimeError, "right subscription failed"):
+            graph.interval_join(
+                left,
+                right,
+                within=1,
+                combine=lambda accel, gyro: (accel, gyro),
+            ).subscribe(lambda _value: None)
+
+        self.assertEqual(graph.subscribers(left), 0)
 
     def test_join_latest_isolates_latest_state_per_subscription(self) -> None:
         graph_module = load_graph_module()

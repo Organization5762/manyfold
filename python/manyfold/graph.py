@@ -5689,9 +5689,13 @@ class Graph:
             left_sub = self.observe(left, replay_latest=False).subscribe(
                 on_left, scheduler=scheduler
             )  # type: ignore[arg-type]
-            right_sub = self.observe(right, replay_latest=False).subscribe(
-                on_right, scheduler=scheduler
-            )  # type: ignore[arg-type]
+            try:
+                right_sub = self.observe(right, replay_latest=False).subscribe(
+                    on_right, scheduler=scheduler
+                )  # type: ignore[arg-type]
+            except Exception:
+                left_sub.dispose()
+                raise
 
             return _CompositeSubscription((left_sub, right_sub))
 
