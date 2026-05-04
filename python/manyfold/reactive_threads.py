@@ -388,8 +388,8 @@ def reset_reactive_threading_state_for_tests() -> None:
     _LATENCY_RECORDER.clear()
 
 
-def share_sequence(sequence: Iterable[T]) -> Observable[T]:
-    """Return a shared observable over an iterable sequence."""
+def materialize_sequence(sequence: Iterable[T]) -> Observable[T]:
+    """Return a materialized observable over an iterable sequence."""
 
     return rx.from_iterable(sequence).pipe(ops.share())
 
@@ -495,7 +495,7 @@ __all__ = [
     "replay_scheduler",
     "reset_reactive_threading_state_for_tests",
     "scheduler_diagnostics",
-    "share_sequence",
+    "materialize_sequence",
     "start_with_once",
     "shutdown",
 ]
