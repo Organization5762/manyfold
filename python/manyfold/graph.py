@@ -1375,6 +1375,19 @@ class _ThreadPlacementSubscription:
             dispose()
 
 
+class _CompositeSubscription:
+    def __init__(self, subscriptions: Sequence[SubscriptionLike]) -> None:
+        self._subscriptions = tuple(subscriptions)
+        self._disposed = False
+
+    def dispose(self) -> None:
+        if self._disposed:
+            return
+        self._disposed = True
+        for subscription in self._subscriptions:
+            subscription.dispose()
+
+
 class GraphConnection:
     """Handle for graph-installed observation topology."""
 
@@ -5226,10 +5239,15 @@ class Graph:
                 if predicate(value):
                     observer.on_next(value)
 
-            self._replay_latest_value(source, on_next)
-            return self.observe(source, replay_latest=False).subscribe(
+            source_sub = self.observe(source, replay_latest=False).subscribe(
                 on_next, scheduler=scheduler
             )  # type: ignore[arg-type]
+            try:
+                self._replay_latest_value(source, on_next)
+            except Exception:
+                source_sub.dispose()
+                raise
+            return source_sub
 
         return rx.create(subscribe)
 
@@ -5275,25 +5293,31 @@ class Graph:
                     if buffer:
                         observer.on_next(list(buffer))
 
-            self._replay_latest_value(source, on_next)
-            if trigger is not None:
-                self._replay_latest_value(trigger, emit_window)
-
             source_sub = self.observe(source, replay_latest=False).subscribe(
                 on_next, scheduler=scheduler
             )  # type: ignore[arg-type]
             if trigger is None:
-                return source_sub
-            trigger_sub = self.observe(trigger, replay_latest=False).subscribe(
-                emit_window, scheduler=scheduler
-            )  # type: ignore[arg-type]
-
-            class _Subscription:
-                def dispose(self) -> None:
+                try:
+                    self._replay_latest_value(source, on_next)
+                except Exception:
                     source_sub.dispose()
-                    trigger_sub.dispose()
-
-            return _Subscription()
+                    raise
+                return source_sub
+            try:
+                trigger_sub = self.observe(trigger, replay_latest=False).subscribe(
+                    emit_window, scheduler=scheduler
+                )  # type: ignore[arg-type]
+            except Exception:
+                source_sub.dispose()
+                raise
+            subscription = _CompositeSubscription((source_sub, trigger_sub))
+            try:
+                self._replay_latest_value(source, on_next)
+                self._replay_latest_value(trigger, emit_window)
+            except Exception:
+                subscription.dispose()
+                raise
+            return subscription
 
         return rx.create(subscribe)
 
@@ -5443,25 +5467,31 @@ class Graph:
                     prune(partition_key)
                     emit_window(partition_key)
 
-            self._replay_latest_value(source, on_next)
-            if watermark is not None:
-                self._replay_latest_value(watermark, on_watermark)
-
             source_sub = self.observe(source, replay_latest=False).subscribe(
                 on_next, scheduler=scheduler
             )  # type: ignore[arg-type]
             if watermark is None:
-                return source_sub
-            watermark_sub = self.observe(watermark, replay_latest=False).subscribe(
-                on_watermark, scheduler=scheduler
-            )  # type: ignore[arg-type]
-
-            class _Subscription:
-                def dispose(self) -> None:
+                try:
+                    self._replay_latest_value(source, on_next)
+                except Exception:
                     source_sub.dispose()
-                    watermark_sub.dispose()
-
-            return _Subscription()
+                    raise
+                return source_sub
+            try:
+                watermark_sub = self.observe(watermark, replay_latest=False).subscribe(
+                    on_watermark, scheduler=scheduler
+                )  # type: ignore[arg-type]
+            except Exception:
+                source_sub.dispose()
+                raise
+            subscription = _CompositeSubscription((source_sub, watermark_sub))
+            try:
+                self._replay_latest_value(source, on_next)
+                self._replay_latest_value(watermark, on_watermark)
+            except Exception:
+                subscription.dispose()
+                raise
+            return subscription
 
         return rx.create(subscribe)
 
@@ -5529,22 +5559,24 @@ class Graph:
                 if left_latest is not _NO_PENDING:
                     observer.on_next(combine(left_latest, right_latest))
 
-            self._replay_latest_value(left, on_left)
-            self._replay_latest_value(right, on_right)
-
             left_sub = self.observe(left, replay_latest=False).subscribe(
                 on_left, scheduler=scheduler
             )  # type: ignore[arg-type]
-            right_sub = self.observe(right, replay_latest=False).subscribe(
-                on_right, scheduler=scheduler
-            )  # type: ignore[arg-type]
-
-            class _Subscription:
-                def dispose(self) -> None:
-                    left_sub.dispose()
-                    right_sub.dispose()
-
-            return _Subscription()
+            try:
+                right_sub = self.observe(right, replay_latest=False).subscribe(
+                    on_right, scheduler=scheduler
+                )  # type: ignore[arg-type]
+            except Exception:
+                left_sub.dispose()
+                raise
+            subscription = _CompositeSubscription((left_sub, right_sub))
+            try:
+                self._replay_latest_value(left, on_left)
+                self._replay_latest_value(right, on_right)
+            except Exception:
+                subscription.dispose()
+                raise
+            return subscription
 
         return rx.create(subscribe)
 
@@ -5580,21 +5612,23 @@ class Graph:
                 left_value = self._operator_value(left, left_route, item)
                 observer.on_next(combine(left_value, right_latest))
 
-            self._replay_latest_value(right_state, on_right)
-
             left_sub = self.observe(left, replay_latest=False).subscribe(
                 on_left, scheduler=scheduler
             )  # type: ignore[arg-type]
-            right_sub = self.observe(right_state, replay_latest=False).subscribe(
-                on_right, scheduler=scheduler
-            )  # type: ignore[arg-type]
-
-            class _Subscription:
-                def dispose(self) -> None:
-                    left_sub.dispose()
-                    right_sub.dispose()
-
-            return _Subscription()
+            try:
+                right_sub = self.observe(right_state, replay_latest=False).subscribe(
+                    on_right, scheduler=scheduler
+                )  # type: ignore[arg-type]
+            except Exception:
+                left_sub.dispose()
+                raise
+            subscription = _CompositeSubscription((left_sub, right_sub))
+            try:
+                self._replay_latest_value(right_state, on_right)
+            except Exception:
+                subscription.dispose()
+                raise
+            return subscription
 
         return rx.create(subscribe)
 
@@ -5659,12 +5693,7 @@ class Graph:
                 on_right, scheduler=scheduler
             )  # type: ignore[arg-type]
 
-            class _Subscription:
-                def dispose(self) -> None:
-                    left_sub.dispose()
-                    right_sub.dispose()
-
-            return _Subscription()
+            return _CompositeSubscription((left_sub, right_sub))
 
         return rx.create(subscribe)
 

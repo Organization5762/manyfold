@@ -1039,6 +1039,35 @@ class GraphReactiveTests(unittest.TestCase):
 
         self.assertEqual(matched, ["frame-2:open", "frame-4:open"])
 
+    def test_filter_subscribes_before_replaying_latest_value(self) -> None:
+        graph_module = load_graph_module()
+
+        source = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("lidar"),
+            family=graph_module.StreamFamily("scan"),
+            stream=graph_module.StreamName("reentrant_frame"),
+            variant=graph_module.Variant.Meta,
+            schema=int_schema(graph_module, "ReentrantFrame"),
+        )
+        graph = graph_module.Graph()
+        graph.publish(source, 1)
+        matched: list[int] = []
+
+        def receive(value: int) -> None:
+            matched.append(value)
+            if value == 1:
+                graph.publish(source, 2)
+
+        subscription = graph.filter(
+            source,
+            predicate=lambda value: value > 0,
+        ).subscribe(receive)
+        subscription.dispose()
+
+        self.assertEqual(matched, [1, 2])
+
     def test_filter_accepts_raw_route_refs_as_bytes(self) -> None:
         graph_module = load_graph_module()
 
@@ -1908,6 +1937,46 @@ class GraphReactiveTests(unittest.TestCase):
 
         self.assertEqual(first_joined, [12, 13])
         self.assertEqual(second_joined, [13, 14])
+
+    def test_join_latest_subscribes_before_replaying_latest_values(self) -> None:
+        graph_module = load_graph_module()
+
+        left = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("imu"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("reentrant_accel"),
+            variant=graph_module.Variant.Meta,
+            schema=int_schema(graph_module, "ReentrantAccel"),
+        )
+        right = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("imu"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("reentrant_gyro"),
+            variant=graph_module.Variant.Meta,
+            schema=int_schema(graph_module, "ReentrantGyro"),
+        )
+        graph = graph_module.Graph()
+        graph.publish(left, 1)
+        graph.publish(right, 10)
+        joined: list[int] = []
+
+        def receive(value: int) -> None:
+            joined.append(value)
+            if value == 11:
+                graph.publish(left, 2)
+
+        subscription = graph.join_latest(
+            left,
+            right,
+            combine=lambda accel, gyro: accel + gyro,
+        ).subscribe(receive)
+        subscription.dispose()
+
+        self.assertEqual(joined, [11, 12])
 
     def test_lookup_join_emits_only_when_left_side_arrives(self) -> None:
         graph_module = load_graph_module()
