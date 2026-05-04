@@ -196,7 +196,7 @@ class EventLog(Generic[T]):
         self.name = name
         self.keyspace = keyspace
         self.schema = schema
-        self._append_lock = threading.Lock()
+        self._append_lock = threading.RLock()
         self.routes = EventLogRoutes(
             append=_component_route(
                 plane=Plane.Write,
@@ -238,11 +238,11 @@ class EventLog(Generic[T]):
                     _format_log_index(index),
                     value=self.schema.encode(envelope.value),
                 )
-            graph.publish(
-                self.routes.committed,
-                envelope.value,
-                control_epoch=envelope.closed.control_epoch,
-            )
+                graph.publish(
+                    self.routes.committed,
+                    envelope.value,
+                    control_epoch=envelope.closed.control_epoch,
+                )
 
         return graph.observe(self.routes.append, replay_latest=False).subscribe(on_next)
 

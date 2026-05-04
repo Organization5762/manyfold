@@ -233,6 +233,51 @@ class ComponentTests(unittest.TestCase):
         self.assertEqual([record.index for record in records], list(range(1, 13)))
         self.assertEqual({record.value for record in records}, set(range(12)))
 
+    def test_event_log_publishes_commits_in_durable_index_order(self) -> None:
+        manyfold = load_manyfold_package()
+        schema = manyfold.Schema(
+            schema_id="OrderedCommand",
+            version=1,
+            encode=lambda value: str(value).encode("ascii"),
+            decode=lambda payload: int(payload.decode("ascii")),
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            keyspace = manyfold.FileStore(temp_dir).prefix("commands")
+            log = manyfold.EventLog("commands", keyspace, schema)
+            graph = manyfold.Graph()
+            committed: list[int] = []
+            first_commit_entered = threading.Event()
+            original_publish = graph.publish
+
+            def delayed_publish(route_ref, value, *args, **kwargs):
+                if route_ref == log.output() and value == 1:
+                    first_commit_entered.set()
+                    time.sleep(0.05)
+                return original_publish(route_ref, value, *args, **kwargs)
+
+            graph.publish = delayed_publish  # type: ignore[method-assign]
+            log_subscription = log.install(graph)
+            committed_subscription = graph.observe(
+                log.output(), replay_latest=False
+            ).subscribe(lambda envelope: committed.append(envelope.value))
+            first = threading.Thread(target=graph.publish, args=(log.input(), 1))
+            second = threading.Thread(target=graph.publish, args=(log.input(), 2))
+
+            first.start()
+            self.assertTrue(first_commit_entered.wait(timeout=1.0))
+            second.start()
+            first.join(timeout=1.0)
+            second.join(timeout=1.0)
+            log_subscription.dispose()
+            committed_subscription.dispose()
+            records = log.records()
+
+        self.assertFalse(first.is_alive())
+        self.assertFalse(second.is_alive())
+        self.assertEqual([record.value for record in records], [1, 2])
+        self.assertEqual(committed, [1, 2])
+
     def test_snapshot_store_writes_latest_value_and_publishes_output(self) -> None:
         manyfold = load_manyfold_package()
         schema = manyfold.Schema(
