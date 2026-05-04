@@ -196,6 +196,36 @@ class SensorIoTests(unittest.TestCase):
         self.assertEqual(decoded.identity.tags[0].variant, "radio")
         self.assertEqual(decoded.raw, b'{"payload":[97,98,99]}')
 
+    def test_sensor_schemas_encode_compact_sorted_json(self) -> None:
+        manyfold = load_manyfold_package()
+        sample_schema = manyfold.sensor_sample_schema(_int_schema(manyfold, "Temp"))
+        health_schema = manyfold.health_status_schema()
+
+        sample = manyfold.SensorSample(
+            value=21,
+            source_timestamp=1.0,
+            ingest_timestamp=2.0,
+            sequence_number=3,
+            quality=None,
+            status="ok",
+        )
+        status = manyfold.HealthStatus(
+            status="ok",
+            observed_at=2.0,
+            message="ready",
+        )
+
+        self.assertEqual(
+            sample_schema.encode(sample),
+            b'{"ingest_timestamp":2.0,"quality":null,"sequence_number":3,'
+            b'"source_timestamp":1.0,"status":"ok","value":"MjE="}',
+        )
+        self.assertEqual(
+            health_schema.encode(status),
+            b'{"error_count":0,"message":"ready","observed_at":2.0,'
+            b'"stale":false,"status":"ok"}',
+        )
+
     def test_sensor_sample_schema_rejects_invalid_value_base64(self) -> None:
         manyfold = load_manyfold_package()
         schema = manyfold.sensor_sample_schema(_int_schema(manyfold, "Temp"))
