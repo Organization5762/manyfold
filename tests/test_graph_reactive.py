@@ -2360,6 +2360,51 @@ class GraphReactiveTests(unittest.TestCase):
         self.assertEqual([item.value for item in emitted], [2])
         self.assertEqual([item.closed.control_epoch for item in emitted], [20])
 
+    def test_capacitor_disposes_source_when_demand_subscription_fails(self) -> None:
+        graph_module = load_graph_module()
+
+        source = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("imu"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("capacitor_source_setup_failure"),
+            variant=graph_module.Variant.Meta,
+            schema=int_schema(graph_module, "CapacitorSourceSetupFailure"),
+        )
+        sampled = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("imu"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("capacitor_sampled_setup_failure"),
+            variant=graph_module.Variant.Meta,
+            schema=int_schema(graph_module, "CapacitorSampledSetupFailure"),
+        )
+        demand = graph_module.route(
+            plane=graph_module.Plane.State,
+            layer=graph_module.Layer.Internal,
+            owner=graph_module.OwnerName("scheduler"),
+            family=graph_module.StreamFamily("tick"),
+            stream=graph_module.StreamName("capacitor_demand_setup_failure"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="CapacitorDemandSetupFailure"),
+        )
+        graph = graph_module.Graph()
+        original_observe = graph.observe
+
+        def observe_with_demand_failure(route_ref, *args, **kwargs):
+            if route_ref == demand:
+                return FailingObservable("demand subscription failed")
+            return original_observe(route_ref, *args, **kwargs)
+
+        graph.observe = observe_with_demand_failure  # type: ignore[method-assign]
+
+        with self.assertRaisesRegex(RuntimeError, "demand subscription failed"):
+            graph.capacitor(source=source, sink=sampled, demand=demand)
+
+        self.assertEqual(graph.subscribers(source), 0)
+
     def test_source_and_sink_wrappers_work_across_core_graph_calls(self) -> None:
         graph_module = load_graph_module()
 
@@ -2625,6 +2670,51 @@ class GraphReactiveTests(unittest.TestCase):
 
         self.assertEqual([item.value for item in emitted], ["frame-2:open"])
 
+    def test_resistor_disposes_source_when_release_subscription_fails(self) -> None:
+        graph_module = load_graph_module()
+
+        source = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("lidar"),
+            family=graph_module.StreamFamily("scan"),
+            stream=graph_module.StreamName("resistor_source_setup_failure"),
+            variant=graph_module.Variant.Meta,
+            schema=str_schema(graph_module, "ResistorSourceSetupFailure"),
+        )
+        selected = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("lidar"),
+            family=graph_module.StreamFamily("scan"),
+            stream=graph_module.StreamName("resistor_selected_setup_failure"),
+            variant=graph_module.Variant.Meta,
+            schema=str_schema(graph_module, "ResistorSelectedSetupFailure"),
+        )
+        release = graph_module.route(
+            plane=graph_module.Plane.State,
+            layer=graph_module.Layer.Internal,
+            owner=graph_module.OwnerName("scheduler"),
+            family=graph_module.StreamFamily("tick"),
+            stream=graph_module.StreamName("resistor_release_setup_failure"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="ResistorReleaseSetupFailure"),
+        )
+        graph = graph_module.Graph()
+        original_observe = graph.observe
+
+        def observe_with_release_failure(route_ref, *args, **kwargs):
+            if route_ref == release:
+                return FailingObservable("release subscription failed")
+            return original_observe(route_ref, *args, **kwargs)
+
+        graph.observe = observe_with_release_failure  # type: ignore[method-assign]
+
+        with self.assertRaisesRegex(RuntimeError, "release subscription failed"):
+            graph.resistor(source=source, sink=selected, release=release)
+
+        self.assertEqual(graph.subscribers(source), 0)
+
     def test_watchdog_emits_timeout_after_missed_ticks_and_resets(self) -> None:
         graph_module = load_graph_module()
 
@@ -2676,6 +2766,56 @@ class GraphReactiveTests(unittest.TestCase):
 
         self.assertEqual([item.value for item in emitted], [b"timeout", b"timeout"])
         self.assertEqual([item.closed.control_epoch for item in emitted], [2, 5])
+
+    def test_watchdog_disposes_reset_when_clock_subscription_fails(self) -> None:
+        graph_module = load_graph_module()
+
+        heartbeat = graph_module.route(
+            plane=graph_module.Plane.State,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("raft"),
+            family=graph_module.StreamFamily("leader"),
+            stream=graph_module.StreamName("watchdog_reset_setup_failure"),
+            variant=graph_module.Variant.State,
+            schema=graph_module.Schema.bytes(name="WatchdogResetSetupFailure"),
+        )
+        clock = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Internal,
+            owner=graph_module.OwnerName("raft"),
+            family=graph_module.StreamFamily("clock"),
+            stream=graph_module.StreamName("watchdog_clock_setup_failure"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="WatchdogClockSetupFailure"),
+        )
+        timeout = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Internal,
+            owner=graph_module.OwnerName("raft"),
+            family=graph_module.StreamFamily("election"),
+            stream=graph_module.StreamName("watchdog_timeout_setup_failure"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="WatchdogTimeoutSetupFailure"),
+        )
+        graph = graph_module.Graph()
+        original_observe = graph.observe
+
+        def observe_with_clock_failure(route_ref, *args, **kwargs):
+            if route_ref == clock:
+                return FailingObservable("clock subscription failed")
+            return original_observe(route_ref, *args, **kwargs)
+
+        graph.observe = observe_with_clock_failure  # type: ignore[method-assign]
+
+        with self.assertRaisesRegex(RuntimeError, "clock subscription failed"):
+            graph.watchdog(
+                reset_by=heartbeat,
+                output=timeout,
+                after=2,
+                clock=clock,
+            )
+
+        self.assertEqual(graph.subscribers(heartbeat), 0)
 
     def test_capacitor_demand_supports_raw_route_refs(self) -> None:
         graph_module = load_graph_module()

@@ -4120,15 +4120,23 @@ class Graph:
             )
             self._extend_taints(emitted, taints)
 
-        source_sub = self.observe(
-            source, replay_latest=self._source_replay_latest(source)
-        ).subscribe(retain)
-        self._subscriptions.append(source_sub)
-        if demand is not None:
-            signal_sub = self.observe(demand, replay_latest=False).subscribe(
-                lambda _item: discharge_one()
-            )
-            self._subscriptions.append(signal_sub)
+        try:
+            source_sub = self.observe(
+                source, replay_latest=self._source_replay_latest(source)
+            ).subscribe(retain)
+            if demand is not None:
+                try:
+                    signal_sub = self.observe(demand, replay_latest=False).subscribe(
+                        lambda _item: discharge_one()
+                    )
+                except Exception:
+                    source_sub.dispose()
+                    raise
+                self._subscriptions.append(signal_sub)
+            self._subscriptions.append(source_sub)
+        except Exception:
+            self._capacitors.pop(resolved_name, None)
+            raise
         return capacitor
 
     def resistor(
@@ -4191,20 +4199,28 @@ class Graph:
                 return
             emit(value, closed, lineage, taints)
 
-        source_sub = self.observe(
-            source, replay_latest=self._source_replay_latest(source)
-        ).subscribe(on_source)
-        self._subscriptions.append(source_sub)
-        if release is not None:
+        try:
+            source_sub = self.observe(
+                source, replay_latest=self._source_replay_latest(source)
+            ).subscribe(on_source)
+            if release is not None:
 
-            def on_signal(_item: TypedEnvelope[Any] | ClosedEnvelope) -> None:
-                if latest is not None:
-                    emit(*latest)
+                def on_signal(_item: TypedEnvelope[Any] | ClosedEnvelope) -> None:
+                    if latest is not None:
+                        emit(*latest)
 
-            signal_sub = self.observe(release, replay_latest=False).subscribe(
-                on_signal
-            )
-            self._subscriptions.append(signal_sub)
+                try:
+                    signal_sub = self.observe(release, replay_latest=False).subscribe(
+                        on_signal
+                    )
+                except Exception:
+                    source_sub.dispose()
+                    raise
+                self._subscriptions.append(signal_sub)
+            self._subscriptions.append(source_sub)
+        except Exception:
+            self._resistors.pop(resolved_name, None)
+            raise
         return resistor
 
     def watchdog(
@@ -4254,10 +4270,18 @@ class Graph:
             self.publish(output, pulse, control_epoch=progress)
             emitted_since_reset = True
 
-        reset_sub = self.observe(reset_by, replay_latest=True).subscribe(on_reset)
-        clock_sub = self.observe(clock, replay_latest=False).subscribe(on_clock)
-        self._subscriptions.append(reset_sub)
-        self._subscriptions.append(clock_sub)
+        try:
+            reset_sub = self.observe(reset_by, replay_latest=True).subscribe(on_reset)
+            try:
+                clock_sub = self.observe(clock, replay_latest=False).subscribe(on_clock)
+            except Exception:
+                reset_sub.dispose()
+                raise
+            self._subscriptions.append(reset_sub)
+            self._subscriptions.append(clock_sub)
+        except Exception:
+            self._watchdogs.pop(resolved_name, None)
+            raise
         return watchdog
 
     def lifecycle(
