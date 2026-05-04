@@ -887,13 +887,17 @@ def _heartbeat_schema() -> Schema[Heartbeat]:
     return Schema(
         schema_id="RaftHeartbeat",
         version=1,
-        encode=lambda value: f"{value[0]}|{value[1]}".encode("utf-8"),
+        encode=lambda value: _encode_json_tuple(value),
         decode=lambda payload: _decode_heartbeat(payload),
     )
 
 
 def _decode_heartbeat(payload: bytes) -> Heartbeat:
-    term_text, leader = payload.decode("utf-8").split("|", 1)
+    text = payload.decode("utf-8")
+    if text.startswith("["):
+        term, leader = json.loads(text)
+        return (int(term), str(leader))
+    term_text, leader = text.split("|", 1)
     return (int(term_text), leader)
 
 
@@ -901,17 +905,17 @@ def _request_vote_schema() -> Schema[RequestVote]:
     return Schema(
         schema_id="RaftRequestVote",
         version=1,
-        encode=lambda value: (
-            f"{value[0]}|{value[1]}|{value[2]}|{value[3]}".encode("utf-8")
-        ),
+        encode=lambda value: _encode_json_tuple(value),
         decode=lambda payload: _decode_request_vote(payload),
     )
 
 
 def _decode_request_vote(payload: bytes) -> RequestVote:
-    term_text, candidate, index_text, term_at_index_text = payload.decode(
-        "utf-8"
-    ).split("|", 3)
+    text = payload.decode("utf-8")
+    if text.startswith("["):
+        term, candidate, last_log_index, last_log_term = json.loads(text)
+        return (int(term), str(candidate), int(last_log_index), int(last_log_term))
+    term_text, candidate, index_text, term_at_index_text = text.split("|", 3)
     return (int(term_text), candidate, int(index_text), int(term_at_index_text))
 
 
@@ -919,15 +923,17 @@ def _vote_schema() -> Schema[Vote]:
     return Schema(
         schema_id="RaftVote",
         version=1,
-        encode=lambda value: (
-            f"{value[0]}|{value[1]}|{value[2]}|{1 if value[3] else 0}".encode("utf-8")
-        ),
+        encode=lambda value: _encode_json_tuple(value),
         decode=lambda payload: _decode_vote(payload),
     )
 
 
 def _decode_vote(payload: bytes) -> Vote:
-    term_text, candidate, voter, granted_text = payload.decode("utf-8").split("|", 3)
+    text = payload.decode("utf-8")
+    if text.startswith("["):
+        term, candidate, voter, granted = json.loads(text)
+        return (int(term), str(candidate), str(voter), bool(granted))
+    term_text, candidate, voter, granted_text = text.split("|", 3)
     return (int(term_text), candidate, voter, granted_text == "1")
 
 
@@ -935,19 +941,22 @@ def _quorum_schema() -> Schema[QuorumState]:
     return Schema(
         schema_id="RaftQuorumState",
         version=1,
-        encode=lambda value: (
-            f"{value[0]}|{value[1]}|{','.join(value[2])}|{1 if value[3] else 0}".encode(
-                "utf-8"
-            )
-        ),
+        encode=lambda value: _encode_json_tuple(value),
         decode=lambda payload: _decode_quorum(payload),
     )
 
 
 def _decode_quorum(payload: bytes) -> QuorumState:
-    term_text, candidate, voters_text, granted_text = payload.decode("utf-8").split(
-        "|", 3
-    )
+    text = payload.decode("utf-8")
+    if text.startswith("["):
+        term, candidate, voters, granted = json.loads(text)
+        return (
+            int(term),
+            str(candidate),
+            tuple(str(voter) for voter in voters),
+            bool(granted),
+        )
+    term_text, candidate, voters_text, granted_text = text.split("|", 3)
     voters = tuple(voter for voter in voters_text.split(",") if voter)
     return (int(term_text), candidate, voters, granted_text == "1")
 
@@ -989,16 +998,22 @@ def _leader_state_schema() -> Schema[LeaderState]:
     return Schema(
         schema_id="RaftLeaderState",
         version=1,
-        encode=lambda value: (
-            f"{value[0]}|{value[1]}|{1 if value[2] else 0}".encode("utf-8")
-        ),
+        encode=lambda value: _encode_json_tuple(value),
         decode=lambda payload: _decode_leader_state(payload),
     )
 
 
 def _decode_leader_state(payload: bytes) -> LeaderState:
-    leader, term_text, committed_text = payload.decode("utf-8").split("|", 2)
+    text = payload.decode("utf-8")
+    if text.startswith("["):
+        leader, term, committed = json.loads(text)
+        return (str(leader), int(term), bool(committed))
+    leader, term_text, committed_text = text.split("|", 2)
     return (leader, int(term_text), committed_text == "1")
+
+
+def _encode_json_tuple(value: tuple[Any, ...]) -> bytes:
+    return json.dumps(value, separators=(",", ":")).encode("utf-8")
 
 
 __all__ = [

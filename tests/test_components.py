@@ -304,6 +304,46 @@ class ComponentTests(unittest.TestCase):
 
         self.assertEqual(consensus.latest_log(), ((1, command),))
 
+    def test_consensus_messages_round_trip_delimited_node_ids(self) -> None:
+        manyfold = load_manyfold_package()
+        graph = manyfold.Graph()
+        consensus = manyfold.Consensus.install(
+            graph,
+            nodes=("node|a", "node,b", "node-c"),
+            candidate_id="node|a",
+        )
+
+        consensus.tick(1)
+        consensus.tick(2)
+
+        self.assertEqual(
+            consensus.latest_quorum(),
+            (3, "node|a", ("node,b", "node-c", "node|a"), True),
+        )
+        self.assertEqual(consensus.latest_leader(), ("node|a", 3, True))
+
+    def test_consensus_schemas_read_legacy_delimited_payloads(self) -> None:
+        manyfold = load_manyfold_package()
+        routes = manyfold.Consensus.default_routes()
+
+        self.assertEqual(routes.heartbeat.schema.decode(b"3|node-a"), (3, "node-a"))
+        self.assertEqual(
+            routes.request_vote.schema.decode(b"3|node-a|0|0"),
+            (3, "node-a", 0, 0),
+        )
+        self.assertEqual(
+            routes.vote_response.schema.decode(b"3|node-a|node-b|1"),
+            (3, "node-a", "node-b", True),
+        )
+        self.assertEqual(
+            routes.quorum.schema.decode(b"3|node-a|node-a,node-b|1"),
+            (3, "node-a", ("node-a", "node-b"), True),
+        )
+        self.assertEqual(
+            routes.leader_state.schema.decode(b"node-a|3|1"),
+            ("node-a", 3, True),
+        )
+
     def test_consensus_component_validates_candidate_membership(self) -> None:
         manyfold = load_manyfold_package()
 
