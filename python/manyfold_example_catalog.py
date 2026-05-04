@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import importlib.util
 from pathlib import Path
 
@@ -24,11 +25,11 @@ except ImportError:
 
 ensure_repo_import_paths()
 
+catalog_main = importlib.import_module("examples.catalog").main
+
 
 def main(argv: list[str] | None = None) -> int:
     ensure_repo_import_paths()
-
-    from examples.catalog import main as catalog_main
 
     return catalog_main(argv)
 
