@@ -5514,19 +5514,19 @@ class Graph:
             observer: ObserverLike[TOut],
             scheduler: object | None = None,
         ) -> SubscriptionLike:
-            left_latest: TIn | None = None
-            right_latest: TRight | None = None
+            left_latest: Any = _NO_PENDING
+            right_latest: Any = _NO_PENDING
 
             def on_left(item: TypedEnvelope[TIn] | ClosedEnvelope) -> None:
                 nonlocal left_latest
                 left_latest = self._operator_value(left, left_route, item)
-                if right_latest is not None:
+                if right_latest is not _NO_PENDING:
                     observer.on_next(combine(left_latest, right_latest))
 
             def on_right(item: TypedEnvelope[TRight] | ClosedEnvelope) -> None:
                 nonlocal right_latest
                 right_latest = self._operator_value(right, right_route, item)
-                if left_latest is not None:
+                if left_latest is not _NO_PENDING:
                     observer.on_next(combine(left_latest, right_latest))
 
             self._replay_latest_value(left, on_left)
@@ -5568,14 +5568,14 @@ class Graph:
             observer: ObserverLike[TOut],
             scheduler: object | None = None,
         ) -> SubscriptionLike:
-            right_latest: TRight | bytes | None = None
+            right_latest: Any = _NO_PENDING
 
             def on_right(item: TypedEnvelope[TRight] | ClosedEnvelope) -> None:
                 nonlocal right_latest
                 right_latest = self._operator_value(right_state, right_route, item)
 
             def on_left(item: TypedEnvelope[TIn] | ClosedEnvelope) -> None:
-                if right_latest is None:
+                if right_latest is _NO_PENDING:
                     return
                 left_value = self._operator_value(left, left_route, item)
                 observer.on_next(combine(left_value, right_latest))

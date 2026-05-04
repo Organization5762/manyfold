@@ -1746,6 +1746,40 @@ class GraphReactiveTests(unittest.TestCase):
 
         self.assertEqual(joined, [12, 13, 14])
 
+    def test_join_latest_treats_none_as_present_latest_value(self) -> None:
+        graph_module = load_graph_module()
+
+        left = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("runtime"),
+            family=graph_module.StreamFamily("optional"),
+            stream=graph_module.StreamName("left"),
+            variant=graph_module.Variant.State,
+            schema=graph_module.Schema.any("OptionalLeft"),
+        )
+        right = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("runtime"),
+            family=graph_module.StreamFamily("optional"),
+            stream=graph_module.StreamName("right"),
+            variant=graph_module.Variant.State,
+            schema=graph_module.Schema.any("OptionalRight"),
+        )
+        graph = graph_module.Graph()
+        graph.publish(left, None)
+        graph.publish(right, "ready")
+
+        joined = []
+        subscription = graph.join_latest(
+            left, right, combine=lambda a, b: (a, b)
+        ).subscribe(joined.append)
+        graph.publish(right, "updated")
+        subscription.dispose()
+
+        self.assertEqual(joined, [(None, "ready"), (None, "updated")])
+
     def test_interval_join_emits_pairs_within_bounded_sequence_distance(self) -> None:
         graph_module = load_graph_module()
 
@@ -1952,6 +1986,40 @@ class GraphReactiveTests(unittest.TestCase):
         subscription.dispose()
 
         self.assertEqual(joined, [12, 14])
+
+    def test_lookup_join_treats_none_as_present_state_value(self) -> None:
+        graph_module = load_graph_module()
+
+        left = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("runtime"),
+            family=graph_module.StreamFamily("optional"),
+            stream=graph_module.StreamName("event"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.any("OptionalEvent"),
+        )
+        right_state = graph_module.route(
+            plane=graph_module.Plane.State,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("runtime"),
+            family=graph_module.StreamFamily("optional"),
+            stream=graph_module.StreamName("state"),
+            variant=graph_module.Variant.State,
+            schema=graph_module.Schema.any("OptionalState"),
+        )
+        graph = graph_module.Graph()
+
+        joined = []
+        subscription = graph.lookup_join(
+            left, right_state, combine=lambda event, state: (event, state)
+        ).subscribe(joined.append)
+        graph.publish(left, "ignored")
+        graph.publish(right_state, None)
+        graph.publish(left, "joined")
+        subscription.dispose()
+
+        self.assertEqual(joined, [("joined", None)])
 
     def test_lookup_join_replays_latest_state_per_subscription(self) -> None:
         graph_module = load_graph_module()
