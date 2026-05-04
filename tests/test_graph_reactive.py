@@ -2298,6 +2298,20 @@ class GraphReactiveTests(unittest.TestCase):
         self.assertIn('["planner"]', diagram)
         self.assertNotIn("graph has no topology edges", diagram)
 
+    def test_registered_diagram_node_metadata_is_key_sorted(self) -> None:
+        graph_module = load_graph_module()
+        graph = graph_module.Graph()
+
+        node = graph.register_diagram_node(
+            "planner",
+            metadata={"zeta": "last", "alpha": "first"},
+        )
+
+        self.assertEqual(
+            node.metadata,
+            (("alpha", "first"), ("zeta", "last")),
+        )
+
     def test_context_collects_scoped_route_inputs_and_outputs(self) -> None:
         graph_module = load_graph_module()
         command = graph_module.route(

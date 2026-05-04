@@ -4448,7 +4448,7 @@ class Graph:
     ) -> DiagramNode:
         """Register a graph-visible node for topology diagrams."""
         metadata_items = tuple(
-            (str(key), str(value)) for key, value in (metadata or {}).items()
+            sorted((str(key), str(value)) for key, value in (metadata or {}).items())
         )
         for route_ref in tuple(input_routes) + tuple(output_routes):
             coerced = self._coerce_route_ref(route_ref)
