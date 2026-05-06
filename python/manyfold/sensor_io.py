@@ -6,6 +6,7 @@ import base64
 import binascii
 import codecs
 import json
+import math
 import threading
 import time
 from collections import deque
@@ -1512,7 +1513,9 @@ def _mapping_key_sort_key(key: Any) -> tuple[str, str]:
 def _compact_json_bytes(value: Mapping[str, Any]) -> bytes:
     """Encode deterministic JSON for schemas that compare or persist bytes."""
 
-    return json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return json.dumps(
+        value, allow_nan=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
 
 
 def _json_safe(value: Any) -> Any:
@@ -1559,9 +1562,13 @@ def _decode_json_int(value: Any, field: str) -> int:
 
 
 def _decode_json_number(value: Any, field: str) -> float:
-    if isinstance(value, int | float) and not isinstance(value, bool):
+    if (
+        isinstance(value, int | float)
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+    ):
         return float(value)
-    raise ValueError(f"{field} must be a JSON number")
+    raise ValueError(f"{field} must be a JSON number (finite)")
 
 
 def _sensor_identity_from_json(value: Any) -> SensorIdentity:

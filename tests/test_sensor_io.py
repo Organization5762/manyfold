@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import tempfile
 import threading
 import unittest
@@ -314,6 +315,27 @@ class SensorIoTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "source_timestamp must be a JSON number"):
             schema.decode(json.dumps(payload).encode("utf-8"))
 
+    def test_sensor_sample_schema_rejects_non_finite_timestamp(self) -> None:
+        manyfold = load_manyfold_package()
+        schema = manyfold.sensor_sample_schema(_int_schema(manyfold, "Temp"))
+
+        with self.assertRaisesRegex(
+            ValueError, r"source_timestamp must be a JSON number \(finite\)"
+        ):
+            schema.decode(
+                b'{"ingest_timestamp":1.5,"quality":null,"sequence_number":1,'
+                b'"source_timestamp":NaN,"status":null,"value":"MjE="}'
+            )
+
+        sample = manyfold.SensorSample(
+            value=21,
+            source_timestamp=math.nan,
+            ingest_timestamp=1.5,
+            sequence_number=1,
+        )
+        with self.assertRaisesRegex(ValueError, "Out of range float values"):
+            schema.encode(sample)
+
     def test_sensor_event_schema_rejects_invalid_nested_bytes_base64(self) -> None:
         manyfold = load_manyfold_package()
         schema = manyfold.sensor_event_schema()
@@ -396,6 +418,27 @@ class SensorIoTests(unittest.TestCase):
         ):
             schema.decode(json.dumps(payload).encode("utf-8"))
 
+    def test_sensor_event_schema_rejects_non_finite_location_coordinate(self) -> None:
+        manyfold = load_manyfold_package()
+        schema = manyfold.sensor_event_schema()
+
+        with self.assertRaisesRegex(
+            ValueError, r"identity.location.x must be a JSON number \(finite\)"
+        ):
+            schema.decode(
+                b'{"data":{},"event_type":"radio.packet",'
+                b'"identity":{"location":{"x":Infinity,"y":0.0,"z":0.0}},'
+                b'"metadata":{},"observed_at":1.5,"raw":null,"sequence_number":7}'
+            )
+
+        event = manyfold.SensorEvent(
+            event_type="radio.packet",
+            data={},
+            observed_at=math.inf,
+        )
+        with self.assertRaisesRegex(ValueError, "Out of range float values"):
+            schema.encode(event)
+
     def test_health_status_schema_rejects_string_error_count(self) -> None:
         manyfold = load_manyfold_package()
         health_schema = manyfold.health_status_schema()
@@ -415,6 +458,22 @@ class SensorIoTests(unittest.TestCase):
                 b'{"error_count":0,"message":"ready","observed_at":"2.0",'
                 b'"stale":false,"status":"ok"}'
             )
+
+    def test_health_status_schema_rejects_non_finite_observed_at(self) -> None:
+        manyfold = load_manyfold_package()
+        health_schema = manyfold.health_status_schema()
+
+        with self.assertRaisesRegex(
+            ValueError, r"observed_at must be a JSON number \(finite\)"
+        ):
+            health_schema.decode(
+                b'{"error_count":0,"message":"ready","observed_at":Infinity,'
+                b'"stale":false,"status":"ok"}'
+            )
+
+        status = manyfold.HealthStatus(status="ok", observed_at=-math.inf)
+        with self.assertRaisesRegex(ValueError, "Out of range float values"):
+            health_schema.encode(status)
 
     def test_sequence_counter_assigns_monotonic_numbers(self) -> None:
         manyfold = load_manyfold_package()
