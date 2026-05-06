@@ -13,6 +13,31 @@ use pyo3::prelude::*;
 #[cfg(feature = "stub-gen")]
 use pyo3_stub_gen::define_stub_info_gatherer;
 
+const DELIVERY_MODES: &[&str] = &[
+    "mpsc_serial",
+    "mpmc_unique",
+    "mpmc_replicated",
+    "key_affine",
+];
+const ORDERING_POLICIES: &[&str] = &[
+    "fifo",
+    "priority_stable",
+    "weighted_fair",
+    "round_robin_by_producer",
+    "keyed_fifo",
+    "latest_only",
+    "unordered",
+];
+const OVERFLOW_POLICIES: &[&str] = &[
+    "block",
+    "drop_oldest",
+    "drop_newest",
+    "coalesce_latest",
+    "deadline_drop",
+    "spill_to_store",
+    "reject_write",
+];
+
 fn lock_graph<'a>(
     state: &'a Arc<Mutex<GraphCore>>,
 ) -> PyResult<std::sync::MutexGuard<'a, GraphCore>> {
@@ -66,6 +91,13 @@ fn validate_route(route: &RouteRefCore) -> PyResult<()> {
         ));
     }
     Ok(())
+}
+
+fn unsupported_choice(field: &str, value: &str, choices: &[&str]) -> PyErr {
+    PyValueError::new_err(format!(
+        "unsupported {field} {value:?}; expected one of {}",
+        choices.join(", ")
+    ))
 }
 
 #[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
@@ -1072,7 +1104,7 @@ impl MailboxDescriptor {
             "mpmc_unique" => DeliveryMode::MpmcUnique,
             "mpmc_replicated" => DeliveryMode::MpmcReplicated,
             "key_affine" => DeliveryMode::KeyAffine,
-            _ => return Err(PyValueError::new_err("unsupported delivery_mode")),
+            value => return Err(unsupported_choice("delivery_mode", value, DELIVERY_MODES)),
         };
         let ordering_policy = match ordering_policy.as_str() {
             "fifo" => OrderingPolicy::Fifo,
@@ -1082,7 +1114,13 @@ impl MailboxDescriptor {
             "keyed_fifo" => OrderingPolicy::KeyedFifo,
             "latest_only" => OrderingPolicy::LatestOnly,
             "unordered" => OrderingPolicy::Unordered,
-            _ => return Err(PyValueError::new_err("unsupported ordering_policy")),
+            value => {
+                return Err(unsupported_choice(
+                    "ordering_policy",
+                    value,
+                    ORDERING_POLICIES,
+                ));
+            }
         };
         let overflow_policy = match overflow_policy.as_str() {
             "block" => OverflowPolicy::Block,
@@ -1092,7 +1130,13 @@ impl MailboxDescriptor {
             "deadline_drop" => OverflowPolicy::DeadlineDrop,
             "spill_to_store" => OverflowPolicy::SpillToStore,
             "reject_write" => OverflowPolicy::RejectWrite,
-            _ => return Err(PyValueError::new_err("unsupported overflow_policy")),
+            value => {
+                return Err(unsupported_choice(
+                    "overflow_policy",
+                    value,
+                    OVERFLOW_POLICIES,
+                ))
+            }
         };
         Ok(Self {
             inner: MailboxDescriptorCore {
