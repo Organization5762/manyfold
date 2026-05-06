@@ -66,6 +66,9 @@ class RfcChecklistGenTests(unittest.TestCase):
         self.assertIsNone(
             generator._parse_section_heading("## Notes. Not a numbered section")
         )
+        section = generator._parse_section_heading("## 6. Appendix-aware vocabulary")
+        assert section is not None
+        self.assertEqual(section.title, "Appendix-aware vocabulary")
         self.assertIsNone(generator._parse_appendix_item("- [ ] Unknown appendix item"))
         self.assertIsNone(
             generator._parse_appendix_item("- [?] Query plane modeled as streams")

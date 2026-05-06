@@ -207,7 +207,7 @@ def parse_rfc_sections(
 
 
 def _parse_section_heading(line: str) -> SectionStatus | None:
-    if "Appendix" in line:
+    if line.startswith("## Appendix"):
         return None
     prefix, _, title = line[3:].partition(". ")
     if not prefix.isdigit():
