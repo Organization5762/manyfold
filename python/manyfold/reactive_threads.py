@@ -370,6 +370,7 @@ def background_threaded_observable(
     finally:
         if run.subscription is not None:
             run.subscription.dispose()
+        subject.on_completed()
 
 
 def scheduler_diagnostics() -> dict[str, int | None]:

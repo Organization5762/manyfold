@@ -180,6 +180,7 @@ class ReactiveThreadsTests(unittest.TestCase):
     def test_background_threaded_observable_disposes_subscription_on_exit(self) -> None:
         subscribed = Event()
         disposable = RecordingDisposable()
+        completed = Event()
 
         def subscribe(observer: object, scheduler: object | None = None) -> object:
             subscribed.set()
@@ -188,11 +189,13 @@ class ReactiveThreadsTests(unittest.TestCase):
         with self.reactive_threads.background_threaded_observable(
             self.rx.create(subscribe),
             name="manyfold-test-background",
-        ):
+        ) as background:
+            background.subscribe(on_completed=completed.set)
             self.assertTrue(subscribed.wait(timeout=1.0))
             self.assertFalse(disposable.disposed.is_set())
 
         self.assertTrue(disposable.disposed.wait(timeout=1.0))
+        self.assertTrue(completed.wait(timeout=1.0))
 
 
 if __name__ == "__main__":
