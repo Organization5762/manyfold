@@ -2745,7 +2745,7 @@ class Graph:
             route_ref.namespace.plane == Plane.Write
             and route_ref.namespace.layer == Layer.Shadow
         ):
-            producer_kind = getattr(ProducerKind, "Transform", "reconciler")
+            producer_kind = getattr(ProducerKind, "Reconciler", "reconciler")
         elif (
             route_ref.namespace.plane == Plane.Read
             and route_ref.namespace.layer == Layer.Raw
