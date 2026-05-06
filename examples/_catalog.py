@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Iterable
+from collections.abc import Hashable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeVar
 
 from ._exports import CATALOG_EXPORTS
 
-T = TypeVar("T")
+T = TypeVar("T", bound=Hashable)
 
 __all__ = [
     *CATALOG_EXPORTS,
@@ -388,13 +388,16 @@ def _manifest_for_list_mode(mode: str) -> tuple[str, ...]:
 
 def _duplicate_values(values: Iterable[T]) -> tuple[T, ...]:
     seen: set[T] = set()
-    duplicates: set[T] = set()
+    duplicate_seen: set[T] = set()
+    duplicates: list[T] = []
     for value in values:
         if value in seen:
-            duplicates.add(value)
+            if value not in duplicate_seen:
+                duplicate_seen.add(value)
+                duplicates.append(value)
         else:
             seen.add(value)
-    return tuple(sorted(duplicates))
+    return tuple(duplicates)
 
 
 def _joined_values(values: Iterable[object]) -> str:
