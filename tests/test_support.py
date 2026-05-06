@@ -788,7 +788,7 @@ def install_manyfold_rust_stub() -> None:
             return envelope
 
         def catalog(self):
-            return list(self._catalog.values())
+            return sorted(self._catalog.values(), key=lambda route: route.display())
 
         def describe_route(self, route):
             return PortDescriptor(route_display=route.display())
@@ -797,14 +797,14 @@ def install_manyfold_rust_stub() -> None:
             return self._latest.get(route)
 
         def topology(self):
-            return list(self._edges)
+            return sorted(self._edges)
 
         def validate_graph(self):
             return []
 
         def credit_snapshot(self):
             snapshots = []
-            for route in self._catalog.values():
+            for route in self.catalog():
                 mailbox = None
                 for candidate in self._mailboxes.values():
                     if route in (candidate.ingress._route, candidate.egress._route):
@@ -822,7 +822,7 @@ def install_manyfold_rust_stub() -> None:
                             largest_queue_depth=mailbox.descriptor.capacity,
                         )
                     )
-            return snapshots
+            return sorted(snapshots, key=lambda snapshot: snapshot.route_display)
 
         def _fanout(self, envelope):
             emitted = []
