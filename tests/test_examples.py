@@ -566,6 +566,10 @@ class ExampleTests(unittest.TestCase):
             self.assertEqual(sys.path[:2], [repo_root, python_dir])
             self.assertEqual(sys.path.count(repo_root), 1)
             self.assertEqual(sys.path.count(python_dir), 1)
+
+            sys.path = ["before", python_dir, "middle", python_dir, "after"]
+            module.ensure_path_on_sys_path(Path(python_dir))
+            self.assertEqual(sys.path, [python_dir, "before", "middle", "after"])
         finally:
             sys.path = original_sys_path
 
@@ -1423,12 +1427,12 @@ class ExampleTests(unittest.TestCase):
             result["topology_edges"],
             (
                 (
-                    "read.logical.sensor.mailbox.producer.meta.v1",
-                    "write.internal.bridge.mailbox.bridge.request.v1",
-                ),
-                (
                     "read.internal.bridge.mailbox.bridge.meta.v1",
                     "write.logical.consumer.mailbox.consumer.request.v1",
+                ),
+                (
+                    "read.logical.sensor.mailbox.producer.meta.v1",
+                    "write.internal.bridge.mailbox.bridge.request.v1",
                 ),
             ),
         )
