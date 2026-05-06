@@ -47,11 +47,15 @@ assert snapshot.largest_queue_depth == 2, snapshot
 
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_mailbox_descriptor_rejects_unknown_policies_clearly(self) -> None:
+    def test_mailbox_descriptor_rejects_invalid_options_clearly(self) -> None:
         script = """
 import manyfold
 
 cases = (
+    (
+        {"capacity": 0},
+        "capacity must be greater than zero",
+    ),
     (
         {"delivery_mode": "fanout"},
         'unsupported delivery_mode "fanout"; expected one of mpsc_serial',

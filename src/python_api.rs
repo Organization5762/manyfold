@@ -1099,6 +1099,9 @@ impl MailboxDescriptor {
         ordering_policy: String,
         overflow_policy: String,
     ) -> PyResult<Self> {
+        if capacity == 0 {
+            return Err(PyValueError::new_err("capacity must be greater than zero"));
+        }
         let delivery_mode = match delivery_mode.as_str() {
             "mpsc_serial" => DeliveryMode::MpscSerial,
             "mpmc_unique" => DeliveryMode::MpmcUnique,
