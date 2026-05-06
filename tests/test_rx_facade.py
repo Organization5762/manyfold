@@ -60,6 +60,24 @@ class RxFacadeTests(unittest.TestCase):
         self.assertNotIn("warn", marble_module.__all__)
         self.assertNotIn("typing", marble_module.__all__)
 
+    def test_private_subject_submodules_export_only_subject_classes(self) -> None:
+        load_manyfold_package()
+        expected_exports = {
+            "manyfold._rx.subject.asyncsubject": ("AsyncSubject",),
+            "manyfold._rx.subject.behaviorsubject": ("BehaviorSubject",),
+            "manyfold._rx.subject.replaysubject": ("ReplaySubject",),
+            "manyfold._rx.subject.subject": ("Subject",),
+        }
+
+        for module_name, names in expected_exports.items():
+            with self.subTest(module=module_name):
+                module = importlib.import_module(module_name)
+
+                self.assertEqual(module.__all__, names)
+                self.assertNotIn("typing", module.__all__)
+                self.assertNotIn("abc", module.__all__)
+                self.assertNotIn("TypeVar", module.__all__)
+
     def test_private_facade_modules_publish_stable_exports(self) -> None:
         load_manyfold_package()
         expected_exports = {
