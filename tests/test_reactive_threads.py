@@ -3,9 +3,18 @@ from __future__ import annotations
 import importlib
 import os
 import unittest
+from threading import Event
 from unittest.mock import patch
 
 from tests.test_support import load_manyfold_package
+
+
+class RecordingDisposable:
+    def __init__(self) -> None:
+        self.disposed = Event()
+
+    def dispose(self) -> None:
+        self.disposed.set()
 
 
 class ReactiveThreadsTests(unittest.TestCase):
@@ -167,6 +176,23 @@ class ReactiveThreadsTests(unittest.TestCase):
         self.reactive_threads.materialize_sequence(["a", "b"]).subscribe(values.append)
 
         self.assertEqual(values, ["a", "b"])
+
+    def test_background_threaded_observable_disposes_subscription_on_exit(self) -> None:
+        subscribed = Event()
+        disposable = RecordingDisposable()
+
+        def subscribe(observer: object, scheduler: object | None = None) -> object:
+            subscribed.set()
+            return disposable
+
+        with self.reactive_threads.background_threaded_observable(
+            self.rx.create(subscribe),
+            name="manyfold-test-background",
+        ):
+            self.assertTrue(subscribed.wait(timeout=1.0))
+            self.assertFalse(disposable.disposed.is_set())
+
+        self.assertTrue(disposable.disposed.wait(timeout=1.0))
 
 
 if __name__ == "__main__":

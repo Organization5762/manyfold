@@ -18,7 +18,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import timedelta
 from functools import partial
-from threading import Lock, Thread, get_ident
+from threading import Event, Lock, Thread, get_ident
 from typing import Any, TypeVar
 
 from . import _rx as rx
@@ -64,6 +64,12 @@ class _SchedulerState:
 class _FrameThreadTask:
     callback: Callable[[], None]
     enqueued_monotonic: float
+
+
+@dataclass
+class _BackgroundObservableRun:
+    subscription: DisposableBase | None = None
+    error: BaseException | None = None
 
 
 class _NoStartingValue:
@@ -347,14 +353,23 @@ def background_threaded_observable(
 
     logger.debug("Starting background stream thread %s", name)
     subject: Subject[T] = Subject()
+    ready = Event()
+    run = _BackgroundObservableRun()
     thread = Thread(
         name=name,
         target=_run_background_observable,
-        args=(subject, observable),
+        args=(subject, observable, ready, run),
         daemon=True,
     )
     thread.start()
-    yield subject
+    ready.wait()
+    if run.error is not None:
+        raise run.error
+    try:
+        yield subject
+    finally:
+        if run.subscription is not None:
+            run.subscription.dispose()
 
 
 def scheduler_diagnostics() -> dict[str, int | None]:
@@ -468,8 +483,15 @@ def _enqueue_frame_thread_task(callback: Callable[[], None]) -> None:
 def _run_background_observable(
     subject: Subject[T],
     observable: Observable[T],
+    ready: Event,
+    run: _BackgroundObservableRun,
 ) -> None:
-    observable.subscribe(subject)
+    try:
+        run.subscription = observable.subscribe(subject)
+    except BaseException as exc:
+        run.error = exc
+    finally:
+        ready.set()
 
 
 __all__ = [
