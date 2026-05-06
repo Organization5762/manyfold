@@ -488,14 +488,15 @@ class Memory:
                     record.value,
                     control_epoch=record.control_epoch,
                 )
-                self._seen.add(
-                    (
-                        envelope.closed.route.display(),
-                        envelope.closed.seq_source,
-                        payload_b64,
-                        envelope.closed.control_epoch,
+                with self._append_lock:
+                    self._seen.add(
+                        (
+                            envelope.closed.route.display(),
+                            envelope.closed.seq_source,
+                            payload_b64,
+                            envelope.closed.control_epoch,
+                        )
                     )
-                )
             finally:
                 with self._append_lock:
                     self._resuming.discard(resume_key)
