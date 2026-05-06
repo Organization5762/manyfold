@@ -67,6 +67,11 @@ class RfcChecklistGenTests(unittest.TestCase):
             generator._parse_section_heading("## Notes. Not a numbered section")
         )
         self.assertIsNone(generator._parse_appendix_item("- [ ] Unknown appendix item"))
+        self.assertIsNone(
+            generator._parse_appendix_item(
+                "- [?] Raw and logical stream handling",
+            )
+        )
 
     def test_recent_operator_and_flow_control_statuses_are_descriptive(self) -> None:
         generator = load_generator()
