@@ -241,8 +241,9 @@ class ReferenceExampleSuiteTests(unittest.TestCase):
         manyfold = load_manyfold_package()
         reference_examples = sys.modules["manyfold.reference_examples"]
 
+        self.assertIsInstance(reference_examples.__all__, tuple)
         self.assertEqual(
-            tuple(reference_examples.__all__),
+            reference_examples.__all__,
             (
                 "REFERENCE_EXAMPLE_SUITE",
                 "ReferenceExample",
