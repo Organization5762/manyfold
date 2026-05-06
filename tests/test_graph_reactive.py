@@ -2448,6 +2448,70 @@ class GraphReactiveTests(unittest.TestCase):
         self.assertEqual(latest.value, 5)
         self.assertEqual(edge.credit_class, "default")
 
+    def test_stub_graph_orders_catalog_topology_and_credit_snapshots(self) -> None:
+        graph_module = load_graph_module()
+        z_source = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("zeta"),
+            family=graph_module.StreamFamily("flow"),
+            stream=graph_module.StreamName("source"),
+            variant=graph_module.Variant.Meta,
+            schema=int_schema(graph_module, "ZetaValue"),
+        )
+        z_sink = graph_module.route(
+            plane=graph_module.Plane.State,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("zeta"),
+            family=graph_module.StreamFamily("flow"),
+            stream=graph_module.StreamName("sink"),
+            variant=graph_module.Variant.State,
+            schema=int_schema(graph_module, "ZetaValue"),
+        )
+        a_source = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("alpha"),
+            family=graph_module.StreamFamily("flow"),
+            stream=graph_module.StreamName("source"),
+            variant=graph_module.Variant.Meta,
+            schema=int_schema(graph_module, "AlphaValue"),
+        )
+        a_sink = graph_module.route(
+            plane=graph_module.Plane.State,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("alpha"),
+            family=graph_module.StreamFamily("flow"),
+            stream=graph_module.StreamName("sink"),
+            variant=graph_module.Variant.State,
+            schema=int_schema(graph_module, "AlphaValue"),
+        )
+        graph = graph_module.Graph()
+
+        graph.connect(source=z_source, sink=z_sink)
+        graph.connect(source=a_source, sink=a_sink)
+
+        catalog_displays = [route.display() for route in graph.catalog()]
+        expected_route_displays = tuple(
+            route.display() for route in (z_source, z_sink, a_source, a_sink)
+        )
+        self.assertEqual(catalog_displays, sorted(catalog_displays))
+        for route_display in expected_route_displays:
+            self.assertIn(route_display, catalog_displays)
+        self.assertEqual(
+            list(graph.topology()),
+            [
+                (a_source.display(), a_sink.display()),
+                (z_source.display(), z_sink.display()),
+            ],
+        )
+        credit_displays = [
+            snapshot.route_display for snapshot in graph.credit_snapshot()
+        ]
+        self.assertEqual(credit_displays, sorted(credit_displays))
+        for route_display in expected_route_displays:
+            self.assertIn(route_display, credit_displays)
+
     def test_flow_wiring_requires_keyword_source_and_sink(self) -> None:
         graph_module = load_graph_module()
 
