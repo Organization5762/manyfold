@@ -261,11 +261,14 @@ class EventLog(Generic[T]):
         """Return all durable log records in index order."""
         records: list[EventLogRecord[T]] = []
         for entry in self.keyspace.scan():
-            if len(entry.key) != 1 or not entry.key[0].isdigit():
+            if len(entry.key) != 1:
+                continue
+            index = _parse_log_index(entry.key[0])
+            if index is None:
                 continue
             records.append(
                 EventLogRecord(
-                    index=int(entry.key[0]),
+                    index=index,
                     value=self.schema.decode(entry.value),
                 )
             )
@@ -280,9 +283,11 @@ class EventLog(Generic[T]):
 
     def _next_index(self) -> int:
         indexes = (
-            int(key[0])
+            index
             for key in self.keyspace.keys()
-            if len(key) == 1 and key[0].isdigit()
+            if len(key) == 1
+            for index in (_parse_log_index(key[0]),)
+            if index is not None
         )
         return max(indexes, default=0) + 1
 
@@ -907,6 +912,15 @@ def _is_plain_int(value: Any) -> bool:
 
 def _format_log_index(index: int) -> str:
     return f"{index:020d}"
+
+
+def _parse_log_index(value: str) -> int | None:
+    if len(value) != 20 or not value.isdigit():
+        return None
+    index = int(value)
+    if index <= 0 or _format_log_index(index) != value:
+        return None
+    return index
 
 
 def _write_bytes_atomic(path: Path, value: bytes) -> None:

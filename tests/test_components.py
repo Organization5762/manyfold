@@ -220,6 +220,36 @@ class ComponentTests(unittest.TestCase):
         self.assertEqual(committed, ["next"])
         self.assertEqual(stored_next, b"next")
 
+    def test_event_log_ignores_noncanonical_numeric_keys(self) -> None:
+        manyfold = load_manyfold_package()
+        schema = manyfold.Schema(
+            schema_id="CanonicalCommand",
+            version=1,
+            encode=lambda value: value.encode("ascii"),
+            decode=lambda payload: (
+                payload.decode("ascii")
+                if payload != b"bad"
+                else (_ for _ in ()).throw(AssertionError("decoded stray key"))
+            ),
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            keyspace = manyfold.FileStore(temp_dir).prefix("commands")
+            keyspace.put("1", value=b"bad")
+            keyspace.put("00000000000000000000", value=b"bad")
+            keyspace.put("00000000000000000001", value=b"first")
+            keyspace.put("999999999999999999999", value=b"bad")
+            log = manyfold.EventLog("commands", keyspace, schema)
+            graph = manyfold.Graph()
+            log_subscription = log.install(graph)
+
+            graph.publish(log.input(), "second")
+            log_subscription.dispose()
+            records = log.records()
+
+        self.assertEqual([record.index for record in records], [1, 2])
+        self.assertEqual([record.value for record in records], ["first", "second"])
+
     def test_event_log_serializes_concurrent_appends(self) -> None:
         manyfold = load_manyfold_package()
 
