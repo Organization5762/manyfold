@@ -12,6 +12,12 @@ class StatsTests(unittest.TestCase):
 
         self.assertEqual(Average(window_size=3)([1.0, 2.0, 9.0, 10.0]), 7.0)
 
+    def test_average_uses_all_values_when_window_exceeds_input(self) -> None:
+        load_manyfold_package()
+        from manyfold.stats import Average
+
+        self.assertEqual(Average(window_size=10)([1.0, 2.0, 9.0]), 4.0)
+
     def test_average_reads_window_without_slicing(self) -> None:
         load_manyfold_package()
         from manyfold.stats import Average
