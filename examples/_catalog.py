@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TypeVar
 
 from ._exports import CATALOG_EXPORTS
+
+T = TypeVar("T")
 
 __all__ = [
     *CATALOG_EXPORTS,
@@ -382,13 +386,32 @@ def _manifest_for_list_mode(mode: str) -> tuple[str, ...]:
     raise ValueError(f"unknown catalog list mode {mode!r}")
 
 
+def _duplicate_values(values: Iterable[T]) -> tuple[T, ...]:
+    seen: set[T] = set()
+    duplicates: set[T] = set()
+    for value in values:
+        if value in seen:
+            duplicates.add(value)
+        else:
+            seen.add(value)
+    return tuple(sorted(duplicates))
+
+
+def _joined_values(values: Iterable[object]) -> str:
+    return ", ".join(str(value) for value in values)
+
+
 def _validate_catalog() -> None:
     module_names = [entry.module_name for entry in EXAMPLE_CATALOG]
     supported_entries = _catalog_entries(archived=False)
     reference_entries = _reference_entries(supported_entries)
     readme_entries = _sorted_readme_entries(supported_entries)
-    if len(module_names) != len(set(module_names)):
-        raise ValueError("example catalog contains duplicate module names")
+    duplicate_module_names = _duplicate_values(module_names)
+    if duplicate_module_names:
+        raise ValueError(
+            "example catalog contains duplicate module names: "
+            f"{_joined_values(duplicate_module_names)}"
+        )
 
     for entry in EXAMPLE_CATALOG:
         has_reference_number = entry.reference_number is not None
@@ -417,20 +440,30 @@ def _validate_catalog() -> None:
     ]
     if any(order < 1 for order in readme_orders):
         raise ValueError("README example entries must use positive readme_order values")
-    if len(readme_orders) != len(set(readme_orders)):
-        raise ValueError("README example entries contain duplicate readme_order values")
+    duplicate_readme_orders = _duplicate_values(readme_orders)
+    if duplicate_readme_orders:
+        raise ValueError(
+            "README example entries contain duplicate readme_order values: "
+            f"{_joined_values(duplicate_readme_orders)}"
+        )
     if readme_orders and readme_orders != list(range(1, len(readme_orders) + 1)):
         raise ValueError("README example entries must use contiguous readme_order values")
 
     referenced_numbers = [entry.reference_number for entry in reference_entries]
-    if len(referenced_numbers) != len(set(referenced_numbers)):
+    duplicate_reference_numbers = _duplicate_values(referenced_numbers)
+    if duplicate_reference_numbers:
         raise ValueError(
-            "reference example entries contain duplicate RFC example numbers"
+            "reference example entries contain duplicate RFC example numbers: "
+            f"{_joined_values(duplicate_reference_numbers)}"
         )
 
     gap_numbers = [gap.reference_number for gap in REFERENCE_EXAMPLE_GAPS]
-    if len(gap_numbers) != len(set(gap_numbers)):
-        raise ValueError("reference example gaps contain duplicate RFC example numbers")
+    duplicate_gap_numbers = _duplicate_values(gap_numbers)
+    if duplicate_gap_numbers:
+        raise ValueError(
+            "reference example gaps contain duplicate RFC example numbers: "
+            f"{_joined_values(duplicate_gap_numbers)}"
+        )
 
     overlap = set(referenced_numbers).intersection(gap_numbers)
     if overlap:
