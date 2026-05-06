@@ -1050,16 +1050,16 @@ impl GraphCore {
     fn try_drain_mailbox_for_source(&mut self, source: &RouteRefCore) {
         // Draining is demand-shaped by graph topology: if nothing consumes the
         // egress route, items stay queued and consume credit.
-        let Some((name, _)) = self
+        let Some(name) = self
             .mailboxes
             .iter()
             .find(|(_, mailbox)| mailbox.egress == *source)
-            .map(|(name, mailbox)| (name.clone(), mailbox.egress.clone()))
+            .map(|(name, _)| name.clone())
         else {
             return;
         };
 
-        let has_consumer = self.edges.iter().any(|(left, _)| *left == source.clone());
+        let has_consumer = self.edges.iter().any(|(left, _)| left == source);
         if !has_consumer {
             return;
         }
