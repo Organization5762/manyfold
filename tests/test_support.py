@@ -797,7 +797,7 @@ def install_manyfold_rust_stub() -> None:
             return self._latest.get(route)
 
         def topology(self):
-            return list(self._edges)
+            return sorted(self._edges)
 
         def validate_graph(self):
             return []

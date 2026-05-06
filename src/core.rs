@@ -1185,12 +1185,15 @@ impl GraphCore {
             QueryKindCore::Latest(route) => {
                 QueryResultCore::Latest(self.latest.get(&route).cloned())
             }
-            QueryKindCore::Topology => QueryResultCore::Topology(
-                self.edges
+            QueryKindCore::Topology => {
+                let mut edges = self
+                    .edges
                     .iter()
                     .map(|(left, right)| (left.display(), right.display()))
-                    .collect(),
-            ),
+                    .collect::<Vec<_>>();
+                edges.sort();
+                QueryResultCore::Topology(edges)
+            }
             QueryKindCore::Trace => {
                 let mut items = self.latest.values().cloned().collect::<Vec<_>>();
                 items.sort_by_key(|item| (item.seq_source, item.route.display()));
@@ -1407,6 +1410,57 @@ mod tests {
                     z_source.display(),
                     z_sink.display()
                 ),
+            ]
+        );
+    }
+
+    #[test]
+    fn topology_reports_edges_by_route_display() {
+        let z_source = sample_route(
+            Plane::Read,
+            Layer::Logical,
+            "zeta",
+            "topology",
+            "source",
+            Variant::Meta,
+        );
+        let z_sink = sample_route(
+            Plane::Read,
+            Layer::Logical,
+            "zeta",
+            "topology",
+            "sink",
+            Variant::Meta,
+        );
+        let a_source = sample_route(
+            Plane::Read,
+            Layer::Logical,
+            "alpha",
+            "topology",
+            "source",
+            Variant::Meta,
+        );
+        let a_sink = sample_route(
+            Plane::Read,
+            Layer::Logical,
+            "alpha",
+            "topology",
+            "sink",
+            Variant::Meta,
+        );
+
+        let mut graph = GraphCore::default();
+        graph.connect(&z_source, &z_sink);
+        graph.connect(&a_source, &a_sink);
+
+        let QueryResultCore::Topology(edges) = graph.query(QueryKindCore::Topology) else {
+            panic!("unexpected query result");
+        };
+        assert_eq!(
+            edges,
+            vec![
+                (a_source.display(), a_sink.display()),
+                (z_source.display(), z_sink.display()),
             ]
         );
     }
