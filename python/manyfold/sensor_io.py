@@ -720,8 +720,12 @@ def sensor_sample_schema(value_schema: Schema[T], schema_id: str | None = None) 
         value = value_schema.decode(_decode_base64_field(data["value"], "value"))
         return SensorSample(
             value=value,
-            source_timestamp=float(data["source_timestamp"]),
-            ingest_timestamp=float(data["ingest_timestamp"]),
+            source_timestamp=_decode_json_number(
+                data["source_timestamp"], "source_timestamp"
+            ),
+            ingest_timestamp=_decode_json_number(
+                data["ingest_timestamp"], "ingest_timestamp"
+            ),
             sequence_number=_decode_json_int(data["sequence_number"], "sequence_number"),
             quality=data.get("quality"),
             status=data.get("status"),
@@ -760,7 +764,7 @@ def sensor_event_schema(schema_id: str = "SensorEvent") -> Schema[SensorEvent]:
         return SensorEvent(
             event_type=str(data["event_type"]),
             data=_json_restore(data.get("data")),
-            observed_at=float(data["observed_at"]),
+            observed_at=_decode_json_number(data["observed_at"], "observed_at"),
             identity=_sensor_identity_from_json(data.get("identity")),
             sequence_number=None
             if data.get("sequence_number") is None
@@ -790,7 +794,7 @@ def health_status_schema(schema_id: str = "HealthStatus") -> Schema[HealthStatus
         data = json.loads(payload.decode("utf-8"))
         return HealthStatus(
             status=data["status"],
-            observed_at=float(data["observed_at"]),
+            observed_at=_decode_json_number(data["observed_at"], "observed_at"),
             message=data.get("message", ""),
             stale=_decode_json_bool(data.get("stale", False), "stale"),
             error_count=_decode_json_int(data.get("error_count", 0), "error_count"),
@@ -1547,6 +1551,12 @@ def _decode_json_int(value: Any, field: str) -> int:
     raise ValueError(f"{field} must be a JSON integer")
 
 
+def _decode_json_number(value: Any, field: str) -> float:
+    if isinstance(value, int | float) and not isinstance(value, bool):
+        return float(value)
+    raise ValueError(f"{field} must be a JSON number")
+
+
 def _sensor_identity_from_json(value: Any) -> SensorIdentity:
     if not isinstance(value, Mapping):
         return SensorIdentity()
@@ -1565,10 +1575,14 @@ def _sensor_identity_from_json(value: Any) -> SensorIdentity:
     location_value = value.get("location", {})
     location = (
         SensorLocation(
-            x=float(location_value.get("x", 0.0)),
-            y=float(location_value.get("y", 0.0)),
-            z=float(location_value.get("z", 0.0)),
-            timestamp=location_value.get("timestamp"),
+            x=_decode_json_number(location_value.get("x", 0.0), "identity.location.x"),
+            y=_decode_json_number(location_value.get("y", 0.0), "identity.location.y"),
+            z=_decode_json_number(location_value.get("z", 0.0), "identity.location.z"),
+            timestamp=None
+            if location_value.get("timestamp") is None
+            else _decode_json_number(
+                location_value["timestamp"], "identity.location.timestamp"
+            ),
         )
         if isinstance(location_value, Mapping)
         else SensorLocation()

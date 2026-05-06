@@ -277,6 +277,21 @@ class SensorIoTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "sequence_number must be a JSON integer"):
             schema.decode(json.dumps(payload).encode("utf-8"))
 
+    def test_sensor_sample_schema_rejects_string_timestamp(self) -> None:
+        manyfold = load_manyfold_package()
+        schema = manyfold.sensor_sample_schema(_int_schema(manyfold, "Temp"))
+        payload = {
+            "value": "MjE=",
+            "source_timestamp": "1.0",
+            "ingest_timestamp": 1.5,
+            "sequence_number": 1,
+            "quality": None,
+            "status": None,
+        }
+
+        with self.assertRaisesRegex(ValueError, "source_timestamp must be a JSON number"):
+            schema.decode(json.dumps(payload).encode("utf-8"))
+
     def test_sensor_event_schema_rejects_invalid_nested_bytes_base64(self) -> None:
         manyfold = load_manyfold_package()
         schema = manyfold.sensor_event_schema()
@@ -325,6 +340,40 @@ class SensorIoTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "sequence_number must be a JSON integer"):
             schema.decode(json.dumps(payload).encode("utf-8"))
 
+    def test_sensor_event_schema_rejects_boolean_observed_at(self) -> None:
+        manyfold = load_manyfold_package()
+        schema = manyfold.sensor_event_schema()
+        payload = {
+            "event_type": "radio.packet",
+            "data": {},
+            "observed_at": True,
+            "identity": {},
+            "sequence_number": 7,
+            "raw": None,
+            "metadata": {},
+        }
+
+        with self.assertRaisesRegex(ValueError, "observed_at must be a JSON number"):
+            schema.decode(json.dumps(payload).encode("utf-8"))
+
+    def test_sensor_event_schema_rejects_string_location_coordinate(self) -> None:
+        manyfold = load_manyfold_package()
+        schema = manyfold.sensor_event_schema()
+        payload = {
+            "event_type": "radio.packet",
+            "data": {},
+            "observed_at": 1.5,
+            "identity": {"location": {"x": "0.0", "y": 0.0, "z": 0.0}},
+            "sequence_number": 7,
+            "raw": None,
+            "metadata": {},
+        }
+
+        with self.assertRaisesRegex(
+            ValueError, "identity.location.x must be a JSON number"
+        ):
+            schema.decode(json.dumps(payload).encode("utf-8"))
+
     def test_health_status_schema_rejects_string_error_count(self) -> None:
         manyfold = load_manyfold_package()
         health_schema = manyfold.health_status_schema()
@@ -332,6 +381,16 @@ class SensorIoTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "error_count must be a JSON integer"):
             health_schema.decode(
                 b'{"error_count":"0","message":"ready","observed_at":2.0,'
+                b'"stale":false,"status":"ok"}'
+            )
+
+    def test_health_status_schema_rejects_string_observed_at(self) -> None:
+        manyfold = load_manyfold_package()
+        health_schema = manyfold.health_status_schema()
+
+        with self.assertRaisesRegex(ValueError, "observed_at must be a JSON number"):
+            health_schema.decode(
+                b'{"error_count":0,"message":"ready","observed_at":"2.0",'
                 b'"stale":false,"status":"ok"}'
             )
 
