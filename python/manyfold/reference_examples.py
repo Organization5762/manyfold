@@ -33,12 +33,12 @@ except ModuleNotFoundError as exc:
     ReferenceExampleGap = Any
     reference_example_metadata = None
 
-__all__ = [
+__all__ = (
     "REFERENCE_EXAMPLE_SUITE",
     "ReferenceExample",
     "implemented_reference_examples",
     "reference_example_suite",
-]
+)
 
 ExampleRunner = Callable[[], Any]
 

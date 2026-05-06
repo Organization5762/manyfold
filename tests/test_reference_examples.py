@@ -242,7 +242,7 @@ class ReferenceExampleSuiteTests(unittest.TestCase):
         reference_examples = sys.modules["manyfold.reference_examples"]
 
         self.assertEqual(
-            tuple(reference_examples.__all__),
+            reference_examples.__all__,
             (
                 "REFERENCE_EXAMPLE_SUITE",
                 "ReferenceExample",
