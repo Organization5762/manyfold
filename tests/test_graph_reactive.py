@@ -727,6 +727,37 @@ class GraphReactiveTests(unittest.TestCase):
         topology = list(graph.topology())
         self.assertEqual(len(topology), 2)
 
+    def test_topology_edges_are_reported_in_stable_display_order(self) -> None:
+        graph_module = load_graph_module()
+
+        def route(owner: str, stream: str):
+            return graph_module.route(
+                plane=graph_module.Plane.Read,
+                layer=graph_module.Layer.Logical,
+                owner=graph_module.OwnerName(owner),
+                family=graph_module.StreamFamily("topology"),
+                stream=graph_module.StreamName(stream),
+                variant=graph_module.Variant.Meta,
+                schema=graph_module.Schema.bytes(name="StableTopology"),
+            )
+
+        graph = graph_module.Graph()
+        left_source = route("zeta", "source")
+        left_sink = route("zeta", "sink")
+        right_source = route("alpha", "source")
+        right_sink = route("alpha", "sink")
+
+        graph.connect(source=left_source, sink=left_sink)
+        graph.connect(source=right_source, sink=right_sink)
+
+        self.assertEqual(
+            list(graph.topology()),
+            [
+                (right_source.display(), right_sink.display()),
+                (left_source.display(), left_sink.display()),
+            ],
+        )
+
     def test_plan_join_uses_lookup_when_right_side_is_materialized_view(self) -> None:
         graph_module = load_graph_module()
         left = graph_module.route(
