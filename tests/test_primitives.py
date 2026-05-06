@@ -42,6 +42,19 @@ class PrimitiveTests(unittest.TestCase):
         ):
             schema.decode(b"missing")
 
+    def test_any_schema_tokens_are_scoped_by_schema_id(self) -> None:
+        manyfold = load_manyfold_package()
+        runtime_handles = manyfold.Schema.any("RuntimeHandle")
+        other_handles = manyfold.Schema.any("OtherHandle")
+
+        token = runtime_handles.encode(object())
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "unknown process-local object token for schema 'OtherHandle'",
+        ):
+            other_handles.decode(token)
+
 
 if __name__ == "__main__":
     unittest.main()
