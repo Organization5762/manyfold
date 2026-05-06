@@ -93,6 +93,18 @@ class ReactiveThreadsTests(unittest.TestCase):
             2,
         )
 
+    def test_drain_frame_thread_queue_zero_limit_leaves_queue_pending(self) -> None:
+        source = self.rx.Subject()
+        values: list[int] = []
+
+        self.reactive_threads.deliver_on_frame_thread(source).subscribe(values.append)
+        source.on_next(1)
+
+        self.assertEqual(self.reactive_threads.drain_frame_thread_queue(max_items=0), 0)
+        self.assertEqual(values, [])
+        self.assertEqual(self.reactive_threads.drain_frame_thread_queue(), 1)
+        self.assertEqual(values, [1])
+
     def test_latency_snapshot_reports_percentiles_from_sorted_samples(self) -> None:
         recorder = self.reactive_threads._LatencyRecorder()
 
