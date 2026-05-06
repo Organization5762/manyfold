@@ -1108,7 +1108,7 @@ def _encode_json_tuple(value: tuple[Any, ...]) -> bytes:
     return json.dumps(value, separators=(",", ":")).encode("utf-8")
 
 
-__all__ = [
+__all__ = (
     "AppendEntry",
     "Consensus",
     "ConsensusRoutes",
@@ -1128,4 +1128,4 @@ __all__ = [
     "SnapshotStoreRoutes",
     "StoreEntry",
     "Vote",
-]
+)
