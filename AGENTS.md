@@ -18,8 +18,9 @@ package entrypoints and then report that they are missing from `PATH`; the
 project's Python tools live in the `uv` environment and the test suite uses
 `unittest`.
 
-After editing `src/` Rust extension code, run `uv sync --reinstall-package manyfold`
-before Python tests that exercise the native module.
+After editing `src/` Rust extension code, or after pulling/rebasing onto new
+`src/` changes, run `uv sync --reinstall-package manyfold` before Python tests
+that exercise the native module.
 
 If the default `uv` cache is blocked by sandbox permissions, set
 `UV_CACHE_DIR=.cache/uv` for `uv sync` and verification commands before
