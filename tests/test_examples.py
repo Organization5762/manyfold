@@ -1423,12 +1423,12 @@ class ExampleTests(unittest.TestCase):
             result["topology_edges"],
             (
                 (
-                    "read.logical.sensor.mailbox.producer.meta.v1",
-                    "write.internal.bridge.mailbox.bridge.request.v1",
-                ),
-                (
                     "read.internal.bridge.mailbox.bridge.meta.v1",
                     "write.logical.consumer.mailbox.consumer.request.v1",
+                ),
+                (
+                    "read.logical.sensor.mailbox.producer.meta.v1",
+                    "write.internal.bridge.mailbox.bridge.request.v1",
                 ),
             ),
         )
