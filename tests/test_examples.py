@@ -868,7 +868,7 @@ class ExampleTests(unittest.TestCase):
 
             with self.assertRaisesRegex(
                 ValueError,
-                "example catalog contains duplicate module names",
+                "example catalog contains duplicate module names: simple_latest",
             ):
                 catalog_module._validate_catalog()
         finally:
@@ -955,7 +955,27 @@ class ExampleTests(unittest.TestCase):
 
             with self.assertRaisesRegex(
                 ValueError,
-                "duplicate readme_order values",
+                "duplicate readme_order values: 1",
+            ):
+                catalog_module._validate_catalog()
+        finally:
+            catalog_module.EXAMPLE_CATALOG = original_catalog
+
+    def test_catalog_validation_rejects_duplicate_reference_numbers(self) -> None:
+        import examples._catalog as catalog_module
+
+        original_catalog = catalog_module.EXAMPLE_CATALOG
+        try:
+            catalog_module.EXAMPLE_CATALOG = tuple(
+                replace(entry, reference_number=1)
+                if entry.module_name == "imu_fusion_join"
+                else entry
+                for entry in original_catalog
+            )
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "duplicate RFC example numbers: 1",
             ):
                 catalog_module._validate_catalog()
         finally:
@@ -1082,7 +1102,7 @@ class ExampleTests(unittest.TestCase):
 
             with self.assertRaisesRegex(
                 ValueError,
-                "reference example gaps contain duplicate RFC example numbers",
+                "reference example gaps contain duplicate RFC example numbers: 9",
             ):
                 catalog_module._validate_catalog()
         finally:
