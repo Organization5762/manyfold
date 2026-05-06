@@ -13,6 +13,38 @@ from tests.test_support import load_manyfold_package
 
 
 class ComponentTests(unittest.TestCase):
+    def test_components_module_exports_intentional_surface(self) -> None:
+        load_manyfold_package()
+        components = importlib.import_module("manyfold.components")
+
+        self.assertIsInstance(components.__all__, tuple)
+        self.assertEqual(
+            components.__all__,
+            (
+                "AppendEntry",
+                "Consensus",
+                "ConsensusRoutes",
+                "EventLog",
+                "EventLogRecord",
+                "EventLogRoutes",
+                "FileStore",
+                "Heartbeat",
+                "Keyspace",
+                "LeaderState",
+                "Memory",
+                "MemoryRecord",
+                "QuorumState",
+                "ReplicatedLog",
+                "RequestVote",
+                "SnapshotStore",
+                "SnapshotStoreRoutes",
+                "StoreEntry",
+                "Vote",
+            ),
+        )
+        for name in components.__all__:
+            self.assertIn(name, components.__dict__)
+
     def test_file_store_addresses_bytes_by_nested_keyspace_prefix(self) -> None:
         manyfold = load_manyfold_package()
 
