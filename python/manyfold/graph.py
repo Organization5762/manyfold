@@ -1876,6 +1876,7 @@ class Graph:
         self._lifecycle_bindings: dict[str, LifecycleBinding] = {}
         self._lazy_payload_sources: dict[str, LazyPayloadSource] = {}
         self._materialized_payloads: dict[str, bytes] = {}
+        self._empty_inline_payload_ids: set[str] = set()
         self._payload_route_by_id: dict[str, str] = {}
         self._opened_payload_ids: set[str] = set()
         self._payload_demand_stats: dict[str, dict[str, int]] = {}
@@ -2197,6 +2198,7 @@ class Graph:
     def _purge_payload_ref(self, payload_id: str) -> None:
         self._lazy_payload_sources.pop(payload_id, None)
         self._materialized_payloads.pop(payload_id, None)
+        self._empty_inline_payload_ids.discard(payload_id)
         self._payload_route_by_id.pop(payload_id, None)
         self._opened_payload_ids.discard(payload_id)
 
@@ -2238,6 +2240,12 @@ class Graph:
         if retention.history_limit is not None and len(history) > retention.history_limit:
             del history[: len(history) - retention.history_limit]
         self._payload_route_by_id[envelope.payload_ref.payload_id] = key
+        inline_payload = bytes(envelope.payload_ref.inline_bytes)
+        if (
+            not inline_payload
+            and envelope.payload_ref.payload_id not in self._lazy_payload_sources
+        ):
+            self._empty_inline_payload_ids.add(envelope.payload_ref.payload_id)
         self._payload_stats(route_ref)["metadata_events"] += 1
         self._enforce_payload_retention(route_ref)
         self._remember_stream_taints(route_ref, envelope)
@@ -2300,6 +2308,8 @@ class Graph:
             payload = self._materialized_payloads[payload_id]
             if record_open:
                 stats["cache_hits"] += 1
+        elif payload_id in self._empty_inline_payload_ids:
+            payload = b""
         elif payload_id in self._lazy_payload_sources:
             payload = self._normalize_payload_chunks(
                 self._lazy_payload_sources[payload_id].open()

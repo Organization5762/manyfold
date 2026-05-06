@@ -4029,6 +4029,25 @@ class GraphReactiveTests(unittest.TestCase):
         self.assertEqual(snapshot.cache_hits, 1)
         self.assertEqual(snapshot.unopened_lazy_payloads, 0)
 
+    def test_open_payload_preserves_specific_empty_inline_envelope(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("camera"),
+            family=graph_module.StreamFamily("frame"),
+            stream=graph_module.StreamName("preview"),
+            variant=graph_module.Variant.Meta,
+            schema=graph_module.Schema.bytes(name="PreviewFrame"),
+        )
+        graph = graph_module.Graph()
+
+        first = graph.publish(route, b"")
+        graph.publish(route, b"next")
+
+        self.assertEqual(graph.open_payload(first.closed), b"")
+        self.assertEqual(graph.open_payload(route), b"next")
+
     def test_non_replayable_payload_retention_purges_old_lazy_sources(self) -> None:
         graph_module = load_graph_module()
         route = graph_module.route(
