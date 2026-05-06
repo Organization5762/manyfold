@@ -28,14 +28,16 @@ producer = manyfold.route(
 )
 mailbox = graph.mailbox(
     "native-depth",
-    manyfold.MailboxDescriptor(capacity=2, overflow_policy="block"),
+    manyfold.MailboxDescriptor(capacity=5, overflow_policy="block"),
 )
 graph.connect(source=producer, sink=mailbox)
+snapshot = graph.flow_snapshot(mailbox.ingress)
+assert snapshot.largest_queue_depth == 0, snapshot
 graph.publish(producer, b"one")
 graph.publish(producer, b"two")
 graph.publish(producer, b"three")
 snapshot = graph.flow_snapshot(mailbox.ingress)
-assert snapshot.largest_queue_depth == 2, snapshot
+assert snapshot.largest_queue_depth == 3, snapshot
 """
         result = subprocess.run(
             [sys.executable, "-c", script],

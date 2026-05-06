@@ -1505,6 +1505,7 @@ impl Graph {
             dropped_messages: 0,
             coalesced_messages: 0,
             delivered_messages: 0,
+            largest_queue_depth: 0,
         };
         let mut graph = lock_graph(&self.state)?;
         graph.register_mailbox(name.clone(), mailbox);

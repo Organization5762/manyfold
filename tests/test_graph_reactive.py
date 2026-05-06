@@ -4792,7 +4792,7 @@ class GraphReactiveTests(unittest.TestCase):
         mailbox = graph.mailbox(
             "forwarding_bridge",
             graph_module.NativeMailboxDescriptor(
-                capacity=2,
+                capacity=5,
                 overflow_policy="drop_oldest",
             ),
         )
@@ -4807,11 +4807,11 @@ class GraphReactiveTests(unittest.TestCase):
         latest = graph.latest(consumer_route)
 
         self.assertEqual(snapshot.depth, 0)
-        self.assertEqual(snapshot.available_credit, 2)
+        self.assertEqual(snapshot.available_credit, 5)
         self.assertEqual(snapshot.blocked_writes, 0)
         self.assertEqual(snapshot.dropped_messages, 0)
-        self.assertEqual(flow.available, 2)
-        self.assertEqual(flow.largest_queue_depth, 2)
+        self.assertEqual(flow.available, 5)
+        self.assertEqual(flow.largest_queue_depth, 1)
         self.assertIsNotNone(latest)
         assert latest is not None
         self.assertEqual(latest.value, b"two")

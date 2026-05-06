@@ -833,7 +833,7 @@ def install_manyfold_rust_stub() -> None:
                             available=mailbox.available_credit(),
                             blocked_senders=mailbox.blocked_writes,
                             dropped_messages=mailbox.dropped_messages,
-                            largest_queue_depth=mailbox.descriptor.capacity,
+                            largest_queue_depth=mailbox.largest_queue_depth,
                         )
                     )
             return sorted(snapshots, key=lambda snapshot: snapshot.route_display)

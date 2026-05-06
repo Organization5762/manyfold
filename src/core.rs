@@ -637,6 +637,7 @@ pub struct MailboxCore {
     pub dropped_messages: u64,
     pub coalesced_messages: u64,
     pub delivered_messages: u64,
+    pub largest_queue_depth: usize,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -998,7 +999,7 @@ impl GraphCore {
                     .saturating_sub(mailbox.queue.len()) as u64,
                 blocked_senders: mailbox.blocked_writes,
                 dropped_messages: mailbox.dropped_messages,
-                largest_queue_depth: mailbox.descriptor.capacity.max(mailbox.queue.len()),
+                largest_queue_depth: mailbox.largest_queue_depth,
             },
             None => CreditSnapshotCore {
                 route_display: route.display(),
@@ -1056,10 +1057,11 @@ impl GraphCore {
         }
 
         mailbox.queue.push_back(envelope);
+        mailbox.largest_queue_depth = mailbox.largest_queue_depth.max(mailbox.queue.len());
         Some(mailbox.egress.clone())
     }
 
-    fn try_drain_mailbox_for_source(&mut self, source: &RouteRefCore) {
+    fn try_drain_mailbox_for_source(&mut self, source: &RouteRefCore) -> Vec<ClosedEnvelopeCore> {
         // Draining is demand-shaped by graph topology: if nothing consumes the
         // egress route, items stay queued and consume credit.
         let Some(name) = self
@@ -1068,25 +1070,35 @@ impl GraphCore {
             .find(|(_, mailbox)| mailbox.egress == *source)
             .map(|(name, _)| name.clone())
         else {
-            return;
+            return Vec::new();
         };
 
         let has_consumer = self.edges.iter().any(|(left, _)| left == source);
         if !has_consumer {
-            return;
+            return Vec::new();
         }
 
         let mut staged = Vec::new();
         if let Some(mailbox) = self.mailboxes.get_mut(&name) {
             while let Some(item) = mailbox.queue.pop_front() {
                 mailbox.delivered_messages += 1;
-                staged.push(item);
+                staged.push((mailbox.egress.clone(), item));
             }
         }
 
+        let mut emitted = Vec::new();
         for item in staged {
-            self.route_envelope(item, false);
+            let (egress, queued) = item;
+            let payload = self.payload_bytes_for(&queued);
+            let forwarded = self.direct_write(
+                &egress,
+                payload,
+                queued.producer.clone(),
+                queued.control_epoch,
+            );
+            emitted.extend(self.route_envelope(forwarded, true));
         }
+        emitted
     }
 
     fn route_envelope(
@@ -1115,11 +1127,6 @@ impl GraphCore {
                 emitted.push(desired);
             }
 
-            if let Some(egress) = self.try_enqueue_mailbox(&route, envelope.clone()) {
-                self.try_drain_mailbox_for_source(&egress);
-                return emitted;
-            }
-
             let downstream = self
                 .edges
                 .iter()
@@ -1135,6 +1142,10 @@ impl GraphCore {
                 );
                 emitted.extend(self.route_envelope(forwarded, false));
             }
+        }
+
+        if let Some(egress) = self.try_enqueue_mailbox(&route, envelope.clone()) {
+            emitted.extend(self.try_drain_mailbox_for_source(&egress));
         }
 
         emitted
@@ -1595,6 +1606,7 @@ mod tests {
                     dropped_messages: 0,
                     coalesced_messages: 0,
                     delivered_messages: 0,
+                    largest_queue_depth: 0,
                 },
             );
         }
@@ -1709,6 +1721,7 @@ mod tests {
                 dropped_messages: 0,
                 coalesced_messages: 0,
                 delivered_messages: 0,
+                largest_queue_depth: 0,
             },
         );
         let producer = ProducerRefCore {
@@ -1774,6 +1787,7 @@ mod tests {
                 dropped_messages: 0,
                 coalesced_messages: 0,
                 delivered_messages: 0,
+                largest_queue_depth: 0,
             },
         );
         graph.register_mailbox(
@@ -1792,6 +1806,7 @@ mod tests {
                 dropped_messages: 0,
                 coalesced_messages: 0,
                 delivered_messages: 0,
+                largest_queue_depth: 0,
             },
         );
 
@@ -1802,7 +1817,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(ingress_snapshot.available, 3);
-        assert_eq!(ingress_snapshot.largest_queue_depth, 3);
+        assert_eq!(ingress_snapshot.largest_queue_depth, 0);
     }
 
     #[test]
