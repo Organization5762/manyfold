@@ -722,7 +722,7 @@ def sensor_sample_schema(value_schema: Schema[T], schema_id: str | None = None) 
             value=value,
             source_timestamp=float(data["source_timestamp"]),
             ingest_timestamp=float(data["ingest_timestamp"]),
-            sequence_number=int(data["sequence_number"]),
+            sequence_number=_decode_json_int(data["sequence_number"], "sequence_number"),
             quality=data.get("quality"),
             status=data.get("status"),
         )
@@ -762,7 +762,9 @@ def sensor_event_schema(schema_id: str = "SensorEvent") -> Schema[SensorEvent]:
             data=_json_restore(data.get("data")),
             observed_at=float(data["observed_at"]),
             identity=_sensor_identity_from_json(data.get("identity")),
-            sequence_number=data.get("sequence_number"),
+            sequence_number=None
+            if data.get("sequence_number") is None
+            else _decode_json_int(data["sequence_number"], "sequence_number"),
             raw=None if raw is None else _decode_base64_field(raw, "raw"),
             metadata=_json_restore(data.get("metadata", {})),
         )
@@ -791,7 +793,7 @@ def health_status_schema(schema_id: str = "HealthStatus") -> Schema[HealthStatus
             observed_at=float(data["observed_at"]),
             message=data.get("message", ""),
             stale=_decode_json_bool(data.get("stale", False), "stale"),
-            error_count=int(data.get("error_count", 0)),
+            error_count=_decode_json_int(data.get("error_count", 0), "error_count"),
         )
 
     return Schema(schema_id=schema_id, version=1, encode=encode, decode=decode)
@@ -1537,6 +1539,12 @@ def _decode_json_bool(value: Any, field: str) -> bool:
     if isinstance(value, bool):
         return value
     raise ValueError(f"{field} must be a JSON boolean")
+
+
+def _decode_json_int(value: Any, field: str) -> int:
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    raise ValueError(f"{field} must be a JSON integer")
 
 
 def _sensor_identity_from_json(value: Any) -> SensorIdentity:

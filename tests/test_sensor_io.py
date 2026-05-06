@@ -262,6 +262,21 @@ class SensorIoTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "value must be valid base64"):
             schema.decode(json.dumps(payload).encode("utf-8"))
 
+    def test_sensor_sample_schema_rejects_non_integer_sequence_number(self) -> None:
+        manyfold = load_manyfold_package()
+        schema = manyfold.sensor_sample_schema(_int_schema(manyfold, "Temp"))
+        payload = {
+            "value": "MjE=",
+            "source_timestamp": 1.0,
+            "ingest_timestamp": 1.5,
+            "sequence_number": "1",
+            "quality": None,
+            "status": None,
+        }
+
+        with self.assertRaisesRegex(ValueError, "sequence_number must be a JSON integer"):
+            schema.decode(json.dumps(payload).encode("utf-8"))
+
     def test_sensor_event_schema_rejects_invalid_nested_bytes_base64(self) -> None:
         manyfold = load_manyfold_package()
         schema = manyfold.sensor_event_schema()
@@ -293,6 +308,32 @@ class SensorIoTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "raw must be valid base64"):
             schema.decode(json.dumps(payload).encode("utf-8"))
+
+    def test_sensor_event_schema_rejects_boolean_sequence_number(self) -> None:
+        manyfold = load_manyfold_package()
+        schema = manyfold.sensor_event_schema()
+        payload = {
+            "event_type": "radio.packet",
+            "data": {},
+            "observed_at": 1.5,
+            "identity": {},
+            "sequence_number": True,
+            "raw": None,
+            "metadata": {},
+        }
+
+        with self.assertRaisesRegex(ValueError, "sequence_number must be a JSON integer"):
+            schema.decode(json.dumps(payload).encode("utf-8"))
+
+    def test_health_status_schema_rejects_string_error_count(self) -> None:
+        manyfold = load_manyfold_package()
+        health_schema = manyfold.health_status_schema()
+
+        with self.assertRaisesRegex(ValueError, "error_count must be a JSON integer"):
+            health_schema.decode(
+                b'{"error_count":"0","message":"ready","observed_at":2.0,'
+                b'"stale":false,"status":"ok"}'
+            )
 
     def test_sequence_counter_assigns_monotonic_numbers(self) -> None:
         manyfold = load_manyfold_package()
