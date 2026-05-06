@@ -8,7 +8,7 @@ from typing import Sequence
 
 @dataclass(frozen=True)
 class Average:
-    """Moving average over the latest `window_size` values."""
+    """Moving average over the latest `window_size` values, or all available values."""
 
     window_size: int
 
