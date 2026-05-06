@@ -78,6 +78,64 @@ class RxFacadeTests(unittest.TestCase):
                 self.assertNotIn("abc", module.__all__)
                 self.assertNotIn("TypeVar", module.__all__)
 
+    def test_private_rx_facade_exports_intentional_snapshot(self) -> None:
+        load_manyfold_package()
+        rx_module = importlib.import_module("manyfold._rx")
+
+        self.assertEqual(
+            rx_module.__all__,
+            (
+                "ConnectableObservable",
+                "GroupedObservable",
+                "Notification",
+                "Observable",
+                "Observer",
+                "Subject",
+                "abc",
+                "amb",
+                "case",
+                "catch",
+                "catch_with_iterable",
+                "combine_latest",
+                "compose",
+                "concat",
+                "concat_with_iterable",
+                "create",
+                "defer",
+                "empty",
+                "fork_join",
+                "from_callable",
+                "from_callback",
+                "from_future",
+                "from_iterable",
+                "from_marbles",
+                "generate",
+                "generate_with_relative_time",
+                "if_then",
+                "interval",
+                "just",
+                "merge",
+                "never",
+                "of",
+                "on_error_resume_next",
+                "operators",
+                "pipe",
+                "range",
+                "repeat_value",
+                "return_value",
+                "start",
+                "start_async",
+                "throw",
+                "timer",
+                "to_async",
+                "typing",
+                "using",
+                "with_latest_from",
+                "zip",
+            ),
+        )
+        self.assertNotIn("annotations", rx_module.__all__)
+
     def test_private_facade_modules_publish_stable_exports(self) -> None:
         load_manyfold_package()
         expected_exports = {
