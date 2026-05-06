@@ -168,7 +168,7 @@ from .sensor_io import (
 )
 from .stats import Average as Average
 
-__all__ = [
+__all__ = (
     "Average",
     "BackoffPolicy",
     "BoundedRingBuffer",
@@ -317,4 +317,4 @@ __all__ = [
     "sink",
     "source",
     "xor_checksum",
-]
+)
