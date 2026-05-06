@@ -836,6 +836,10 @@ class DelimitedMessageBuffer:
     def append(self, data: bytes | bytearray | str) -> tuple[bytes | str, ...]:
         if self.mode == "text":
             if isinstance(data, str):
+                if self._text_decoder.getstate()[0]:
+                    raise ValueError(
+                        "cannot append text while a UTF-8 byte sequence is pending"
+                    )
                 self._text_buffer += data
             else:
                 self._text_buffer += self._text_decoder.decode(bytes(data), final=False)

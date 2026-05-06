@@ -104,6 +104,17 @@ class SensorIoTests(unittest.TestCase):
         self.assertEqual(text_buffer.append(b"caf\xc3"), ())
         self.assertEqual(text_buffer.append(b"\xa9\n"), ("café",))
 
+    def test_delimited_message_buffer_rejects_text_while_utf8_sequence_is_pending(
+        self,
+    ) -> None:
+        manyfold = load_manyfold_package()
+        text_buffer = manyfold.DelimitedMessageBuffer(mode="text")
+
+        self.assertEqual(text_buffer.append(b"caf\xc3"), ())
+        with self.assertRaisesRegex(ValueError, "UTF-8 byte sequence is pending"):
+            text_buffer.append("!\n")
+        self.assertEqual(text_buffer.append(b"\xa9\n"), ("café",))
+
     def test_delimited_message_buffer_rejects_invalid_utf8_text(self) -> None:
         manyfold = load_manyfold_package()
         text_buffer = manyfold.DelimitedMessageBuffer(mode="text")
