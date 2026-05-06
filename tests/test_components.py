@@ -575,6 +575,37 @@ class ComponentTests(unittest.TestCase):
         assert latest is not None
         self.assertEqual(latest.value, 24)
 
+    def test_memory_chip_writes_compact_sorted_jsonl_records(self) -> None:
+        manyfold = load_manyfold_package()
+        route = manyfold.route(
+            plane=manyfold.Plane.Read,
+            layer=manyfold.Layer.Logical,
+            owner=manyfold.OwnerName("demo"),
+            family=manyfold.StreamFamily("memory"),
+            stream=manyfold.StreamName("bytes"),
+            variant=manyfold.Variant.Meta,
+            schema=manyfold.Schema.bytes(name="MemoryBytes"),
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "memory.jsonl"
+            graph = manyfold.Graph()
+            memory = manyfold.Memory(path)
+            subscription = memory.remember(graph, route, replay_latest=False)
+
+            graph.publish(route, b"ok", control_epoch=3)
+            subscription.dispose()
+            lines = path.read_text(encoding="utf-8").splitlines()
+
+        self.assertEqual(
+            lines,
+            [
+                '{"control_epoch":3,"payload_b64":"b2s=",'
+                '"route":"read.logical.demo.memory.bytes.meta.v1",'
+                '"schema_id":"MemoryBytes","schema_version":1,"seq_source":1}'
+            ],
+        )
+
     def test_memory_chip_skips_duplicate_observed_events(self) -> None:
         manyfold = load_manyfold_package()
         route = manyfold.route(

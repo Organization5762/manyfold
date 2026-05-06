@@ -39,6 +39,14 @@ AppendEntry = tuple[int, str]
 ReplicatedLog = tuple[AppendEntry, ...]
 LeaderState = tuple[str, int, bool]
 _VoteLedger = dict[tuple[int, str], frozenset[str]]
+_MEMORY_RECORD_FIELDS = (
+    "route",
+    "seq_source",
+    "control_epoch",
+    "schema_id",
+    "schema_version",
+    "payload_b64",
+)
 
 
 @dataclass(frozen=True)
@@ -436,7 +444,9 @@ class Memory:
                     "payload_b64": payload_b64,
                 }
                 with self.path.open("a", encoding="utf-8") as handle:
-                    handle.write(json.dumps(record, sort_keys=True))
+                    handle.write(
+                        json.dumps(record, separators=(",", ":"), sort_keys=True)
+                    )
                     handle.write("\n")
 
         return graph.observe(route_ref, replay_latest=replay_latest).subscribe(on_next)
@@ -499,14 +509,7 @@ class Memory:
                     raise ValueError(
                         f"memory file {self.path} line {line_number} must be a JSON object"
                     )
-                for field in (
-                    "route",
-                    "seq_source",
-                    "control_epoch",
-                    "schema_id",
-                    "schema_version",
-                    "payload_b64",
-                ):
+                for field in _MEMORY_RECORD_FIELDS:
                     if field not in record:
                         raise ValueError(
                             f"memory file {self.path} line {line_number} is missing {field}"
