@@ -1045,7 +1045,7 @@ def _decode_quorum(payload: bytes) -> QuorumState:
         return (
             _decode_json_int(term),
             str(candidate),
-            tuple(str(voter) for voter in voters),
+            _decode_json_string_array(voters, "quorum voters"),
             _decode_json_bool(granted),
         )
     term_text, candidate, voters_text, granted_text = text.split("|", 3)
@@ -1120,6 +1120,14 @@ def _decode_json_int(value: Any) -> int:
     if _is_plain_int(value):
         return value
     raise ValueError("JSON integer field must be an integer")
+
+
+def _decode_json_string_array(value: Any, field: str) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        raise ValueError(f"{field} must be a JSON array")
+    if not all(isinstance(item, str) for item in value):
+        raise ValueError(f"{field} must contain only strings")
+    return tuple(value)
 
 
 def _encode_json_tuple(value: tuple[Any, ...]) -> bytes:

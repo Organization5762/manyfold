@@ -592,6 +592,18 @@ class ComponentTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "JSON integer"):
             routes.leader_state.schema.decode(b'["node-a","3",true]')
 
+    def test_consensus_quorum_json_schema_rejects_non_array_voters(self) -> None:
+        manyfold = load_manyfold_package()
+        routes = manyfold.Consensus.default_routes()
+
+        with self.assertRaisesRegex(ValueError, "quorum voters must be a JSON array"):
+            routes.quorum.schema.decode(b'[3,"node-a","node-b",true]')
+        with self.assertRaisesRegex(
+            ValueError,
+            "quorum voters must contain only strings",
+        ):
+            routes.quorum.schema.decode(b'[3,"node-a",["node-b",7],true]')
+
     def test_consensus_append_entry_schema_encodes_compact_json_tuple(self) -> None:
         manyfold = load_manyfold_package()
         route = manyfold.Consensus.default_routes().append_entries
