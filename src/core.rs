@@ -1007,19 +1007,13 @@ impl GraphCore {
         // Mailbox ingress is the explicit async boundary. Once a route resolves to
         // mailbox ingress, delivery semantics are owned by the mailbox descriptor
         // rather than by normal edge fanout.
-        let Some(name) = self
+        let Some(mailbox) = self
             .mailboxes
-            .iter()
-            .find(|(_, mailbox)| mailbox.ingress == *route)
-            .map(|(name, _)| name.clone())
+            .values_mut()
+            .find(|mailbox| mailbox.ingress == *route)
         else {
             return None;
         };
-
-        let mailbox = self
-            .mailboxes
-            .get_mut(&name)
-            .expect("mailbox existed during lookup");
         let capacity = mailbox.descriptor.capacity;
         let full = mailbox.queue.len() >= capacity;
 
@@ -1185,12 +1179,15 @@ impl GraphCore {
             QueryKindCore::Latest(route) => {
                 QueryResultCore::Latest(self.latest.get(&route).cloned())
             }
-            QueryKindCore::Topology => QueryResultCore::Topology(
-                self.edges
+            QueryKindCore::Topology => {
+                let mut edges = self
+                    .edges
                     .iter()
                     .map(|(left, right)| (left.display(), right.display()))
-                    .collect(),
-            ),
+                    .collect::<Vec<_>>();
+                edges.sort();
+                QueryResultCore::Topology(edges)
+            }
             QueryKindCore::Trace => {
                 let mut items = self.latest.values().cloned().collect::<Vec<_>>();
                 items.sort_by_key(|item| (item.seq_source, item.route.display()));
@@ -1446,6 +1443,57 @@ mod tests {
             .map(|item| item.route.display())
             .collect::<Vec<_>>();
         assert_eq!(displays, vec![alpha.display(), beta.display()]);
+    }
+
+    #[test]
+    fn topology_query_orders_edges_by_display() {
+        let z_source = sample_route(
+            Plane::Read,
+            Layer::Logical,
+            "zeta",
+            "telemetry",
+            "sample",
+            Variant::Meta,
+        );
+        let z_sink = sample_route(
+            Plane::Read,
+            Layer::Logical,
+            "zeta",
+            "telemetry",
+            "projected",
+            Variant::Meta,
+        );
+        let a_source = sample_route(
+            Plane::Read,
+            Layer::Logical,
+            "alpha",
+            "telemetry",
+            "sample",
+            Variant::Meta,
+        );
+        let a_sink = sample_route(
+            Plane::Read,
+            Layer::Logical,
+            "alpha",
+            "telemetry",
+            "projected",
+            Variant::Meta,
+        );
+        let mut graph = GraphCore::default();
+
+        graph.connect(&z_source, &z_sink);
+        graph.connect(&a_source, &a_sink);
+
+        let QueryResultCore::Topology(edges) = graph.query(QueryKindCore::Topology) else {
+            panic!("unexpected query result");
+        };
+        assert_eq!(
+            edges,
+            vec![
+                (a_source.display(), a_sink.display()),
+                (z_source.display(), z_sink.display()),
+            ]
+        );
     }
 
     #[test]
