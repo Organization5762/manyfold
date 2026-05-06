@@ -878,6 +878,31 @@ class ExampleTests(unittest.TestCase):
         finally:
             catalog_module.EXAMPLE_CATALOG = original_catalog
 
+    def test_catalog_validation_reports_duplicate_modules_in_first_repeat_order(
+        self,
+    ) -> None:
+        import examples._catalog as catalog_module
+
+        original_catalog = catalog_module.EXAMPLE_CATALOG
+        first_duplicate = catalog_entry("simple_latest")
+        second_duplicate = catalog_entry("rate_matched_sensor")
+        try:
+            catalog_module.EXAMPLE_CATALOG = (
+                *EXAMPLE_CATALOG,
+                first_duplicate,
+                second_duplicate,
+                first_duplicate,
+                second_duplicate,
+            )
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "duplicate module names: simple_latest, rate_matched_sensor",
+            ):
+                catalog_module._validate_catalog()
+        finally:
+            catalog_module.EXAMPLE_CATALOG = original_catalog
+
     def test_catalog_validation_rejects_non_contiguous_reference_numbers(self) -> None:
         import examples._catalog as catalog_module
 
