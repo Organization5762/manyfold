@@ -12,6 +12,7 @@ from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
+import examples._shared as shared
 from examples import (
     ARCHIVED_EXAMPLE_ENTRIES,
     ARCHIVED_EXAMPLE_MODULES,
@@ -1186,6 +1187,12 @@ class ExampleTests(unittest.TestCase):
         self.assertEqual(sibling.family.value, "temperature")
         self.assertEqual(sibling.stream.value, "latest")
         self.assertIs(sibling.schema, base.schema)
+
+    def test_shared_example_helpers_publish_stable_exports(self) -> None:
+        self.assertEqual(
+            shared.__all__,
+            ("example_route", "int_schema", "sibling_route"),
+        )
 
     def test_shared_int_schema_round_trips_ascii_values_and_version(self) -> None:
         schema = int_schema("Temperature", version=3)
