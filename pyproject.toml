@@ -12,10 +12,10 @@ license = "AGPL-3.0-only"
 license-files = ["LICENSE"]
 authors = [{ name = "Manyfold contributors" }]
 keywords = [
+    "pyo3",
     "reactive",
     "runtime",
     "streaming",
-    "pyo3",
 ]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
@@ -40,8 +40,8 @@ Repository = "https://github.com/Organization5762/manyfold"
 Issues = "https://github.com/Organization5762/manyfold/issues"
 
 [project.scripts]
-manyfold-rfc-checklist = "manyfold.rfc_checklist_gen:main"
 manyfold-example-catalog = "manyfold_example_catalog:main"
+manyfold-rfc-checklist = "manyfold.rfc_checklist_gen:main"
 
 [tool.maturin]
 features = ["python-extension"]
