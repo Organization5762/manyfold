@@ -12,6 +12,7 @@ from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
+import examples._shared as shared
 from examples import (
     ARCHIVED_EXAMPLE_ENTRIES,
     ARCHIVED_EXAMPLE_MODULES,
@@ -137,6 +138,14 @@ class ExampleTests(unittest.TestCase):
         self.assertIs(examples_package.EXAMPLE_CATALOG, EXAMPLE_CATALOG)
         self.assertIs(examples_package.ExampleCatalogEntry, ExampleCatalogEntry)
         self.assertIs(examples_package.ReferenceExampleGap, ReferenceExampleGap)
+
+    def test_shared_example_helpers_keep_explicit_exports(self) -> None:
+        self.assertEqual(
+            shared.__all__,
+            ("example_route", "int_schema", "sibling_route"),
+        )
+        for name in shared.__all__:
+            self.assertTrue(callable(getattr(shared, name)))
 
     def test_catalog_exports_manifest_matches_examples_package_and_catalog_module(
         self,
