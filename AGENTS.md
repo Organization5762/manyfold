@@ -21,6 +21,10 @@ project's Python tools live in the `uv` environment and the test suite uses
 After editing `src/` Rust extension code, run `uv sync --reinstall-package manyfold`
 before Python tests that exercise the native module.
 
+If the default `uv` cache is blocked by sandbox permissions, set
+`UV_CACHE_DIR=.cache/uv` for `uv sync` and verification commands before
+retrying.
+
 ## Verification
 
 Use the smallest command that covers the changed surface:
