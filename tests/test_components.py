@@ -623,6 +623,15 @@ class ComponentTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "leader must be a JSON string"):
             routes.leader_state.schema.decode(b"[7,3,true]")
 
+    def test_consensus_json_schemas_reject_non_finite_encoded_values(self) -> None:
+        manyfold = load_manyfold_package()
+        routes = manyfold.Consensus.default_routes()
+
+        with self.assertRaisesRegex(ValueError, "Out of range float"):
+            routes.heartbeat.schema.encode((float("nan"), "node-a"))
+        with self.assertRaisesRegex(ValueError, "Out of range float"):
+            routes.replicated_log.schema.encode(((float("inf"), "set pipe=a"),))
+
     def test_consensus_append_entry_schema_encodes_compact_json_tuple(self) -> None:
         manyfold = load_manyfold_package()
         route = manyfold.Consensus.default_routes().append_entries

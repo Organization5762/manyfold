@@ -1075,7 +1075,11 @@ def _replicated_log_schema() -> Schema[ReplicatedLog]:
     return Schema(
         schema_id="RaftReplicatedLog",
         version=1,
-        encode=lambda value: json.dumps(value, separators=(",", ":")).encode("utf-8"),
+        encode=lambda value: json.dumps(
+            value,
+            allow_nan=False,
+            separators=(",", ":"),
+        ).encode("utf-8"),
         decode=lambda payload: _decode_replicated_log(payload),
     )
 
@@ -1142,7 +1146,7 @@ def _decode_json_string_array(value: Any, field: str) -> tuple[str, ...]:
 
 
 def _encode_json_tuple(value: tuple[Any, ...]) -> bytes:
-    return json.dumps(value, separators=(",", ":")).encode("utf-8")
+    return json.dumps(value, allow_nan=False, separators=(",", ":")).encode("utf-8")
 
 
 __all__ = (
