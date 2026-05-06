@@ -579,6 +579,21 @@ class SensorIoTests(unittest.TestCase):
         self.assertTrue(list_threshold.accepts([1.0, 2.0]))
         self.assertTrue(list_threshold.accepts([1.0]))
 
+    def test_threshold_filter_compares_mapping_keys_in_stable_order(self) -> None:
+        manyfold = load_manyfold_package()
+        accessed_keys: list[str] = []
+
+        class LoggedDict(dict[str, float]):
+            def get(self, key, default=None):
+                accessed_keys.append(key)
+                return super().get(key, default)
+
+        threshold = manyfold.ThresholdFilter[dict[str, float]](threshold=0.5)
+
+        self.assertTrue(threshold.accepts({"z": 0.0, "a": 0.0}))
+        self.assertFalse(threshold.accepts(LoggedDict({"z": 0.1, "a": 0.1})))
+        self.assertEqual(accessed_keys, ["a", "z"])
+
     def test_local_sensor_source_publishes_sensor_samples(self) -> None:
         manyfold = load_manyfold_package()
         graph = manyfold.Graph()

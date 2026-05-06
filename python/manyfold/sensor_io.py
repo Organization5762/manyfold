@@ -1476,7 +1476,7 @@ def _adopt_group(component: object, group: str | None) -> None:
 
 def _changed_enough(new: Any, old: Any, threshold: float) -> bool:
     if isinstance(new, Mapping) and isinstance(old, Mapping):
-        keys = set(new) | set(old)
+        keys = sorted(set(new) | set(old), key=_mapping_key_sort_key)
         return any(_changed_enough(new.get(key), old.get(key), threshold) for key in keys)
     if isinstance(new, tuple) and isinstance(old, tuple):
         if len(new) != len(old):
@@ -1489,6 +1489,10 @@ def _changed_enough(new: Any, old: Any, threshold: float) -> bool:
     if isinstance(new, (int, float)) and isinstance(old, (int, float)):
         return abs(float(new) - float(old)) > threshold
     return new != old
+
+
+def _mapping_key_sort_key(key: Any) -> tuple[str, str]:
+    return (type(key).__qualname__, str(key))
 
 
 def _compact_json_bytes(value: Mapping[str, Any]) -> bytes:
