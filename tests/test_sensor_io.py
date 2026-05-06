@@ -818,6 +818,56 @@ class SensorIoTests(unittest.TestCase):
 
         self.assertEqual(peripheral.inputs, [9])
 
+    def test_peripheral_adapter_disposes_output_subscription_when_control_subscribe_fails(
+        self,
+    ) -> None:
+        manyfold = load_manyfold_package()
+
+        class FakeSubscription:
+            def __init__(self) -> None:
+                self.disposed = False
+
+            def dispose(self) -> None:
+                self.disposed = True
+
+        class FakeObservable:
+            def __init__(self) -> None:
+                self.subscription = FakeSubscription()
+
+            def subscribe(self, _on_next):
+                return self.subscription
+
+        class FakePeripheral:
+            def __init__(self) -> None:
+                self.observe = FakeObservable()
+
+        graph = manyfold.Graph()
+        output = _route(manyfold, "failed_control_output", manyfold.sensor_event_schema())
+        control = _route(
+            manyfold,
+            "failed_control_input",
+            _int_schema(manyfold, "Control"),
+        )
+        peripheral = FakePeripheral()
+        original_observe = graph.observe
+
+        def failing_observe(route_ref, *args, **kwargs):
+            if route_ref == control:
+                raise RuntimeError("control subscribe failed")
+            return original_observe(route_ref, *args, **kwargs)
+
+        graph.observe = failing_observe  # type: ignore[method-assign]
+
+        with self.assertRaisesRegex(RuntimeError, "control subscribe failed"):
+            manyfold.PeripheralAdapter(
+                peripheral=peripheral,
+                route=output,
+                control_route=control,
+                run_on_install=False,
+            ).install(graph)
+
+        self.assertTrue(peripheral.observe.subscription.disposed)
+
     def test_rate_matched_sensor_handles_bursty_input(self) -> None:
         manyfold = load_manyfold_package()
         graph = manyfold.Graph()

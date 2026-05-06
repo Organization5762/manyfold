@@ -1254,9 +1254,13 @@ class PeripheralAdapter:
             def on_control(item: Any) -> None:
                 _call_if_present(self.peripheral, "handle_input", _event_value(item))
 
-            control_subscription = graph.observe(
-                self.control_route, replay_latest=False
-            ).subscribe(on_control)
+            try:
+                control_subscription = graph.observe(
+                    self.control_route, replay_latest=False
+                ).subscribe(on_control)
+            except Exception:
+                subscription.dispose()
+                raise
         if self.run_on_install:
             try:
                 _call_if_present(self.peripheral, "run")
