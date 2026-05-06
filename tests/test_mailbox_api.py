@@ -47,6 +47,42 @@ assert snapshot.largest_queue_depth == 2, snapshot
 
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_mailbox_descriptor_rejects_unknown_policies_clearly(self) -> None:
+        script = """
+import manyfold
+
+cases = (
+    (
+        {"delivery_mode": "fanout"},
+        'unsupported delivery_mode "fanout"; expected one of mpsc_serial',
+    ),
+    (
+        {"ordering_policy": "random"},
+        'unsupported ordering_policy "random"; expected one of fifo',
+    ),
+    (
+        {"overflow_policy": "panic"},
+        'unsupported overflow_policy "panic"; expected one of block',
+    ),
+)
+for kwargs, expected in cases:
+    try:
+        manyfold.MailboxDescriptor(**kwargs)
+    except ValueError as exc:
+        assert expected in str(exc), str(exc)
+    else:
+        raise AssertionError(f"expected ValueError for {kwargs}")
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            check=False,
+            capture_output=True,
+            env=subprocess_test_env(),
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_mailbox_snapshot_exposes_semantics_and_delivery_counters(self) -> None:
         graph_module = load_graph_module()
         source = graph_module.route(
