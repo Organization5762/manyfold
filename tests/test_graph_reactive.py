@@ -42,6 +42,34 @@ class FailingObservable:
 
 
 class GraphReactiveTests(unittest.TestCase):
+    def test_producer_kind_exposes_all_runtime_kinds(self) -> None:
+        graph_module = load_graph_module()
+
+        def enum_value(value) -> str:
+            return getattr(value, "value", str(value))
+
+        route = graph_module.route(
+            plane=graph_module.Plane.Write,
+            layer=graph_module.Layer.Shadow,
+            owner=graph_module.OwnerName("lamp"),
+            family=graph_module.StreamFamily("brightness"),
+            stream=graph_module.StreamName("level"),
+            variant=graph_module.Variant.Desired,
+            schema=graph_module.Schema.bytes(name="Brightness"),
+        )
+        graph = graph_module.Graph()
+
+        self.assertEqual(enum_value(graph_module.ProducerKind.Bridge), "bridge")
+        self.assertEqual(enum_value(graph_module.ProducerKind.Reconciler), "reconciler")
+        self.assertEqual(
+            enum_value(graph_module.ProducerKind.LifecycleService),
+            "lifecycle_service",
+        )
+        self.assertEqual(
+            enum_value(graph.describe_route(route).identity.producer_ref.kind),
+            "reconciler",
+        )
+
     def test_observe_replays_latest_and_pushes_future_writes(self) -> None:
         graph_module = load_graph_module()
         route = graph_module.route(

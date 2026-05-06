@@ -377,6 +377,24 @@ impl PyProducerKind {
             inner: ProducerKind::Application,
         }
     }
+    #[classattr]
+    fn Bridge() -> PyProducerKind {
+        Self {
+            inner: ProducerKind::Bridge,
+        }
+    }
+    #[classattr]
+    fn Reconciler() -> PyProducerKind {
+        Self {
+            inner: ProducerKind::Reconciler,
+        }
+    }
+    #[classattr]
+    fn LifecycleService() -> PyProducerKind {
+        Self {
+            inner: ProducerKind::LifecycleService,
+        }
+    }
     #[getter]
     fn value(&self) -> &'static str {
         self.inner.as_str()

@@ -232,6 +232,9 @@ class ProducerKind:
     Mailbox: ProducerKind
     QueryService: ProducerKind
     Application: ProducerKind
+    Bridge: ProducerKind
+    Reconciler: ProducerKind
+    LifecycleService: ProducerKind
     @property
     def value(self) -> builtins.str: ...
     def __eq__(self, other: builtins.object) -> builtins.bool: ...

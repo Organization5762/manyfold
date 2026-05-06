@@ -438,6 +438,9 @@ def install_manyfold_rust_stub() -> None:
         Mailbox = EnumValue("mailbox")
         QueryService = EnumValue("query_service")
         Application = EnumValue("application")
+        Bridge = EnumValue("bridge")
+        Reconciler = EnumValue("reconciler")
+        LifecycleService = EnumValue("lifecycle_service")
 
     class TaintDomain:
         Time = EnumValue("time")
