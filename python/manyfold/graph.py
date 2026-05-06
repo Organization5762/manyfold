@@ -143,6 +143,7 @@ class CoalesceLatestNode(Generic[T]):
             timer: Any | None = None
             fallback_timer: Timer | None = None
             due_time: float | None = None
+            generation = 0
             window_seconds = self.window_ms / 1000
 
             def cancel_timers() -> None:
@@ -154,9 +155,14 @@ class CoalesceLatestNode(Generic[T]):
                     fallback_timer.cancel()
                     fallback_timer = None
 
-            def flush() -> None:
+            def flush(expected_generation: int | None = None) -> None:
                 nonlocal pending, due_time
                 with lock:
+                    if (
+                        expected_generation is not None
+                        and expected_generation != generation
+                    ):
+                        return
                     value = pending
                     pending = _NO_PENDING
                     cancel_timers()
@@ -165,52 +171,42 @@ class CoalesceLatestNode(Generic[T]):
                     observer.on_next(value)
 
             def schedule_flush(now: float) -> None:
-                nonlocal timer, fallback_timer, due_time
-                if timer is not None or fallback_timer is not None:
-                    if due_time is not None and now >= due_time:
-                        cancel_timers()
-                        due_time = None
-                    else:
-                        return
+                nonlocal timer, fallback_timer, due_time, generation
+                cancel_timers()
+                generation += 1
+                scheduled_generation = generation
                 due_time = now + window_seconds
                 timer = reactive_threads.coalesce_scheduler().schedule_relative(
                     window_seconds,
-                    lambda *_: flush(),
+                    lambda *_: flush(scheduled_generation),
                 )
-                fallback_timer = Timer(window_seconds, flush)
+                fallback_timer = Timer(
+                    window_seconds,
+                    lambda: flush(scheduled_generation),
+                )
                 fallback_timer.daemon = True
                 fallback_timer.start()
 
             def on_next(value: T) -> None:
-                nonlocal pending, due_time
+                nonlocal pending
                 now = time.monotonic()
-                flush_value: Any = _NO_PENDING
                 with lock:
-                    if (
-                        pending is not _NO_PENDING
-                        and due_time is not None
-                        and now >= due_time
-                    ):
-                        flush_value = pending
-                        pending = _NO_PENDING
-                        cancel_timers()
-                        due_time = None
                     pending = value
                     schedule_flush(now)
-                if flush_value is not _NO_PENDING:
-                    observer.on_next(flush_value)
 
             def on_error(error: Exception) -> None:
-                nonlocal pending, due_time
+                nonlocal pending, due_time, generation
                 with lock:
+                    generation += 1
                     cancel_timers()
                     pending = _NO_PENDING
                     due_time = None
                 observer.on_error(error)
 
             def on_completed() -> None:
-                nonlocal due_time
+                nonlocal due_time, generation
                 with lock:
+                    generation += 1
                     cancel_timers()
                     due_time = None
                 flush()
@@ -224,9 +220,10 @@ class CoalesceLatestNode(Generic[T]):
             )
 
             def dispose() -> None:
-                nonlocal pending, due_time
+                nonlocal pending, due_time, generation
                 subscription.dispose()
                 with lock:
+                    generation += 1
                     pending = _NO_PENDING
                     cancel_timers()
                     due_time = None

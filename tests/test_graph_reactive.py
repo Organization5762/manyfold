@@ -32,6 +32,32 @@ def str_schema(graph_module, schema_id: str):
     )
 
 
+class ManualDisposable:
+    def dispose(self) -> None:
+        pass
+
+
+class ManualCoalesceScheduler:
+    def __init__(self) -> None:
+        self.callbacks = []
+
+    def schedule_relative(self, _duetime, action):
+        self.callbacks.append(action)
+        return ManualDisposable()
+
+
+class ManualTimer:
+    def __init__(self, _interval, function) -> None:
+        self.daemon = False
+        self.function = function
+
+    def start(self) -> None:
+        pass
+
+    def cancel(self) -> None:
+        pass
+
+
 class FailingObservable:
     def __init__(self, message: str) -> None:
         self.message = message
@@ -653,6 +679,35 @@ class GraphReactiveTests(unittest.TestCase):
         source.on_completed()
 
         self.assertEqual(seen, [3])
+
+    def test_coalesce_latest_ignores_stale_timer_callbacks(self) -> None:
+        graph_module = load_graph_module()
+        scheduler = ManualCoalesceScheduler()
+        original_scheduler = graph_module.reactive_threads.coalesce_scheduler
+        original_timer = graph_module.Timer
+        graph_module.reactive_threads.coalesce_scheduler = lambda: scheduler
+        graph_module.Timer = ManualTimer
+        node = graph_module.CoalesceLatestNode(
+            name="coalesce",
+            window_ms=1000,
+            stream_name="numbers",
+        )
+        seen: list[int] = []
+        source = graph_module.Subject()
+
+        try:
+            node.observable(source).subscribe(seen.append)
+            source.on_next(1)
+            source.on_next(2)
+
+            scheduler.callbacks[0]()
+            self.assertEqual(seen, [])
+
+            scheduler.callbacks[1]()
+            self.assertEqual(seen, [2])
+        finally:
+            graph_module.reactive_threads.coalesce_scheduler = original_scheduler
+            graph_module.Timer = original_timer
 
     def test_observe_pipeline_coalesces_latest_route_value(self) -> None:
         graph_module = load_graph_module()
