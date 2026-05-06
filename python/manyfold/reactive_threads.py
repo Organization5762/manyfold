@@ -229,6 +229,9 @@ def delivery_latency_snapshot() -> dict[str, DeliveryLatencyStats]:
 def drain_frame_thread_queue(max_items: int | None = None) -> int:
     """Run pending frame-thread callbacks and return the number drained."""
 
+    if max_items is not None and max_items <= 0:
+        return 0
+
     global _FRAME_THREAD_IDENT
     _FRAME_THREAD_IDENT = get_ident()
     drained = 0
