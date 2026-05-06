@@ -207,6 +207,28 @@ class SensorIoTests(unittest.TestCase):
         self.assertEqual(decoded.identity.tags[0].variant, "radio")
         self.assertEqual(decoded.raw, b'{"payload":[97,98,99]}')
 
+    def test_sensor_event_schema_serializes_string_colliding_keys_deterministically(
+        self,
+    ) -> None:
+        manyfold = load_manyfold_package()
+        schema = manyfold.sensor_event_schema()
+        first_data: dict[object, str] = {}
+        second_data: dict[object, str] = {}
+        first_data["2"] = "string"
+        first_data[2] = "integer"
+        second_data[2] = "integer"
+        second_data["2"] = "string"
+
+        first = schema.encode(
+            manyfold.SensorEvent("radio.packet", first_data, observed_at=1.0)
+        )
+        second = schema.encode(
+            manyfold.SensorEvent("radio.packet", second_data, observed_at=1.0)
+        )
+
+        self.assertEqual(first, second)
+        self.assertEqual(schema.decode(first).data, {"2": "string"})
+
     def test_sensor_schemas_encode_compact_sorted_json(self) -> None:
         manyfold = load_manyfold_package()
         sample_schema = manyfold.sensor_sample_schema(_int_schema(manyfold, "Temp"))

@@ -1521,7 +1521,14 @@ def _json_safe(value: Any) -> Any:
     if isinstance(value, bytes | bytearray | memoryview):
         return {"__bytes_b64__": base64.b64encode(bytes(value)).decode("ascii")}
     if isinstance(value, Mapping):
-        return {str(key): _json_safe(item) for key, item in value.items()}
+        # Coerce after sorting so keys that collapse to the same string resolve
+        # the same way regardless of the original mapping's insertion order.
+        return {
+            str(key): _json_safe(item)
+            for key, item in sorted(
+                value.items(), key=lambda pair: _mapping_key_sort_key(pair[0])
+            )
+        }
     if isinstance(value, tuple):
         return [_json_safe(item) for item in value]
     if isinstance(value, list):
