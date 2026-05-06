@@ -259,6 +259,15 @@ def render_checklist(
     return "\n".join(lines)
 
 
+def _write_if_changed(path: Path, content: str) -> bool:
+    """Write generated content only when the target bytes would change."""
+
+    if path.exists() and path.read_text(encoding="utf-8") == content:
+        return False
+    path.write_text(content, encoding="utf-8")
+    return True
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -279,7 +288,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0 if current_checklist == checklist_content else 1
 
-    CHECKLIST_PATH.write_text(checklist_content, encoding="utf-8")
+    _write_if_changed(CHECKLIST_PATH, checklist_content)
     return 0
 
 
