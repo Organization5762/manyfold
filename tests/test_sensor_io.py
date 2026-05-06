@@ -300,6 +300,36 @@ class SensorIoTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "sequence_number must be a JSON integer"):
             schema.decode(json.dumps(payload).encode("utf-8"))
 
+    def test_sensor_sample_schema_rejects_non_string_quality(self) -> None:
+        manyfold = load_manyfold_package()
+        schema = manyfold.sensor_sample_schema(_int_schema(manyfold, "Temp"))
+        payload = {
+            "value": "MjE=",
+            "source_timestamp": 1.0,
+            "ingest_timestamp": 1.5,
+            "sequence_number": 1,
+            "quality": 1,
+            "status": None,
+        }
+
+        with self.assertRaisesRegex(ValueError, "quality must be a JSON string"):
+            schema.decode(json.dumps(payload).encode("utf-8"))
+
+    def test_sensor_sample_schema_rejects_non_string_status(self) -> None:
+        manyfold = load_manyfold_package()
+        schema = manyfold.sensor_sample_schema(_int_schema(manyfold, "Temp"))
+        payload = {
+            "value": "MjE=",
+            "source_timestamp": 1.0,
+            "ingest_timestamp": 1.5,
+            "sequence_number": 1,
+            "quality": None,
+            "status": False,
+        }
+
+        with self.assertRaisesRegex(ValueError, "status must be a JSON string"):
+            schema.decode(json.dumps(payload).encode("utf-8"))
+
     def test_sensor_sample_schema_rejects_string_timestamp(self) -> None:
         manyfold = load_manyfold_package()
         schema = manyfold.sensor_sample_schema(_int_schema(manyfold, "Temp"))
@@ -366,6 +396,40 @@ class SensorIoTests(unittest.TestCase):
         }
 
         with self.assertRaisesRegex(ValueError, "raw must be valid base64"):
+            schema.decode(json.dumps(payload).encode("utf-8"))
+
+    def test_sensor_event_schema_rejects_non_string_event_type(self) -> None:
+        manyfold = load_manyfold_package()
+        schema = manyfold.sensor_event_schema()
+        payload = {
+            "event_type": 7,
+            "data": {},
+            "observed_at": 1.5,
+            "identity": {},
+            "sequence_number": 7,
+            "raw": None,
+            "metadata": {},
+        }
+
+        with self.assertRaisesRegex(ValueError, "event_type must be a JSON string"):
+            schema.decode(json.dumps(payload).encode("utf-8"))
+
+    def test_sensor_event_schema_rejects_non_string_identity_tag(self) -> None:
+        manyfold = load_manyfold_package()
+        schema = manyfold.sensor_event_schema()
+        payload = {
+            "event_type": "radio.packet",
+            "data": {},
+            "observed_at": 1.5,
+            "identity": {"tags": [{"name": "input_variant", "variant": 3}]},
+            "sequence_number": 7,
+            "raw": None,
+            "metadata": {},
+        }
+
+        with self.assertRaisesRegex(
+            ValueError, r"identity\.tags\[\]\.variant must be a JSON string"
+        ):
             schema.decode(json.dumps(payload).encode("utf-8"))
 
     def test_sensor_event_schema_rejects_boolean_sequence_number(self) -> None:
@@ -447,6 +511,28 @@ class SensorIoTests(unittest.TestCase):
             health_schema.decode(
                 b'{"error_count":"0","message":"ready","observed_at":2.0,'
                 b'"stale":false,"status":"ok"}'
+            )
+
+    def test_health_status_schema_rejects_non_string_message(self) -> None:
+        manyfold = load_manyfold_package()
+        health_schema = manyfold.health_status_schema()
+
+        with self.assertRaisesRegex(ValueError, "message must be a JSON string"):
+            health_schema.decode(
+                b'{"error_count":0,"message":7,"observed_at":2.0,'
+                b'"stale":false,"status":"ok"}'
+            )
+
+    def test_health_status_schema_rejects_unknown_status(self) -> None:
+        manyfold = load_manyfold_package()
+        health_schema = manyfold.health_status_schema()
+
+        with self.assertRaisesRegex(
+            ValueError, "status must be one of: ok, stale, error"
+        ):
+            health_schema.decode(
+                b'{"error_count":0,"message":"ready","observed_at":2.0,'
+                b'"stale":false,"status":"green"}'
             )
 
     def test_health_status_schema_rejects_string_observed_at(self) -> None:

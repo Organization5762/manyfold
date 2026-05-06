@@ -728,8 +728,8 @@ def sensor_sample_schema(value_schema: Schema[T], schema_id: str | None = None) 
                 data["ingest_timestamp"], "ingest_timestamp"
             ),
             sequence_number=_decode_json_int(data["sequence_number"], "sequence_number"),
-            quality=data.get("quality"),
-            status=data.get("status"),
+            quality=_decode_optional_json_string(data.get("quality"), "quality"),
+            status=_decode_optional_json_string(data.get("status"), "status"),
         )
 
     return Schema(
@@ -763,7 +763,7 @@ def sensor_event_schema(schema_id: str = "SensorEvent") -> Schema[SensorEvent]:
         data = json.loads(payload.decode("utf-8"))
         raw = data.get("raw")
         return SensorEvent(
-            event_type=str(data["event_type"]),
+            event_type=_decode_json_string(data["event_type"], "event_type"),
             data=_json_restore(data.get("data")),
             observed_at=_decode_json_number(data["observed_at"], "observed_at"),
             identity=_sensor_identity_from_json(data.get("identity")),
@@ -794,9 +794,9 @@ def health_status_schema(schema_id: str = "HealthStatus") -> Schema[HealthStatus
     def decode(payload: bytes) -> HealthStatus:
         data = json.loads(payload.decode("utf-8"))
         return HealthStatus(
-            status=data["status"],
+            status=_decode_health_status(data["status"]),
             observed_at=_decode_json_number(data["observed_at"], "observed_at"),
-            message=data.get("message", ""),
+            message=_decode_json_string(data.get("message", ""), "message"),
             stale=_decode_json_bool(data.get("stale", False), "stale"),
             error_count=_decode_json_int(data.get("error_count", 0), "error_count"),
         )
@@ -1571,15 +1571,36 @@ def _decode_json_number(value: Any, field: str) -> float:
     raise ValueError(f"{field} must be a JSON number (finite)")
 
 
+def _decode_json_string(value: Any, field: str) -> str:
+    if isinstance(value, str):
+        return value
+    raise ValueError(f"{field} must be a JSON string")
+
+
+def _decode_optional_json_string(value: Any, field: str) -> str | None:
+    if value is None:
+        return None
+    return _decode_json_string(value, field)
+
+
+def _decode_health_status(value: Any) -> Literal["ok", "stale", "error"]:
+    status = _decode_json_string(value, "status")
+    if status in ("ok", "stale", "error"):
+        return status
+    raise ValueError("status must be one of: ok, stale, error")
+
+
 def _sensor_identity_from_json(value: Any) -> SensorIdentity:
     if not isinstance(value, Mapping):
         return SensorIdentity()
     tags = tuple(
         SensorTag(
-            name=str(tag.get("name")),
-            variant=str(tag.get("variant")),
+            name=_decode_json_string(tag.get("name"), "identity.tags[].name"),
+            variant=_decode_json_string(tag.get("variant"), "identity.tags[].variant"),
             metadata={
-                str(key): str(item)
+                _decode_json_string(key, "identity.tags[].metadata key"): _decode_json_string(
+                    item, "identity.tags[].metadata value"
+                )
                 for key, item in dict(tag.get("metadata", {})).items()
             },
         )
@@ -1602,10 +1623,10 @@ def _sensor_identity_from_json(value: Any) -> SensorIdentity:
         else SensorLocation()
     )
     return SensorIdentity(
-        id=value.get("id"),
+        id=_decode_optional_json_string(value.get("id"), "identity.id"),
         tags=tags,
         location=location,
-        group=value.get("group"),
+        group=_decode_optional_json_string(value.get("group"), "identity.group"),
     )
 
 
