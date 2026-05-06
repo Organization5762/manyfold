@@ -775,6 +775,41 @@ class ComponentTests(unittest.TestCase):
         self.assertEqual([record.value for record in records], [b"restored"])
         self.assertEqual([record.control_epoch for record in records], [10])
 
+    def test_memory_chip_does_not_reappend_during_active_resume(self) -> None:
+        manyfold = load_manyfold_package()
+        route = manyfold.route(
+            plane=manyfold.Plane.Read,
+            layer=manyfold.Layer.Logical,
+            owner=manyfold.OwnerName("demo"),
+            family=manyfold.StreamFamily("memory"),
+            stream=manyfold.StreamName("bytes"),
+            variant=manyfold.Variant.Meta,
+            schema=manyfold.Schema.bytes(name="MemoryBytes"),
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "memory.jsonl"
+            original_graph = manyfold.Graph()
+            original_memory = manyfold.Memory(path)
+            original_subscription = original_memory.remember(
+                original_graph, route, replay_latest=False
+            )
+            original_graph.publish(route, b"restored", control_epoch=10)
+            original_subscription.dispose()
+
+            resumed_graph = manyfold.Graph()
+            resumed_memory = manyfold.Memory(path)
+            resumed_subscription = resumed_memory.remember(
+                resumed_graph, route, replay_latest=False
+            )
+            resumed_memory.resume(resumed_graph, route)
+            resumed_subscription.dispose()
+
+            records = manyfold.Memory(path).records(route)
+
+        self.assertEqual([record.value for record in records], [b"restored"])
+        self.assertEqual([record.control_epoch for record in records], [10])
+
     def test_memory_chip_seeds_duplicate_filter_from_existing_file(self) -> None:
         manyfold = load_manyfold_package()
         route = manyfold.route(

@@ -412,6 +412,7 @@ class Memory:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._append_lock = threading.Lock()
+        self._resuming: set[tuple[str, str, int | None]] = set()
         self._seen: set[tuple[str, int, str, int | None]] = set(
             self._event_key(record) for record in self._iter_raw_records()
         )
@@ -437,6 +438,13 @@ class Memory:
                     payload_b64,
                     closed.control_epoch,
                 )
+                resume_key = (
+                    closed.route.display(),
+                    payload_b64,
+                    closed.control_epoch,
+                )
+                if resume_key in self._resuming:
+                    return
                 if event_key in self._seen:
                     return
                 self._seen.add(event_key)
@@ -464,22 +472,33 @@ class Memory:
         """Publish remembered values for ``route_ref`` into ``graph``."""
         records = self.records(route_ref)
         for record in records:
-            envelope = graph.publish(
-                route_ref,
-                record.value,
-                control_epoch=record.control_epoch,
-            )
             payload_b64 = base64.b64encode(route_ref.schema.encode(record.value)).decode(
                 "ascii"
             )
-            self._seen.add(
-                (
-                    envelope.closed.route.display(),
-                    envelope.closed.seq_source,
-                    payload_b64,
-                    envelope.closed.control_epoch,
-                )
+            resume_key = (
+                route_ref.display(),
+                payload_b64,
+                record.control_epoch,
             )
+            with self._append_lock:
+                self._resuming.add(resume_key)
+            try:
+                envelope = graph.publish(
+                    route_ref,
+                    record.value,
+                    control_epoch=record.control_epoch,
+                )
+                self._seen.add(
+                    (
+                        envelope.closed.route.display(),
+                        envelope.closed.seq_source,
+                        payload_b64,
+                        envelope.closed.control_epoch,
+                    )
+                )
+            finally:
+                with self._append_lock:
+                    self._resuming.discard(resume_key)
         return records
 
     def _iter_records(self, route_ref: TypedRoute[T]) -> Iterator[MemoryRecord[T]]:
