@@ -25,6 +25,7 @@ PACKAGE_DIR = Path(__file__).resolve().parent
 REPO_ROOT = PACKAGE_DIR.parent.parent
 RFC_PATH = REPO_ROOT / "docs" / "rfc" / "wiregraph_rfc_rev2.md"
 CHECKLIST_PATH = REPO_ROOT / "docs" / "rfc" / "implementation_checklist.md"
+CHECKBOX_STATES = frozenset({" ", "x"})
 
 CHECKLIST_STATUS = {
     "6": (
@@ -218,7 +219,13 @@ def _parse_section_heading(line: str) -> SectionStatus | None:
 
 
 def _parse_appendix_item(line: str) -> AppendixStatus | None:
-    title = line.split("] ", 1)[-1].strip()
+    marker, separator, title = line.partition("] ")
+    if separator == "":
+        return None
+    checkbox = marker.removeprefix("- [")
+    if checkbox not in CHECKBOX_STATES:
+        return None
+    title = title.strip()
     status = APPENDIX_STATUS.get(title)
     if status is None:
         return None

@@ -67,6 +67,27 @@ class RfcChecklistGenTests(unittest.TestCase):
             generator._parse_section_heading("## Notes. Not a numbered section")
         )
         self.assertIsNone(generator._parse_appendix_item("- [ ] Unknown appendix item"))
+        self.assertIsNone(
+            generator._parse_appendix_item("- [?] Query plane modeled as streams")
+        )
+        self.assertIsNone(
+            generator._parse_appendix_item("- [ ]Query plane modeled as streams")
+        )
+
+    def test_parse_appendix_item_accepts_known_checkbox_states(self) -> None:
+        generator = load_generator()
+
+        open_item = generator._parse_appendix_item(
+            "- [ ] Retry, filtering, backpressure, overflow, and rate matching"
+        )
+        complete_item = generator._parse_appendix_item(
+            "- [x] Query plane modeled as streams"
+        )
+
+        assert open_item is not None
+        assert complete_item is not None
+        self.assertEqual(open_item.checkbox, " ")
+        self.assertEqual(complete_item.checkbox, "x")
 
     def test_recent_operator_and_flow_control_statuses_are_descriptive(self) -> None:
         generator = load_generator()
