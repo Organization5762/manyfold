@@ -4467,6 +4467,14 @@ class Graph:
             if route_display is not None and snapshot.route_display != route_display:
                 continue
             snapshots.append(snapshot)
+        snapshots.sort(
+            key=lambda snapshot: (
+                snapshot.route_display,
+                snapshot.scheduler_epoch,
+                snapshot.not_before_epoch if snapshot.not_before_epoch is not None else -1,
+                snapshot.attempt_count,
+            )
+        )
         return iter(tuple(snapshots))
 
     def topology(self) -> Iterator[tuple[str, str]]:

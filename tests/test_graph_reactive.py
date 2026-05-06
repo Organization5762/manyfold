@@ -4889,6 +4889,30 @@ class GraphReactiveTests(unittest.TestCase):
         graph.run_scheduler(epoch=7)
         self.assertEqual(tuple(graph.scheduler_snapshot(binding.request)), ())
 
+    def test_scheduler_snapshot_orders_pending_writes_by_route_display(self) -> None:
+        graph_module = load_graph_module()
+        alpha = graph_module.WriteBindings.logical(
+            graph_module.OwnerName("alpha"),
+            graph_module.StreamFamily("flow"),
+            graph_module.StreamName("target"),
+            graph_module.Schema.bytes(name="PumpFlow"),
+        )
+        zeta = graph_module.WriteBindings.logical(
+            graph_module.OwnerName("zeta"),
+            graph_module.StreamFamily("flow"),
+            graph_module.StreamName("target"),
+            graph_module.Schema.bytes(name="PumpFlow"),
+        )
+        graph = graph_module.Graph()
+
+        graph.publish_guarded(zeta, b"9", not_before_epoch=3)
+        graph.publish_guarded(alpha, b"1", not_before_epoch=2)
+
+        self.assertEqual(
+            [snapshot.route_display for snapshot in graph.scheduler_snapshot()],
+            [alpha.request.display(), zeta.request.display()],
+        )
+
     def test_publish_guarded_retry_policy_requires_ack_route(self) -> None:
         graph_module = load_graph_module()
         request = graph_module.route(
