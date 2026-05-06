@@ -18,6 +18,9 @@ package entrypoints and then report that they are missing from `PATH`; the
 project's Python tools live in the `uv` environment and the test suite uses
 `unittest`.
 
+After editing `src/` Rust extension code, run `uv sync --reinstall-package manyfold`
+before Python tests that exercise the native module.
+
 ## Verification
 
 Use the smallest command that covers the changed surface:
