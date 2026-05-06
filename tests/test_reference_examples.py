@@ -172,6 +172,7 @@ class ReferenceExampleSuiteTests(unittest.TestCase):
         runtime_init_path = (
             Path(__file__).resolve().parents[1] / "python" / "manyfold" / "__init__.py"
         )
+        manyfold = load_manyfold_package()
         stub_module = ast.parse(stub_path.read_text(encoding="utf-8"))
         runtime_init_module = ast.parse(runtime_init_path.read_text(encoding="utf-8"))
 
@@ -191,6 +192,7 @@ class ReferenceExampleSuiteTests(unittest.TestCase):
                 )
             self.fail("module does not define __all__")
 
+        self.assertIsInstance(manyfold.__all__, tuple)
         self.assertEqual(exports_from(stub_module), exports_from(runtime_init_module))
         self.assertEqual(
             exports_from(runtime_init_module),
