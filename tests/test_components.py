@@ -530,6 +530,17 @@ class ComponentTests(unittest.TestCase):
             ("node-a", 3, True),
         )
 
+    def test_consensus_json_schemas_reject_string_booleans(self) -> None:
+        manyfold = load_manyfold_package()
+        routes = manyfold.Consensus.default_routes()
+
+        with self.assertRaisesRegex(ValueError, "JSON boolean"):
+            routes.vote_response.schema.decode(b'[3,"node-a","node-b","false"]')
+        with self.assertRaisesRegex(ValueError, "JSON boolean"):
+            routes.quorum.schema.decode(b'[3,"node-a",["node-a"],"true"]')
+        with self.assertRaisesRegex(ValueError, "JSON boolean"):
+            routes.leader_state.schema.decode(b'["node-a",3,"true"]')
+
     def test_consensus_append_entry_schema_encodes_compact_json_tuple(self) -> None:
         manyfold = load_manyfold_package()
         route = manyfold.Consensus.default_routes().append_entries

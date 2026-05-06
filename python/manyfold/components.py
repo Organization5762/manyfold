@@ -1014,7 +1014,7 @@ def _decode_vote(payload: bytes) -> Vote:
     text = payload.decode("utf-8")
     if text.startswith("["):
         term, candidate, voter, granted = json.loads(text)
-        return (int(term), str(candidate), str(voter), bool(granted))
+        return (int(term), str(candidate), str(voter), _decode_json_bool(granted))
     term_text, candidate, voter, granted_text = text.split("|", 3)
     return (int(term_text), candidate, voter, granted_text == "1")
 
@@ -1036,7 +1036,7 @@ def _decode_quorum(payload: bytes) -> QuorumState:
             int(term),
             str(candidate),
             tuple(str(voter) for voter in voters),
-            bool(granted),
+            _decode_json_bool(granted),
         )
     term_text, candidate, voters_text, granted_text = text.split("|", 3)
     voters = tuple(voter for voter in voters_text.split(",") if voter)
@@ -1093,9 +1093,15 @@ def _decode_leader_state(payload: bytes) -> LeaderState:
     text = payload.decode("utf-8")
     if text.startswith("["):
         leader, term, committed = json.loads(text)
-        return (str(leader), int(term), bool(committed))
+        return (str(leader), int(term), _decode_json_bool(committed))
     leader, term_text, committed_text = text.split("|", 2)
     return (leader, int(term_text), committed_text == "1")
+
+
+def _decode_json_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    raise ValueError("JSON boolean field must be true or false")
 
 
 def _encode_json_tuple(value: tuple[Any, ...]) -> bytes:
