@@ -790,7 +790,7 @@ def health_status_schema(schema_id: str = "HealthStatus") -> Schema[HealthStatus
             status=data["status"],
             observed_at=float(data["observed_at"]),
             message=data.get("message", ""),
-            stale=bool(data.get("stale", False)),
+            stale=_decode_json_bool(data.get("stale", False), "stale"),
             error_count=int(data.get("error_count", 0)),
         )
 
@@ -1531,6 +1531,12 @@ def _json_restore(value: Any) -> Any:
     if isinstance(value, list):
         return [_json_restore(item) for item in value]
     return value
+
+
+def _decode_json_bool(value: Any, field: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    raise ValueError(f"{field} must be a JSON boolean")
 
 
 def _sensor_identity_from_json(value: Any) -> SensorIdentity:

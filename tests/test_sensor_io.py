@@ -237,6 +237,16 @@ class SensorIoTests(unittest.TestCase):
             b'"stale":false,"status":"ok"}',
         )
 
+    def test_health_status_schema_rejects_string_stale_flag(self) -> None:
+        manyfold = load_manyfold_package()
+        health_schema = manyfold.health_status_schema()
+
+        with self.assertRaisesRegex(ValueError, "stale must be a JSON boolean"):
+            health_schema.decode(
+                b'{"error_count":0,"message":"ready","observed_at":2.0,'
+                b'"stale":"false","status":"ok"}'
+            )
+
     def test_sensor_sample_schema_rejects_invalid_value_base64(self) -> None:
         manyfold = load_manyfold_package()
         schema = manyfold.sensor_sample_schema(_int_schema(manyfold, "Temp"))
