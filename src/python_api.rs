@@ -1544,6 +1544,35 @@ impl Graph {
         Ok(())
     }
 
+    fn disconnect(&self, source: &Bound<'_, PyAny>, sink: &Bound<'_, PyAny>) -> PyResult<bool> {
+        let source_route = if let Ok(route) = source.extract::<RouteRef>() {
+            route.inner
+        } else if let Ok(mailbox) = source.extract::<Mailbox>() {
+            let graph = lock_graph(&self.state)?;
+            graph
+                .mailboxes
+                .get(&mailbox.name)
+                .map(|mailbox| mailbox.egress.clone())
+                .ok_or_else(|| PyKeyError::new_err("unknown mailbox"))?
+        } else {
+            return Err(PyTypeError::new_err("source must be a RouteRef or Mailbox"));
+        };
+        let sink_route = if let Ok(route) = sink.extract::<RouteRef>() {
+            route.inner
+        } else if let Ok(mailbox) = sink.extract::<Mailbox>() {
+            let graph = lock_graph(&self.state)?;
+            graph
+                .mailboxes
+                .get(&mailbox.name)
+                .map(|mailbox| mailbox.ingress.clone())
+                .ok_or_else(|| PyKeyError::new_err("unknown mailbox"))?
+        } else {
+            return Err(PyTypeError::new_err("sink must be a RouteRef or Mailbox"));
+        };
+        let mut graph = lock_graph(&self.state)?;
+        Ok(graph.disconnect(&source_route, &sink_route))
+    }
+
     fn install(&self, loop_ref: ControlLoop) -> PyResult<()> {
         let mut graph = lock_graph(&self.state)?;
         graph

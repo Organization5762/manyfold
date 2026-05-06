@@ -1398,12 +1398,14 @@ class GraphConnection:
         name: str,
         subscriptions: Sequence[SubscriptionLike] = (),
         nodes: Sequence[str] = (),
+        edges: Sequence[tuple[RouteLike, RouteLike]] = (),
         connections: Sequence[GraphConnection] = (),
     ) -> None:
         self._graph = graph
         self.name = name
         self._subscriptions = tuple(subscriptions)
         self._nodes = tuple(nodes)
+        self._edges = tuple(edges)
         self._connections = tuple(connections)
         self._removed = False
 
@@ -1418,6 +1420,8 @@ class GraphConnection:
             subscription.dispose()
         for node in self._nodes:
             self._graph._diagram_nodes.pop(node, None)
+        for edge_source, edge_sink in self._edges:
+            self._graph.disconnect(source=edge_source, sink=edge_sink)
 
     def dispose(self) -> None:
         """Compatibility alias for callers still expecting disposable handles."""
@@ -3597,16 +3601,21 @@ class Graph:
         def publish(value: Any) -> None:
             self.publish(target, value)
 
-        subscription = self._pipeline_value_observable(
-            source,
-            replay_latest=replay_latest,
-            subscriber_id=subscriber_id,
-            thread_placement=thread_placement,
-        ).subscribe(publish)
+        try:
+            subscription = self._pipeline_value_observable(
+                source,
+                replay_latest=replay_latest,
+                subscriber_id=subscriber_id,
+                thread_placement=thread_placement,
+            ).subscribe(publish)
+        except Exception:
+            self.disconnect(source=source, sink=target)
+            raise
         return GraphConnection(
             self,
             name=connection_name,
             subscriptions=(subscription,),
+            edges=((source, target),),
         )
 
     def _connect_transform_pipeline(
@@ -4053,6 +4062,32 @@ class Graph:
             if isinstance(source, NativeMailbox)
             else self._coerce_route_ref(source),
         )
+
+    def disconnect(
+        self,
+        *,
+        source: ConnectableTarget,
+        sink: ConnectableTarget,
+    ) -> bool:
+        """Remove one topology edge between two routes or mailbox endpoints."""
+        native_source = (
+            source
+            if isinstance(source, NativeMailbox)
+            else self._coerce_route_ref(source)
+        )
+        native_sink = (
+            sink if isinstance(sink, NativeMailbox) else self._coerce_route_ref(sink)
+        )
+        removed = self._graph.disconnect(native_source, native_sink)
+        if removed:
+            self._emit_debug_event(
+                "topology",
+                f"disconnected {self._connectable_key(source, edge_role='source')} -> {self._connectable_key(sink, edge_role='sink')}",
+                None
+                if isinstance(source, NativeMailbox)
+                else self._coerce_route_ref(source),
+            )
+        return removed
 
     def capacitor(
         self,

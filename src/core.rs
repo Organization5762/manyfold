@@ -900,6 +900,18 @@ impl GraphCore {
         self.try_drain_mailbox_for_source(source);
     }
 
+    pub fn disconnect(&mut self, source: &RouteRefCore, sink: &RouteRefCore) -> bool {
+        let Some(index) = self
+            .edges
+            .iter()
+            .position(|(left, right)| left == source && right == sink)
+        else {
+            return false;
+        };
+        self.edges.remove(index);
+        true
+    }
+
     fn direct_write(
         &mut self,
         route: &RouteRefCore,

@@ -277,6 +277,75 @@ class GraphReactiveTests(unittest.TestCase):
         connection.remove()
         self.assertEqual(seen, [50])
 
+    def test_route_pipeline_remove_cleans_up_topology_edge(self) -> None:
+        graph_module = load_graph_module()
+        source = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("routed_source"),
+            variant=graph_module.Variant.Event,
+            schema=int_schema(graph_module, "RoutedSourceNumber"),
+        )
+        target = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Internal,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("routed_target"),
+            variant=graph_module.Variant.Event,
+            schema=int_schema(graph_module, "RoutedTargetNumber"),
+        )
+        graph = graph_module.Graph()
+
+        connection = graph.observe(source, replay_latest=False).connect(target)
+        self.assertEqual(
+            list(graph.topology()),
+            [(source.route_ref.display(), target.route_ref.display())],
+        )
+
+        connection.remove()
+
+        self.assertEqual(list(graph.topology()), [])
+
+    def test_route_pipeline_disconnects_topology_when_latest_replay_fails(self) -> None:
+        graph_module = load_graph_module()
+        source = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("failing_route_source"),
+            variant=graph_module.Variant.Event,
+            schema=int_schema(graph_module, "FailingRouteSourceNumber"),
+        )
+        target = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Internal,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("failing_route_target"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema(
+                schema_id="FailingRouteTargetNumber",
+                version=1,
+                encode=lambda _value: (_ for _ in ()).throw(
+                    RuntimeError("target rejected latest")
+                ),
+                decode=lambda payload: int(payload.decode("ascii")),
+            ),
+        )
+        graph = graph_module.Graph()
+
+        graph.publish(source, 1)
+
+        with self.assertRaisesRegex(RuntimeError, "target rejected latest"):
+            graph.observe(source).connect(target)
+
+        self.assertEqual(list(graph.topology()), [])
+        self.assertEqual(graph.subscribers(source), 0)
+
     def test_callback_pipeline_removes_node_when_latest_replay_fails(self) -> None:
         graph_module = load_graph_module()
         route = graph_module.route(

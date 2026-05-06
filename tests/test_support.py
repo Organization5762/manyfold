@@ -771,6 +771,17 @@ def install_manyfold_rust_stub() -> None:
             self._edges.append((source.display(), sink.display()))
             return None
 
+        def disconnect(self, source, sink):
+            if hasattr(source, "egress"):
+                source = source.egress._route
+            if hasattr(sink, "ingress"):
+                sink = sink.ingress._route
+            edge = (source.display(), sink.display())
+            if edge not in self._edges:
+                return False
+            self._edges.remove(edge)
+            return True
+
         def install(self, control_loop):
             self._loops[control_loop.name] = control_loop
 
