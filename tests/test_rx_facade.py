@@ -63,6 +63,12 @@ class RxFacadeTests(unittest.TestCase):
     def test_private_subject_submodules_export_only_subject_classes(self) -> None:
         load_manyfold_package()
         expected_exports = {
+            "manyfold._rx.subject": (
+                "AsyncSubject",
+                "BehaviorSubject",
+                "ReplaySubject",
+                "Subject",
+            ),
             "manyfold._rx.subject.asyncsubject": ("AsyncSubject",),
             "manyfold._rx.subject.behaviorsubject": ("BehaviorSubject",),
             "manyfold._rx.subject.replaysubject": ("ReplaySubject",),
