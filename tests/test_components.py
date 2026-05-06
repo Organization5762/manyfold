@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import importlib
 import json
 import tempfile
 import threading
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from tests.test_support import load_manyfold_package
 
@@ -126,6 +128,25 @@ class ComponentTests(unittest.TestCase):
                 (("__value__.bin",), b"nested"),
             ],
         )
+
+    def test_file_store_failed_replace_preserves_previous_value(self) -> None:
+        manyfold = load_manyfold_package()
+        components = importlib.import_module("manyfold.components")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            keyspace = manyfold.FileStore(root).prefix("safe")
+            keyspace.put("latest", value=b"old")
+
+            with patch.object(components.os, "replace", side_effect=OSError("full")):
+                with self.assertRaisesRegex(OSError, "full"):
+                    keyspace.put("latest", value=b"new")
+
+            latest = keyspace.get("latest")
+            temporary_files = tuple(root.rglob("*.tmp"))
+
+        self.assertEqual(latest, b"old")
+        self.assertEqual(temporary_files, ())
 
     def test_event_log_appends_commits_and_replays_typed_values(self) -> None:
         manyfold = load_manyfold_package()
@@ -333,6 +354,51 @@ class ComponentTests(unittest.TestCase):
         assert latest is not None
         self.assertIsNone(latest.value)
 
+    def test_snapshot_store_serializes_concurrent_writes_and_publishes(self) -> None:
+        manyfold = load_manyfold_package()
+        schema = manyfold.Schema(
+            schema_id="OrderedSnapshot",
+            version=1,
+            encode=lambda value: str(value).encode("ascii"),
+            decode=lambda payload: int(payload.decode("ascii")),
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            keyspace = manyfold.FileStore(temp_dir).prefix("state")
+            snapshot = manyfold.SnapshotStore("state_snapshot", keyspace, schema)
+            graph = manyfold.Graph()
+            latest_values: list[int] = []
+            first_write_entered = threading.Event()
+            original_write = snapshot.write
+
+            def delayed_write(value: int) -> None:
+                if value == 1:
+                    first_write_entered.set()
+                    time.sleep(0.05)
+                original_write(value)
+
+            snapshot.write = delayed_write  # type: ignore[method-assign]
+            store_subscription = snapshot.install(graph)
+            latest_subscription = graph.observe(
+                snapshot.output(), replay_latest=False
+            ).subscribe(lambda envelope: latest_values.append(envelope.value))
+            first = threading.Thread(target=graph.publish, args=(snapshot.input(), 1))
+            second = threading.Thread(target=graph.publish, args=(snapshot.input(), 2))
+
+            first.start()
+            self.assertTrue(first_write_entered.wait(timeout=1.0))
+            second.start()
+            first.join(timeout=1.0)
+            second.join(timeout=1.0)
+            store_subscription.dispose()
+            latest_subscription.dispose()
+            durable_latest = snapshot.latest()
+
+        self.assertFalse(first.is_alive())
+        self.assertFalse(second.is_alive())
+        self.assertEqual(latest_values, [1, 2])
+        self.assertEqual(durable_latest, 2)
+
     def test_consensus_component_runs_default_leader_election(self) -> None:
         manyfold = load_manyfold_package()
         graph = manyfold.Graph()
@@ -384,6 +450,29 @@ class ComponentTests(unittest.TestCase):
             (3, "node|a", ("node,b", "node-c", "node|a"), True),
         )
         self.assertEqual(consensus.latest_leader(), ("node|a", 3, True))
+
+    def test_consensus_votes_do_not_leak_between_candidates(self) -> None:
+        manyfold = load_manyfold_package()
+        graph = manyfold.Graph()
+        consensus = manyfold.Consensus.install(graph)
+        heartbeats: list[tuple[int, str]] = []
+        subscription = graph.observe(
+            consensus.routes.heartbeat,
+            replay_latest=False,
+        ).subscribe(lambda envelope: heartbeats.append(envelope.value))
+
+        consensus.tick(1)
+        consensus.tick(2)
+        graph.publish(consensus.routes.vote_response, (3, "node-b", "node-b", True))
+        graph.publish(consensus.routes.vote_response, (3, "node-b", "node-c", True))
+        subscription.dispose()
+
+        self.assertEqual(consensus.latest_leader(), ("node-a", 3, True))
+        self.assertEqual(
+            consensus.latest_quorum(),
+            (3, "node-b", ("node-b", "node-c"), True),
+        )
+        self.assertEqual(heartbeats, [(3, "node-a")])
 
     def test_consensus_schemas_read_legacy_delimited_payloads(self) -> None:
         manyfold = load_manyfold_package()

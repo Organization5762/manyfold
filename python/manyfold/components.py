@@ -5,6 +5,8 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import os
+import tempfile
 import threading
 from dataclasses import dataclass
 from json import JSONDecodeError
@@ -36,6 +38,7 @@ QuorumState = tuple[int, str, tuple[str, ...], bool]
 AppendEntry = tuple[int, str]
 ReplicatedLog = tuple[AppendEntry, ...]
 LeaderState = tuple[str, int, bool]
+_VoteLedger = dict[tuple[int, str], frozenset[str]]
 
 
 @dataclass(frozen=True)
@@ -118,7 +121,7 @@ class Keyspace:
         """Store bytes under a keyspace-relative key."""
         path = self._value_path(self.key(*parts))
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(bytes(value))
+        _write_bytes_atomic(path, bytes(value))
 
     def get(self, *parts: KeyPart) -> bytes | None:
         """Return bytes for a keyspace-relative key, if present."""
@@ -292,6 +295,7 @@ class SnapshotStore(Generic[T]):
         self.keyspace = keyspace
         self.schema = schema
         self.key = str(key)
+        self._write_lock = threading.RLock()
         self.routes = SnapshotStoreRoutes(
             write=_component_route(
                 plane=Plane.Write,
@@ -327,34 +331,38 @@ class SnapshotStore(Generic[T]):
         """Store input values, then publish the latest output."""
 
         def on_next(envelope: TypedEnvelope[T]) -> None:
-            self.write(envelope.value)
-            graph.publish(
-                self.routes.latest,
-                envelope.value,
-                control_epoch=envelope.closed.control_epoch,
-            )
+            with self._write_lock:
+                self.write(envelope.value)
+                graph.publish(
+                    self.routes.latest,
+                    envelope.value,
+                    control_epoch=envelope.closed.control_epoch,
+                )
 
         return graph.observe(self.routes.write, replay_latest=False).subscribe(on_next)
 
     def write(self, value: T) -> None:
         """Store one latest value without publishing to a graph."""
-        self.keyspace.put(self.key, value=self.schema.encode(value))
+        with self._write_lock:
+            self.keyspace.put(self.key, value=self.schema.encode(value))
 
     def latest(self) -> T | None:
         """Return the durable latest value, if present."""
-        payload = self.keyspace.get(self.key)
-        if payload is None:
-            return None
-        return self.schema.decode(payload)
+        with self._write_lock:
+            payload = self.keyspace.get(self.key)
+            if payload is None:
+                return None
+            return self.schema.decode(payload)
 
     def publish_latest(self, graph: Graph) -> T | None:
         """Publish the durable latest value to the latest output route."""
-        payload = self.keyspace.get(self.key)
-        if payload is None:
-            return None
-        value = self.schema.decode(payload)
-        graph.publish(self.routes.latest, value)
-        return value
+        with self._write_lock:
+            payload = self.keyspace.get(self.key)
+            if payload is None:
+                return None
+            value = self.schema.decode(payload)
+            graph.publish(self.routes.latest, value)
+            return value
 
 
 @dataclass(frozen=True)
@@ -587,6 +595,7 @@ class Consensus:
         self.quorum_size = len(nodes) // 2 + 1
         self.election_timeout_ticks = election_timeout_ticks
         self.routes = self.default_routes(owner)
+        self._announced_quorums: set[tuple[int, str]] = set()
         self._installed = False
 
     @classmethod
@@ -728,7 +737,7 @@ class Consensus:
         )
         self.graph.stateful_map(
             routes.vote_response,
-            initial_state=frozenset(),
+            initial_state={},
             step=self._accumulate_votes,
             output=routes.quorum,
         )
@@ -746,7 +755,7 @@ class Consensus:
                 heartbeat[0],
                 quorum[3] and quorum[0] == heartbeat[0] and quorum[1] == heartbeat[1],
             ),
-        ).subscribe(lambda state: self.graph.publish(routes.leader_state, state))
+        ).subscribe(self._publish_confirmed_leader_state)
         self.graph.observe(routes.request_vote, replay_latest=False).subscribe(
             self._on_request_vote
         )
@@ -795,16 +804,19 @@ class Consensus:
 
     def _accumulate_votes(
         self,
-        voters: frozenset[str],
+        ledger: _VoteLedger,
         vote_value: Vote,
-    ) -> tuple[frozenset[str], QuorumState]:
+    ) -> tuple[_VoteLedger, QuorumState]:
         term, candidate, voter, granted = vote_value
-        next_voters = voters
-        if term == self.term and candidate == self.candidate_id and granted:
-            next_voters = voters | {voter}
+        election = (term, candidate)
+        voters = ledger.get(election, frozenset())
+        next_voters = voters | {voter} if granted else voters
+        next_ledger = ledger
+        if next_voters != voters:
+            next_ledger = {**ledger, election: next_voters}
         stable_voters = tuple(sorted(next_voters))
         return (
-            next_voters,
+            next_ledger,
             (term, candidate, stable_voters, len(stable_voters) >= self.quorum_size),
         )
 
@@ -821,8 +833,15 @@ class Consensus:
 
     def _become_leader_on_quorum(self, quorum: TypedEnvelope[QuorumState]) -> None:
         term, candidate, _voters, has_quorum = quorum.value
-        if has_quorum:
+        election = (term, candidate)
+        is_self_election = term == self.term and candidate == self.candidate_id
+        if has_quorum and is_self_election and election not in self._announced_quorums:
+            self._announced_quorums.add(election)
             self.graph.publish(self.routes.heartbeat, (term, candidate))
+
+    def _publish_confirmed_leader_state(self, state: LeaderState) -> None:
+        if state[2]:
+            self.graph.publish(self.routes.leader_state, state)
 
 
 def _component_route(
@@ -885,6 +904,28 @@ def _is_plain_int(value: Any) -> bool:
 
 def _format_log_index(index: int) -> str:
     return f"{index:020d}"
+
+
+def _write_bytes_atomic(path: Path, value: bytes) -> None:
+    with tempfile.NamedTemporaryFile(
+        dir=path.parent,
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        delete=False,
+    ) as handle:
+        temporary_path = Path(handle.name)
+        try:
+            handle.write(value)
+            handle.flush()
+            os.fsync(handle.fileno())
+        except BaseException:
+            temporary_path.unlink(missing_ok=True)
+            raise
+    try:
+        os.replace(temporary_path, path)
+    except BaseException:
+        temporary_path.unlink(missing_ok=True)
+        raise
 
 
 def _heartbeat_schema() -> Schema[Heartbeat]:
