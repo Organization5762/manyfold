@@ -46,6 +46,24 @@ class EmbeddedProfileTests(unittest.TestCase):
             sensor.validate(),
         )
 
+    def test_embedded_module_exports_intentional_profile_surface(self) -> None:
+        manyfold = load_manyfold_package()
+        embedded = sys.modules["manyfold.embedded"]
+
+        self.assertEqual(
+            embedded.__all__,
+            [
+                "EmbeddedBulkSensor",
+                "EmbeddedDeviceProfile",
+                "EmbeddedRuntimeRules",
+                "EmbeddedScalarSensor",
+                "FirmwareAgentProfile",
+            ],
+        )
+        for name in embedded.__all__:
+            with self.subTest(name=name):
+                self.assertIs(getattr(embedded, name), getattr(manyfold, name))
+
     def test_bulk_sensor_rejects_metadata_on_bulk_layer(self) -> None:
         manyfold = load_manyfold_package()
         sensor = manyfold.EmbeddedBulkSensor(
