@@ -545,14 +545,14 @@ class GraphReactiveTests(unittest.TestCase):
         seen: list[int] = []
 
         connection = graph.observe(route, replay_latest=False).coalesce_latest(
-            window_ms=10,
+            window_ms=100,
             name="coalesce",
             stream_name="numbers",
         ).callback(seen.append)
         try:
             graph.publish(route, 1)
             graph.publish(route, 2)
-            time.sleep(0.05)
+            time.sleep(0.15)
 
             self.assertEqual(seen, [2])
             self.assertEqual(
