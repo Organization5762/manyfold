@@ -4487,21 +4487,22 @@ class Graph:
         metadata_items = tuple(
             sorted((str(key), str(value)) for key, value in (metadata or {}).items())
         )
-        for route_ref in tuple(input_routes) + tuple(output_routes):
-            coerced = self._coerce_route_ref(route_ref)
-            self._diagram_routes[coerced.display()] = coerced
+        input_route_refs = tuple(self._coerce_route_ref(route) for route in input_routes)
+        output_route_refs = tuple(self._coerce_route_ref(route) for route in output_routes)
+        for route_ref in input_route_refs + output_route_refs:
+            self._diagram_routes[route_ref.display()] = route_ref
         node = DiagramNode(
             name=name,
-            input_routes=tuple(self._route_key(route) for route in input_routes),
-            output_routes=tuple(self._route_key(route) for route in output_routes),
+            input_routes=tuple(route.display() for route in input_route_refs),
+            output_routes=tuple(route.display() for route in output_route_refs),
             group=group,
             metadata=metadata_items,
             thread_placement=thread_placement,
         )
         self._diagram_nodes[name] = node
         self._remember_active_context_routes(
-            input_routes=input_routes,
-            output_routes=output_routes,
+            input_routes=input_route_refs,
+            output_routes=output_route_refs,
         )
         self._remember_active_context_node(name)
         return node

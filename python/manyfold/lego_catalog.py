@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+from operator import attrgetter
 
 
 @dataclass(frozen=True)
@@ -23,6 +24,8 @@ class Lego:
     provides: tuple[str, ...] = ()
     knobs: tuple[str, ...] = ()
 
+
+_LEGO_NAME_KEY = attrgetter("name")
 
 _LEGOS = (
     # Atoms.
@@ -276,7 +279,7 @@ if _UNKNOWN_REQUIREMENTS:
     raise RuntimeError(f"lego catalog references unknown dependencies: {unknown}")
 
 # Query helpers return immutable tuples, so precompute the small static indexes once.
-_ALL_LEGOS = tuple(sorted(_LEGOS, key=lambda lego: lego.name))
+_ALL_LEGOS = tuple(sorted(_LEGOS, key=_LEGO_NAME_KEY))
 _DEPENDENCIES_BY_NAME = {
     lego.name: tuple(_BY_NAME[requirement] for requirement in lego.requires)
     for lego in _LEGOS
@@ -292,15 +295,15 @@ for lego in _LEGOS:
     _legos_by_layer.setdefault(lego.layer, []).append(lego)
 
 _DEPENDENTS_BY_NAME = {
-    name: tuple(sorted(dependents, key=lambda lego: lego.name))
+    name: tuple(sorted(dependents, key=_LEGO_NAME_KEY))
     for name, dependents in _dependents_by_name.items()
 }
 _LEGOS_BY_ROLE = {
-    role: tuple(sorted(legos, key=lambda lego: lego.name))
+    role: tuple(sorted(legos, key=_LEGO_NAME_KEY))
     for role, legos in _legos_by_role.items()
 }
 _LEGOS_BY_LAYER = {
-    layer: tuple(sorted(legos, key=lambda lego: lego.name))
+    layer: tuple(sorted(legos, key=_LEGO_NAME_KEY))
     for layer, legos in _legos_by_layer.items()
 }
 del _dependents_by_name, _legos_by_layer, _legos_by_role
