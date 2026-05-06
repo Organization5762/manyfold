@@ -978,7 +978,7 @@ def _decode_heartbeat(payload: bytes) -> Heartbeat:
     text = payload.decode("utf-8")
     if text.startswith("["):
         term, leader = json.loads(text)
-        return (int(term), str(leader))
+        return (_decode_json_int(term), str(leader))
     term_text, leader = text.split("|", 1)
     return (int(term_text), leader)
 
@@ -996,7 +996,12 @@ def _decode_request_vote(payload: bytes) -> RequestVote:
     text = payload.decode("utf-8")
     if text.startswith("["):
         term, candidate, last_log_index, last_log_term = json.loads(text)
-        return (int(term), str(candidate), int(last_log_index), int(last_log_term))
+        return (
+            _decode_json_int(term),
+            str(candidate),
+            _decode_json_int(last_log_index),
+            _decode_json_int(last_log_term),
+        )
     term_text, candidate, index_text, term_at_index_text = text.split("|", 3)
     return (int(term_text), candidate, int(index_text), int(term_at_index_text))
 
@@ -1014,7 +1019,12 @@ def _decode_vote(payload: bytes) -> Vote:
     text = payload.decode("utf-8")
     if text.startswith("["):
         term, candidate, voter, granted = json.loads(text)
-        return (int(term), str(candidate), str(voter), _decode_json_bool(granted))
+        return (
+            _decode_json_int(term),
+            str(candidate),
+            str(voter),
+            _decode_json_bool(granted),
+        )
     term_text, candidate, voter, granted_text = text.split("|", 3)
     return (int(term_text), candidate, voter, granted_text == "1")
 
@@ -1033,7 +1043,7 @@ def _decode_quorum(payload: bytes) -> QuorumState:
     if text.startswith("["):
         term, candidate, voters, granted = json.loads(text)
         return (
-            int(term),
+            _decode_json_int(term),
             str(candidate),
             tuple(str(voter) for voter in voters),
             _decode_json_bool(granted),
@@ -1056,7 +1066,7 @@ def _decode_append_entry(payload: bytes) -> AppendEntry:
     text = payload.decode("utf-8")
     if text.startswith("["):
         index, command = json.loads(text)
-        return (int(index), str(command))
+        return (_decode_json_int(index), str(command))
     index_text, command = text.split("|", 1)
     return (int(index_text), command)
 
@@ -1076,7 +1086,9 @@ def _decode_replicated_log(payload: bytes) -> ReplicatedLog:
         return ()
     if text.startswith("["):
         entries = json.loads(text)
-        return tuple((int(index), str(command)) for index, command in entries)
+        return tuple(
+            (_decode_json_int(index), str(command)) for index, command in entries
+        )
     return tuple(_decode_append_entry(line.encode("utf-8")) for line in text.splitlines())
 
 
@@ -1093,7 +1105,7 @@ def _decode_leader_state(payload: bytes) -> LeaderState:
     text = payload.decode("utf-8")
     if text.startswith("["):
         leader, term, committed = json.loads(text)
-        return (str(leader), int(term), _decode_json_bool(committed))
+        return (str(leader), _decode_json_int(term), _decode_json_bool(committed))
     leader, term_text, committed_text = text.split("|", 2)
     return (leader, int(term_text), committed_text == "1")
 
@@ -1102,6 +1114,12 @@ def _decode_json_bool(value: Any) -> bool:
     if isinstance(value, bool):
         return value
     raise ValueError("JSON boolean field must be true or false")
+
+
+def _decode_json_int(value: Any) -> int:
+    if _is_plain_int(value):
+        return value
+    raise ValueError("JSON integer field must be an integer")
 
 
 def _encode_json_tuple(value: tuple[Any, ...]) -> bytes:

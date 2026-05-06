@@ -573,6 +573,25 @@ class ComponentTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "JSON boolean"):
             routes.leader_state.schema.decode(b'["node-a",3,"true"]')
 
+    def test_consensus_json_schemas_reject_non_integer_numbers(self) -> None:
+        manyfold = load_manyfold_package()
+        routes = manyfold.Consensus.default_routes()
+
+        with self.assertRaisesRegex(ValueError, "JSON integer"):
+            routes.heartbeat.schema.decode(b'["3","node-a"]')
+        with self.assertRaisesRegex(ValueError, "JSON integer"):
+            routes.request_vote.schema.decode(b'[true,"node-a",0,0]')
+        with self.assertRaisesRegex(ValueError, "JSON integer"):
+            routes.request_vote.schema.decode(b'[3,"node-a","0",0]')
+        with self.assertRaisesRegex(ValueError, "JSON integer"):
+            routes.vote_response.schema.decode(b'[false,"node-a","node-b",true]')
+        with self.assertRaisesRegex(ValueError, "JSON integer"):
+            routes.append_entries.schema.decode(b'["7","set pipe=a"]')
+        with self.assertRaisesRegex(ValueError, "JSON integer"):
+            routes.replicated_log.schema.decode(b'[["7","set pipe=a"]]')
+        with self.assertRaisesRegex(ValueError, "JSON integer"):
+            routes.leader_state.schema.decode(b'["node-a","3",true]')
+
     def test_consensus_append_entry_schema_encodes_compact_json_tuple(self) -> None:
         manyfold = load_manyfold_package()
         route = manyfold.Consensus.default_routes().append_entries
