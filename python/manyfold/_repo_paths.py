@@ -16,8 +16,10 @@ def ensure_path_on_sys_path(path: Path) -> None:
     """Prepend one path to ``sys.path`` exactly once."""
 
     path_str = str(path)
-    if path_str not in sys.path:
-        sys.path.insert(0, path_str)
+    sys.path[:] = [
+        existing_path for existing_path in sys.path if existing_path != path_str
+    ]
+    sys.path.insert(0, path_str)
 
 
 def ensure_package_dir_on_path() -> None:

@@ -566,6 +566,10 @@ class ExampleTests(unittest.TestCase):
             self.assertEqual(sys.path[:2], [repo_root, python_dir])
             self.assertEqual(sys.path.count(repo_root), 1)
             self.assertEqual(sys.path.count(python_dir), 1)
+
+            sys.path = ["before", python_dir, "middle", python_dir, "after"]
+            module.ensure_path_on_sys_path(Path(python_dir))
+            self.assertEqual(sys.path, [python_dir, "before", "middle", "after"])
         finally:
             sys.path = original_sys_path
 
