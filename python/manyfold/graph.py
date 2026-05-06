@@ -1257,13 +1257,18 @@ class ReactiveReadablePort:
             observer: ObserverLike[ClosedEnvelope],
             scheduler: object | None = None,
         ) -> SubscriptionLike:
-            if replay_latest:
-                latest = self.latest()
-                if latest is not None:
-                    observer.on_next(latest)
-            return self._graph._subject_for(self._route_ref).subscribe(
+            subscription = self._graph._subject_for(self._route_ref).subscribe(
                 observer, scheduler=scheduler
             )
+            try:
+                if replay_latest:
+                    latest = self.latest()
+                    if latest is not None:
+                        observer.on_next(latest)
+            except Exception:
+                subscription.dispose()
+                raise
+            return subscription
 
         return rx.create(subscribe)
 

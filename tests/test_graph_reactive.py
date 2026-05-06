@@ -147,6 +147,33 @@ class GraphReactiveTests(unittest.TestCase):
         self.assertEqual(graph.subscribers(route), 0)
         self.assertEqual(graph.route_audit(route).active_subscribers, ())
 
+    def test_readable_port_observe_keeps_reentrant_replay_publications(
+        self,
+    ) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("imu"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("port_replay"),
+            variant=graph_module.Variant.Meta,
+            schema=graph_module.Schema.bytes(name="PortReplay"),
+        )
+        graph = graph_module.Graph()
+        graph.publish(route, b"first")
+        observed_sequences: list[int] = []
+
+        def publish_during_replay(envelope) -> None:
+            observed_sequences.append(envelope.seq_source)
+            if envelope.seq_source == 1:
+                graph.publish(route, b"second")
+
+        subscription = graph._read_port(route).observe().subscribe(publish_during_replay)
+        subscription.dispose()
+
+        self.assertEqual(observed_sequences, [1, 2])
+
     def test_pipe_binds_rx_source_into_writable_port(self) -> None:
         graph_module = load_graph_module()
         route = graph_module.route(
