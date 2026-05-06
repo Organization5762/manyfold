@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import unittest
 
 from tests.test_support import load_manyfold_package
@@ -54,6 +55,30 @@ class PrimitiveTests(unittest.TestCase):
             "unknown process-local object token for schema 'OtherHandle'",
         ):
             other_handles.decode(token)
+
+    def test_float_schema_rejects_non_finite_values(self) -> None:
+        manyfold = load_manyfold_package()
+        schema = manyfold.Schema.float(name="Temperature")
+
+        for value in (math.nan, math.inf, -math.inf):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "float schema values must be finite",
+                ):
+                    schema.encode(value)
+
+    def test_float_schema_rejects_non_finite_payloads(self) -> None:
+        manyfold = load_manyfold_package()
+        schema = manyfold.Schema.float(name="Temperature")
+
+        for payload in (b"nan", b"inf", b"-inf"):
+            with self.subTest(payload=payload):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "float schema values must be finite",
+                ):
+                    schema.decode(payload)
 
 
 if __name__ == "__main__":

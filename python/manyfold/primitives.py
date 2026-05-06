@@ -7,6 +7,7 @@ enough to deserve first-class status.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from functools import cached_property
 from itertools import count
@@ -41,6 +42,20 @@ TProto = TypeVar("TProto", bound="ProtobufMessage")
 _ANY_SCHEMA_IDS = count(1)
 _ANY_SCHEMA_LOCK = Lock()
 _ANY_SCHEMA_VALUES: dict[tuple[str, str], Any] = {}
+
+
+def _encode_finite_float(value: Any) -> bytes:
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError("float schema values must be finite")
+    return repr(number).encode("ascii")
+
+
+def _decode_finite_float(payload: bytes) -> float:
+    number = float(payload.decode("ascii"))
+    if not math.isfinite(number):
+        raise ValueError("float schema values must be finite")
+    return number
 
 
 @runtime_checkable
@@ -174,12 +189,12 @@ class Schema(Generic[T]):
 
     @classmethod
     def float(cls, *, name: str, version: int = 1) -> Schema[float]:
-        """Create a schema for ASCII-encoded floating point values."""
+        """Create a schema for finite ASCII-encoded floating point values."""
         return cls(
             schema_id=name,
             version=version,
-            encode=lambda value: repr(float(value)).encode("ascii"),
-            decode=lambda payload: float(payload.decode("ascii")),
+            encode=_encode_finite_float,
+            decode=_decode_finite_float,
         )
 
     @classmethod
