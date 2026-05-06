@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -745,7 +745,7 @@ pub struct GraphCore {
     pub edges: Vec<(RouteRefCore, RouteRefCore)>,
     pub bindings: HashMap<String, WriteBindingCore>,
     pub request_bindings: HashMap<RouteRefCore, WriteBindingCore>,
-    pub mailboxes: HashMap<String, MailboxCore>,
+    pub mailboxes: BTreeMap<String, MailboxCore>,
     pub loops: HashMap<String, ControlLoopCore>,
 }
 
@@ -1618,6 +1618,80 @@ mod tests {
         assert_eq!(ingress_snapshot.available, 0);
         assert_eq!(ingress_snapshot.blocked_senders, 1);
         assert_eq!(ingress_snapshot.largest_queue_depth, 1);
+    }
+
+    #[test]
+    fn mailbox_route_credit_uses_name_ordered_tie_breaker() {
+        let ingress = sample_route(
+            Plane::Write,
+            Layer::Internal,
+            "mailbox",
+            "mailbox",
+            "shared",
+            Variant::Request,
+        );
+        let z_egress = sample_route(
+            Plane::Read,
+            Layer::Internal,
+            "mailbox",
+            "mailbox",
+            "z-egress",
+            Variant::Meta,
+        );
+        let a_egress = sample_route(
+            Plane::Read,
+            Layer::Internal,
+            "mailbox",
+            "mailbox",
+            "a-egress",
+            Variant::Meta,
+        );
+        let mut graph = GraphCore::default();
+        graph.register_mailbox(
+            "zeta".to_string(),
+            MailboxCore {
+                ingress: ingress.clone(),
+                egress: z_egress,
+                descriptor: MailboxDescriptorCore {
+                    delivery_mode: DeliveryMode::MpscSerial,
+                    ordering_policy: OrderingPolicy::Fifo,
+                    overflow_policy: OverflowPolicy::Block,
+                    capacity: 7,
+                },
+                queue: VecDeque::new(),
+                blocked_writes: 0,
+                dropped_messages: 0,
+                coalesced_messages: 0,
+                delivered_messages: 0,
+            },
+        );
+        graph.register_mailbox(
+            "alpha".to_string(),
+            MailboxCore {
+                ingress: ingress.clone(),
+                egress: a_egress,
+                descriptor: MailboxDescriptorCore {
+                    delivery_mode: DeliveryMode::MpscSerial,
+                    ordering_policy: OrderingPolicy::Fifo,
+                    overflow_policy: OverflowPolicy::Block,
+                    capacity: 3,
+                },
+                queue: VecDeque::new(),
+                blocked_writes: 0,
+                dropped_messages: 0,
+                coalesced_messages: 0,
+                delivered_messages: 0,
+            },
+        );
+
+        let snapshot = graph.credit_snapshot();
+        let ingress_snapshot = snapshot
+            .into_iter()
+            .find(|item| item.route_display == ingress.display())
+            .unwrap();
+
+        assert_eq!(ingress_snapshot.available, 3);
+        assert_eq!(ingress_snapshot.largest_queue_depth, 3);
     }
 
     #[test]
