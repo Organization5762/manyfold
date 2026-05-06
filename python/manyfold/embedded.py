@@ -11,6 +11,8 @@ from .primitives import OwnerName, Schema, StreamFamily, StreamName, TypedRoute,
 T = TypeVar("T")
 TMeta = TypeVar("TMeta")
 
+_BULK_CREDIT_POLICY = "bytes"
+
 # Validation issue order is part of the ergonomics: callers can show the tuple
 # directly and get stable, high-priority setup fixes before softer advice.
 _FIRMWARE_ISSUE_CHECKS: tuple[tuple[str, str], ...] = (
@@ -90,19 +92,20 @@ class EmbeddedRuntimeRules:
     preserve_device_and_ingest_time: bool = True
     lazy_bulk_payload_open: bool = True
     prefer_zero_copy_bulk_payloads: bool = True
-    bulk_credit_policy: str = "bytes"
+    bulk_credit_policy: str = _BULK_CREDIT_POLICY
 
     def required_issues(self) -> tuple[str, ...]:
         return _disabled_issue_messages(self, _EMBEDDED_RUNTIME_ISSUE_CHECKS)
 
     def bulk_issues(self) -> tuple[str, ...]:
-        issues = list(self.required_issues())
-        issues.extend(_disabled_issue_messages(self, _BULK_RUNTIME_ISSUE_CHECKS))
-        if self.bulk_credit_policy != "bytes":
-            issues.append(
-                "bulk payload routes must use byte credits instead of count credits"
+        issues = self.required_issues() + _disabled_issue_messages(
+            self, _BULK_RUNTIME_ISSUE_CHECKS
+        )
+        if self.bulk_credit_policy != _BULK_CREDIT_POLICY:
+            issues += (
+                "bulk payload routes must use byte credits instead of count credits",
             )
-        return tuple(issues)
+        return issues
 
 
 @dataclass(frozen=True)
@@ -212,3 +215,12 @@ class EmbeddedDeviceProfile:
             firmware=self.firmware,
             rules=self.rules,
         )
+
+
+__all__ = [
+    "EmbeddedBulkSensor",
+    "EmbeddedDeviceProfile",
+    "EmbeddedRuntimeRules",
+    "EmbeddedScalarSensor",
+    "FirmwareAgentProfile",
+]
