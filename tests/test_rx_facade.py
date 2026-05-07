@@ -146,6 +146,8 @@ class RxFacadeTests(unittest.TestCase):
         load_manyfold_package()
         expected_exports = {
             "manyfold._rx": ("Observable", "Subject", "from_iterable"),
+            "manyfold._rx.abc": ("ObservableBase", "SchedulerBase", "SubjectBase"),
+            "manyfold._rx.disposable": ("Disposable", "SerialDisposable"),
             "manyfold._rx.operators": ("map",),
             "manyfold._rx.scheduler": ("TimeoutScheduler",),
             "manyfold._rx.subject": ("BehaviorSubject", "Subject"),
@@ -153,6 +155,7 @@ class RxFacadeTests(unittest.TestCase):
             "manyfold._rx.subject.replaysubject": ("ReplaySubject",),
             "manyfold._rx.subject.subject": ("Subject",),
             "manyfold._rx.testing.marbles": ("marbles_testing",),
+            "manyfold._rx.typing": ("Mapper", "Predicate", "Subscription"),
         }
 
         for module_name, names in expected_exports.items():
