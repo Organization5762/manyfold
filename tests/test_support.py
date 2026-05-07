@@ -68,15 +68,19 @@ MODULES_TO_RESET = (
 
 def subprocess_test_env() -> dict[str, str]:
     env = dict(os.environ)
-    python_root = str(PYTHON_ROOT)
-    current_pythonpath = env.get("PYTHONPATH")
-    env["PYTHONPATH"] = (
-        python_root
-        if not current_pythonpath
-        else f"{python_root}{os.pathsep}{current_pythonpath}"
-    )
+    env["PYTHONPATH"] = _pythonpath_with_repo_python_first(env.get("PYTHONPATH"))
     env.setdefault("UV_CACHE_DIR", str(REPO_ROOT / ".cache" / "uv"))
     return env
+
+
+def _pythonpath_with_repo_python_first(current_pythonpath: str | None) -> str:
+    python_root = str(PYTHON_ROOT)
+    if not current_pythonpath:
+        return python_root
+    existing_paths = [
+        path for path in current_pythonpath.split(os.pathsep) if path != python_root
+    ]
+    return os.pathsep.join((python_root, *existing_paths))
 
 
 def install_reactivex_stub() -> None:
