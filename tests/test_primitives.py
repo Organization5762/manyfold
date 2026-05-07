@@ -33,6 +33,42 @@ class PrimitiveTests(unittest.TestCase):
         ):
             manyfold.route(schema=manyfold.Schema.float(name="Temperature"))
 
+    def test_route_rejects_empty_identity_parts(self) -> None:
+        manyfold = load_manyfold_package()
+
+        for field in ("owner", "family", "stream"):
+            kwargs = {"owner": "sensor", "family": "events", "stream": "temperature"}
+            kwargs[field] = " "
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    f"{field} must be a non-empty string",
+                ):
+                    manyfold.route(
+                        **kwargs,
+                        schema=manyfold.Schema.float(name="Temperature"),
+                    )
+
+    def test_schema_rejects_empty_id(self) -> None:
+        manyfold = load_manyfold_package()
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "schema_id must be a non-empty string",
+        ):
+            manyfold.Schema.bytes(name="")
+
+    def test_schema_rejects_non_positive_versions(self) -> None:
+        manyfold = load_manyfold_package()
+
+        for version in (0, -1, False):
+            with self.subTest(version=version):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "schema version must be a positive integer",
+                ):
+                    manyfold.Schema.bytes(name="Temperature", version=version)
+
     def test_any_schema_rejects_unknown_process_local_tokens_clearly(self) -> None:
         manyfold = load_manyfold_package()
         schema = manyfold.Schema.any("RuntimeHandle")

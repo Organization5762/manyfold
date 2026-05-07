@@ -44,6 +44,16 @@ _ANY_SCHEMA_LOCK = Lock()
 _ANY_SCHEMA_VALUES: dict[tuple[str, str], Any] = {}
 
 
+def _require_non_empty_string(value: str, field: str) -> None:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field} must be a non-empty string")
+
+
+def _require_positive_int(value: int, field: str) -> None:
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        raise ValueError(f"{field} must be a positive integer")
+
+
 def _encode_finite_float(value: Any) -> bytes:
     number = float(value)
     if not math.isfinite(number):
@@ -82,6 +92,9 @@ class OwnerName:
 
     value: str
 
+    def __post_init__(self) -> None:
+        _require_non_empty_string(self.value, "owner")
+
 
 @dataclass(frozen=True)
 class StreamFamily:
@@ -89,12 +102,18 @@ class StreamFamily:
 
     value: str
 
+    def __post_init__(self) -> None:
+        _require_non_empty_string(self.value, "family")
+
 
 @dataclass(frozen=True)
 class StreamName:
     """Typed stream name segment."""
 
     value: str
+
+    def __post_init__(self) -> None:
+        _require_non_empty_string(self.value, "stream")
 
 
 @dataclass(frozen=True)
@@ -139,6 +158,10 @@ class Schema(Generic[T]):
     version: int
     encode: Callable[[T], bytes]
     decode: Callable[[bytes], T]
+
+    def __post_init__(self) -> None:
+        _require_non_empty_string(self.schema_id, "schema_id")
+        _require_positive_int(self.version, "schema version")
 
     @classmethod
     def any(cls, schema_id: str = "Any", version: int = 1) -> Schema[Any]:
