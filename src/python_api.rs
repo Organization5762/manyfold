@@ -1515,7 +1515,7 @@ impl Graph {
         })
     }
 
-    fn connect(&self, source: &Bound<'_, PyAny>, sink: &Bound<'_, PyAny>) -> PyResult<()> {
+    fn connect(&self, source: &Bound<'_, PyAny>, sink: &Bound<'_, PyAny>) -> PyResult<bool> {
         let source_route = if let Ok(route) = source.extract::<RouteRef>() {
             route.inner
         } else if let Ok(mailbox) = source.extract::<Mailbox>() {
@@ -1541,8 +1541,7 @@ impl Graph {
             return Err(PyTypeError::new_err("sink must be a RouteRef or Mailbox"));
         };
         let mut graph = lock_graph(&self.state)?;
-        graph.connect(&source_route, &sink_route);
-        Ok(())
+        Ok(graph.connect(&source_route, &sink_route))
     }
 
     fn disconnect(&self, source: &Bound<'_, PyAny>, sink: &Bound<'_, PyAny>) -> PyResult<bool> {

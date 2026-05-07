@@ -894,11 +894,16 @@ impl GraphCore {
         self.mailboxes.insert(name, mailbox);
     }
 
-    pub fn connect(&mut self, source: &RouteRefCore, sink: &RouteRefCore) {
+    pub fn connect(&mut self, source: &RouteRefCore, sink: &RouteRefCore) -> bool {
         self.register_port(source.clone());
         self.register_port(sink.clone());
-        self.edges.push((source.clone(), sink.clone()));
+        let edge = (source.clone(), sink.clone());
+        if self.edges.contains(&edge) {
+            return false;
+        }
+        self.edges.push(edge);
         self.try_drain_mailbox_for_source(source);
+        true
     }
 
     pub fn disconnect(&mut self, source: &RouteRefCore, sink: &RouteRefCore) -> bool {
@@ -1480,6 +1485,45 @@ mod tests {
                 (z_source.display(), z_sink.display()),
             ]
         );
+    }
+
+    #[test]
+    fn connect_is_idempotent_for_core_fanout() {
+        let source = sample_route(
+            Plane::Read,
+            Layer::Logical,
+            "sensor",
+            "telemetry",
+            "source",
+            Variant::Meta,
+        );
+        let sink = sample_route(
+            Plane::Read,
+            Layer::Logical,
+            "sensor",
+            "telemetry",
+            "sink",
+            Variant::Meta,
+        );
+        let mut graph = GraphCore::default();
+        let producer = ProducerRefCore {
+            producer_id: "app".to_string(),
+            kind: ProducerKind::Application,
+        };
+
+        assert!(graph.connect(&source, &sink));
+        assert!(!graph.connect(&source, &sink));
+        let emitted = graph.write(&source, b"sample".to_vec(), producer, None);
+
+        assert_eq!(emitted.len(), 2);
+        let QueryResultCore::Topology(edges) = graph.query(QueryKindCore::Topology) else {
+            panic!("unexpected query result");
+        };
+        assert_eq!(edges, vec![(source.display(), sink.display())]);
+        let QueryResultCore::Latest(Some(latest)) = graph.query(QueryKindCore::Latest(sink)) else {
+            panic!("unexpected latest response");
+        };
+        assert_eq!(latest.seq_source, 1);
     }
 
     #[test]

@@ -772,8 +772,11 @@ def install_manyfold_rust_stub() -> None:
                 sink = sink.ingress._route
             self.register_port(source)
             self.register_port(sink)
-            self._edges.append((source.display(), sink.display()))
-            return None
+            edge = (source.display(), sink.display())
+            if edge in self._edges:
+                return False
+            self._edges.append(edge)
+            return True
 
         def disconnect(self, source, sink):
             if hasattr(source, "egress"):

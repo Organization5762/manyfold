@@ -4049,7 +4049,7 @@ class Graph:
             self._connectable_key(sink, edge_role="sink"),
             "output",
         )
-        self._graph.connect(native_source, native_sink)
+        connected = self._graph.connect(native_source, native_sink)
         if flow_policy is not None:
             self._edge_flow_overrides[
                 (
@@ -4057,6 +4057,8 @@ class Graph:
                     self._connectable_key(sink, edge_role="sink"),
                 )
             ] = flow_policy
+        if not connected:
+            return
         self._emit_debug_event(
             "topology",
             f"connected {self._connectable_key(source, edge_role='source')} -> {self._connectable_key(sink, edge_role='sink')}",
