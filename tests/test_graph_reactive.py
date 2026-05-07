@@ -399,6 +399,45 @@ class GraphReactiveTests(unittest.TestCase):
         self.assertEqual(list(graph.topology()), [])
         self.assertEqual(graph.subscribers(source), 0)
 
+    def test_connect_is_idempotent_for_public_graph_fanout(self) -> None:
+        graph_module = load_graph_module()
+        source = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("core_source"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="CoreSource"),
+        )
+        sink = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("core_sink"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="CoreSink"),
+        )
+        graph = graph_module.Graph()
+
+        graph.connect(source=source, sink=sink)
+        graph.connect(source=source, sink=sink)
+        graph.publish(source, b"sample")
+
+        latest = graph.latest(sink)
+
+        self.assertEqual(
+            list(graph.topology()),
+            [(source.route_ref.display(), sink.route_ref.display())],
+        )
+        self.assertIsNotNone(latest)
+        assert latest is not None
+        self.assertEqual(latest.value, b"sample")
+        self.assertEqual(latest.closed.seq_source, 1)
+        self.assertEqual(graph.disconnect(source=source, sink=sink), True)
+        self.assertEqual(graph.disconnect(source=source, sink=sink), False)
+
     def test_callback_pipeline_removes_node_when_latest_replay_fails(self) -> None:
         graph_module = load_graph_module()
         route = graph_module.route(
