@@ -76,6 +76,18 @@ class SensorIoTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "clock delta must be finite"):
             clock.advance(float("nan"))
 
+    def test_manual_clock_rejects_non_numeric_time_values(self) -> None:
+        manyfold = load_manyfold_package()
+
+        with self.assertRaisesRegex(ValueError, "clock value must be finite"):
+            manyfold.ManualClock(True)
+
+        clock = manyfold.ManualClock(10.0)
+        with self.assertRaisesRegex(ValueError, "clock value must be finite"):
+            clock.set("11.0")  # type: ignore[arg-type]
+        with self.assertRaisesRegex(ValueError, "clock delta must be finite"):
+            clock.advance(False)
+
     def test_bounded_ring_buffer_enforces_overflow_policy(self) -> None:
         manyfold = load_manyfold_package()
         buffer = manyfold.BoundedRingBuffer[int](capacity=2, overflow="drop_oldest")
@@ -108,6 +120,14 @@ class SensorIoTests(unittest.TestCase):
 
         self.assertEqual(tuple(buffer), (4,))
         self.assertEqual(buffer.dropped, 3)
+
+    def test_bounded_ring_buffer_rejects_non_integer_capacity(self) -> None:
+        manyfold = load_manyfold_package()
+
+        for capacity in (True, 1.5, "2"):
+            with self.subTest(capacity=capacity):
+                with self.assertRaisesRegex(ValueError, "capacity must be an integer"):
+                    manyfold.BoundedRingBuffer[int](capacity=capacity)  # type: ignore[arg-type]
 
     def test_delimited_message_buffer_reassembles_bytes_and_text(self) -> None:
         manyfold = load_manyfold_package()
@@ -686,6 +706,20 @@ class SensorIoTests(unittest.TestCase):
         self.assertEqual(sequence.next(), 101)
         self.assertEqual(sequence.group, "ambient")
 
+    def test_sequence_counter_rejects_non_integer_state(self) -> None:
+        manyfold = load_manyfold_package()
+
+        with self.assertRaisesRegex(ValueError, "current must be an integer"):
+            manyfold.SequenceCounter(current=True)
+        with self.assertRaisesRegex(ValueError, "step must be an integer"):
+            manyfold.SequenceCounter(step=1.5)  # type: ignore[arg-type]
+        with self.assertRaisesRegex(ValueError, "step must be positive"):
+            manyfold.SequenceCounter(step=0)
+
+        sequence = manyfold.SequenceCounter()
+        with self.assertRaisesRegex(ValueError, "value must be an integer"):
+            sequence.reset(False)
+
     def test_retry_loop_retries_transient_failures(self) -> None:
         manyfold = load_manyfold_package()
         attempts = 0
@@ -704,6 +738,25 @@ class SensorIoTests(unittest.TestCase):
 
         self.assertEqual(loop.run(read), 42)
         self.assertEqual(attempts, 3)
+
+    def test_retry_policy_rejects_invalid_attempts_and_exception_types(self) -> None:
+        manyfold = load_manyfold_package()
+
+        for max_attempts in (True, 1.5, "2"):
+            with self.subTest(max_attempts=max_attempts):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "max_attempts must be an integer",
+                ):
+                    manyfold.SensorRetryPolicy(max_attempts=max_attempts)  # type: ignore[arg-type]
+
+        with self.assertRaisesRegex(ValueError, "retry_on must contain exception types"):
+            manyfold.SensorRetryPolicy(retry_on=(ValueError, object))  # type: ignore[arg-type]
+        with self.assertRaisesRegex(ValueError, "retry_on must contain exception types"):
+            manyfold.SensorRetryPolicy(retry_on=ValueError)  # type: ignore[arg-type]
+
+        policy = manyfold.SensorRetryPolicy(retry_on=[ValueError])  # type: ignore[arg-type]
+        self.assertEqual(policy.retry_on, (ValueError,))
 
     def test_retry_loop_stops_at_max_attempts(self) -> None:
         manyfold = load_manyfold_package()
@@ -1114,6 +1167,27 @@ class SensorIoTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "history_size must be positive"):
             manyfold.SensorDebugTap(history_size=0)
 
+    def test_sensor_debug_tap_rejects_non_integer_history_size(self) -> None:
+        manyfold = load_manyfold_package()
+
+        for history_size in (True, 1.5, "2"):
+            with self.subTest(history_size=history_size):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "history_size must be an integer",
+                ):
+                    manyfold.SensorDebugTap(history_size=history_size)  # type: ignore[arg-type]
+
+        tap = manyfold.SensorDebugTap(history_size=2)
+        tap.history_size = 1.5  # type: ignore[assignment]
+        with self.assertRaisesRegex(ValueError, "history_size must be an integer"):
+            tap.publish(
+                stage=manyfold.SensorDebugStage.RAW,
+                stream_name="temperature",
+                source_id="ambient",
+                payload=21,
+            )
+
     def test_peripheral_adapter_publishes_heart_style_envelopes(self) -> None:
         manyfold = load_manyfold_package()
 
@@ -1331,6 +1405,22 @@ class SensorIoTests(unittest.TestCase):
         self.assertEqual(capacitor.name, "ambient.rate_matched_sensor")
         self.assertEqual(clock.group, "ambient")
 
+    def test_rate_matched_sensor_rejects_non_integer_capacity(self) -> None:
+        manyfold = load_manyfold_package()
+        source = _route(manyfold, "rate_raw", _int_schema(manyfold, "Raw"))
+        sink = _route(manyfold, "rate_sampled", _int_schema(manyfold, "Sampled"))
+
+        for capacity in (True, 1.5, "2"):
+            with self.subTest(capacity=capacity):
+                with self.assertRaisesRegex(ValueError, "capacity must be an integer"):
+                    manyfold.RateMatchedSensor(
+                        source=source,
+                        sink=sink,
+                        capacity=capacity,  # type: ignore[arg-type]
+                    )
+        with self.assertRaisesRegex(ValueError, "capacity must be positive"):
+            manyfold.RateMatchedSensor(source=source, sink=sink, capacity=0)
+
     def test_sensor_health_watchdog_reports_stale_input(self) -> None:
         manyfold = load_manyfold_package()
         graph = manyfold.Graph()
@@ -1380,6 +1470,35 @@ class SensorIoTests(unittest.TestCase):
                 stale_after=float("inf"),
             )
 
+    def test_sensor_timing_policies_reject_non_numeric_values(self) -> None:
+        manyfold = load_manyfold_package()
+
+        with self.assertRaisesRegex(ValueError, "initial_delay must be finite"):
+            manyfold.SensorBackoffPolicy(initial_delay=True)
+        with self.assertRaisesRegex(ValueError, "multiplier must be finite"):
+            manyfold.SensorBackoffPolicy(multiplier="2.0")  # type: ignore[arg-type]
+        with self.assertRaisesRegex(ValueError, "max_delay must be finite"):
+            manyfold.SensorBackoffPolicy(max_delay=False)
+        with self.assertRaisesRegex(ValueError, "stale_after must be finite"):
+            manyfold.SensorHealthWatchdog(
+                source=_route(manyfold, "sample", _int_schema(manyfold, "Sample")),
+                health_route=_route(
+                    manyfold,
+                    "health",
+                    manyfold.health_status_schema(),
+                ),
+                stale_after="5.0",  # type: ignore[arg-type]
+            )
+
+    def test_backoff_delay_rejects_non_integer_attempt_index(self) -> None:
+        manyfold = load_manyfold_package()
+        backoff = manyfold.SensorBackoffPolicy.fixed(0.5)
+
+        with self.assertRaisesRegex(ValueError, "attempt_index must be an integer"):
+            backoff.delay_for_attempt(2.0)  # type: ignore[arg-type]
+        with self.assertRaisesRegex(ValueError, "attempt_index must be positive"):
+            backoff.delay_for_attempt(0)
+
     def test_double_buffer_frame_assembler_and_checksum(self) -> None:
         manyfold = load_manyfold_package()
         buffer = manyfold.DoubleBuffer[tuple[int, int]](buffer_size=2)
@@ -1413,6 +1532,29 @@ class SensorIoTests(unittest.TestCase):
 
         self.assertEqual(frames[0].frame_id, 7)
         self.assertEqual(frames[0].samples, ((7, 0, "integer"), (7, "0", "string")))
+
+    def test_frame_buffer_controls_reject_non_integer_sizes(self) -> None:
+        manyfold = load_manyfold_package()
+
+        for buffer_size in (True, 1.5, "2"):
+            with self.subTest(buffer_size=buffer_size):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "buffer_size must be an integer",
+                ):
+                    manyfold.DoubleBuffer[int](buffer_size=buffer_size)  # type: ignore[arg-type]
+
+        for expected_count in (True, 1.5, "2"):
+            with self.subTest(expected_count=expected_count):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "expected_count must be an integer",
+                ):
+                    manyfold.FrameAssembler[int](
+                        expected_count=expected_count,  # type: ignore[arg-type]
+                        frame_id=lambda sample: sample,
+                        slot_id=lambda sample: sample,
+                    )
 
     def test_local_durable_spool_restores_samples(self) -> None:
         manyfold = load_manyfold_package()

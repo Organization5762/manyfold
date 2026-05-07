@@ -12,6 +12,7 @@ import time
 from collections import deque
 from dataclasses import asdict, dataclass, field, is_dataclass
 from enum import Enum
+from numbers import Real
 from typing import (
     Any,
     Callable,
@@ -88,10 +89,24 @@ class RetryPolicy:
     retry_on: tuple[type[BaseException], ...] = (Exception,)
 
     def __post_init__(self) -> None:
-        if self.max_attempts <= 0:
-            raise ValueError("max_attempts must be positive")
-        if not self.retry_on:
+        object.__setattr__(
+            self,
+            "max_attempts",
+            _require_positive_int(self.max_attempts, "max_attempts"),
+        )
+        try:
+            retry_on = tuple(self.retry_on)
+        except TypeError as exc:
+            raise ValueError("retry_on must contain exception types") from exc
+        if not retry_on:
             raise ValueError("retry_on must contain at least one exception type")
+        if not all(
+            isinstance(exception_type, type)
+            and issubclass(exception_type, BaseException)
+            for exception_type in retry_on
+        ):
+            raise ValueError("retry_on must contain exception types")
+        object.__setattr__(self, "retry_on", retry_on)
 
     @classmethod
     def never(cls) -> RetryPolicy:
@@ -143,9 +158,10 @@ class BackoffPolicy:
         return cls(initial_delay=delay)
 
     def delay_for_attempt(self, attempt_index: int) -> float:
-        if attempt_index <= 1:
+        attempt = _require_positive_int(attempt_index, "attempt_index")
+        if attempt <= 1:
             return 0.0
-        delay = self.initial_delay * (self.multiplier ** (attempt_index - 2))
+        delay = self.initial_delay * (self.multiplier ** (attempt - 2))
         if self.max_delay is not None:
             delay = min(delay, self.max_delay)
         return delay
@@ -526,8 +542,7 @@ class BoundedRingBuffer(Generic[T]):
     rejected: int = 0
 
     def __post_init__(self) -> None:
-        if self.capacity <= 0:
-            raise ValueError("capacity must be positive")
+        self.capacity = _require_positive_int(self.capacity, "capacity")
         if self.overflow not in {"drop_oldest", "drop_newest", "reject", "latest"}:
             raise ValueError(
                 "overflow must be one of 'drop_oldest', 'drop_newest', 'reject', or 'latest'"
@@ -580,8 +595,8 @@ class SequenceCounter:
     group: str | None = None
 
     def __post_init__(self) -> None:
-        if self.step <= 0:
-            raise ValueError("step must be positive")
+        self.current = _require_plain_int(self.current, "current")
+        self.step = _require_positive_int(self.step, "step")
 
     def next(self) -> int:
         self.current += self.step
@@ -591,7 +606,7 @@ class SequenceCounter:
         return self.current
 
     def reset(self, value: int = 0) -> None:
-        self.current = value
+        self.current = _require_plain_int(value, "value")
 
 
 @dataclass(frozen=True)
@@ -689,8 +704,7 @@ class SensorDebugTap:
     _history: deque[SensorDebugEnvelope] = field(default_factory=deque, init=False, repr=False)
 
     def __post_init__(self) -> None:
-        if self.history_size <= 0:
-            raise ValueError("history_size must be positive")
+        self.history_size = _require_positive_int(self.history_size, "history_size")
         self._history = deque(maxlen=self.history_size)
 
     def publish(
@@ -711,8 +725,10 @@ class SensorDebugTap:
             upstream_ids=tuple(upstream_ids),
         )
         if self._history.maxlen != self.history_size:
-            if self.history_size <= 0:
-                raise ValueError("history_size must be positive")
+            self.history_size = _require_positive_int(
+                self.history_size,
+                "history_size",
+            )
             self._history = deque(self._history, maxlen=self.history_size)
         self._history.append(envelope)
         return envelope
@@ -1029,8 +1045,7 @@ class DoubleBuffer(Generic[TFrame]):
     )
 
     def __post_init__(self) -> None:
-        if self.buffer_size <= 0:
-            raise ValueError("buffer_size must be positive")
+        self.buffer_size = _require_positive_int(self.buffer_size, "buffer_size")
 
     def push(self, sample: TFrame) -> tuple[int, tuple[TFrame, ...]] | None:
         buffer = self._buffers[self._active]
@@ -1069,8 +1084,10 @@ class FrameAssembler(Generic[TFrame]):
     _pending: dict[Any, dict[Any, TFrame]] = field(default_factory=dict, init=False, repr=False)
 
     def __post_init__(self) -> None:
-        if self.expected_count <= 0:
-            raise ValueError("expected_count must be positive")
+        self.expected_count = _require_positive_int(
+            self.expected_count,
+            "expected_count",
+        )
 
     def add(self, sample: TFrame) -> tuple[SensorFrame[TFrame], ...]:
         resolved_frame_id = self.frame_id(sample)
@@ -1365,6 +1382,7 @@ class RateMatchedSensor:
     group: str | None = None
 
     def __post_init__(self) -> None:
+        self.capacity = _require_positive_int(self.capacity, "capacity")
         _adopt_group(self.clock, self.group)
 
     def install(self, graph: Graph) -> Any:
@@ -1546,10 +1564,25 @@ def _changed_enough(new: Any, old: Any, threshold: float) -> bool:
 
 
 def _require_finite_number(value: float, field: str) -> float:
+    if not isinstance(value, Real) or isinstance(value, bool):
+        raise ValueError(f"{field} must be finite")
     number = float(value)
     if not math.isfinite(number):
         raise ValueError(f"{field} must be finite")
     return number
+
+
+def _require_plain_int(value: Any, field: str) -> int:
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ValueError(f"{field} must be an integer")
+    return value
+
+
+def _require_positive_int(value: Any, field: str) -> int:
+    integer = _require_plain_int(value, field)
+    if integer <= 0:
+        raise ValueError(f"{field} must be positive")
+    return integer
 
 
 def _mapping_key_sort_key(key: Any) -> tuple[str, str]:
