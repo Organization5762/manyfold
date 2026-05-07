@@ -1279,6 +1279,20 @@ class SensorIoTests(unittest.TestCase):
         self.assertEqual(frames[0].samples, ((7, 0, "a"), (7, 1, "b")))
         self.assertEqual(manyfold.xor_checksum([0xAA, 0x0F, 0x01]), 0xA4)
 
+    def test_frame_assembler_orders_mixed_slot_ids_deterministically(self) -> None:
+        manyfold = load_manyfold_package()
+        assembler = manyfold.FrameAssembler[tuple[int, object, str]](
+            expected_count=2,
+            frame_id=lambda sample: sample[0],
+            slot_id=lambda sample: sample[1],
+        )
+
+        self.assertEqual(assembler.add((7, "0", "string")), ())
+        frames = assembler.add((7, 0, "integer"))
+
+        self.assertEqual(frames[0].frame_id, 7)
+        self.assertEqual(frames[0].samples, ((7, 0, "integer"), (7, "0", "string")))
+
     def test_local_durable_spool_restores_samples(self) -> None:
         manyfold = load_manyfold_package()
         sample_schema = manyfold.sensor_sample_schema(_int_schema(manyfold, "Temp"))
