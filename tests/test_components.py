@@ -550,6 +550,10 @@ class ComponentTests(unittest.TestCase):
             (3, "node-a", "node-b", True),
         )
         self.assertEqual(
+            routes.vote_response.schema.decode(b"3|node-a|node-b|0"),
+            (3, "node-a", "node-b", False),
+        )
+        self.assertEqual(
             routes.append_entries.schema.decode(b"7|set pipe=a|b"),
             (7, "set pipe=a|b"),
         )
@@ -561,6 +565,17 @@ class ComponentTests(unittest.TestCase):
             routes.leader_state.schema.decode(b"node-a|3|1"),
             ("node-a", 3, True),
         )
+
+    def test_consensus_legacy_schemas_reject_invalid_boolean_tokens(self) -> None:
+        manyfold = load_manyfold_package()
+        routes = manyfold.Consensus.default_routes()
+
+        with self.assertRaisesRegex(ValueError, "legacy boolean"):
+            routes.vote_response.schema.decode(b"3|node-a|node-b|true")
+        with self.assertRaisesRegex(ValueError, "legacy boolean"):
+            routes.quorum.schema.decode(b"3|node-a|node-a,node-b|2")
+        with self.assertRaisesRegex(ValueError, "legacy boolean"):
+            routes.leader_state.schema.decode(b"node-a|3|")
 
     def test_consensus_json_schemas_reject_string_booleans(self) -> None:
         manyfold = load_manyfold_package()
