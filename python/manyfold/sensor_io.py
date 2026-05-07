@@ -740,7 +740,9 @@ def sensor_sample_schema(value_schema: Schema[T], schema_id: str | None = None) 
         )
 
     def decode(payload: bytes) -> SensorSample[T]:
-        data = json.loads(payload.decode("utf-8"))
+        data = _decode_json_mapping(
+            json.loads(payload.decode("utf-8")), "sensor sample"
+        )
         value = value_schema.decode(_decode_base64_field(data["value"], "value"))
         return SensorSample(
             value=value,
@@ -783,7 +785,9 @@ def sensor_event_schema(schema_id: str = "SensorEvent") -> Schema[SensorEvent]:
         )
 
     def decode(payload: bytes) -> SensorEvent:
-        data = json.loads(payload.decode("utf-8"))
+        data = _decode_json_mapping(
+            json.loads(payload.decode("utf-8")), "sensor event"
+        )
         raw = data.get("raw")
         metadata = _decode_json_mapping(data.get("metadata", {}), "metadata")
         return SensorEvent(
@@ -816,7 +820,9 @@ def health_status_schema(schema_id: str = "HealthStatus") -> Schema[HealthStatus
         )
 
     def decode(payload: bytes) -> HealthStatus:
-        data = json.loads(payload.decode("utf-8"))
+        data = _decode_json_mapping(
+            json.loads(payload.decode("utf-8")), "health status"
+        )
         return HealthStatus(
             status=_decode_health_status(data["status"]),
             observed_at=_decode_json_number(data["observed_at"], "observed_at"),
