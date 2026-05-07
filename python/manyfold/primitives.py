@@ -329,6 +329,10 @@ class TypedEnvelope(Generic[T]):
     closed: ClosedEnvelope
     value: T
 
+    def close(self) -> ClosedEnvelope:
+        """Return the immutable closed envelope carried by this decoded view."""
+        return self.closed
+
 
 def source(route: TypedRoute[T] | RouteRef, *, replay_latest: bool = True) -> Source[T]:
     """Mark a route as a signal source."""

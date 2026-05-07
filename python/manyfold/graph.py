@@ -2460,6 +2460,54 @@ class Graph:
                 continue
             remembered.setdefault((domain_name, value_id), taint)
 
+    def _closed_with_taints(
+        self,
+        envelope: ClosedEnvelope,
+        taints: Sequence[Any],
+    ) -> ClosedEnvelope:
+        if hasattr(envelope, "with_taints"):
+            return cast(Any, envelope).with_taints(tuple(taints))
+        try:
+            envelope.taints = tuple(taints)
+        except AttributeError:
+            return envelope
+        return envelope
+
+    @staticmethod
+    def _replace_item_closed(
+        item: TypedEnvelope[Any] | ClosedEnvelope,
+        closed: ClosedEnvelope,
+    ) -> TypedEnvelope[Any] | ClosedEnvelope:
+        if isinstance(item, TypedEnvelope):
+            return replace(item, closed=closed)
+        return closed
+
+    def _replace_recorded_envelope(self, envelope: ClosedEnvelope) -> None:
+        key = envelope.route.display()
+        history = self._history.get(key)
+        if history is None:
+            return
+        for index in range(len(history) - 1, -1, -1):
+            candidate = history[index]
+            if (
+                candidate.seq_source == envelope.seq_source
+                and candidate.payload_ref.payload_id == envelope.payload_ref.payload_id
+            ):
+                history[index] = envelope
+                break
+
+    def _recorded_envelope_for(self, envelope: ClosedEnvelope) -> ClosedEnvelope:
+        history = self._history.get(envelope.route.display())
+        if history is None:
+            return envelope
+        for candidate in reversed(history):
+            if (
+                candidate.seq_source == envelope.seq_source
+                and candidate.payload_ref.payload_id == envelope.payload_ref.payload_id
+            ):
+                return candidate
+        return envelope
+
     @staticmethod
     def _taint_domain_matches(taint: Any, domain_name: str) -> bool:
         domain = getattr(taint, "domain", None)
@@ -2477,9 +2525,9 @@ class Graph:
         *,
         domain_name: str,
         values: Sequence[str],
-    ) -> None:
+    ) -> ClosedEnvelope | None:
         if envelope is None:
-            return
+            return None
         retained = [
             taint
             for taint in getattr(envelope, "taints", ())
@@ -2489,10 +2537,9 @@ class Graph:
             TaintMark(TaintDomain.Coherence, value, envelope.route.display())
             for value in values
         )
-        try:
-            envelope.taints = retained
-        except AttributeError:
-            return
+        updated = self._closed_with_taints(envelope, retained)
+        self._replace_recorded_envelope(updated)
+        return updated
 
     def _envelope_payload_bytes(self, envelope: ClosedEnvelope | None) -> bytes | None:
         if envelope is None:
@@ -2535,12 +2582,11 @@ class Graph:
             binding.reported,
             binding.effective,
         ):
-            self._set_domain_taints(
+            latest = self._set_domain_taints(
                 self._graph.latest(binding_route),
                 domain_name="coherence",
                 values=taints,
             )
-            latest = self._graph.latest(binding_route)
             if latest is not None:
                 self._remember_stream_taints(binding_route, latest)
         return taints
@@ -2636,12 +2682,10 @@ class Graph:
                 continue
             existing.append(taint)
             existing_keys.add(key)
-        try:
-            closed.taints = existing
-        except AttributeError:
-            return emitted
-        self._remember_stream_taints(closed.route, closed)
-        return emitted
+        updated = self._closed_with_taints(closed, existing)
+        self._replace_recorded_envelope(updated)
+        self._remember_stream_taints(updated.route, updated)
+        return self._replace_item_closed(emitted, updated)
 
     def _apply_taint_repair(
         self,
@@ -2683,10 +2727,8 @@ class Graph:
                     and getattr(taint, "value_id", None) in cleared
                 )
             ]
-            try:
-                closed.taints = repaired_taints
-            except AttributeError:
-                return emitted
+            closed = self._closed_with_taints(closed, repaired_taints)
+            emitted = self._replace_item_closed(emitted, closed)
         existing = list(getattr(closed, "taints", ()))
         existing_keys = {self._taint_key(taint) for taint in existing}
         for taint in repair.added:
@@ -2695,12 +2737,10 @@ class Graph:
                 continue
             existing.append(taint)
             existing_keys.add(key)
-        try:
-            closed.taints = existing
-        except AttributeError:
-            return emitted
-        self._remember_stream_taints(closed.route, closed)
-        return emitted
+        updated = self._closed_with_taints(closed, existing)
+        self._replace_recorded_envelope(updated)
+        self._remember_stream_taints(updated.route, updated)
+        return self._replace_item_closed(emitted, updated)
 
     def _taint_query_items(self, route_ref: RouteLike) -> tuple[str, ...]:
         key = self._route_key(route_ref)
@@ -4436,7 +4476,13 @@ class Graph:
         self, route_ref: RouteLike
     ) -> TypedEnvelope[Any] | ClosedEnvelope | None:
         """Return the latest envelope seen for one route."""
-        latest = self._graph.latest(self._coerce_route_ref(route_ref))
+        native_route = self._coerce_route_ref(route_ref)
+        native_latest = self._graph.latest(native_route)
+        latest = (
+            None
+            if native_latest is None
+            else self._recorded_envelope_for(native_latest)
+        )
         if latest is None:
             return None
         typed_route = self._typed_route(route_ref)

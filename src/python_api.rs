@@ -876,6 +876,14 @@ impl ClosedEnvelope {
             inner: self.inner.payload_ref.clone(),
         }
     }
+    fn with_taints(&self, taints: Vec<TaintMark>) -> Self {
+        let mut inner = self.inner.clone();
+        inner.taints = taints.into_iter().map(|taint| taint.inner).collect();
+        Self { inner }
+    }
+    fn close(&self) -> Self {
+        self.clone()
+    }
 }
 
 #[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
@@ -899,6 +907,11 @@ impl OpenedEnvelope {
     #[getter]
     fn payload(&self) -> Vec<u8> {
         self.inner.payload.clone()
+    }
+    fn close(&self) -> ClosedEnvelope {
+        ClosedEnvelope {
+            inner: self.inner.closed.clone(),
+        }
     }
 }
 
