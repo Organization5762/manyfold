@@ -460,6 +460,70 @@ class SensorIoTests(unittest.TestCase):
         ):
             schema.decode(json.dumps(payload).encode("utf-8"))
 
+    def test_sensor_event_schema_rejects_malformed_identity_containers(self) -> None:
+        manyfold = load_manyfold_package()
+        schema = manyfold.sensor_event_schema()
+        base_payload = {
+            "event_type": "radio.packet",
+            "data": {},
+            "observed_at": 1.5,
+            "identity": {},
+            "sequence_number": 7,
+            "raw": None,
+            "metadata": {},
+        }
+        cases = (
+            ({"identity": []}, "identity must be a JSON object"),
+            (
+                {"identity": {"tags": "input_variant"}},
+                r"identity\.tags must be a JSON array",
+            ),
+            (
+                {"identity": {"tags": ["input_variant"]}},
+                r"identity\.tags\[\] must be a JSON object",
+            ),
+            (
+                {
+                    "identity": {
+                        "tags": [
+                            {
+                                "name": "input_variant",
+                                "variant": "radio",
+                                "metadata": [],
+                            }
+                        ]
+                    }
+                },
+                r"identity\.tags\[\]\.metadata must be a JSON object",
+            ),
+            (
+                {"identity": {"location": "lab"}},
+                r"identity\.location must be a JSON object",
+            ),
+        )
+
+        for patch, pattern in cases:
+            with self.subTest(pattern=pattern):
+                payload = {**base_payload, **patch}
+                with self.assertRaisesRegex(ValueError, pattern):
+                    schema.decode(json.dumps(payload).encode("utf-8"))
+
+    def test_sensor_event_schema_rejects_non_object_metadata(self) -> None:
+        manyfold = load_manyfold_package()
+        schema = manyfold.sensor_event_schema()
+        payload = {
+            "event_type": "radio.packet",
+            "data": {},
+            "observed_at": 1.5,
+            "identity": {},
+            "sequence_number": 7,
+            "raw": None,
+            "metadata": [],
+        }
+
+        with self.assertRaisesRegex(ValueError, "metadata must be a JSON object"):
+            schema.decode(json.dumps(payload).encode("utf-8"))
+
     def test_sensor_event_schema_rejects_boolean_sequence_number(self) -> None:
         manyfold = load_manyfold_package()
         schema = manyfold.sensor_event_schema()

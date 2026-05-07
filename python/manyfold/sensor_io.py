@@ -762,6 +762,7 @@ def sensor_event_schema(schema_id: str = "SensorEvent") -> Schema[SensorEvent]:
     def decode(payload: bytes) -> SensorEvent:
         data = json.loads(payload.decode("utf-8"))
         raw = data.get("raw")
+        metadata = _decode_json_mapping(data.get("metadata", {}), "metadata")
         return SensorEvent(
             event_type=_decode_json_string(data["event_type"], "event_type"),
             data=_json_restore(data.get("data")),
@@ -771,7 +772,7 @@ def sensor_event_schema(schema_id: str = "SensorEvent") -> Schema[SensorEvent]:
             if data.get("sequence_number") is None
             else _decode_json_int(data["sequence_number"], "sequence_number"),
             raw=None if raw is None else _decode_base64_field(raw, "raw"),
-            metadata=_json_restore(data.get("metadata", {})),
+            metadata=_json_restore(metadata),
         )
 
     return Schema(schema_id=schema_id, version=1, encode=encode, decode=decode)
@@ -1586,6 +1587,12 @@ def _decode_json_string(value: Any, field: str) -> str:
     raise ValueError(f"{field} must be a JSON string")
 
 
+def _decode_json_mapping(value: Any, field: str) -> Mapping[Any, Any]:
+    if isinstance(value, Mapping):
+        return value
+    raise ValueError(f"{field} must be a JSON object")
+
+
 def _decode_optional_json_string(value: Any, field: str) -> str | None:
     if value is None:
         return None
@@ -1600,42 +1607,55 @@ def _decode_health_status(value: Any) -> Literal["ok", "stale", "error"]:
 
 
 def _sensor_identity_from_json(value: Any) -> SensorIdentity:
-    if not isinstance(value, Mapping):
+    if value is None:
         return SensorIdentity()
+    identity_value = _decode_json_mapping(value, "identity")
+    raw_tags = identity_value.get("tags", ())
+    if not isinstance(raw_tags, list | tuple):
+        raise ValueError("identity.tags must be a JSON array")
     tags = tuple(
         SensorTag(
-            name=_decode_json_string(tag.get("name"), "identity.tags[].name"),
-            variant=_decode_json_string(tag.get("variant"), "identity.tags[].variant"),
+            name=_decode_json_string(tag_value.get("name"), "identity.tags[].name"),
+            variant=_decode_json_string(
+                tag_value.get("variant"), "identity.tags[].variant"
+            ),
             metadata={
                 _decode_json_string(key, "identity.tags[].metadata key"): _decode_json_string(
                     item, "identity.tags[].metadata value"
                 )
-                for key, item in dict(tag.get("metadata", {})).items()
+                for key, item in _decode_json_mapping(
+                    tag_value.get("metadata", {}), "identity.tags[].metadata"
+                ).items()
             },
         )
-        for tag in value.get("tags", ())
-        if isinstance(tag, Mapping)
+        for tag in raw_tags
+        for tag_value in (_decode_json_mapping(tag, "identity.tags[]"),)
     )
-    location_value = value.get("location", {})
+    location_value = identity_value.get("location", {})
     location = (
-        SensorLocation(
-            x=_decode_json_number(location_value.get("x", 0.0), "identity.location.x"),
-            y=_decode_json_number(location_value.get("y", 0.0), "identity.location.y"),
-            z=_decode_json_number(location_value.get("z", 0.0), "identity.location.z"),
-            timestamp=None
-            if location_value.get("timestamp") is None
-            else _decode_json_number(
-                location_value["timestamp"], "identity.location.timestamp"
-            ),
-        )
-        if isinstance(location_value, Mapping)
+        _sensor_location_from_json(location_value)
+        if location_value is not None
         else SensorLocation()
     )
     return SensorIdentity(
-        id=_decode_optional_json_string(value.get("id"), "identity.id"),
+        id=_decode_optional_json_string(identity_value.get("id"), "identity.id"),
         tags=tags,
         location=location,
-        group=_decode_optional_json_string(value.get("group"), "identity.group"),
+        group=_decode_optional_json_string(identity_value.get("group"), "identity.group"),
+    )
+
+
+def _sensor_location_from_json(value: Any) -> SensorLocation:
+    location_value = _decode_json_mapping(value, "identity.location")
+    return SensorLocation(
+        x=_decode_json_number(location_value.get("x", 0.0), "identity.location.x"),
+        y=_decode_json_number(location_value.get("y", 0.0), "identity.location.y"),
+        z=_decode_json_number(location_value.get("z", 0.0), "identity.location.z"),
+        timestamp=None
+        if location_value.get("timestamp") is None
+        else _decode_json_number(
+            location_value["timestamp"], "identity.location.timestamp"
+        ),
     )
 
 
