@@ -1053,7 +1053,10 @@ class FrameAssembler(Generic[TFrame]):
         bucket[self.slot_id(sample)] = sample
         if len(bucket) < self.expected_count:
             return ()
-        samples = tuple(bucket[key] for key in sorted(bucket)[: self.expected_count])
+        samples = tuple(
+            bucket[key]
+            for key in sorted(bucket, key=_mapping_key_sort_key)[: self.expected_count]
+        )
         del self._pending[resolved_frame_id]
         return (SensorFrame(frame_id=resolved_frame_id, samples=samples),)
 
