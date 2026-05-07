@@ -221,6 +221,52 @@ class GraphReactiveTests(unittest.TestCase):
         self.assertEqual(latest.value, b"two")
         self.assertEqual(latest.closed.seq_source, 2)
 
+    def test_publish_rejects_invalid_control_epochs(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("clock"),
+            family=graph_module.StreamFamily("epoch"),
+            stream=graph_module.StreamName("sample"),
+            variant=graph_module.Variant.Meta,
+            schema=graph_module.Schema.bytes(name="EpochSample"),
+        )
+        graph = graph_module.Graph()
+
+        for control_epoch in (True, False, -1, "3"):
+            with self.subTest(control_epoch=control_epoch):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "control_epoch must be a non-negative integer or None",
+                ):
+                    graph.publish(route, b"tick", control_epoch=control_epoch)
+
+        latest = graph.latest(route)
+        self.assertIsNone(latest)
+
+    def test_writable_port_rejects_boolean_control_epoch(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Write,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("clock"),
+            family=graph_module.StreamFamily("epoch"),
+            stream=graph_module.StreamName("request"),
+            variant=graph_module.Variant.Request,
+            schema=graph_module.Schema.bytes(name="EpochRequest"),
+        )
+        graph = graph_module.Graph()
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "control_epoch must be a non-negative integer or None",
+        ):
+            graph._write_port(route).write(b"tick", control_epoch=True)
+
+        latest = graph.latest(route)
+        self.assertIsNone(latest)
+
     def test_any_schema_preserves_local_objects_through_graph_observe(self) -> None:
         graph_module = load_graph_module()
         route = graph_module.route(

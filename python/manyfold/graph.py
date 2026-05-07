@@ -1013,6 +1013,15 @@ class RetryPolicy:
 WriteTarget = Union[WriteBinding, LifecycleBinding, RouteLike]
 
 
+def _validate_control_epoch(control_epoch: int | None) -> None:
+    if control_epoch is None:
+        return
+    if not isinstance(control_epoch, int) or isinstance(control_epoch, bool):
+        raise ValueError("control_epoch must be a non-negative integer or None")
+    if control_epoch < 0:
+        raise ValueError("control_epoch must be a non-negative integer or None")
+
+
 @dataclass(frozen=True)
 class WriteBindings:
     """Factories for common shadow-route write binding layouts."""
@@ -1286,6 +1295,7 @@ class ReactiveWritablePort:
         producer: ProducerRef | None = None,
         control_epoch: int | None = None,
     ) -> ClosedEnvelope:
+        _validate_control_epoch(control_epoch)
         envelope = self._native.write(
             payload, producer=producer, control_epoch=control_epoch
         )
@@ -3370,6 +3380,7 @@ class Graph:
         producer: ProducerRef | None = None,
         control_epoch: int | None = None,
     ) -> list[ClosedEnvelope]:
+        _validate_control_epoch(control_epoch)
         if hasattr(self._graph, "emit"):
             return cast(
                 list[ClosedEnvelope],
