@@ -12,9 +12,9 @@ from ._exports import CATALOG_EXPORTS
 
 T = TypeVar("T", bound=Hashable)
 
-__all__ = [
+__all__ = (
     *CATALOG_EXPORTS,
-]
+)
 
 _README_INTRO_LINES = (
     "The `examples/` directory is organized as a short path through the mental",

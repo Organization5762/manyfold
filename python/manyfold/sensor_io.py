@@ -1771,7 +1771,7 @@ def _dispose_handle(handle: Any, *, timeout: float | None = None) -> None:
     _call_if_present(handle, "join", timeout)
 
 
-__all__ = [
+__all__ = (
     "BackoffPolicy",
     "BoundedRingBuffer",
     "ChangeFilter",
@@ -1819,4 +1819,4 @@ __all__ = [
     "sensor_event_schema",
     "sensor_sample_schema",
     "xor_checksum",
-]
+)

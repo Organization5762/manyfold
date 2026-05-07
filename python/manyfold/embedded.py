@@ -217,10 +217,10 @@ class EmbeddedDeviceProfile:
         )
 
 
-__all__ = [
+__all__ = (
     "EmbeddedBulkSensor",
     "EmbeddedDeviceProfile",
     "EmbeddedRuntimeRules",
     "EmbeddedScalarSensor",
     "FirmwareAgentProfile",
-]
+)

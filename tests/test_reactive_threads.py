@@ -28,6 +28,12 @@ class ReactiveThreadsTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.reactive_threads.reset_reactive_threading_state_for_tests()
 
+    def test_reactive_threads_exports_are_tuple_shaped(self) -> None:
+        self.assertIsInstance(self.reactive_threads.__all__, tuple)
+        for name in self.reactive_threads.__all__:
+            with self.subTest(name=name):
+                self.assertTrue(hasattr(self.reactive_threads, name))
+
     def test_shared_schedulers_record_configured_worker_counts(self) -> None:
         env = {
             "MANYFOLD_RX_BACKGROUND_MAX_WORKERS": "7",

@@ -7,6 +7,26 @@ from tests.test_support import load_manyfold_package
 
 
 class LegoCatalogTests(unittest.TestCase):
+    def test_lego_catalog_exports_intentional_surface(self) -> None:
+        manyfold = load_manyfold_package()
+        lego_catalog = sys.modules["manyfold.lego_catalog"]
+
+        self.assertEqual(
+            lego_catalog.__all__,
+            (
+                "Lego",
+                "all_legos",
+                "dependencies_of",
+                "dependents_of",
+                "get_lego",
+                "legos_by_layer",
+                "legos_by_role",
+            ),
+        )
+        for name in lego_catalog.__all__:
+            with self.subTest(name=name):
+                self.assertIs(getattr(lego_catalog, name), getattr(manyfold, name))
+
     def test_catalog_dependencies_reference_known_legos(self) -> None:
         manyfold = load_manyfold_package()
         known = {lego.name for lego in manyfold.all_legos()}
