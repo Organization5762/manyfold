@@ -4968,11 +4968,11 @@ class Graph:
         """Summarize producers, subscribers, writes, and taint state for a route."""
         scope_routes = self._audit_scope_routes(route_ref)
         scope_keys = tuple(route.display() for route in scope_routes)
+        scope_key_set = set(scope_keys)
         producers: set[str] = set()
         active_subscribers: set[str] = set()
         taint_upper_bounds: set[str] = set()
         repair_notes: set[str] = set()
-        recent_debug_events: list[str] = []
 
         for scope_route in scope_routes:
             route_display = scope_route.display()
@@ -4983,10 +4983,6 @@ class Graph:
                     taint_upper_bounds.add(item)
                 elif item.startswith("repair:"):
                     repair_notes.add(item.removeprefix("repair:"))
-            recent_debug_events.extend(
-                f"{event.event_type}:{event.detail}"
-                for event in self.audit(scope_route)
-            )
 
         binding = self._binding_for_route(route_ref)
         related_write_requests = ()
@@ -5004,7 +5000,11 @@ class Graph:
             related_write_requests=related_write_requests,
             taint_upper_bounds=tuple(sorted(taint_upper_bounds)),
             repair_notes=tuple(sorted(repair_notes)),
-            recent_debug_events=tuple(recent_debug_events),
+            recent_debug_events=tuple(
+                f"{event.event_type}:{event.detail}"
+                for event in self._audit_events
+                if event.route_display in scope_key_set
+            ),
         )
 
     def writers(self, route_ref: RouteLike) -> Iterator[str]:
