@@ -52,13 +52,13 @@ class EmbeddedProfileTests(unittest.TestCase):
 
         self.assertEqual(
             embedded.__all__,
-            [
+            (
                 "EmbeddedBulkSensor",
                 "EmbeddedDeviceProfile",
                 "EmbeddedRuntimeRules",
                 "EmbeddedScalarSensor",
                 "FirmwareAgentProfile",
-            ],
+            ),
         )
         for name in embedded.__all__:
             with self.subTest(name=name):

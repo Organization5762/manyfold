@@ -348,7 +348,7 @@ def legos_by_layer(layer: str) -> tuple[Lego, ...]:
     return _LEGOS_BY_LAYER.get(layer, ())
 
 
-__all__ = [
+__all__ = (
     "Lego",
     "all_legos",
     "dependencies_of",
@@ -356,4 +356,4 @@ __all__ = [
     "get_lego",
     "legos_by_layer",
     "legos_by_role",
-]
+)

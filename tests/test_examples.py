@@ -155,6 +155,7 @@ class ExampleTests(unittest.TestCase):
         examples_package = __import__("examples")
 
         self.assertIsInstance(examples_package.__all__, tuple)
+        self.assertIsInstance(catalog_module.__all__, tuple)
         self.assertEqual(tuple(CATALOG_EXPORTS), tuple(examples_package.__all__))
         self.assertEqual(tuple(CATALOG_EXPORTS), tuple(catalog_module.__all__))
 
@@ -376,7 +377,7 @@ class ExampleTests(unittest.TestCase):
         argv = ["--check"]
         self.assertEqual(module.main(argv), 29)
         self.assertEqual(recorded, [argv])
-        self.assertEqual(module.__all__, ["main"])
+        self.assertEqual(module.__all__, ("main",))
 
     def test_repo_root_manyfold_example_catalog_wrapper_uses_python_impl_path(
         self,

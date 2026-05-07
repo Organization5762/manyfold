@@ -498,7 +498,7 @@ def _run_background_observable(
         ready.set()
 
 
-__all__ = [
+__all__ = (
     "DEFAULT_DELIVERY_LATENCY_HISTORY_SIZE",
     "FRAME_THREAD_LATENCY_STREAM",
     "DeliveryLatencyStats",
@@ -524,4 +524,4 @@ __all__ = [
     "scheduler_diagnostics",
     "start_with_once",
     "shutdown",
-]
+)

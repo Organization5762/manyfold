@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from ._catalog import main
 
-__all__ = ["main"]
+__all__ = ("main",)
 
 
 if __name__ == "__main__":

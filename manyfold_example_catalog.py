@@ -20,7 +20,7 @@ _SPEC.loader.exec_module(_MODULE)
 
 main = _MODULE.main
 
-__all__ = ["main"]
+__all__ = ("main",)
 
 
 if __name__ == "__main__":

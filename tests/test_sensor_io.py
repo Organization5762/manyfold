@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import sys
 import tempfile
 import threading
 import unittest
@@ -45,6 +46,15 @@ def _route(manyfold, stream: str, schema):
 
 
 class SensorIoTests(unittest.TestCase):
+    def test_sensor_io_exports_are_tuple_shaped(self) -> None:
+        load_manyfold_package()
+        sensor_io = sys.modules["manyfold.sensor_io"]
+
+        self.assertIsInstance(sensor_io.__all__, tuple)
+        for name in sensor_io.__all__:
+            with self.subTest(name=name):
+                self.assertTrue(hasattr(sensor_io, name))
+
     def test_manual_clock_produces_deterministic_timestamps(self) -> None:
         manyfold = load_manyfold_package()
         clock = manyfold.ManualClock(10.0)
