@@ -1,5 +1,31 @@
 """Scheduler and observer protocols re-exported through Manyfold."""
 
-from reactivex.abc import *  # noqa: F403
+from reactivex.abc import (
+    DisposableBase as DisposableBase,
+    ObservableBase as ObservableBase,
+    ObserverBase as ObserverBase,
+    OnCompleted as OnCompleted,
+    OnError as OnError,
+    OnNext as OnNext,
+    PeriodicSchedulerBase as PeriodicSchedulerBase,
+    ScheduledAction as ScheduledAction,
+    SchedulerBase as SchedulerBase,
+    StartableBase as StartableBase,
+    SubjectBase as SubjectBase,
+    Subscription as Subscription,
+)
 
-__all__ = tuple(sorted(name for name in globals() if not name.startswith("_")))
+__all__ = (
+    "DisposableBase",
+    "ObservableBase",
+    "ObserverBase",
+    "OnCompleted",
+    "OnError",
+    "OnNext",
+    "PeriodicSchedulerBase",
+    "ScheduledAction",
+    "SchedulerBase",
+    "StartableBase",
+    "SubjectBase",
+    "Subscription",
+)
