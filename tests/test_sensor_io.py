@@ -310,6 +310,23 @@ class SensorIoTests(unittest.TestCase):
             b'"stale":false,"status":"ok"}',
         )
 
+    def test_sensor_schemas_reject_non_object_payloads(self) -> None:
+        manyfold = load_manyfold_package()
+        sample_schema = manyfold.sensor_sample_schema(_int_schema(manyfold, "Temp"))
+        event_schema = manyfold.sensor_event_schema()
+        health_schema = manyfold.health_status_schema()
+
+        cases = (
+            (sample_schema, b"[]", "sensor sample must be a JSON object"),
+            (event_schema, b"null", "sensor event must be a JSON object"),
+            (health_schema, b'"ok"', "health status must be a JSON object"),
+        )
+
+        for schema, payload, message in cases:
+            with self.subTest(schema=schema.schema_id):
+                with self.assertRaisesRegex(ValueError, message):
+                    schema.decode(payload)
+
     def test_health_status_schema_rejects_string_stale_flag(self) -> None:
         manyfold = load_manyfold_package()
         health_schema = manyfold.health_status_schema()
