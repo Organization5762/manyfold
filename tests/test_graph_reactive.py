@@ -5305,6 +5305,31 @@ class GraphReactiveTests(unittest.TestCase):
 
         self.assertEqual(graph.route_audit(binding.effective).active_subscribers, ())
 
+    def test_route_audit_preserves_binding_scope_event_chronology(self) -> None:
+        graph_module = load_graph_module()
+        binding = graph_module.WriteBindings.logical(
+            graph_module.OwnerName("pump"),
+            graph_module.StreamFamily("pressure"),
+            graph_module.StreamName("target"),
+            graph_module.Schema.bytes(name="PressureTarget"),
+        )
+        graph = graph_module.Graph()
+
+        graph.publish(binding, b"80")
+        graph.publish(binding.effective, b"72")
+        graph.publish(binding.reported, b"74")
+        graph.publish(binding.ack, b"ok")
+
+        self.assertEqual(
+            graph.route_audit(binding.request).recent_debug_events,
+            (
+                f"write:published {binding.request.display()}",
+                f"write:published {binding.effective.display()}",
+                f"write:published {binding.reported.display()}",
+                f"write:published {binding.ack.display()}",
+            ),
+        )
+
     def test_route_audit_includes_lifecycle_event_and_health_routes(self) -> None:
         graph_module = load_graph_module()
         graph = graph_module.Graph()
