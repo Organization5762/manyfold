@@ -60,16 +60,23 @@ class ManualClock:
     current: float = 0.0
     group: str | None = None
 
+    def __post_init__(self) -> None:
+        self.current = _require_finite_number(self.current, "clock value")
+
     def now(self) -> float:
         return self.current
 
     def set(self, value: float) -> None:
-        self.current = float(value)
+        self.current = _require_finite_number(value, "clock value")
 
     def advance(self, delta: float) -> float:
-        if delta < 0:
+        resolved_delta = _require_finite_number(delta, "clock delta")
+        if resolved_delta < 0:
             raise ValueError("delta must be non-negative")
-        self.current += float(delta)
+        self.current = _require_finite_number(
+            self.current + resolved_delta,
+            "clock value",
+        )
         return self.current
 
 
@@ -104,6 +111,22 @@ class BackoffPolicy:
     max_delay: float | None = None
 
     def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "initial_delay",
+            _require_finite_number(self.initial_delay, "initial_delay"),
+        )
+        object.__setattr__(
+            self,
+            "multiplier",
+            _require_finite_number(self.multiplier, "multiplier"),
+        )
+        if self.max_delay is not None:
+            object.__setattr__(
+                self,
+                "max_delay",
+                _require_finite_number(self.max_delay, "max_delay"),
+            )
         if self.initial_delay < 0:
             raise ValueError("initial_delay must be non-negative")
         if self.multiplier < 1:
@@ -967,6 +990,7 @@ class ThresholdFilter(Generic[T]):
     _has_last: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self) -> None:
+        self.threshold = _require_finite_number(self.threshold, "threshold")
         if self.threshold < 0:
             raise ValueError("threshold must be non-negative")
 
@@ -1419,6 +1443,7 @@ class SensorHealthWatchdog:
     group: str | None = None
 
     def __post_init__(self) -> None:
+        self.stale_after = _require_finite_number(self.stale_after, "stale_after")
         if self.stale_after < 0:
             raise ValueError("stale_after must be non-negative")
         _adopt_group(self.clock, self.group)
@@ -1512,8 +1537,19 @@ def _changed_enough(new: Any, old: Any, threshold: float) -> bool:
             return True
         return any(_changed_enough(n, o, threshold) for n, o in zip(new, old))
     if isinstance(new, (int, float)) and isinstance(old, (int, float)):
-        return abs(float(new) - float(old)) > threshold
+        new_number = float(new)
+        old_number = float(old)
+        if not math.isfinite(new_number) or not math.isfinite(old_number):
+            return new != old
+        return abs(new_number - old_number) > threshold
     return new != old
+
+
+def _require_finite_number(value: float, field: str) -> float:
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError(f"{field} must be finite")
+    return number
 
 
 def _mapping_key_sort_key(key: Any) -> tuple[str, str]:
