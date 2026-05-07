@@ -249,13 +249,17 @@ _LEGOS = (
 
 def _duplicate_names(names: Iterable[str]) -> tuple[str, ...]:
     seen: set[str] = set()
-    duplicates: set[str] = set()
+    duplicate_seen: set[str] = set()
+    duplicates: list[str] = []
     for name in names:
-        if name in seen:
-            duplicates.add(name)
-        else:
+        if name not in seen:
             seen.add(name)
-    return tuple(sorted(duplicates))
+            continue
+        if name in duplicate_seen:
+            continue
+        duplicates.append(name)
+        duplicate_seen.add(name)
+    return tuple(duplicates)
 
 
 _DUPLICATE_NAMES = _duplicate_names(lego.name for lego in _LEGOS)
