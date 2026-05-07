@@ -480,33 +480,33 @@ def install_manyfold_rust_stub() -> None:
                 f"{self.family}.{self.stream}.{self.variant}.v{self.schema.version}"
             )
 
-    @dataclass
+    @dataclass(frozen=True)
     class PayloadRef:
         payload_id: str
         logical_length_bytes: int = 0
         codec_id: str = "identity"
         inline_bytes: bytes = b""
 
-    @dataclass
+    @dataclass(frozen=True)
     class ProducerRef:
         producer_id: str
         kind: str
 
-    @dataclass
+    @dataclass(frozen=True)
     class RuntimeRef:
         runtime_id: str
 
-    @dataclass
+    @dataclass(frozen=True)
     class ClockDomainRef:
         clock_domain_id: str
 
-    @dataclass
+    @dataclass(frozen=True)
     class TaintMark:
         domain: str
         value_id: str
         origin_id: str
 
-    @dataclass
+    @dataclass(frozen=True)
     class ScheduleGuard:
         expires_at_epoch: Optional[int] = None
 
@@ -518,7 +518,7 @@ def install_manyfold_rust_stub() -> None:
         def wait_for_ack(route: RouteRef) -> "ScheduleGuard":
             return ScheduleGuard()
 
-    @dataclass
+    @dataclass(frozen=True)
     class ClosedEnvelope:
         route: RouteRef
         payload_ref: PayloadRef
@@ -526,23 +526,41 @@ def install_manyfold_rust_stub() -> None:
         producer: ProducerRef = None
         emitter: RuntimeRef = None
         control_epoch: Optional[int] = None
-        taints: list[TaintMark] = None
-        guards: list[ScheduleGuard] = None
+        taints: tuple[TaintMark, ...] = ()
+        guards: tuple[ScheduleGuard, ...] = ()
 
         def __post_init__(self) -> None:
             if self.producer is None:
-                self.producer = ProducerRef("python", ProducerKind.Application)
+                object.__setattr__(
+                    self, "producer", ProducerRef("python", ProducerKind.Application)
+                )
             if self.emitter is None:
-                self.emitter = RuntimeRef("runtime:stub")
-            if self.taints is None:
-                self.taints = []
-            if self.guards is None:
-                self.guards = []
+                object.__setattr__(self, "emitter", RuntimeRef("runtime:stub"))
+            object.__setattr__(self, "taints", tuple(self.taints or ()))
+            object.__setattr__(self, "guards", tuple(self.guards or ()))
 
-    @dataclass
+        def with_taints(self, taints) -> "ClosedEnvelope":
+            return ClosedEnvelope(
+                route=self.route,
+                payload_ref=self.payload_ref,
+                seq_source=self.seq_source,
+                producer=self.producer,
+                emitter=self.emitter,
+                control_epoch=self.control_epoch,
+                taints=tuple(taints),
+                guards=self.guards,
+            )
+
+        def close(self) -> "ClosedEnvelope":
+            return self
+
+    @dataclass(frozen=True)
     class OpenedEnvelope:
         closed: ClosedEnvelope
         payload: bytes
+
+        def close(self) -> ClosedEnvelope:
+            return self.closed
 
     @dataclass
     class PortDescriptor:

@@ -438,6 +438,43 @@ class GraphReactiveTests(unittest.TestCase):
         self.assertEqual(graph.disconnect(source=source, sink=sink), True)
         self.assertEqual(graph.disconnect(source=source, sink=sink), False)
 
+    def test_typed_envelopes_close_to_immutable_closed_facts(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("closeable"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="CloseableBytes"),
+        )
+        graph = graph_module.Graph()
+
+        envelope = graph.publish(route, b"payload")
+        tainted = envelope.close().with_taints(
+            (
+                graph_module.TaintMark(
+                    graph_module.TaintDomain.Determinism,
+                    "DET_SHARED_FACT",
+                    route.display(),
+                ),
+            )
+        )
+
+        with self.assertRaises(AttributeError):
+            envelope.value = b"changed"
+        self.assertIs(envelope.close(), envelope.closed)
+        self.assertEqual(tuple(envelope.closed.taints), ())
+        self.assertEqual(
+            tuple(taint.value_id for taint in tainted.taints),
+            ("DET_SHARED_FACT",),
+        )
+        self.assertEqual(
+            tainted.payload_ref.payload_id,
+            envelope.closed.payload_ref.payload_id,
+        )
+
     def test_callback_pipeline_removes_node_when_latest_replay_fails(self) -> None:
         graph_module = load_graph_module()
         route = graph_module.route(
@@ -3444,13 +3481,17 @@ class GraphReactiveTests(unittest.TestCase):
             ),
         )
         envelope = graph.publish(source, b"frame-1")
-        envelope.closed.taints.append(
-            graph_module.TaintMark(
-                graph_module.TaintDomain.Time,
-                "TIME_UNKNOWN",
-                "device_clock_missing",
+        tainted_source = envelope.close().with_taints(
+            (
+                graph_module.TaintMark(
+                    graph_module.TaintDomain.Time,
+                    "TIME_UNKNOWN",
+                    "device_clock_missing",
+                ),
             )
         )
+        self.assertEqual(tuple(envelope.close().taints), ())
+        self.assertEqual(len(tainted_source.taints), 1)
         subscription.dispose()
 
         latest = graph.latest(repaired)
@@ -3590,13 +3631,17 @@ class GraphReactiveTests(unittest.TestCase):
             ),
         )
         envelope = graph.publish(source, b"frame-1")
-        envelope.closed.taints.append(
-            graph_module.TaintMark(
-                graph_module.TaintDomain.Time,
-                "TIME_UNKNOWN",
-                "device_clock_missing",
+        tainted_source = envelope.close().with_taints(
+            (
+                graph_module.TaintMark(
+                    graph_module.TaintDomain.Time,
+                    "TIME_UNKNOWN",
+                    "device_clock_missing",
+                ),
             )
         )
+        self.assertEqual(tuple(envelope.close().taints), ())
+        self.assertEqual(len(tainted_source.taints), 1)
         response = graph.query(
             graph_module.QueryRequest(command="taints", route=repaired),
         )
