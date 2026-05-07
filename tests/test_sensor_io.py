@@ -183,6 +183,34 @@ class SensorIoTests(unittest.TestCase):
         self.assertIsNone(event)
         self.assertEqual(decoder.sequence.peek(), 0)
 
+    def test_json_event_decoder_uses_default_for_missing_event_type(self) -> None:
+        manyfold = load_manyfold_package()
+        decoder = manyfold.JsonEventDecoder(default_event_type="sensor.default")
+
+        missing = decoder.decode(b'{"data":"ok"}')
+        null = decoder.decode(b'{"event_type":null,"data":"ok"}')
+        empty = decoder.decode(b'{"event_type":"","data":"ok"}')
+
+        self.assertIsNotNone(missing)
+        self.assertIsNotNone(null)
+        self.assertIsNotNone(empty)
+        assert missing is not None
+        assert null is not None
+        assert empty is not None
+        self.assertEqual(missing.event_type, "sensor.default")
+        self.assertEqual(null.event_type, "sensor.default")
+        self.assertEqual(empty.event_type, "sensor.default")
+        self.assertEqual(decoder.sequence.peek(), 3)
+
+    def test_json_event_decoder_rejects_non_string_event_type(self) -> None:
+        manyfold = load_manyfold_package()
+        decoder = manyfold.JsonEventDecoder()
+
+        self.assertIsNone(decoder.decode(b'{"event_type":7,"data":"ok"}'))
+        self.assertIsNone(decoder.decode(b'{"event_type":false,"data":"ok"}'))
+        self.assertIsNone(decoder.decode(b'{"event_type":[],"data":"ok"}'))
+        self.assertEqual(decoder.sequence.peek(), 0)
+
     def test_sensor_event_schema_round_trips_identity_and_raw_bytes(self) -> None:
         manyfold = load_manyfold_package()
         schema = manyfold.sensor_event_schema()

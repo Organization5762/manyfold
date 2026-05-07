@@ -916,7 +916,13 @@ class JsonEventDecoder:
             return None
         if not isinstance(parsed, Mapping):
             return None
-        event_type = str(parsed.get("event_type") or self.default_event_type)
+        event_type_value = parsed.get("event_type", self.default_event_type)
+        if event_type_value is None or event_type_value == "":
+            event_type = self.default_event_type
+        elif isinstance(event_type_value, str):
+            event_type = event_type_value
+        else:
+            return None
         data = parsed.get("data", {})
         return SensorEvent(
             event_type=event_type,
