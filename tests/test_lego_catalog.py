@@ -22,7 +22,7 @@ class LegoCatalogTests(unittest.TestCase):
 
         self.assertEqual(lego_catalog._duplicate_names(names), ())
         self.assertEqual(
-            lego_catalog._duplicate_names(["Bytes", "Key", "Bytes", "Key"]),
+            lego_catalog._duplicate_names(["Key", "Bytes", "Bytes", "Key"]),
             ("Bytes", "Key"),
         )
 
