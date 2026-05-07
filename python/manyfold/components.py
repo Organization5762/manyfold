@@ -1026,7 +1026,7 @@ def _decode_vote(payload: bytes) -> Vote:
             _decode_json_bool(granted),
         )
     term_text, candidate, voter, granted_text = text.split("|", 3)
-    return (int(term_text), candidate, voter, granted_text == "1")
+    return (int(term_text), candidate, voter, _decode_legacy_bool(granted_text))
 
 
 def _quorum_schema() -> Schema[QuorumState]:
@@ -1050,7 +1050,7 @@ def _decode_quorum(payload: bytes) -> QuorumState:
         )
     term_text, candidate, voters_text, granted_text = text.split("|", 3)
     voters = tuple(voter for voter in voters_text.split(",") if voter)
-    return (int(term_text), candidate, voters, granted_text == "1")
+    return (int(term_text), candidate, voters, _decode_legacy_bool(granted_text))
 
 
 def _append_entry_schema() -> Schema[AppendEntry]:
@@ -1116,13 +1116,21 @@ def _decode_leader_state(payload: bytes) -> LeaderState:
             _decode_json_bool(committed),
         )
     leader, term_text, committed_text = text.split("|", 2)
-    return (leader, int(term_text), committed_text == "1")
+    return (leader, int(term_text), _decode_legacy_bool(committed_text))
 
 
 def _decode_json_bool(value: Any) -> bool:
     if isinstance(value, bool):
         return value
     raise ValueError("JSON boolean field must be true or false")
+
+
+def _decode_legacy_bool(value: str) -> bool:
+    if value == "1":
+        return True
+    if value == "0":
+        return False
+    raise ValueError("legacy boolean field must be 0 or 1")
 
 
 def _decode_json_int(value: Any) -> int:
