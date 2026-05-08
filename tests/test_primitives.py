@@ -92,6 +92,19 @@ class PrimitiveTests(unittest.TestCase):
         ):
             other_handles.decode(token)
 
+    def test_any_schema_tokens_are_scoped_by_schema_version(self) -> None:
+        manyfold = load_manyfold_package()
+        current_handles = manyfold.Schema.any("RuntimeHandle", version=1)
+        next_handles = manyfold.Schema.any("RuntimeHandle", version=2)
+
+        token = current_handles.encode(object())
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "unknown process-local object token for schema 'RuntimeHandle'",
+        ):
+            next_handles.decode(token)
+
     def test_float_schema_rejects_non_finite_values(self) -> None:
         manyfold = load_manyfold_package()
         schema = manyfold.Schema.float(name="Temperature")
