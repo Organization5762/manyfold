@@ -49,6 +49,26 @@ class PrimitiveTests(unittest.TestCase):
                         schema=manyfold.Schema.float(name="Temperature"),
                     )
 
+    def test_route_rejects_invalid_native_enum_values_early(self) -> None:
+        manyfold = load_manyfold_package()
+
+        cases = (
+            ("plane", "read", "plane must be a Plane"),
+            ("layer", "logical", "layer must be a Layer"),
+            ("variant", "meta", "variant must be a Variant"),
+        )
+        for field, value, message in cases:
+            with self.subTest(field=field):
+                kwargs = {
+                    "owner": "sensor",
+                    "family": "events",
+                    "stream": "temperature",
+                    "schema": manyfold.Schema.float(name="Temperature"),
+                    field: value,
+                }
+                with self.assertRaisesRegex(ValueError, message):
+                    manyfold.route(**kwargs)
+
     def test_schema_rejects_empty_id(self) -> None:
         manyfold = load_manyfold_package()
 

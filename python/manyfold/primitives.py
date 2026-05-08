@@ -54,6 +54,24 @@ def _require_positive_int(value: int, field: str) -> None:
         raise ValueError(f"{field} must be a positive integer")
 
 
+def _require_enum_member(value: object, enum_type: type[Any], field: str) -> None:
+    if type(value) is str:
+        raise ValueError(f"{field} must be a {enum_type.__name__}")
+    value_token = getattr(value, "value", value)
+    members = (
+        getattr(enum_type, name)
+        for name in dir(enum_type)
+        if not name.startswith("_")
+    )
+    if not any(
+        value is member
+        or value == member
+        or value_token == getattr(member, "value", member)
+        for member in members
+    ):
+        raise ValueError(f"{field} must be a {enum_type.__name__}")
+
+
 def _encode_finite_float(value: Any) -> bytes:
     number = float(value)
     if not math.isfinite(number):
@@ -493,6 +511,9 @@ def route(
     )
     if missing:
         raise ValueError(f"route requires: {', '.join(missing)}")
+    _require_enum_member(plane, Plane, "plane")
+    _require_enum_member(layer, Layer, "layer")
+    _require_enum_member(variant, Variant, "variant")
     return TypedRoute(
         plane=cast(Plane, plane),
         layer=cast(Layer, layer),
