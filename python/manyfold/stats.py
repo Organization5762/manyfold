@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Sequence
 
@@ -22,4 +23,6 @@ class Average:
             raise ValueError("average requires at least one value")
         start = max(0, value_count - self.window_size)
         window_count = value_count - start
-        return sum(values[index] for index in range(start, value_count)) / window_count
+        # fsum keeps cancellation-heavy windows deterministic without copying
+        # the sequence; callers may provide index-only buffers.
+        return math.fsum(values[index] for index in range(start, value_count)) / window_count
