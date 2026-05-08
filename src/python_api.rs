@@ -9,6 +9,7 @@ use crate::core::{
 };
 use pyo3::exceptions::{PyKeyError, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
+use pyo3::types::PyBool;
 
 #[cfg(feature = "stub-gen")]
 use pyo3_stub_gen::define_stub_info_gatherer;
@@ -98,6 +99,19 @@ fn unsupported_choice(field: &str, value: &str, choices: &[&str]) -> PyErr {
         "unsupported {field} {value:?}; expected one of {}",
         choices.join(", ")
     ))
+}
+
+fn extract_positive_capacity(value: &Bound<'_, PyAny>) -> PyResult<usize> {
+    if value.is_instance_of::<PyBool>() {
+        return Err(PyTypeError::new_err(
+            "capacity must be an integer, not bool",
+        ));
+    }
+    let capacity = value.extract::<usize>()?;
+    if capacity == 0 {
+        return Err(PyValueError::new_err("capacity must be greater than zero"));
+    }
+    Ok(capacity)
 }
 
 #[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
@@ -1125,14 +1139,11 @@ impl MailboxDescriptor {
     #[new]
     #[pyo3(signature = (capacity=128, delivery_mode="mpsc_serial".to_string(), ordering_policy="fifo".to_string(), overflow_policy="block".to_string()))]
     fn new(
-        capacity: usize,
+        #[pyo3(from_py_with = extract_positive_capacity)] capacity: usize,
         delivery_mode: String,
         ordering_policy: String,
         overflow_policy: String,
     ) -> PyResult<Self> {
-        if capacity == 0 {
-            return Err(PyValueError::new_err("capacity must be greater than zero"));
-        }
         let delivery_mode = match delivery_mode.as_str() {
             "mpsc_serial" => DeliveryMode::MpscSerial,
             "mpmc_unique" => DeliveryMode::MpmcUnique,
