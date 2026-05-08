@@ -672,6 +672,12 @@ def install_manyfold_rust_stub() -> None:
         ordering_policy: str = "fifo"
         overflow_policy: str = "block"
 
+        def __post_init__(self) -> None:
+            if isinstance(self.capacity, bool):
+                raise TypeError("capacity must be an integer, not bool")
+            if self.capacity <= 0:
+                raise ValueError("capacity must be greater than zero")
+
     @dataclass
     class Mailbox:
         name: str

@@ -89,6 +89,28 @@ for kwargs, expected in cases:
 
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_mailbox_descriptor_rejects_boolean_capacity(self) -> None:
+        script = """
+import manyfold
+
+for capacity in (False, True):
+    try:
+        manyfold.MailboxDescriptor(capacity=capacity)
+    except TypeError as exc:
+        assert "capacity must be an integer, not bool" in str(exc), str(exc)
+    else:
+        raise AssertionError(f"expected TypeError for {capacity!r}")
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            check=False,
+            capture_output=True,
+            env=subprocess_test_env(),
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_mailbox_snapshot_exposes_semantics_and_delivery_counters(self) -> None:
         graph_module = load_graph_module()
         source = graph_module.route(
