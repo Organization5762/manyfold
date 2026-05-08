@@ -90,8 +90,11 @@ class RetryPolicy:
     def __post_init__(self) -> None:
         if self.max_attempts <= 0:
             raise ValueError("max_attempts must be positive")
+        object.__setattr__(self, "retry_on", tuple(self.retry_on))
         if not self.retry_on:
             raise ValueError("retry_on must contain at least one exception type")
+        if not all(_is_exception_class(exception) for exception in self.retry_on):
+            raise ValueError("retry_on must contain only exception types")
 
     @classmethod
     def never(cls) -> RetryPolicy:
@@ -1558,6 +1561,10 @@ def _require_finite_number(value: float, field: str) -> float:
     if not math.isfinite(number):
         raise ValueError(f"{field} must be finite")
     return number
+
+
+def _is_exception_class(value: object) -> bool:
+    return isinstance(value, type) and issubclass(value, BaseException)
 
 
 def _require_int(value: int, field: str) -> int:

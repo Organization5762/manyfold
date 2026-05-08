@@ -762,6 +762,23 @@ class SensorIoTests(unittest.TestCase):
             loop.run(read)
         self.assertEqual(attempts, 2)
 
+    def test_retry_policy_normalizes_retryable_exception_classes(self) -> None:
+        manyfold = load_manyfold_package()
+
+        policy = manyfold.SensorRetryPolicy(retry_on=[RuntimeError])
+
+        self.assertEqual(policy.retry_on, (RuntimeError,))
+
+    def test_retry_policy_rejects_non_exception_retry_types(self) -> None:
+        manyfold = load_manyfold_package()
+
+        for retry_on in ((RuntimeError, object), (ValueError, ValueError())):
+            with self.subTest(retry_on=retry_on):
+                with self.assertRaisesRegex(
+                    ValueError, "retry_on must contain only exception types"
+                ):
+                    manyfold.SensorRetryPolicy(retry_on=retry_on)  # type: ignore[arg-type]
+
     def test_managed_run_loop_retries_until_stopped(self) -> None:
         manyfold = load_manyfold_package()
         attempts = 0
