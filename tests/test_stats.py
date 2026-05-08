@@ -53,6 +53,15 @@ class StatsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "must be positive"):
             Average(window_size=0)
 
+    def test_average_rejects_non_integer_window_size(self) -> None:
+        load_manyfold_package()
+        from manyfold.stats import Average
+
+        for value in (True, 3.5, "3"):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "must be an integer"):
+                    Average(window_size=value)  # type: ignore[arg-type]
+
 
 if __name__ == "__main__":
     unittest.main()

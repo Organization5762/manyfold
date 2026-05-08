@@ -5304,6 +5304,22 @@ class GraphReactiveTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "backoff_epochs must be non-negative"):
             graph_module.RetryPolicy(max_attempts=1, backoff_epochs=-1)
 
+    def test_retry_policy_rejects_non_integer_attempts_and_backoff(self) -> None:
+        graph_module = load_graph_module()
+
+        for value in (True, 1.5, "3"):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "max_attempts must be an integer"):
+                    graph_module.RetryPolicy(max_attempts=value)  # type: ignore[arg-type]
+
+        for value in (False, 1.5, "3"):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "backoff_epochs must be an integer"):
+                    graph_module.RetryPolicy(  # type: ignore[arg-type]
+                        max_attempts=1,
+                        backoff_epochs=value,
+                    )
+
     def test_shadow_state_tracks_pending_and_reconciliation(self) -> None:
         graph_module = load_graph_module()
         binding = graph_module.WriteBindings.logical(

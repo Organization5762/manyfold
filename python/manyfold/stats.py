@@ -14,6 +14,8 @@ class Average:
     window_size: int
 
     def __post_init__(self) -> None:
+        if not isinstance(self.window_size, int) or isinstance(self.window_size, bool):
+            raise ValueError("average window size must be an integer")
         if self.window_size <= 0:
             raise ValueError("average window size must be positive")
 

@@ -989,6 +989,10 @@ class RetryPolicy:
     backoff_epochs: int = 0
 
     def __post_init__(self) -> None:
+        if not isinstance(self.max_attempts, int) or isinstance(self.max_attempts, bool):
+            raise ValueError("max_attempts must be an integer")
+        if not isinstance(self.backoff_epochs, int) or isinstance(self.backoff_epochs, bool):
+            raise ValueError("backoff_epochs must be an integer")
         if self.max_attempts <= 0:
             raise ValueError("max_attempts must be positive")
         if self.backoff_epochs < 0:
