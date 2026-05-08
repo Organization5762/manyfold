@@ -1035,6 +1035,38 @@ class ComponentTests(unittest.TestCase):
             ):
                 manyfold.Memory(path)
 
+    def test_memory_chip_reports_invalid_record_field_value_with_path_and_line(
+        self,
+    ) -> None:
+        manyfold = load_manyfold_package()
+
+        cases = (
+            ("seq_source", 0, r"field seq_source must be positive"),
+            ("schema_version", 0, r"field schema_version must be positive"),
+            ("control_epoch", -1, r"field control_epoch must be non-negative"),
+        )
+
+        for field, value, message in cases:
+            with self.subTest(field=field):
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    path = Path(temp_dir) / "memory.jsonl"
+                    record = {
+                        "route": "read.logical.demo.memory.bytes.meta.v1",
+                        "seq_source": 1,
+                        "control_epoch": None,
+                        "schema_id": "MemoryBytes",
+                        "schema_version": 1,
+                        "payload_b64": "",
+                    }
+                    record[field] = value
+                    path.write_text(json.dumps(record) + "\n", encoding="utf-8")
+
+                    with self.assertRaisesRegex(
+                        ValueError,
+                        rf"memory file .*memory\.jsonl line 1 {message}",
+                    ):
+                        manyfold.Memory(path)
+
     def test_memory_chip_reports_invalid_record_payload_base64_with_path_and_line(
         self,
     ) -> None:

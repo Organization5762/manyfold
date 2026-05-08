@@ -555,12 +555,27 @@ class Memory:
                     f"memory file {self.path} line {line_number} field {field} "
                     "must be an integer"
                 )
+        if record["seq_source"] <= 0:
+            raise ValueError(
+                f"memory file {self.path} line {line_number} field seq_source "
+                "must be positive"
+            )
+        if record["schema_version"] <= 0:
+            raise ValueError(
+                f"memory file {self.path} line {line_number} field schema_version "
+                "must be positive"
+            )
         if record["control_epoch"] is not None and not _is_plain_int(
             record["control_epoch"]
         ):
             raise ValueError(
                 f"memory file {self.path} line {line_number} field control_epoch "
                 "must be an integer or null"
+            )
+        if record["control_epoch"] is not None and record["control_epoch"] < 0:
+            raise ValueError(
+                f"memory file {self.path} line {line_number} field control_epoch "
+                "must be non-negative"
             )
         try:
             base64.b64decode(record["payload_b64"], validate=True)
