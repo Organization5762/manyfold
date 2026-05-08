@@ -60,6 +60,18 @@ class RxFacadeTests(unittest.TestCase):
         self.assertNotIn("warn", marble_module.__all__)
         self.assertNotIn("typing", marble_module.__all__)
 
+    def test_private_operator_facade_deduplicates_upstream_exports(self) -> None:
+        load_manyfold_package()
+        operators_module = importlib.import_module("manyfold._rx.operators")
+        upstream_module = importlib.import_module("reactivex.operators")
+
+        self.assertEqual(
+            operators_module.__all__,
+            tuple(sorted(set(upstream_module.__all__))),
+        )
+        self.assertEqual(len(operators_module.__all__), len(set(operators_module.__all__)))
+        self.assertEqual(operators_module.zip_with_list, upstream_module.zip_with_list)
+
     def test_private_subject_submodules_export_only_subject_classes(self) -> None:
         load_manyfold_package()
         expected_exports = {
