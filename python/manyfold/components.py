@@ -1105,10 +1105,7 @@ def _decode_replicated_log(payload: bytes) -> ReplicatedLog:
         return ()
     if _is_json_tuple_payload(text):
         entries = json.loads(text.lstrip())
-        return tuple(
-            (_decode_json_int(index), _decode_json_string(command, "command"))
-            for index, command in entries
-        )
+        return tuple(_decode_json_append_entry(entry) for entry in entries)
     return tuple(_decode_append_entry(line.encode("utf-8")) for line in text.splitlines())
 
 
@@ -1166,6 +1163,13 @@ def _decode_json_string_array(value: Any, field: str) -> tuple[str, ...]:
     if not all(isinstance(item, str) for item in value):
         raise ValueError(f"{field} must contain only strings")
     return tuple(value)
+
+
+def _decode_json_append_entry(value: Any) -> AppendEntry:
+    if not isinstance(value, list) or len(value) != 2:
+        raise ValueError("replicated log entries must be JSON [index, command] pairs")
+    index, command = value
+    return (_decode_json_int(index), _decode_json_string(command, "command"))
 
 
 def _is_json_tuple_payload(text: str) -> bool:

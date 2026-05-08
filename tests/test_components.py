@@ -654,6 +654,20 @@ class ComponentTests(unittest.TestCase):
         ):
             routes.quorum.schema.decode(b'[3,"node-a",["node-b",7],true]')
 
+    def test_consensus_replicated_log_json_schema_rejects_malformed_entries(
+        self,
+    ) -> None:
+        manyfold = load_manyfold_package()
+        route = manyfold.Consensus.default_routes().replicated_log
+
+        for payload in (b'[7,"set pipe=a"]', b'[[7,"ok"],[8]]'):
+            with self.subTest(payload=payload):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    r"replicated log entries must be JSON \[index, command\] pairs",
+                ):
+                    route.schema.decode(payload)
+
     def test_consensus_json_schemas_reject_non_string_labels(self) -> None:
         manyfold = load_manyfold_package()
         routes = manyfold.Consensus.default_routes()
