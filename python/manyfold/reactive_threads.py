@@ -81,6 +81,12 @@ _NO_STARTING_VALUE = _NoStartingValue()
 
 class _LatencyRecorder:
     def __init__(self, history_size: int = DEFAULT_DELIVERY_LATENCY_HISTORY_SIZE) -> None:
+        if (
+            not isinstance(history_size, int)
+            or isinstance(history_size, bool)
+            or history_size <= 0
+        ):
+            raise ValueError("history_size must be a positive integer")
         self._history_size = history_size
         self._history: dict[str, deque[float]] = defaultdict(
             lambda: deque(maxlen=self._history_size)
