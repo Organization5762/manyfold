@@ -41,7 +41,7 @@ TWrite = TypeVar("TWrite")
 TProto = TypeVar("TProto", bound="ProtobufMessage")
 _ANY_SCHEMA_IDS = count(1)
 _ANY_SCHEMA_LOCK = Lock()
-_ANY_SCHEMA_VALUES: dict[tuple[str, str], Any] = {}
+_ANY_SCHEMA_VALUES: dict[tuple[str, int, str], Any] = {}
 
 
 def _require_non_empty_string(value: str, field: str) -> None:
@@ -176,18 +176,18 @@ class Schema(Generic[T]):
         def encode(value: Any) -> bytes:
             # Tokens are intentionally tiny because the process-local table owns
             # the actual object lifetime and identity. The schema id stays in
-            # the lookup key so unrelated local schemas cannot decode each
-            # other's opaque references by accident.
+            # the lookup key with the version so unrelated local schemas cannot
+            # decode each other's opaque references by accident.
             with _ANY_SCHEMA_LOCK:
                 key = str(next(_ANY_SCHEMA_IDS))
-                _ANY_SCHEMA_VALUES[(schema_id, key)] = value
+                _ANY_SCHEMA_VALUES[(schema_id, version, key)] = value
             return key.encode("ascii")
 
         def decode(payload: bytes) -> Any:
             key = payload.decode("ascii")
             with _ANY_SCHEMA_LOCK:
                 try:
-                    return _ANY_SCHEMA_VALUES[(schema_id, key)]
+                    return _ANY_SCHEMA_VALUES[(schema_id, version, key)]
                 except KeyError as error:
                     raise ValueError(
                         f"unknown process-local object token for schema {schema_id!r}"
