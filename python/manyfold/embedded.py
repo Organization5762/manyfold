@@ -61,6 +61,16 @@ def _disabled_issue_messages(
     return tuple(message for field, message in checks if not getattr(owner, field))
 
 
+def _require_bool(value: object, field: str) -> None:
+    if not isinstance(value, bool):
+        raise ValueError(f"{field} must be a boolean")
+
+
+def _require_bool_fields(owner: object, fields: tuple[str, ...]) -> None:
+    for field in fields:
+        _require_bool(getattr(owner, field), field)
+
+
 @dataclass(frozen=True)
 class FirmwareAgentProfile:
     """Capabilities expected from the firmware-lite agent profile."""
@@ -74,6 +84,13 @@ class FirmwareAgentProfile:
     local_aggregation: bool = True
     ring_buffer_staging: bool = True
     flash_backed_retention: bool = False
+
+    def __post_init__(self) -> None:
+        _require_bool_fields(
+            self,
+            tuple(field for field, _message in _FIRMWARE_ISSUE_CHECKS)
+            + ("flash_backed_retention",),
+        )
 
     def required_issues(self) -> tuple[str, ...]:
         return _disabled_issue_messages(self, _FIRMWARE_ISSUE_CHECKS)
@@ -93,6 +110,15 @@ class EmbeddedRuntimeRules:
     lazy_bulk_payload_open: bool = True
     prefer_zero_copy_bulk_payloads: bool = True
     bulk_credit_policy: str = _BULK_CREDIT_POLICY
+
+    def __post_init__(self) -> None:
+        _require_bool_fields(
+            self,
+            tuple(field for field, _message in _EMBEDDED_RUNTIME_ISSUE_CHECKS)
+            + tuple(field for field, _message in _BULK_RUNTIME_ISSUE_CHECKS),
+        )
+        if not isinstance(self.bulk_credit_policy, str):
+            raise ValueError("bulk_credit_policy must be a string")
 
     def required_issues(self) -> tuple[str, ...]:
         return _disabled_issue_messages(self, _EMBEDDED_RUNTIME_ISSUE_CHECKS)

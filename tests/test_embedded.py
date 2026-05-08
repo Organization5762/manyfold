@@ -156,6 +156,42 @@ class EmbeddedProfileTests(unittest.TestCase):
             ),
         )
 
+    def test_firmware_profile_rejects_non_boolean_flags(self) -> None:
+        manyfold = load_manyfold_package()
+
+        for kwargs, message in (
+            ({"route_descriptors": "yes"}, "route_descriptors must be a boolean"),
+            ({"flash_backed_retention": 1}, "flash_backed_retention must be a boolean"),
+        ):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    manyfold.FirmwareAgentProfile(**kwargs)
+
+    def test_embedded_runtime_rules_reject_non_boolean_flags(self) -> None:
+        manyfold = load_manyfold_package()
+
+        for kwargs, message in (
+            (
+                {"timestamps_close_to_source": "yes"},
+                "timestamps_close_to_source must be a boolean",
+            ),
+            (
+                {"prefer_zero_copy_bulk_payloads": 1},
+                "prefer_zero_copy_bulk_payloads must be a boolean",
+            ),
+        ):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    manyfold.EmbeddedRuntimeRules(**kwargs)
+
+    def test_embedded_runtime_rules_reject_non_string_bulk_credit_policy(
+        self,
+    ) -> None:
+        manyfold = load_manyfold_package()
+
+        with self.assertRaisesRegex(ValueError, "bulk_credit_policy must be a string"):
+            manyfold.EmbeddedRuntimeRules(bulk_credit_policy=1)
+
     def test_sensor_validation_includes_firmware_local_processing_issues(
         self,
     ) -> None:
