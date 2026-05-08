@@ -992,8 +992,15 @@ def _heartbeat_schema() -> Schema[Heartbeat]:
     return Schema(
         schema_id="RaftHeartbeat",
         version=1,
-        encode=lambda value: _encode_json_tuple(value),
+        encode=_encode_heartbeat,
         decode=lambda payload: _decode_heartbeat(payload),
+    )
+
+
+def _encode_heartbeat(value: Heartbeat) -> bytes:
+    term, leader = _encode_tuple_fields(value, 2, "heartbeat")
+    return _encode_json_tuple(
+        (_encode_int(term, "term"), _encode_string(leader, "leader"))
     )
 
 
@@ -1010,8 +1017,24 @@ def _request_vote_schema() -> Schema[RequestVote]:
     return Schema(
         schema_id="RaftRequestVote",
         version=1,
-        encode=lambda value: _encode_json_tuple(value),
+        encode=_encode_request_vote,
         decode=lambda payload: _decode_request_vote(payload),
+    )
+
+
+def _encode_request_vote(value: RequestVote) -> bytes:
+    term, candidate, last_log_index, last_log_term = _encode_tuple_fields(
+        value,
+        4,
+        "request vote",
+    )
+    return _encode_json_tuple(
+        (
+            _encode_int(term, "term"),
+            _encode_string(candidate, "candidate"),
+            _encode_int(last_log_index, "last_log_index"),
+            _encode_int(last_log_term, "last_log_term"),
+        )
     )
 
 
@@ -1037,8 +1060,20 @@ def _vote_schema() -> Schema[Vote]:
     return Schema(
         schema_id="RaftVote",
         version=1,
-        encode=lambda value: _encode_json_tuple(value),
+        encode=_encode_vote,
         decode=lambda payload: _decode_vote(payload),
+    )
+
+
+def _encode_vote(value: Vote) -> bytes:
+    term, candidate, voter, granted = _encode_tuple_fields(value, 4, "vote")
+    return _encode_json_tuple(
+        (
+            _encode_int(term, "term"),
+            _encode_string(candidate, "candidate"),
+            _encode_string(voter, "voter"),
+            _encode_bool(granted, "granted"),
+        )
     )
 
 
@@ -1060,8 +1095,20 @@ def _quorum_schema() -> Schema[QuorumState]:
     return Schema(
         schema_id="RaftQuorumState",
         version=1,
-        encode=lambda value: _encode_json_tuple(value),
+        encode=_encode_quorum,
         decode=lambda payload: _decode_quorum(payload),
+    )
+
+
+def _encode_quorum(value: QuorumState) -> bytes:
+    term, candidate, voters, granted = _encode_tuple_fields(value, 4, "quorum")
+    return _encode_json_tuple(
+        (
+            _encode_int(term, "term"),
+            _encode_string(candidate, "candidate"),
+            _encode_string_sequence(voters, "quorum voters"),
+            _encode_bool(granted, "granted"),
+        )
     )
 
 
@@ -1084,9 +1131,13 @@ def _append_entry_schema() -> Schema[AppendEntry]:
     return Schema(
         schema_id="RaftAppendEntry",
         version=1,
-        encode=lambda value: _encode_json_tuple(value),
+        encode=_encode_append_entry,
         decode=lambda payload: _decode_append_entry(payload),
     )
+
+
+def _encode_append_entry(value: AppendEntry) -> bytes:
+    return _encode_json_tuple(_encode_append_entry_value(value))
 
 
 def _decode_append_entry(payload: bytes) -> AppendEntry:
@@ -1102,13 +1153,16 @@ def _replicated_log_schema() -> Schema[ReplicatedLog]:
     return Schema(
         schema_id="RaftReplicatedLog",
         version=1,
-        encode=lambda value: json.dumps(
-            value,
-            allow_nan=False,
-            separators=(",", ":"),
-        ).encode("utf-8"),
+        encode=_encode_replicated_log,
         decode=lambda payload: _decode_replicated_log(payload),
     )
+
+
+def _encode_replicated_log(value: ReplicatedLog) -> bytes:
+    if not isinstance(value, (tuple, list)):
+        raise ValueError("replicated log must be a tuple of append entries")
+    entries = tuple(_encode_append_entry_value(entry) for entry in value)
+    return json.dumps(entries, allow_nan=False, separators=(",", ":")).encode("utf-8")
 
 
 def _decode_replicated_log(payload: bytes) -> ReplicatedLog:
@@ -1125,8 +1179,19 @@ def _leader_state_schema() -> Schema[LeaderState]:
     return Schema(
         schema_id="RaftLeaderState",
         version=1,
-        encode=lambda value: _encode_json_tuple(value),
+        encode=_encode_leader_state,
         decode=lambda payload: _decode_leader_state(payload),
+    )
+
+
+def _encode_leader_state(value: LeaderState) -> bytes:
+    leader, term, committed = _encode_tuple_fields(value, 3, "leader state")
+    return _encode_json_tuple(
+        (
+            _encode_string(leader, "leader"),
+            _encode_int(term, "term"),
+            _encode_bool(committed, "committed"),
+        )
     )
 
 
@@ -1182,6 +1247,43 @@ def _decode_json_append_entry(value: Any) -> AppendEntry:
         raise ValueError("replicated log entries must be JSON [index, command] pairs")
     index, command = value
     return (_decode_json_int(index), _decode_json_string(command, "command"))
+
+
+def _encode_append_entry_value(value: Any) -> AppendEntry:
+    index, command = _encode_tuple_fields(value, 2, "append entry")
+    return (_encode_int(index, "index"), _encode_string(command, "command"))
+
+
+def _encode_tuple_fields(value: Any, expected_length: int, field: str) -> tuple[Any, ...]:
+    if not isinstance(value, (tuple, list)) or len(value) != expected_length:
+        raise ValueError(f"{field} must be a tuple with {expected_length} fields")
+    return tuple(value)
+
+
+def _encode_bool(value: Any, field: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    raise ValueError(f"{field} must be a boolean")
+
+
+def _encode_int(value: Any, field: str) -> int:
+    if _is_plain_int(value):
+        return value
+    raise ValueError(f"{field} must be an integer")
+
+
+def _encode_string(value: Any, field: str) -> str:
+    if isinstance(value, str):
+        return value
+    raise ValueError(f"{field} must be a string")
+
+
+def _encode_string_sequence(value: Any, field: str) -> tuple[str, ...]:
+    if not isinstance(value, (tuple, list)):
+        raise ValueError(f"{field} must be a tuple of strings")
+    if not all(isinstance(item, str) for item in value):
+        raise ValueError(f"{field} must contain only strings")
+    return tuple(value)
 
 
 def _decode_json_tuple(text: str, expected_length: int, field: str) -> list[Any]:

@@ -712,10 +712,59 @@ class ComponentTests(unittest.TestCase):
         manyfold = load_manyfold_package()
         routes = manyfold.Consensus.default_routes()
 
-        with self.assertRaisesRegex(ValueError, "Out of range float"):
+        with self.assertRaisesRegex(ValueError, "term must be an integer"):
             routes.heartbeat.schema.encode((float("nan"), "node-a"))
-        with self.assertRaisesRegex(ValueError, "Out of range float"):
+        with self.assertRaisesRegex(ValueError, "index must be an integer"):
             routes.replicated_log.schema.encode(((float("inf"), "set pipe=a"),))
+
+    def test_consensus_json_schemas_reject_invalid_encoded_values(self) -> None:
+        manyfold = load_manyfold_package()
+        routes = manyfold.Consensus.default_routes()
+
+        cases = (
+            (routes.heartbeat, (True, "node-a"), "term must be an integer"),
+            (routes.request_vote, (3, 7, 0, 0), "candidate must be a string"),
+            (
+                routes.request_vote,
+                (3, "node-a", False, 0),
+                "last_log_index must be an integer",
+            ),
+            (routes.vote_response, (3, "node-a", 7, True), "voter must be a string"),
+            (
+                routes.vote_response,
+                (3, "node-a", "node-b", "true"),
+                "granted must be a boolean",
+            ),
+            (
+                routes.quorum,
+                (3, "node-a", ("node-a", 7), True),
+                "quorum voters must contain only strings",
+            ),
+            (routes.append_entries, (True, "set pipe=a"), "index must be an integer"),
+            (routes.append_entries, (7, False), "command must be a string"),
+            (routes.leader_state, (7, 3, True), "leader must be a string"),
+            (routes.leader_state, ("node-a", 3, 1), "committed must be a boolean"),
+        )
+
+        for route_ref, value, message in cases:
+            with self.subTest(route=route_ref.display(), value=value):
+                with self.assertRaisesRegex(ValueError, message):
+                    route_ref.schema.encode(value)
+
+    def test_consensus_replicated_log_schema_rejects_invalid_encoded_entries(
+        self,
+    ) -> None:
+        manyfold = load_manyfold_package()
+        route = manyfold.Consensus.default_routes().replicated_log
+
+        for value, message in (
+            (((1, "ok"), (True, "bad")), "index must be an integer"),
+            (((1, "ok"), (2, False)), "command must be a string"),
+            ((1, "flat"), "append entry must be a tuple with 2 fields"),
+        ):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, message):
+                    route.schema.encode(value)
 
     def test_consensus_append_entry_schema_encodes_compact_json_tuple(self) -> None:
         manyfold = load_manyfold_package()
