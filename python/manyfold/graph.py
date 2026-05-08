@@ -888,6 +888,11 @@ class RouteRetentionPolicy:
                 "payload_retention_policy must be one of "
                 "'inline', 'separate_store', 'external_store', or 'non_replayable'"
             )
+        if self.history_limit is not None and (
+            not isinstance(self.history_limit, int)
+            or isinstance(self.history_limit, bool)
+        ):
+            raise ValueError("history_limit must be an integer when provided")
         if self.history_limit is not None and self.history_limit <= 0:
             raise ValueError("history_limit must be positive when provided")
 
@@ -5409,6 +5414,8 @@ class Graph:
         Trigger routes flush every currently buffered partition in insertion
         order.
         """
+        if not isinstance(size, int) or isinstance(size, bool):
+            raise ValueError("window size must be an integer")
         if size <= 0:
             raise ValueError("window size must be positive")
         source_route = self._coerce_route_ref(source)

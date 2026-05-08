@@ -1539,6 +1539,24 @@ class GraphReactiveTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "window size must be positive"):
             graph.window(route, size=0)
 
+    def test_window_rejects_non_integer_size(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("imu"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("temperature"),
+            variant=graph_module.Variant.Meta,
+            schema=graph_module.Schema.bytes(name="Temperature"),
+        )
+        graph = graph_module.Graph()
+
+        for value in (True, 2.5, "2"):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "window size must be an integer"):
+                    graph.window(route, size=value)  # type: ignore[arg-type]
+
     def test_window_isolates_buffer_state_per_subscription(self) -> None:
         graph_module = load_graph_module()
         route = graph_module.route(
@@ -3986,6 +4004,15 @@ class GraphReactiveTests(unittest.TestCase):
                 latest_replay_policy="latest_only",
                 history_limit=0,
             )
+        for value in (True, 1.5, "2"):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(
+                    ValueError, "history_limit must be an integer when provided"
+                ):
+                    graph_module.RouteRetentionPolicy(  # type: ignore[arg-type]
+                        latest_replay_policy="latest_only",
+                        history_limit=value,
+                    )
         with self.assertRaisesRegex(
             ValueError, "payload_retention_policy must be one of"
         ):
