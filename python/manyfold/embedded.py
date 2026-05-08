@@ -119,6 +119,8 @@ class EmbeddedScalarSensor(Generic[T]):
         issues.extend(self.rules.required_issues())
         if self.metadata_route.plane != Plane.Read:
             issues.append("embedded sensor metadata must flow in the read plane")
+        if self.metadata_route.layer == Layer.Bulk:
+            issues.append("embedded sensor metadata must not use Layer.Bulk")
         if self.metadata_route.variant != Variant.Meta:
             issues.append("embedded sensor metadata must use Variant.Meta")
         return tuple(issues)
