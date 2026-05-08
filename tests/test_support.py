@@ -1138,6 +1138,7 @@ def load_manyfold_package():
         "WriteBinding": rust.WriteBinding,
         "WriteBindings": graph.WriteBindings,
         "bridge_version": rust.bridge_version,
+        "dependency_closure_of": lego_catalog.dependency_closure_of,
         "dependencies_of": lego_catalog.dependencies_of,
         "dependents_of": lego_catalog.dependents_of,
         "get_lego": lego_catalog.get_lego,

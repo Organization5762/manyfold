@@ -17,6 +17,7 @@ class LegoCatalogTests(unittest.TestCase):
                 "Lego",
                 "all_legos",
                 "dependencies_of",
+                "dependency_closure_of",
                 "dependents_of",
                 "get_lego",
                 "legos_by_layer",
@@ -132,6 +133,24 @@ class LegoCatalogTests(unittest.TestCase):
         self.assertIn("DurableQueue", dependents)
         self.assertIn("Workflow", dependents)
         self.assertEqual(dependents, sorted(dependents))
+
+    def test_dependency_closure_reports_transitive_build_order(self) -> None:
+        manyfold = load_manyfold_package()
+
+        closure = [lego.name for lego in manyfold.dependency_closure_of("Workflow")]
+
+        self.assertEqual(len(closure), len(set(closure)))
+        self.assertIn("ByteStore", closure)
+        self.assertIn("DurableQueue", closure)
+        self.assertIn("RetryLoop", closure)
+        self.assertNotIn("Workflow", closure)
+        self.assertLess(closure.index("ByteStore"), closure.index("EventLog"))
+        self.assertLess(closure.index("EventLog"), closure.index("DurableQueue"))
+
+    def test_dependency_closure_accepts_leaf_legos(self) -> None:
+        manyfold = load_manyfold_package()
+
+        self.assertEqual(manyfold.dependency_closure_of("Bytes"), ())
 
 
 if __name__ == "__main__":

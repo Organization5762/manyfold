@@ -303,6 +303,35 @@ _DEPENDENCIES_BY_NAME = {
     for lego in _LEGOS
 }
 
+
+def _dependency_closure_for(name: str) -> tuple[Lego, ...]:
+    ordered: list[Lego] = []
+    visited: set[str] = set()
+    visiting: list[str] = []
+
+    def collect(current_name: str) -> None:
+        if current_name in visiting:
+            cycle = " -> ".join((*visiting, current_name))
+            raise RuntimeError(f"lego catalog declares cyclic dependencies: {cycle}")
+
+        visiting.append(current_name)
+        for requirement in _BY_NAME[current_name].requires:
+            if requirement in visited:
+                continue
+            collect(requirement)
+            visited.add(requirement)
+            ordered.append(_BY_NAME[requirement])
+        visiting.pop()
+
+    collect(name)
+    return tuple(ordered)
+
+
+_DEPENDENCY_CLOSURE_BY_NAME = {
+    lego.name: _dependency_closure_for(lego.name)
+    for lego in _LEGOS
+}
+
 _dependents_by_name: dict[str, list[Lego]] = {lego.name: [] for lego in _LEGOS}
 _legos_by_role: dict[str, list[Lego]] = {}
 _legos_by_layer: dict[str, list[Lego]] = {}
@@ -346,6 +375,12 @@ def dependencies_of(name: str) -> tuple[Lego, ...]:
     return _DEPENDENCIES_BY_NAME[name]
 
 
+def dependency_closure_of(name: str) -> tuple[Lego, ...]:
+    """Return transitive dependencies in dependency-first order."""
+    get_lego(name)
+    return _DEPENDENCY_CLOSURE_BY_NAME[name]
+
+
 def dependents_of(name: str) -> tuple[Lego, ...]:
     """Return legos that directly depend on ``name`` sorted by name."""
     get_lego(name)
@@ -366,6 +401,7 @@ __all__ = (
     "Lego",
     "all_legos",
     "dependencies_of",
+    "dependency_closure_of",
     "dependents_of",
     "get_lego",
     "legos_by_layer",
