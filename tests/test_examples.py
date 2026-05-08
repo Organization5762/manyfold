@@ -1138,6 +1138,41 @@ class ExampleTests(unittest.TestCase):
         finally:
             catalog_module.REFERENCE_EXAMPLE_GAPS = original_gaps
 
+    def test_catalog_validation_keeps_readme_groups_in_sync_with_featured_examples(
+        self,
+    ) -> None:
+        import examples._catalog as catalog_module
+
+        original_groups = catalog_module._README_EXAMPLE_GROUPS
+        try:
+            catalog_module._README_EXAMPLE_GROUPS = {
+                module_name: f"Featured {module_name}"
+                for module_name in README_EXAMPLE_MODULES
+                if module_name != "simple_latest"
+            }
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "README example entries missing group headings: simple_latest",
+            ):
+                catalog_module._validate_catalog()
+
+            catalog_module._README_EXAMPLE_GROUPS = {
+                **{
+                    module_name: f"Featured {module_name}"
+                    for module_name in README_EXAMPLE_MODULES
+                },
+                "future_example": "Future example",
+            }
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "README example group headings reference unfeatured modules: future_example",
+            ):
+                catalog_module._validate_catalog()
+        finally:
+            catalog_module._README_EXAMPLE_GROUPS = original_groups
+
     def test_catalog_validation_rejects_gap_overlap_with_implemented_reference_example(
         self,
     ) -> None:

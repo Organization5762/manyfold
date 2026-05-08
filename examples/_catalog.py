@@ -451,6 +451,25 @@ def _validate_catalog() -> None:
         )
     if readme_orders and readme_orders != list(range(1, len(readme_orders) + 1)):
         raise ValueError("README example entries must use contiguous readme_order values")
+    readme_module_names = tuple(entry.module_name for entry in readme_entries)
+    missing_readme_groups = tuple(
+        module_name
+        for module_name in readme_module_names
+        if module_name not in _README_EXAMPLE_GROUPS
+    )
+    if missing_readme_groups:
+        raise ValueError(
+            "README example entries missing group headings: "
+            f"{_joined_values(missing_readme_groups)}"
+        )
+    extra_readme_groups = tuple(
+        sorted(set(_README_EXAMPLE_GROUPS) - set(readme_module_names))
+    )
+    if extra_readme_groups:
+        raise ValueError(
+            "README example group headings reference unfeatured modules: "
+            f"{_joined_values(extra_readme_groups)}"
+        )
 
     referenced_numbers = [entry.reference_number for entry in reference_entries]
     duplicate_reference_numbers = _duplicate_values(referenced_numbers)
