@@ -687,6 +687,27 @@ class ComponentTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "leader must be a JSON string"):
             routes.leader_state.schema.decode(b"[7,3,true]")
 
+    def test_consensus_json_schemas_reject_wrong_tuple_shapes(self) -> None:
+        manyfold = load_manyfold_package()
+        routes = manyfold.Consensus.default_routes()
+
+        cases = (
+            (routes.heartbeat, b"[3]", "heartbeat"),
+            (routes.request_vote, b'[3,"node-a",0]', "request vote"),
+            (routes.vote_response, b'[3,"node-a","node-b",true,false]', "vote"),
+            (routes.quorum, b'[3,"node-a",["node-b"]]', "quorum"),
+            (routes.append_entries, b'[7,"set pipe=a","extra"]', "append entry"),
+            (routes.leader_state, b'["node-a",3]', "leader state"),
+        )
+
+        for route_ref, payload, field in cases:
+            with self.subTest(route=route_ref.display(), payload=payload):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    rf"{field} must be a JSON array with \d+ fields",
+                ):
+                    route_ref.schema.decode(payload)
+
     def test_consensus_json_schemas_reject_non_finite_encoded_values(self) -> None:
         manyfold = load_manyfold_package()
         routes = manyfold.Consensus.default_routes()
