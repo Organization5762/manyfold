@@ -1169,6 +1169,18 @@ class SensorIoTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "history_size must be positive"):
             manyfold.SensorDebugTap(history_size=0)
+        with self.assertRaisesRegex(ValueError, "history_size must be an integer"):
+            manyfold.SensorDebugTap(history_size=True)  # type: ignore[arg-type]
+        with self.assertRaisesRegex(ValueError, "history_size must be an integer"):
+            manyfold.SensorDebugTap(history_size=2.5)  # type: ignore[arg-type]
+
+    def test_retry_policy_rejects_non_integer_max_attempts(self) -> None:
+        manyfold = load_manyfold_package()
+
+        with self.assertRaisesRegex(ValueError, "max_attempts must be an integer"):
+            manyfold.SensorRetryPolicy(max_attempts=True)  # type: ignore[arg-type]
+        with self.assertRaisesRegex(ValueError, "max_attempts must be an integer"):
+            manyfold.SensorRetryPolicy(max_attempts=2.5)  # type: ignore[arg-type]
 
     def test_peripheral_adapter_publishes_heart_style_envelopes(self) -> None:
         manyfold = load_manyfold_package()

@@ -88,6 +88,11 @@ class RetryPolicy:
     retry_on: tuple[type[BaseException], ...] = (Exception,)
 
     def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "max_attempts",
+            _require_int(self.max_attempts, "max_attempts"),
+        )
         if self.max_attempts <= 0:
             raise ValueError("max_attempts must be positive")
         object.__setattr__(self, "retry_on", tuple(self.retry_on))
@@ -694,6 +699,7 @@ class SensorDebugTap:
     _history: deque[SensorDebugEnvelope] = field(default_factory=deque, init=False, repr=False)
 
     def __post_init__(self) -> None:
+        self.history_size = _require_int(self.history_size, "history_size")
         if self.history_size <= 0:
             raise ValueError("history_size must be positive")
         self._history = deque(maxlen=self.history_size)
@@ -716,6 +722,7 @@ class SensorDebugTap:
             upstream_ids=tuple(upstream_ids),
         )
         if self._history.maxlen != self.history_size:
+            self.history_size = _require_int(self.history_size, "history_size")
             if self.history_size <= 0:
                 raise ValueError("history_size must be positive")
             self._history = deque(self._history, maxlen=self.history_size)
