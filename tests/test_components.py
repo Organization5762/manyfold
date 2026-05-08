@@ -566,6 +566,41 @@ class ComponentTests(unittest.TestCase):
             ("node-a", 3, True),
         )
 
+    def test_consensus_json_schemas_accept_leading_whitespace(self) -> None:
+        manyfold = load_manyfold_package()
+        routes = manyfold.Consensus.default_routes()
+
+        self.assertEqual(
+            routes.heartbeat.schema.decode(b' \n[3,"node-a"]'),
+            (3, "node-a"),
+        )
+        self.assertEqual(
+            routes.request_vote.schema.decode(b' \t[3,"node-a",0,0]'),
+            (3, "node-a", 0, 0),
+        )
+        self.assertEqual(
+            routes.vote_response.schema.decode(b' \n[3,"node-a","node-b",true]'),
+            (3, "node-a", "node-b", True),
+        )
+        self.assertEqual(
+            routes.quorum.schema.decode(b' \n[3,"node-a",["node-a","node-b"],true]'),
+            (3, "node-a", ("node-a", "node-b"), True),
+        )
+        self.assertEqual(
+            routes.append_entries.schema.decode(b' \n[7,"set pipe=a|b"]'),
+            (7, "set pipe=a|b"),
+        )
+        self.assertEqual(
+            routes.replicated_log.schema.decode(
+                b' \n[[1,"set mode=auto"],[2,"set temp=21"]]'
+            ),
+            ((1, "set mode=auto"), (2, "set temp=21")),
+        )
+        self.assertEqual(
+            routes.leader_state.schema.decode(b' \n["node-a",3,true]'),
+            ("node-a", 3, True),
+        )
+
     def test_consensus_legacy_schemas_reject_invalid_boolean_tokens(self) -> None:
         manyfold = load_manyfold_package()
         routes = manyfold.Consensus.default_routes()

@@ -991,8 +991,8 @@ def _heartbeat_schema() -> Schema[Heartbeat]:
 
 def _decode_heartbeat(payload: bytes) -> Heartbeat:
     text = payload.decode("utf-8")
-    if text.startswith("["):
-        term, leader = json.loads(text)
+    if _is_json_tuple_payload(text):
+        term, leader = json.loads(text.lstrip())
         return (_decode_json_int(term), _decode_json_string(leader, "leader"))
     term_text, leader = text.split("|", 1)
     return (int(term_text), leader)
@@ -1009,8 +1009,8 @@ def _request_vote_schema() -> Schema[RequestVote]:
 
 def _decode_request_vote(payload: bytes) -> RequestVote:
     text = payload.decode("utf-8")
-    if text.startswith("["):
-        term, candidate, last_log_index, last_log_term = json.loads(text)
+    if _is_json_tuple_payload(text):
+        term, candidate, last_log_index, last_log_term = json.loads(text.lstrip())
         return (
             _decode_json_int(term),
             _decode_json_string(candidate, "candidate"),
@@ -1032,8 +1032,8 @@ def _vote_schema() -> Schema[Vote]:
 
 def _decode_vote(payload: bytes) -> Vote:
     text = payload.decode("utf-8")
-    if text.startswith("["):
-        term, candidate, voter, granted = json.loads(text)
+    if _is_json_tuple_payload(text):
+        term, candidate, voter, granted = json.loads(text.lstrip())
         return (
             _decode_json_int(term),
             _decode_json_string(candidate, "candidate"),
@@ -1055,8 +1055,8 @@ def _quorum_schema() -> Schema[QuorumState]:
 
 def _decode_quorum(payload: bytes) -> QuorumState:
     text = payload.decode("utf-8")
-    if text.startswith("["):
-        term, candidate, voters, granted = json.loads(text)
+    if _is_json_tuple_payload(text):
+        term, candidate, voters, granted = json.loads(text.lstrip())
         return (
             _decode_json_int(term),
             _decode_json_string(candidate, "candidate"),
@@ -1079,8 +1079,8 @@ def _append_entry_schema() -> Schema[AppendEntry]:
 
 def _decode_append_entry(payload: bytes) -> AppendEntry:
     text = payload.decode("utf-8")
-    if text.startswith("["):
-        index, command = json.loads(text)
+    if _is_json_tuple_payload(text):
+        index, command = json.loads(text.lstrip())
         return (_decode_json_int(index), _decode_json_string(command, "command"))
     index_text, command = text.split("|", 1)
     return (int(index_text), command)
@@ -1103,8 +1103,8 @@ def _decode_replicated_log(payload: bytes) -> ReplicatedLog:
     text = payload.decode("utf-8")
     if not text:
         return ()
-    if text.startswith("["):
-        entries = json.loads(text)
+    if _is_json_tuple_payload(text):
+        entries = json.loads(text.lstrip())
         return tuple(
             (_decode_json_int(index), _decode_json_string(command, "command"))
             for index, command in entries
@@ -1123,8 +1123,8 @@ def _leader_state_schema() -> Schema[LeaderState]:
 
 def _decode_leader_state(payload: bytes) -> LeaderState:
     text = payload.decode("utf-8")
-    if text.startswith("["):
-        leader, term, committed = json.loads(text)
+    if _is_json_tuple_payload(text):
+        leader, term, committed = json.loads(text.lstrip())
         return (
             _decode_json_string(leader, "leader"),
             _decode_json_int(term),
@@ -1166,6 +1166,10 @@ def _decode_json_string_array(value: Any, field: str) -> tuple[str, ...]:
     if not all(isinstance(item, str) for item in value):
         raise ValueError(f"{field} must contain only strings")
     return tuple(value)
+
+
+def _is_json_tuple_payload(text: str) -> bool:
+    return text.lstrip().startswith("[")
 
 
 def _encode_json_tuple(value: tuple[Any, ...]) -> bytes:
