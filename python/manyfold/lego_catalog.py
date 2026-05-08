@@ -262,10 +262,24 @@ def _duplicate_names(names: Iterable[str]) -> tuple[str, ...]:
     return tuple(duplicates)
 
 
+def _duplicate_requirements_by_lego(legos: Iterable[Lego]) -> tuple[str, ...]:
+    duplicates: list[str] = []
+    for lego in legos:
+        duplicate_requirements = _duplicate_names(lego.requires)
+        if duplicate_requirements:
+            duplicates.append(f"{lego.name}: {', '.join(duplicate_requirements)}")
+    return tuple(duplicates)
+
+
 _DUPLICATE_NAMES = _duplicate_names(lego.name for lego in _LEGOS)
 if _DUPLICATE_NAMES:
     duplicate = ", ".join(_DUPLICATE_NAMES)
     raise RuntimeError(f"lego catalog declares duplicate names: {duplicate}")
+
+_DUPLICATE_REQUIREMENTS = _duplicate_requirements_by_lego(_LEGOS)
+if _DUPLICATE_REQUIREMENTS:
+    duplicate = "; ".join(_DUPLICATE_REQUIREMENTS)
+    raise RuntimeError(f"lego catalog declares duplicate dependencies: {duplicate}")
 
 _BY_NAME = {lego.name: lego for lego in _LEGOS}
 _UNKNOWN_REQUIREMENTS = tuple(

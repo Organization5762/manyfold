@@ -46,6 +46,29 @@ class LegoCatalogTests(unittest.TestCase):
             ("Bytes", "Key"),
         )
 
+    def test_catalog_dependencies_are_unique_per_lego(self) -> None:
+        manyfold = load_manyfold_package()
+        lego_catalog = sys.modules["manyfold.lego_catalog"]
+
+        self.assertEqual(
+            lego_catalog._duplicate_requirements_by_lego(manyfold.all_legos()), ()
+        )
+        self.assertEqual(
+            lego_catalog._duplicate_requirements_by_lego(
+                (
+                    manyfold.Lego("Bridge", "communication", "local", "", ("Pipe",)),
+                    manyfold.Lego(
+                        "Pipe",
+                        "communication",
+                        "local",
+                        "",
+                        ("RouteRef", "Schema", "RouteRef"),
+                    ),
+                )
+            ),
+            ("Pipe: RouteRef",),
+        )
+
     def test_consensus_dependencies_are_lowered_components(self) -> None:
         manyfold = load_manyfold_package()
 
