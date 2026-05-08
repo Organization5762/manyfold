@@ -580,6 +580,8 @@ class SequenceCounter:
     group: str | None = None
 
     def __post_init__(self) -> None:
+        self.current = _require_int(self.current, "current")
+        self.step = _require_int(self.step, "step")
         if self.step <= 0:
             raise ValueError("step must be positive")
 
@@ -591,7 +593,7 @@ class SequenceCounter:
         return self.current
 
     def reset(self, value: int = 0) -> None:
-        self.current = value
+        self.current = _require_int(value, "current")
 
 
 @dataclass(frozen=True)
@@ -1556,6 +1558,12 @@ def _require_finite_number(value: float, field: str) -> float:
     if not math.isfinite(number):
         raise ValueError(f"{field} must be finite")
     return number
+
+
+def _require_int(value: int, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{field} must be an integer")
+    return value
 
 
 def _mapping_key_sort_key(key: Any) -> tuple[str, str]:

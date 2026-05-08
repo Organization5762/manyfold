@@ -703,6 +703,28 @@ class SensorIoTests(unittest.TestCase):
         self.assertEqual(sequence.next(), 101)
         self.assertEqual(sequence.group, "ambient")
 
+    def test_sequence_counter_rejects_non_integer_state(self) -> None:
+        manyfold = load_manyfold_package()
+
+        for kwargs, message in (
+            ({"current": 1.5}, "current must be an integer"),
+            ({"current": True}, "current must be an integer"),
+            ({"step": 1.5}, "step must be an integer"),
+            ({"step": True}, "step must be an integer"),
+        ):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    manyfold.SequenceCounter(**kwargs)
+
+    def test_sequence_counter_reset_rejects_non_integer_state(self) -> None:
+        manyfold = load_manyfold_package()
+        sequence = manyfold.SequenceCounter()
+
+        for value in (1.5, False):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "current must be an integer"):
+                    sequence.reset(value)  # type: ignore[arg-type]
+
     def test_retry_loop_retries_transient_failures(self) -> None:
         manyfold = load_manyfold_package()
         attempts = 0
