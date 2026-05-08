@@ -15,9 +15,11 @@ REPO_ROOT = PYTHON_DIR.parent
 def ensure_path_on_sys_path(path: Path) -> None:
     """Prepend one path to ``sys.path`` exactly once."""
 
-    path_str = str(path)
+    path_str = _canonical_path_str(path)
     sys.path[:] = [
-        existing_path for existing_path in sys.path if existing_path != path_str
+        existing_path
+        for existing_path in sys.path
+        if _canonical_path_str(Path(existing_path)) != path_str
     ]
     sys.path.insert(0, path_str)
 
@@ -63,3 +65,7 @@ def load_module_from_path(module_name: str, module_path: Path) -> ModuleType:
             sys.modules[module_name] = previous_module
         raise
     return module
+
+
+def _canonical_path_str(path: Path) -> str:
+    return str(path.expanduser().resolve())
