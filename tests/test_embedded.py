@@ -90,6 +90,24 @@ class EmbeddedProfileTests(unittest.TestCase):
             sensor.validate(),
         )
 
+    def test_scalar_sensor_rejects_metadata_on_bulk_layer(self) -> None:
+        manyfold = load_manyfold_package()
+        sensor = manyfold.EmbeddedScalarSensor(
+            metadata_route=manyfold.route(
+                owner=manyfold.OwnerName("uart-temp"),
+                family=manyfold.StreamFamily("sensor"),
+                stream=manyfold.StreamName("temperature"),
+                layer=manyfold.Layer.Bulk,
+                variant=manyfold.Variant.Meta,
+                schema=manyfold.Schema.bytes(name="Temperature"),
+            ),
+        )
+
+        self.assertIn(
+            "embedded sensor metadata must not use Layer.Bulk",
+            sensor.validate(),
+        )
+
     def test_bulk_sensor_rejects_unpaired_payload_identity(self) -> None:
         manyfold = load_manyfold_package()
         sensor = manyfold.EmbeddedBulkSensor(
