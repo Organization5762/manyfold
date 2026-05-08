@@ -618,6 +618,34 @@ class ExampleTests(unittest.TestCase):
 
         self.assertNotIn("manyfold_broken_load_test", sys.modules)
 
+    def test_repo_path_helpers_remove_base_exception_failed_module_loads(self) -> None:
+        module_path = (
+            Path(__file__).resolve().parents[1]
+            / "python"
+            / "manyfold"
+            / "_repo_paths.py"
+        )
+        spec = importlib.util.spec_from_file_location(
+            "manyfold_repo_paths_test",
+            module_path,
+        )
+        module = importlib.util.module_from_spec(spec)
+        assert spec is not None and spec.loader is not None
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            broken_module = Path(temp_dir) / "broken_module.py"
+            broken_module.write_text("raise SystemExit(7)\n", encoding="utf-8")
+
+            with self.assertRaises(SystemExit):
+                module.load_module_from_path(
+                    "manyfold_system_exit_load_test",
+                    broken_module,
+                )
+
+        self.assertNotIn("manyfold_system_exit_load_test", sys.modules)
+
     def test_repo_path_helpers_restore_existing_module_after_failed_load(self) -> None:
         module_path = (
             Path(__file__).resolve().parents[1]

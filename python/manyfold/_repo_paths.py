@@ -56,7 +56,7 @@ def load_module_from_path(module_name: str, module_path: Path) -> ModuleType:
     sys.modules[module_name] = module
     try:
         spec.loader.exec_module(module)
-    except Exception:
+    except BaseException:
         if previous_module is None:
             sys.modules.pop(module_name, None)
         else:
