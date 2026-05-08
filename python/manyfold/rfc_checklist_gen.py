@@ -6,7 +6,7 @@ import argparse
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Protocol
 
 try:
     from ._repo_paths import ensure_repo_import_paths
@@ -185,6 +185,16 @@ class AppendixStatus:
     detail: str
 
 
+class _TextPath(Protocol):
+    """Minimal path protocol used by the generated-file writer."""
+
+    def exists(self) -> bool: ...
+
+    def read_text(self, *, encoding: str) -> str: ...
+
+    def write_text(self, content: str, *, encoding: str) -> int: ...
+
+
 def parse_rfc_sections(
     rfc_path: Path = RFC_PATH,
 ) -> tuple[list[SectionStatus], list[AppendixStatus]]:
@@ -259,7 +269,7 @@ def render_checklist(
     return "\n".join(lines)
 
 
-def _write_if_changed(path: Path, content: str) -> bool:
+def _write_if_changed(path: _TextPath, content: str) -> bool:
     """Write generated content only when the target bytes would change."""
 
     if path.exists() and path.read_text(encoding="utf-8") == content:

@@ -213,6 +213,35 @@ class RfcChecklistGenTests(unittest.TestCase):
         self.assertFalse(generator._write_if_changed(checklist_path, rendered))
         self.assertEqual(checklist_path.writes, 0)
 
+    def test_checklist_write_mode_updates_changed_file(self) -> None:
+        generator = load_generator()
+        sections, appendix_items = generator.parse_rfc_sections()
+        rendered = generator.render_checklist(sections, appendix_items)
+        test_case = self
+
+        class TrackingChecklistPath:
+            writes = 0
+            content = "stale checklist"
+
+            def exists(self) -> bool:
+                return True
+
+            def read_text(self, *, encoding: str) -> str:
+                test_case.assertEqual(encoding, "utf-8")
+                return self.content
+
+            def write_text(self, content: str, *, encoding: str) -> int:
+                test_case.assertEqual(encoding, "utf-8")
+                self.writes += 1
+                self.content = content
+                return len(content)
+
+        checklist_path = TrackingChecklistPath()
+
+        self.assertTrue(generator._write_if_changed(checklist_path, rendered))
+        self.assertEqual(checklist_path.writes, 1)
+        self.assertEqual(checklist_path.content, rendered)
+
     def test_script_entrypoint_check_runs(self) -> None:
         result = subprocess.run(
             [
