@@ -735,6 +735,62 @@ class ComponentTests(unittest.TestCase):
                 candidate_id="node-a",
             )
 
+    def test_consensus_component_rejects_non_string_node_ids(self) -> None:
+        manyfold = load_manyfold_package()
+
+        for nodes in (("", "node-b"), ("node-a", 7)):
+            with self.subTest(nodes=nodes):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "nodes must contain non-empty string identifiers",
+                ):
+                    manyfold.Consensus(
+                        manyfold.Graph(),
+                        nodes=nodes,  # type: ignore[arg-type]
+                        candidate_id="node-a",
+                    )
+
+    def test_consensus_component_rejects_invalid_candidate_id_type(self) -> None:
+        manyfold = load_manyfold_package()
+
+        for candidate_id in ("", 7):
+            with self.subTest(candidate_id=candidate_id):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "candidate_id must be a non-empty string",
+                ):
+                    manyfold.Consensus(
+                        manyfold.Graph(),
+                        nodes=("node-a", "node-b"),
+                        candidate_id=candidate_id,  # type: ignore[arg-type]
+                    )
+
+    def test_consensus_component_rejects_invalid_integer_knobs(self) -> None:
+        manyfold = load_manyfold_package()
+
+        cases = (
+            ("term", 0, "term must be a positive integer"),
+            ("term", True, "term must be a positive integer"),
+            (
+                "election_timeout_ticks",
+                0,
+                "election_timeout_ticks must be a positive integer",
+            ),
+            (
+                "election_timeout_ticks",
+                False,
+                "election_timeout_ticks must be a positive integer",
+            ),
+        )
+
+        for keyword, value, message in cases:
+            with self.subTest(keyword=keyword, value=value):
+                with self.assertRaisesRegex(ValueError, message):
+                    manyfold.Consensus(
+                        manyfold.Graph(),
+                        **{keyword: value},
+                    )
+
     def test_memory_chip_records_and_resumes_typed_route_values(self) -> None:
         manyfold = load_manyfold_package()
         route = manyfold.route(

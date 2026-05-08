@@ -626,10 +626,18 @@ class Consensus:
     ) -> None:
         if not nodes:
             raise ValueError("nodes must contain at least one node")
+        if not all(isinstance(node, str) and node for node in nodes):
+            raise ValueError("nodes must contain non-empty string identifiers")
         if len(nodes) != len(set(nodes)):
             raise ValueError("nodes must contain unique node identifiers")
+        if not isinstance(candidate_id, str) or not candidate_id:
+            raise ValueError("candidate_id must be a non-empty string")
         if candidate_id not in nodes:
             raise ValueError("candidate_id must be present in nodes")
+        if not _is_plain_int(term) or term <= 0:
+            raise ValueError("term must be a positive integer")
+        if not _is_plain_int(election_timeout_ticks) or election_timeout_ticks <= 0:
+            raise ValueError("election_timeout_ticks must be a positive integer")
         self.graph = graph
         self.owner = owner
         self.nodes = nodes
