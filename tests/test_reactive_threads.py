@@ -133,6 +133,15 @@ class ReactiveThreadsTests(unittest.TestCase):
 
         self.assertEqual(list(recorder.snapshot()), ["a-stream", "z-stream"])
 
+    def test_latency_recorder_rejects_non_positive_history_size(self) -> None:
+        for history_size in (0, -1, False, 1.5):
+            with self.subTest(history_size=history_size):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "history_size must be a positive integer",
+                ):
+                    self.reactive_threads._LatencyRecorder(history_size=history_size)
+
     def test_disposed_frame_thread_delivery_drops_queued_callbacks(self) -> None:
         source = self.rx.Subject()
         values: list[int] = []
