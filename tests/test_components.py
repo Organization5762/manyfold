@@ -152,6 +152,41 @@ class ComponentTests(unittest.TestCase):
                     ):
                         keyspace.put(part, value=b"nope")
 
+    def test_direct_keyspace_construction_normalizes_key_parts(self) -> None:
+        manyfold = load_manyfold_package()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = manyfold.FileStore(temp_dir)
+            keyspace = manyfold.Keyspace(store, ("robots", 1))
+
+            keyspace.put("pose", value=b"ok")
+            entries = store.scan("robots")
+
+        self.assertEqual(keyspace.parts, ("robots", "1"))
+        self.assertEqual(
+            [(entry.key, entry.value) for entry in entries],
+            [(("1", "pose"), b"ok")],
+        )
+
+    def test_direct_keyspace_construction_rejects_invalid_key_parts(self) -> None:
+        manyfold = load_manyfold_package()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = manyfold.FileStore(temp_dir)
+
+            with self.assertRaisesRegex(ValueError, "NUL"):
+                manyfold.Keyspace(store, ("bad\x00key",))
+            with self.assertRaisesRegex(
+                ValueError,
+                "key parts must be strings or integers",
+            ):
+                manyfold.Keyspace(store, (object(),))  # type: ignore[arg-type]
+            with self.assertRaisesRegex(
+                ValueError,
+                "keyspace parts must be a tuple",
+            ):
+                manyfold.Keyspace(store, "safe")  # type: ignore[arg-type]
+
     def test_file_store_allows_key_part_matching_value_filename(self) -> None:
         manyfold = load_manyfold_package()
 

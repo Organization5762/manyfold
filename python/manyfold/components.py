@@ -118,6 +118,11 @@ class Keyspace:
     store: FileStore
     parts: Key = ()
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.parts, tuple):
+            raise ValueError("keyspace parts must be a tuple of strings or integers")
+        object.__setattr__(self, "parts", _normalize_key(self.parts))
+
     def prefix(self, *parts: KeyPart) -> Keyspace:
         """Return a nested keyspace."""
         return Keyspace(self.store, (*self.parts, *_normalize_key(parts)))
