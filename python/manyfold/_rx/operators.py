@@ -1,5 +1,7 @@
 """Rx operators re-exported through Manyfold."""
 
-from reactivex.operators import *  # noqa: F403
+import reactivex.operators as _operators
 
-__all__ = tuple(sorted(name for name in globals() if not name.startswith("_")))
+__all__ = tuple(sorted(set(_operators.__all__)))
+
+globals().update((name, getattr(_operators, name)) for name in __all__)
