@@ -3004,6 +3004,22 @@ class GraphReactiveTests(unittest.TestCase):
             "flowchart LR\n  %% graph has no topology edges",
         )
 
+    def test_diagram_normalizes_supported_direction(self) -> None:
+        graph_module = load_graph_module()
+        graph = graph_module.Graph()
+
+        self.assertEqual(
+            graph.render_diagram(direction="td"),
+            "flowchart TD\n  %% graph has no topology edges",
+        )
+
+    def test_diagram_rejects_unknown_direction(self) -> None:
+        graph_module = load_graph_module()
+        graph = graph_module.Graph()
+
+        with self.assertRaisesRegex(ValueError, "unsupported Mermaid diagram direction"):
+            graph.render_diagram(direction="LR; click n0")
+
     def test_diagram_renders_registered_node_without_edges(self) -> None:
         graph_module = load_graph_module()
         graph = graph_module.Graph()
