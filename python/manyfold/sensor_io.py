@@ -616,6 +616,26 @@ class SensorTag:
     variant: str
     metadata: Mapping[str, str] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "name", _require_string(self.name, "tag.name"))
+        object.__setattr__(
+            self,
+            "variant",
+            _require_string(self.variant, "tag.variant"),
+        )
+        metadata = _require_mapping(self.metadata, "tag.metadata")
+        object.__setattr__(
+            self,
+            "metadata",
+            {
+                _require_string(key, "tag.metadata key"): _require_string(
+                    value,
+                    "tag.metadata value",
+                )
+                for key, value in metadata.items()
+            },
+        )
+
 
 @dataclass(frozen=True)
 class SensorLocation:
@@ -646,6 +666,27 @@ class SensorIdentity:
     tags: tuple[SensorTag, ...] = ()
     location: SensorLocation = field(default_factory=SensorLocation)
     group: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "id",
+            _require_optional_string(self.id, "identity.id"),
+        )
+        try:
+            tags = tuple(self.tags)
+        except TypeError as exc:
+            raise ValueError("identity.tags must be iterable") from exc
+        if not all(isinstance(tag, SensorTag) for tag in tags):
+            raise ValueError("identity.tags[] must be a SensorTag")
+        object.__setattr__(self, "tags", tags)
+        if not isinstance(self.location, SensorLocation):
+            raise ValueError("identity.location must be a SensorLocation")
+        object.__setattr__(
+            self,
+            "group",
+            _require_optional_string(self.group, "identity.group"),
+        )
 
 
 @dataclass(frozen=True)
@@ -1631,6 +1672,24 @@ def _is_exception_class(value: object) -> bool:
 def _require_int(value: int, field: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise ValueError(f"{field} must be an integer")
+    return value
+
+
+def _require_string(value: Any, field: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{field} must be a string")
+    return value
+
+
+def _require_optional_string(value: Any, field: str) -> str | None:
+    if value is None:
+        return None
+    return _require_string(value, field)
+
+
+def _require_mapping(value: Any, field: str) -> Mapping[Any, Any]:
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{field} must be a mapping")
     return value
 
 

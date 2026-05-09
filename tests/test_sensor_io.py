@@ -104,6 +104,51 @@ class SensorIoTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, message):
                     manyfold.SensorLocation(**kwargs)
 
+    def test_sensor_tag_rejects_invalid_metadata(self) -> None:
+        manyfold = load_manyfold_package()
+
+        for kwargs, message in (
+            ({"name": True, "variant": "radio"}, r"tag\.name must be a string"),
+            ({"name": "input", "variant": 3}, r"tag\.variant must be a string"),
+            (
+                {"name": "input", "variant": "radio", "metadata": []},
+                r"tag\.metadata must be a mapping",
+            ),
+            (
+                {"name": "input", "variant": "radio", "metadata": {7: "ok"}},
+                r"tag\.metadata key must be a string",
+            ),
+            (
+                {"name": "input", "variant": "radio", "metadata": {"unit": 7}},
+                r"tag\.metadata value must be a string",
+            ),
+        ):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    manyfold.SensorTag(**kwargs)
+
+    def test_sensor_identity_rejects_invalid_values(self) -> None:
+        manyfold = load_manyfold_package()
+
+        for kwargs, message in (
+            ({"id": True}, r"identity\.id must be a string"),
+            ({"tags": None}, r"identity\.tags must be iterable"),
+            ({"tags": ("input_variant",)}, r"identity\.tags\[\] must be a SensorTag"),
+            ({"location": "lab"}, r"identity\.location must be a SensorLocation"),
+            ({"group": 7}, r"identity\.group must be a string"),
+        ):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    manyfold.SensorIdentity(**kwargs)
+
+    def test_sensor_identity_accepts_iterable_tags_as_tuple(self) -> None:
+        manyfold = load_manyfold_package()
+        tag = manyfold.SensorTag("input_variant", "radio")
+
+        identity = manyfold.SensorIdentity(tags=[tag])
+
+        self.assertEqual(identity.tags, (tag,))
+
     def test_bounded_ring_buffer_enforces_overflow_policy(self) -> None:
         manyfold = load_manyfold_package()
         buffer = manyfold.BoundedRingBuffer[int](capacity=2, overflow="drop_oldest")
