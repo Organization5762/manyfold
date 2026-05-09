@@ -1421,6 +1421,30 @@ class SensorIoTests(unittest.TestCase):
         self.assertEqual(capacitor.name, "ambient.rate_matched_sensor")
         self.assertEqual(clock.group, "ambient")
 
+    def test_rate_matched_sensor_rejects_invalid_capacity(self) -> None:
+        manyfold = load_manyfold_package()
+        source = _route(manyfold, "invalid_rate_raw", _int_schema(manyfold, "Raw"))
+        sink = _route(
+            manyfold,
+            "invalid_rate_sampled",
+            _int_schema(manyfold, "Sampled"),
+        )
+
+        invalid_inputs = (
+            (True, "capacity must be an integer"),
+            ("1", "capacity must be an integer"),
+            (0, "capacity must be positive"),
+        )
+
+        for capacity, message in invalid_inputs:
+            with self.subTest(capacity=capacity):
+                with self.assertRaisesRegex(ValueError, message):
+                    manyfold.RateMatchedSensor(
+                        source=source,
+                        sink=sink,
+                        capacity=capacity,  # type: ignore[arg-type]
+                    )
+
     def test_sensor_health_watchdog_reports_stale_input(self) -> None:
         manyfold = load_manyfold_package()
         graph = manyfold.Graph()

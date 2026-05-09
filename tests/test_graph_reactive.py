@@ -856,6 +856,20 @@ class GraphReactiveTests(unittest.TestCase):
             graph_module.reactive_threads.coalesce_scheduler = original_scheduler
             graph_module.Timer = original_timer
 
+    def test_coalesce_latest_node_rejects_non_integer_windows(self) -> None:
+        graph_module = load_graph_module()
+
+        for window_ms in (True, 100.5, "100"):
+            with self.subTest(window_ms=window_ms):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "coalesce window_ms must be an integer",
+                ):
+                    graph_module.CoalesceLatestNode(
+                        name="coalesce",
+                        window_ms=window_ms,
+                    )
+
     def test_observe_pipeline_coalesces_latest_route_value(self) -> None:
         graph_module = load_graph_module()
         route = graph_module.route(
@@ -974,6 +988,36 @@ class GraphReactiveTests(unittest.TestCase):
 
         self.assertEqual(len(scheduler.disposables), 1)
         self.assertTrue(scheduler.disposables[0].disposed)
+
+    def test_logging_nodes_reject_non_integer_intervals(self) -> None:
+        graph_module = load_graph_module()
+
+        cases = (
+            (
+                "logging",
+                lambda interval_ms: graph_module.LoggingNode(
+                    name="log",
+                    stream_name="numbers",
+                    interval_ms=interval_ms,
+                ),
+            ),
+            (
+                "pipeline logging",
+                lambda interval_ms: graph_module.PipelineLoggingNode(
+                    name="log",
+                    stream_name="numbers",
+                    interval_ms=interval_ms,
+                ),
+            ),
+        )
+        for label, factory in cases:
+            for interval_ms in (False, 1.5, "1"):
+                with self.subTest(label=label, interval_ms=interval_ms):
+                    with self.assertRaisesRegex(
+                        ValueError,
+                        "logging interval_ms must be an integer",
+                    ):
+                        factory(interval_ms)
 
     def test_observe_pipeline_installs_logging_node(self) -> None:
         graph_module = load_graph_module()
@@ -2355,6 +2399,17 @@ class GraphReactiveTests(unittest.TestCase):
             graph.interval_join(
                 left.route_ref, right.route_ref, within=-1, combine=lambda a, b: (a, b)
             )
+        for within in (True, 1.5, "1"):
+            with self.subTest(within=within):
+                with self.assertRaisesRegex(
+                    ValueError, "interval join distance must be an integer"
+                ):
+                    graph.interval_join(
+                        left.route_ref,
+                        right.route_ref,
+                        within=within,
+                        combine=lambda a, b: (a, b),
+                    )
 
         joined = []
         subscription = graph.interval_join(
@@ -3287,6 +3342,54 @@ class GraphReactiveTests(unittest.TestCase):
 
         self.assertEqual([item.value for item in emitted], [b"timeout", b"timeout"])
         self.assertEqual([item.closed.control_epoch for item in emitted], [2, 5])
+
+    def test_watchdog_rejects_invalid_timeout_inputs(self) -> None:
+        graph_module = load_graph_module()
+
+        heartbeat = graph_module.route(
+            plane=graph_module.Plane.State,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("raft"),
+            family=graph_module.StreamFamily("leader"),
+            stream=graph_module.StreamName("watchdog_invalid_heartbeat"),
+            variant=graph_module.Variant.State,
+            schema=graph_module.Schema.bytes(name="WatchdogInvalidHeartbeat"),
+        )
+        clock = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Internal,
+            owner=graph_module.OwnerName("raft"),
+            family=graph_module.StreamFamily("clock"),
+            stream=graph_module.StreamName("watchdog_invalid_clock"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="WatchdogInvalidClock"),
+        )
+        timeout = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Internal,
+            owner=graph_module.OwnerName("raft"),
+            family=graph_module.StreamFamily("election"),
+            stream=graph_module.StreamName("watchdog_invalid_timeout"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="WatchdogInvalidTimeout"),
+        )
+        graph = graph_module.Graph()
+
+        invalid_inputs = (
+            (True, "watchdog timeout must be an integer"),
+            ("2", "watchdog timeout must be an integer"),
+            (0, "watchdog timeout must be positive"),
+        )
+
+        for after, message in invalid_inputs:
+            with self.subTest(after=after):
+                with self.assertRaisesRegex(ValueError, message):
+                    graph.watchdog(
+                        reset_by=heartbeat,
+                        output=timeout,
+                        after=after,
+                        clock=clock,
+                    )
 
     def test_watchdog_disposes_reset_when_clock_subscription_fails(self) -> None:
         graph_module = load_graph_module()

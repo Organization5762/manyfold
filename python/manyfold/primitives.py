@@ -73,16 +73,21 @@ def _require_enum_member(value: object, enum_type: type[Any], field: str) -> Non
 
 
 def _encode_finite_float(value: Any) -> bytes:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("float schema values must be finite numbers")
     number = float(value)
     if not math.isfinite(number):
-        raise ValueError("float schema values must be finite")
+        raise ValueError("float schema values must be finite numbers")
     return repr(number).encode("ascii")
 
 
 def _decode_finite_float(payload: bytes) -> float:
-    number = float(payload.decode("ascii"))
+    try:
+        number = float(payload.decode("ascii"))
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise ValueError("float schema values must be finite numbers") from exc
     if not math.isfinite(number):
-        raise ValueError("float schema values must be finite")
+        raise ValueError("float schema values must be finite numbers")
     return number
 
 

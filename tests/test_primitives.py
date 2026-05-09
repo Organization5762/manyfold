@@ -147,7 +147,19 @@ class PrimitiveTests(unittest.TestCase):
             with self.subTest(value=value):
                 with self.assertRaisesRegex(
                     ValueError,
-                    "float schema values must be finite",
+                    "float schema values must be finite numbers",
+                ):
+                    schema.encode(value)
+
+    def test_float_schema_rejects_boolean_and_non_numeric_values(self) -> None:
+        manyfold = load_manyfold_package()
+        schema = manyfold.Schema.float(name="Temperature")
+
+        for value in (False, True, "1.0", b"1.0"):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "float schema values must be finite numbers",
                 ):
                     schema.encode(value)
 
@@ -155,11 +167,11 @@ class PrimitiveTests(unittest.TestCase):
         manyfold = load_manyfold_package()
         schema = manyfold.Schema.float(name="Temperature")
 
-        for payload in (b"nan", b"inf", b"-inf"):
+        for payload in (b"nan", b"inf", b"-inf", b"not-a-number", b"\xff"):
             with self.subTest(payload=payload):
                 with self.assertRaisesRegex(
                     ValueError,
-                    "float schema values must be finite",
+                    "float schema values must be finite numbers",
                 ):
                     schema.decode(payload)
 

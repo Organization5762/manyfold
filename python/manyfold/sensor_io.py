@@ -1386,6 +1386,9 @@ class RateMatchedSensor:
     group: str | None = None
 
     def __post_init__(self) -> None:
+        self.capacity = _require_int(self.capacity, "capacity")
+        if self.capacity <= 0:
+            raise ValueError("capacity must be positive")
         _adopt_group(self.clock, self.group)
 
     def install(self, graph: Graph) -> Any:

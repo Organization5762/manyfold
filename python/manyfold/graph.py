@@ -106,6 +106,11 @@ def _require_non_empty_text(value: str, field_name: str) -> None:
         raise ValueError(f"{field_name} must be a non-empty string")
 
 
+def _require_integer(value: object, field: str) -> None:
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ValueError(f"{field} must be an integer")
+
+
 @runtime_checkable
 class SubscriptionLike(Protocol):
     def dispose(self) -> None: ...
@@ -136,6 +141,9 @@ class CoalesceLatestNode(Generic[T]):
     name: str
     window_ms: int
     stream_name: str | None = None
+
+    def __post_init__(self) -> None:
+        _require_integer(self.window_ms, "coalesce window_ms")
 
     def observable(self, source: ObservableLike[T]) -> Observable[T]:
         if self.window_ms <= 0:
@@ -246,6 +254,9 @@ class LoggingNode(Generic[T]):
     name: str
     stream_name: str
     interval_ms: int
+
+    def __post_init__(self) -> None:
+        _require_integer(self.interval_ms, "logging interval_ms")
 
     def observable(self, source: ObservableLike[T]) -> Observable[T]:
         if self.interval_ms <= 0:
@@ -1592,6 +1603,9 @@ class PipelineLoggingNode(_ThreadPlaceableNode, Generic[T]):
     stream_name: str
     interval_ms: int
     thread_placement: NodeThreadPlacement | None = None
+
+    def __post_init__(self) -> None:
+        _require_integer(self.interval_ms, "logging interval_ms")
 
     def observable(self, source: ObservableLike[T]) -> Observable[T]:
         return LoggingNode(
@@ -4368,6 +4382,8 @@ class Graph:
         name: str | None = None,
     ) -> Watchdog:
         """Emit a timeout pulse when reset signal is absent for too long."""
+        if not isinstance(after, int) or isinstance(after, bool):
+            raise ValueError("watchdog timeout must be an integer")
         if after <= 0:
             raise ValueError("watchdog timeout must be positive")
         resolved_name = name or self._auto_node_name(
@@ -5831,6 +5847,7 @@ class Graph:
         a recent buffer on each side and emits joined values whenever the
         opposite side has events within the requested distance.
         """
+        _require_integer(within, "interval join distance")
         if within < 0:
             raise ValueError("interval join distance must be non-negative")
         left_route = self._coerce_route_ref(left)
