@@ -100,6 +100,11 @@ _STATS_SCHEDULER = TimeoutScheduler()
 logger = logging.getLogger(__name__)
 
 
+def _require_non_empty_text(value: str, field_name: str) -> None:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field_name} must be a non-empty string")
+
+
 @runtime_checkable
 class SubscriptionLike(Protocol):
     def dispose(self) -> None: ...
@@ -6099,6 +6104,10 @@ class Graph:
 
     def add_middleware(self, middleware: Middleware) -> Middleware:
         """Register middleware after enforcing RFC preservation rules."""
+        _require_non_empty_text(middleware.name, "middleware name")
+        _require_non_empty_text(middleware.kind, "middleware kind")
+        _require_non_empty_text(middleware.attachment_scope, "middleware attachment scope")
+        _require_non_empty_text(middleware.target, "middleware target")
         if not middleware.preserves_envelope_identity:
             raise ValueError(
                 "middleware must preserve envelope identity unless explicitly reframing"
@@ -6119,6 +6128,8 @@ class Graph:
 
     def register_link(self, link: Link) -> Link:
         """Register a transport/link adapter."""
+        _require_non_empty_text(link.name, "link name")
+        _require_non_empty_text(link.link_class, "link class")
         self._links[link.name] = link
         self._emit_debug_event(
             "link_health", f"registered {link.link_class} link {link.name}"
@@ -6131,6 +6142,10 @@ class Graph:
 
     def add_mesh_primitive(self, primitive: MeshPrimitive) -> MeshPrimitive:
         """Register an explicit mesh primitive in topology metadata."""
+        _require_non_empty_text(primitive.name, "mesh primitive name")
+        _require_non_empty_text(primitive.kind, "mesh primitive kind")
+        if primitive.link_name is not None:
+            _require_non_empty_text(primitive.link_name, "mesh primitive link name")
         if (
             primitive.kind in {"bridge", "mirror", "replicate"}
             and primitive.link_name is None
