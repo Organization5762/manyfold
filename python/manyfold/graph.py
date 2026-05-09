@@ -90,6 +90,7 @@ TRight = TypeVar("TRight")
 DIAGRAM_GROUP_FIELDS = frozenset(
     ("plane", "layer", "owner", "family", "stream", "variant", "thread")
 )
+DIAGRAM_DIRECTIONS = frozenset(("BT", "LR", "RL", "TB", "TD"))
 _PIPELINE_ROUTE_IDS = count(1)
 _THREAD_PLACEMENT_KINDS = frozenset(
     ("main", "background", "pooled", "isolated")
@@ -4664,6 +4665,13 @@ class Graph:
         resolved_format = format.lower()
         if resolved_format not in ("mermaid", "mermaid_flowchart"):
             raise ValueError("only Mermaid diagram rendering is supported")
+        resolved_direction = direction.upper()
+        if resolved_direction not in DIAGRAM_DIRECTIONS:
+            supported = ", ".join(sorted(DIAGRAM_DIRECTIONS))
+            raise ValueError(
+                f"unsupported Mermaid diagram direction {direction!r}; "
+                f"expected one of {supported}"
+            )
         unknown_fields = tuple(
             field for field in group_by if field not in DIAGRAM_GROUP_FIELDS
         )
@@ -4697,7 +4705,7 @@ class Graph:
             for node_name in node_names
         }
 
-        lines = [f"flowchart {direction}"]
+        lines = [f"flowchart {resolved_direction}"]
         if not node_names:
             lines.append("  %% graph has no topology edges")
             return "\n".join(lines)
