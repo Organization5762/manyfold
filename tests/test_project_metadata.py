@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+CARGO_TOML_PATH = PROJECT_ROOT / "Cargo.toml"
 PYPROJECT_PATH = PROJECT_ROOT / "pyproject.toml"
 PACKAGE_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+")
 
@@ -50,6 +51,15 @@ def _section_keys(lines: list[str], section: str) -> tuple[str, ...]:
 
 
 class ProjectMetadataTests(unittest.TestCase):
+    def test_cargo_dependency_tables_stay_sorted(self) -> None:
+        lines = CARGO_TOML_PATH.read_text(encoding="utf-8").splitlines()
+
+        dependencies = _section_keys(lines, "dependencies")
+        dev_dependencies = _section_keys(lines, "dev-dependencies")
+
+        self.assertEqual(dependencies, tuple(sorted(dependencies)))
+        self.assertEqual(dev_dependencies, tuple(sorted(dev_dependencies)))
+
     def test_pyproject_metadata_lists_stay_sorted(self) -> None:
         lines = PYPROJECT_PATH.read_text(encoding="utf-8").splitlines()
 
