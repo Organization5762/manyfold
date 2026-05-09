@@ -161,6 +161,22 @@ class ComponentTests(unittest.TestCase):
             ],
         )
 
+    def test_file_store_delete_prunes_empty_key_directories(self) -> None:
+        manyfold = load_manyfold_package()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            keyspace = manyfold.FileStore(root).prefix("safe")
+
+            keyspace.put("branch", "leaf", value=b"value")
+            deleted = keyspace.delete("branch", "leaf")
+            root_still_exists = root.exists()
+            safe_dir_exists = (root / "safe").exists()
+
+        self.assertTrue(deleted)
+        self.assertTrue(root_still_exists)
+        self.assertFalse(safe_dir_exists)
+
     def test_file_store_failed_replace_preserves_previous_value(self) -> None:
         manyfold = load_manyfold_package()
         components = importlib.import_module("manyfold.components")
