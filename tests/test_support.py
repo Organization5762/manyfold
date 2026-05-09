@@ -78,12 +78,20 @@ def _pythonpath_with_repo_python_first(current_pythonpath: str | None) -> str:
     python_root = str(PYTHON_ROOT)
     if not current_pythonpath:
         return python_root
+    resolved_python_root = PYTHON_ROOT.resolve()
     existing_paths = _unique_nonempty_paths(
         path
         for path in current_pythonpath.split(os.pathsep)
-        if path != python_root
+        if _resolve_pythonpath_entry(path) != resolved_python_root
     )
     return os.pathsep.join((python_root, *existing_paths))
+
+
+def _resolve_pythonpath_entry(path: str) -> Path:
+    entry = Path(path)
+    if not entry.is_absolute():
+        entry = REPO_ROOT / entry
+    return entry.resolve()
 
 
 def _unique_nonempty_paths(paths: Iterable[str]) -> tuple[str, ...]:
