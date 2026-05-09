@@ -88,6 +88,22 @@ class SensorIoTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "clock delta must be a finite number"):
             clock.advance(False)  # type: ignore[arg-type]
 
+    def test_sensor_location_rejects_invalid_coordinates(self) -> None:
+        manyfold = load_manyfold_package()
+
+        for kwargs, message in (
+            ({"x": True}, r"location\.x must be a finite number"),
+            ({"y": "1.0"}, r"location\.y must be a finite number"),
+            ({"z": float("nan")}, r"location\.z must be a finite number"),
+            (
+                {"timestamp": float("inf")},
+                r"location\.timestamp must be a finite number",
+            ),
+        ):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    manyfold.SensorLocation(**kwargs)
+
     def test_bounded_ring_buffer_enforces_overflow_policy(self) -> None:
         manyfold = load_manyfold_package()
         buffer = manyfold.BoundedRingBuffer[int](capacity=2, overflow="drop_oldest")

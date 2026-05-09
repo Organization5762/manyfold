@@ -626,6 +626,17 @@ class SensorLocation:
     z: float = 0.0
     timestamp: float | None = None
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "x", _require_finite_number(self.x, "location.x"))
+        object.__setattr__(self, "y", _require_finite_number(self.y, "location.y"))
+        object.__setattr__(self, "z", _require_finite_number(self.z, "location.z"))
+        if self.timestamp is not None:
+            object.__setattr__(
+                self,
+                "timestamp",
+                _require_finite_number(self.timestamp, "location.timestamp"),
+            )
+
 
 @dataclass(frozen=True)
 class SensorIdentity:
