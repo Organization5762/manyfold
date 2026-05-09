@@ -1049,6 +1049,16 @@ class SensorIoTests(unittest.TestCase):
         self.assertTrue(list_threshold.accepts([1.0, 2.0]))
         self.assertTrue(list_threshold.accepts([1.0]))
 
+    def test_threshold_filter_detects_boolean_transitions_as_value_changes(
+        self,
+    ) -> None:
+        manyfold = load_manyfold_package()
+        threshold = manyfold.ThresholdFilter[bool](threshold=10.0)
+
+        self.assertTrue(threshold.accepts(False))
+        self.assertTrue(threshold.accepts(True))
+        self.assertFalse(threshold.accepts(True))
+
     def test_threshold_filter_compares_mapping_keys_in_stable_order(self) -> None:
         manyfold = load_manyfold_package()
         accessed_keys: list[str] = []

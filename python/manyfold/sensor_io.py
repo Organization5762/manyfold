@@ -1560,6 +1560,8 @@ def _changed_enough(new: Any, old: Any, threshold: float) -> bool:
         if len(new) != len(old):
             return True
         return any(_changed_enough(n, o, threshold) for n, o in zip(new, old))
+    if isinstance(new, bool) or isinstance(old, bool):
+        return new != old
     if isinstance(new, (int, float)) and isinstance(old, (int, float)):
         new_number = float(new)
         old_number = float(old)
