@@ -151,6 +151,9 @@ class BackoffPolicy:
         return cls(initial_delay=delay)
 
     def delay_for_attempt(self, attempt_index: int) -> float:
+        attempt_index = _require_int(attempt_index, "attempt_index")
+        if attempt_index <= 0:
+            raise ValueError("attempt_index must be positive")
         if attempt_index <= 1:
             return 0.0
         delay = self.initial_delay * (self.multiplier ** (attempt_index - 2))

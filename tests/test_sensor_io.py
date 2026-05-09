@@ -774,6 +774,18 @@ class SensorIoTests(unittest.TestCase):
             loop.run(read)
         self.assertEqual(attempts, 2)
 
+    def test_backoff_policy_rejects_invalid_attempt_indexes(self) -> None:
+        manyfold = load_manyfold_package()
+        policy = manyfold.SensorBackoffPolicy.fixed(0.5)
+
+        for attempt_index in (0, -1, True, 1.5, "2"):
+            with self.subTest(attempt_index=attempt_index):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "attempt_index must be",
+                ):
+                    policy.delay_for_attempt(attempt_index)  # type: ignore[arg-type]
+
     def test_retry_policy_normalizes_retryable_exception_classes(self) -> None:
         manyfold = load_manyfold_package()
 
