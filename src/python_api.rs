@@ -101,6 +101,15 @@ fn unsupported_choice(field: &str, value: &str, choices: &[&str]) -> PyErr {
     ))
 }
 
+fn validate_nonblank_text(field: &str, value: &str) -> PyResult<()> {
+    if value.trim().is_empty() {
+        return Err(PyValueError::new_err(format!(
+            "{field} must be a non-empty string"
+        )));
+    }
+    Ok(())
+}
+
 fn extract_positive_capacity(value: &Bound<'_, PyAny>) -> PyResult<usize> {
     if value.is_instance_of::<PyBool>() {
         return Err(PyTypeError::new_err(
@@ -1484,6 +1493,7 @@ impl Graph {
 
     #[pyo3(signature = (name, descriptor=None))]
     fn mailbox(&self, name: String, descriptor: Option<MailboxDescriptor>) -> PyResult<Mailbox> {
+        validate_nonblank_text("mailbox name", &name)?;
         let descriptor = descriptor.unwrap_or(MailboxDescriptor {
             inner: MailboxDescriptorCore {
                 delivery_mode: DeliveryMode::MpscSerial,
@@ -1532,6 +1542,11 @@ impl Graph {
             largest_queue_depth: 0,
         };
         let mut graph = lock_graph(&self.state)?;
+        if graph.mailboxes.contains_key(&name) {
+            return Err(PyValueError::new_err(format!(
+                "mailbox {name:?} already exists"
+            )));
+        }
         graph.register_mailbox(name.clone(), mailbox);
         Ok(Mailbox {
             graph: Arc::clone(&self.state),
