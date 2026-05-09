@@ -4085,6 +4085,9 @@ class Graph:
         descriptor: NativeMailboxDescriptor | None = None,
     ) -> NativeMailbox:
         """Create or return a named mailbox from the native graph."""
+        _require_non_empty_text(name, "mailbox name")
+        if name in self._mailbox_descriptors:
+            raise ValueError(f'mailbox "{name}" already exists')
         resolved = descriptor if descriptor is not None else NativeMailboxDescriptor()
         self._mailbox_descriptors[name] = resolved
         mailbox = self._graph.mailbox(name, resolved)
