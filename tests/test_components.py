@@ -139,6 +139,19 @@ class ComponentTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "NUL"):
                 store.put("bad\x00key", value=b"nope")
 
+    def test_file_store_rejects_unsupported_key_part_types(self) -> None:
+        manyfold = load_manyfold_package()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            keyspace = manyfold.FileStore(temp_dir).prefix("safe")
+
+            for part in (True, False, 1.5, object()):
+                with self.subTest(part=part):
+                    with self.assertRaisesRegex(
+                        ValueError, "key parts must be strings or integers"
+                    ):
+                        keyspace.put(part, value=b"nope")
+
     def test_file_store_allows_key_part_matching_value_filename(self) -> None:
         manyfold = load_manyfold_package()
 
@@ -431,6 +444,25 @@ class ComponentTests(unittest.TestCase):
         self.assertIsNotNone(latest)
         assert latest is not None
         self.assertIsNone(latest.value)
+
+    def test_snapshot_store_rejects_unsupported_key_part_types(self) -> None:
+        manyfold = load_manyfold_package()
+        schema = manyfold.Schema.bytes(name="SnapshotBytes")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            keyspace = manyfold.FileStore(temp_dir).prefix("state")
+
+            for key in (True, object()):
+                with self.subTest(key=key):
+                    with self.assertRaisesRegex(
+                        ValueError, "key parts must be strings or integers"
+                    ):
+                        manyfold.SnapshotStore(
+                            "state_snapshot",
+                            keyspace,
+                            schema,
+                            key=key,
+                        )
 
     def test_snapshot_store_serializes_concurrent_writes_and_publishes(self) -> None:
         manyfold = load_manyfold_package()
