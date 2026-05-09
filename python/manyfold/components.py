@@ -308,7 +308,7 @@ class SnapshotStore(Generic[T]):
         self.name = name
         self.keyspace = keyspace
         self.schema = schema
-        self.key = str(key)
+        self.key = _normalize_key_part(key)
         self._write_lock = threading.RLock()
         self.routes = SnapshotStoreRoutes(
             write=_component_route(
@@ -921,8 +921,17 @@ _VALUE_FILENAME = "__value__.bin"
 
 
 def _normalize_key(parts: tuple[KeyPart, ...]) -> Key:
-    key = tuple(str(part) for part in parts)
-    if any("\x00" in part for part in key):
+    return tuple(_normalize_key_part(part) for part in parts)
+
+
+def _normalize_key_part(part: KeyPart) -> str:
+    if isinstance(part, str):
+        key = part
+    elif _is_plain_int(part):
+        key = str(part)
+    else:
+        raise ValueError("key parts must be strings or integers")
+    if "\x00" in key:
         raise ValueError("key parts cannot contain NUL bytes")
     return key
 

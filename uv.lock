@@ -1,10 +1,10 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.10"
 
 [[package]]
 name = "manyfold"
-version = "0.1.27"
+version = "0.1.29"
 source = { editable = "." }
 dependencies = [
     { name = "reactivex" },
