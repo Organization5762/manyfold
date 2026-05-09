@@ -37,6 +37,96 @@ Non-goals for v1.0.0:
 - A large cloud control plane required for local use.
 - A framework that hides distributed trade-offs behind friendly names.
 
+## Working Backward From v1
+
+The v1.0.0 release should be planned around a few concrete stories rather than
+only a list of primitives. These stories are intentionally demanding, but each
+one can be built from concepts already present in the package.
+
+### Story 1: Local Graph, Production Semantics
+
+A developer should be able to build a local graph that handles bursty sensor
+input, lazy bulk payloads, stateful aggregation, write feedback, and route audit
+without leaving Python.
+
+The graph should answer:
+
+- Which routes exist, who owns them, and which schemas do they carry?
+- Where are buffers, mailboxes, windows, joins, retries, and scheduler guards?
+- Which outputs depend on which inputs, payloads, writes, and control epochs?
+- Which taints were introduced, propagated, or repaired?
+- Which payloads were opened because of downstream demand?
+
+The important v1 bar is not raw feature count. The bar is that execution
+semantics are visible enough that callback code, logs, and queue dashboards are
+not the source of truth.
+
+### Story 2: Build A Primitive Once
+
+A developer should be able to define a primitive such as `DurableQueue`,
+`Lease`, or `Replicator` once, then install it into multiple graphs with
+different policies and stores.
+
+The primitive should bring its own:
+
+- dependency requirements,
+- route templates,
+- state and storage requirements,
+- policy knobs,
+- failure semantics,
+- query surfaces,
+- static validation,
+- documentation generated from the same contract the runtime uses.
+
+The result should be a component that is small enough to reason about but real
+enough to be reused. A `Lease` should not be a paragraph in a design document;
+it should be a composed object built from deadlines, renew/release
+capabilities, fencing tokens, versioned state, and explicit stale-owner
+behavior.
+
+### Story 3: Partition A Graph Across Runtimes
+
+A developer should be able to take a graph that works locally and run selected
+parts in separate runtime nodes. The partition boundary should be represented
+as graph structure, not hidden in deployment scripts.
+
+The distributed version should preserve:
+
+- route and port identities,
+- schema compatibility,
+- primitive ownership,
+- mailbox and flow semantics,
+- taint propagation,
+- lineage across links,
+- query/debug visibility,
+- declared transport limitations.
+
+If a link cannot preserve ordering, durability, trust, replay, or lazy payload
+fetch, that loss should be declared and visible as policy, query output, or
+taint.
+
+### Story 4: Move Ownership Safely
+
+A partitioned graph should be able to move ownership of state or work from one
+runtime node to another with enough structure to debug the move later.
+
+That means v1 needs an end-to-end story for:
+
+- current owner,
+- desired owner,
+- partition map epoch,
+- migration fence,
+- checkpoint position,
+- replay or snapshot source,
+- catch-up progress,
+- handoff completion,
+- stale-owner rejection,
+- route audit evidence.
+
+This can start with one supported migration path. It does not need every
+rebalancing strategy at v1.0.0, but the model should be strong enough that new
+strategies can be added without changing the vocabulary.
+
 ## Design
 
 ### Assumptions
@@ -47,6 +137,10 @@ Non-goals for v1.0.0:
 - The `manyfold.graph` module is allowed to host advanced distributed helpers
   while the top-level namespace stays narrow.
 - The lego catalog becomes executable metadata over time, not just prose.
+- Compatibility work favors explicit versioned manifests over implicit best
+  effort upgrades.
+- Early distributed examples can use local processes, but the API should not
+  depend on all nodes sharing memory.
 
 ### v1.0.0 Product Shape
 
@@ -96,6 +190,21 @@ test, validate, and deploy. The runtime should execute that manifest while
 emitting the same route, edge, primitive, and taint identities back through the
 query plane.
 
+### Layer Boundaries
+
+v1.0.0 should keep four boundaries crisp.
+
+| Boundary | Owns | Must not hide |
+| --- | --- | --- |
+| Authoring API | typed routes, primitive installation, graph composition | queueing, retries, placement, transport loss |
+| Compiler | manifest generation, validation, lowering, placement inputs | runtime health, mutable observed state |
+| Runtime | event delivery, stores, mailboxes, operators, query routes | undeclared policy or capability changes |
+| Control plane | desired state, observed state, rollout, ownership movement | data-plane payloads or user callbacks |
+
+This split keeps Manyfold from becoming either a Python-only helper library or a
+large opaque platform. The authoring API describes intent, the compiler makes it
+checkable, the runtime executes it, and the control plane moves it safely.
+
 ### Primitive Builder
 
 The v1 primitive builder should turn the distributed-systems lego catalog into
@@ -122,6 +231,41 @@ A primitive should describe:
 This makes primitives more than helpers. They become inspectable components with
 machine-checkable dependencies and failure contracts.
 
+The contract does not need a final API shape today, but it should support a
+style like this:
+
+```python
+DurableQueue = Primitive.define(
+    name="DurableQueue",
+    layer="durable",
+    requires=("EventLog", "CheckpointStore", "AckTracker", "VisibilityDeadline"),
+    provides=("Append", "Subscribe", "Ack", "Nack", "Replayable", "Bounded"),
+    state=("event_log", "checkpoint", "inflight"),
+    policies=("ordering", "overflow", "retry", "visibility_timeout"),
+)
+```
+
+The installer should then be able to lower that definition into concrete graph
+parts:
+
+```python
+queue = DurableQueue.install(
+    graph,
+    name="image_jobs",
+    schema=ImageJob,
+    store=store.prefix("image_jobs"),
+    capacity=1000,
+    visibility_timeout=Duration.seconds(30),
+)
+
+graph.connect(camera_frames, queue.ingress)
+graph.connect(queue.egress, image_worker)
+```
+
+Those snippets are illustrative rather than a committed API. The committed v1
+requirement is that the primitive contract, installed graph, generated docs, and
+query surfaces all agree.
+
 Example v1-level primitive families:
 
 - Flow: `Capacitor`, `Resistor`, `RateLimiter`, `Semaphore`, `FlowControl`.
@@ -136,6 +280,25 @@ Example v1-level primitive families:
   `AntiEntropyRepair`.
 - Operations: `RouteAudit`, `LineageQuery`, `TaintRepair`, `RolloutController`,
   `KillSwitch`.
+
+### Primitive Maturity Levels
+
+The catalog should distinguish maturity so v1.0.0 can be honest without being
+small.
+
+- **Named**: documented lego exists with dependencies and intended contract.
+- **Installable**: a primitive can lower into graph routes, nodes, stores, and
+  query descriptors.
+- **Validated**: static checks reject invalid wiring and missing policies.
+- **Executable**: tests run the installed primitive through real graph/runtime
+  behavior.
+- **Fault-tested**: restart, duplicate, timeout, stale-owner, or partition
+  cases are exercised.
+- **Stable**: public contract and manifest representation are covered by a
+  compatibility policy.
+
+v1.0.0 should mark only a focused subset as stable. The rest can remain named,
+installable, or experimental if the docs and query output say so directly.
 
 ### Distributed Graph Computing
 
@@ -181,6 +344,98 @@ The runtime should make it hard to express:
 - a retry loop whose idempotency boundary is unknown,
 - a transport crossing that silently drops ordering, durability, or trust.
 
+### Graph Manifest
+
+The graph manifest is the bridge between authoring, validation, runtime, and
+operations. It should be deterministic, versioned, and friendly to code review.
+
+It should include at least:
+
+- manifest version and package/runtime compatibility range,
+- route and port descriptors,
+- schemas and schema versions,
+- primitive instances and their contract versions,
+- edge descriptors, including flow and mailbox policies,
+- state stores, retention, durability, and replay settings,
+- placement constraints and partition ownership,
+- mesh links and link capabilities,
+- query/debug route exposure,
+- security capabilities for external principals,
+- taint, watermark, scheduler, and lineage settings.
+
+Illustrative shape:
+
+```text
+manifest manyfold.graph.v1
+  route read.logical.camera.frames.meta.v1 schema=FrameMeta@1
+  route read.bulk.camera.frames.payload.v1 schema=FramePayload@1
+  primitive durable_queue:image_jobs contract=DurableQueue@1
+  partition camera_ingest owner=node-a checkpoint=frames@142
+  link camera_ingest -> image_workers transport=tcp ordered=true replay=false
+  query route_audit enabled principals=ops
+```
+
+The actual format can be JSON, TOML, Protobuf, or generated Python metadata. The
+important property is that the manifest is a product artifact: stable enough to
+review, diff, load, validate, and attach to bug reports.
+
+### Runtime Profiles
+
+v1.0.0 should avoid a one-size-fits-all runtime promise. A small set of explicit
+profiles is more useful.
+
+- **Embedded-lite profile**: constrained route set, minimal buffering, no local
+  durable store required, explicit transport framing, conservative query
+  surface.
+- **Local profile**: one process, full local graph operators, file-backed
+  durable components, deterministic testing support.
+- **Edge profile**: multiple processes on one host or LAN, mesh links,
+  checkpoints, partition planning, and federated query.
+- **Service profile**: longer-running nodes with compatibility policy, metrics,
+  tracing, restart tests, and supported storage adapters.
+
+Profiles should be additive where practical, but they should not pretend to
+offer the same guarantees. A profile is a declared operating envelope.
+
+### Query And Operations Model
+
+The v1 query plane should treat operational inspection as part of the runtime
+contract. A deployed graph should answer these questions without bespoke code:
+
+- What is the current graph topology and manifest version?
+- Which runtime node owns each partition?
+- Which routes have active producers, subscribers, writers, or retained latest
+  values?
+- Which mailboxes, capacitors, queues, and rate limiters are exerting pressure?
+- Which event-time watermarks and control epochs are holding work?
+- Which lineage records explain a selected output?
+- Which taints are present, repaired, or absorbing?
+- Which primitive instances are healthy, degraded, or blocked?
+- Which link capabilities were requested and which were actually provided?
+
+Query responses should be typed streams where possible. A CLI or dashboard can
+format those streams, but the graph should not depend on an external dashboard
+to know itself.
+
+### Failure Semantics
+
+Every stable distributed primitive should document what happens for the failure
+cases it claims to handle.
+
+| Failure case | v1 expectation |
+| --- | --- |
+| Duplicate delivery | Deduplication or idempotency boundary is declared. |
+| Timeout | Timeout policy emits graph-visible status or retry state. |
+| Crash before ack | Durable queues can replay or expose loss as a capability limit. |
+| Stale owner | Fencing token or epoch rejects stale writes. |
+| Link partition | Runtime exposes degraded link and taints affected routes. |
+| Schema mismatch | Compiler or link handshake rejects the connection. |
+| Replay gap | Checkpoint/query surface reports the missing range. |
+
+The goal is not to eliminate failure. The goal is to ensure failures land in the
+graph vocabulary before users build systems that depend on undocumented
+behavior.
+
 ### v1.0.0 Acceptance Criteria
 
 v1.0.0 is ready when the repository can demonstrate the following in code,
@@ -205,6 +460,32 @@ tests, and docs:
   capabilities.
 - A compatibility policy for schemas, graph manifests, primitive contracts, and
   public Python APIs.
+- A fault-injection suite for at least one stable handoff primitive, one stable
+  coordination primitive, and one stable partitioning or replication primitive.
+- A migration example where observed state, desired state, partition epochs, and
+  route audit explain a safe ownership move.
+- A documented profile matrix that says which guarantees are supported for
+  embedded-lite, local, edge, and service profiles.
+
+### v1 Release Gates
+
+The release should not become `1.0.0` until these gates are true:
+
+- **API gate**: public local graph and primitive APIs have typed signatures,
+  docs, and compatibility notes.
+- **Manifest gate**: graph manifests are deterministic and validated in tests.
+- **Runtime gate**: local runtime semantics are covered by real tests rather
+  than stubs.
+- **Distribution gate**: at least one multi-process example exercises mesh
+  links, query federation, and payload/metadata behavior.
+- **Durability gate**: event log, snapshot, checkpoint, and replay behavior are
+  tested across restart.
+- **Failure gate**: documented fault cases have tests or are explicitly outside
+  the profile.
+- **Operations gate**: route audit, lineage, flow, scheduler, watermarks, taints,
+  and primitive health can be queried from running examples.
+- **Docs gate**: README, onboarding, usage, performance, catalog, RFC, and v1
+  vision agree on what is stable versus experimental.
 
 ### Milestones
 
