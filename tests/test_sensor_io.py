@@ -67,14 +67,26 @@ class SensorIoTests(unittest.TestCase):
     def test_manual_clock_rejects_non_finite_time_values(self) -> None:
         manyfold = load_manyfold_package()
 
-        with self.assertRaisesRegex(ValueError, "clock value must be finite"):
+        with self.assertRaisesRegex(ValueError, "clock value must be a finite number"):
             manyfold.ManualClock(float("nan"))
 
         clock = manyfold.ManualClock(10.0)
-        with self.assertRaisesRegex(ValueError, "clock value must be finite"):
+        with self.assertRaisesRegex(ValueError, "clock value must be a finite number"):
             clock.set(float("inf"))
-        with self.assertRaisesRegex(ValueError, "clock delta must be finite"):
+        with self.assertRaisesRegex(ValueError, "clock delta must be a finite number"):
             clock.advance(float("nan"))
+
+    def test_manual_clock_rejects_boolean_and_non_numeric_time_values(self) -> None:
+        manyfold = load_manyfold_package()
+
+        with self.assertRaisesRegex(ValueError, "clock value must be a finite number"):
+            manyfold.ManualClock(True)  # type: ignore[arg-type]
+
+        clock = manyfold.ManualClock(10.0)
+        with self.assertRaisesRegex(ValueError, "clock value must be a finite number"):
+            clock.set("11.0")  # type: ignore[arg-type]
+        with self.assertRaisesRegex(ValueError, "clock delta must be a finite number"):
+            clock.advance(False)  # type: ignore[arg-type]
 
     def test_bounded_ring_buffer_enforces_overflow_policy(self) -> None:
         manyfold = load_manyfold_package()
@@ -1057,7 +1069,7 @@ class SensorIoTests(unittest.TestCase):
     ) -> None:
         manyfold = load_manyfold_package()
 
-        with self.assertRaisesRegex(ValueError, "threshold must be finite"):
+        with self.assertRaisesRegex(ValueError, "threshold must be a finite number"):
             manyfold.ThresholdFilter[float](threshold=float("nan"))
 
         threshold = manyfold.ThresholdFilter[float](threshold=0.5)
@@ -1066,6 +1078,16 @@ class SensorIoTests(unittest.TestCase):
         self.assertTrue(threshold.accepts(float("nan")))
         self.assertTrue(threshold.accepts(float("inf")))
         self.assertFalse(threshold.accepts(float("inf")))
+
+    def test_threshold_filter_rejects_boolean_and_non_numeric_thresholds(self) -> None:
+        manyfold = load_manyfold_package()
+
+        for threshold in (True, "0.5"):
+            with self.subTest(threshold=threshold):
+                with self.assertRaisesRegex(
+                    ValueError, "threshold must be a finite number"
+                ):
+                    manyfold.ThresholdFilter[float](threshold=threshold)  # type: ignore[arg-type]
 
     def test_local_sensor_source_publishes_sensor_samples(self) -> None:
         manyfold = load_manyfold_package()
@@ -1431,13 +1453,15 @@ class SensorIoTests(unittest.TestCase):
     def test_sensor_timing_policies_reject_non_finite_values(self) -> None:
         manyfold = load_manyfold_package()
 
-        with self.assertRaisesRegex(ValueError, "initial_delay must be finite"):
+        with self.assertRaisesRegex(
+            ValueError, "initial_delay must be a finite number"
+        ):
             manyfold.SensorBackoffPolicy(initial_delay=float("nan"))
-        with self.assertRaisesRegex(ValueError, "multiplier must be finite"):
+        with self.assertRaisesRegex(ValueError, "multiplier must be a finite number"):
             manyfold.SensorBackoffPolicy(multiplier=float("inf"))
-        with self.assertRaisesRegex(ValueError, "max_delay must be finite"):
+        with self.assertRaisesRegex(ValueError, "max_delay must be a finite number"):
             manyfold.SensorBackoffPolicy(max_delay=float("nan"))
-        with self.assertRaisesRegex(ValueError, "stale_after must be finite"):
+        with self.assertRaisesRegex(ValueError, "stale_after must be a finite number"):
             manyfold.SensorHealthWatchdog(
                 source=_route(manyfold, "sample", _int_schema(manyfold, "Sample")),
                 health_route=_route(
@@ -1447,6 +1471,43 @@ class SensorIoTests(unittest.TestCase):
                 ),
                 stale_after=float("inf"),
             )
+
+    def test_sensor_timing_policies_reject_boolean_and_non_numeric_values(self) -> None:
+        manyfold = load_manyfold_package()
+
+        cases = (
+            (
+                "initial_delay",
+                lambda value: manyfold.SensorBackoffPolicy(initial_delay=value),
+            ),
+            ("multiplier", lambda value: manyfold.SensorBackoffPolicy(multiplier=value)),
+            ("max_delay", lambda value: manyfold.SensorBackoffPolicy(max_delay=value)),
+        )
+
+        for field, factory in cases:
+            for value in (True, "1.0"):
+                with self.subTest(field=field, value=value):
+                    with self.assertRaisesRegex(
+                        ValueError, f"{field} must be a finite number"
+                    ):
+                        factory(value)
+
+        source = _route(manyfold, "typed_sample", _int_schema(manyfold, "TypedSample"))
+        health_route = _route(
+            manyfold,
+            "typed_health",
+            manyfold.health_status_schema(),
+        )
+        for value in (False, "1.0"):
+            with self.subTest(field="stale_after", value=value):
+                with self.assertRaisesRegex(
+                    ValueError, "stale_after must be a finite number"
+                ):
+                    manyfold.SensorHealthWatchdog(
+                        source=source,
+                        health_route=health_route,
+                        stale_after=value,  # type: ignore[arg-type]
+                    )
 
     def test_double_buffer_frame_assembler_and_checksum(self) -> None:
         manyfold = load_manyfold_package()

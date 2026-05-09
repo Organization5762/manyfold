@@ -1567,9 +1567,11 @@ def _changed_enough(new: Any, old: Any, threshold: float) -> bool:
 
 
 def _require_finite_number(value: float, field: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{field} must be a finite number")
     number = float(value)
     if not math.isfinite(number):
-        raise ValueError(f"{field} must be finite")
+        raise ValueError(f"{field} must be a finite number")
     return number
 
 

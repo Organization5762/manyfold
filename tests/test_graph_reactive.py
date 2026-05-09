@@ -2712,6 +2712,41 @@ class GraphReactiveTests(unittest.TestCase):
         self.assertEqual([item.value for item in emitted], [2])
         self.assertEqual([item.closed.control_epoch for item in emitted], [20])
 
+    def test_capacitor_rejects_invalid_policy_inputs(self) -> None:
+        graph_module = load_graph_module()
+
+        source = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("imu"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("capacitor_invalid_source"),
+            variant=graph_module.Variant.Meta,
+            schema=int_schema(graph_module, "CapacitorInvalidSource"),
+        )
+        sampled = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("imu"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("capacitor_invalid_sampled"),
+            variant=graph_module.Variant.Meta,
+            schema=int_schema(graph_module, "CapacitorInvalidSampled"),
+        )
+        graph = graph_module.Graph()
+
+        invalid_inputs = (
+            ({"capacity": True}, "capacitor capacity must be an integer"),
+            ({"capacity": "1"}, "capacitor capacity must be an integer"),
+            ({"immediate": "yes"}, "immediate must be a boolean"),
+            ({"overflow": ["latest"]}, "overflow must be a string"),
+        )
+
+        for kwargs, message in invalid_inputs:
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    graph.capacitor(source=source, sink=sampled, **kwargs)
+
     def test_capacitor_disposes_source_when_demand_subscription_fails(self) -> None:
         graph_module = load_graph_module()
 

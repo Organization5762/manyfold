@@ -4165,8 +4165,14 @@ class Graph:
         name: str | None = None,
     ) -> Capacitor:
         """Install active bounded storage between source and sink."""
+        if not isinstance(capacity, int) or isinstance(capacity, bool):
+            raise ValueError("capacitor capacity must be an integer")
         if capacity <= 0:
             raise ValueError("capacitor capacity must be positive")
+        if not isinstance(immediate, bool):
+            raise ValueError("immediate must be a boolean")
+        if not isinstance(overflow, str):
+            raise ValueError("overflow must be a string")
         if overflow not in {"latest", "drop_oldest", "reject"}:
             raise ValueError(
                 "overflow must be one of 'latest', 'drop_oldest', or 'reject'"
