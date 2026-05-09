@@ -727,9 +727,21 @@ class FlowPolicy:
     async_boundary_kind: str | None = None
     overflow_policy: str | None = None
 
+    def __post_init__(self) -> None:
+        for field_name in (
+            "backpressure_policy",
+            "credit_class",
+            "mailbox_policy",
+            "async_boundary_kind",
+            "overflow_policy",
+        ):
+            _require_optional_non_empty_text(getattr(self, field_name), field_name)
+
     def merged(self, override: FlowPolicy | None) -> FlowPolicy:
         if override is None:
             return self
+        if not isinstance(override, FlowPolicy):
+            raise TypeError("flow policy override must be a FlowPolicy")
         return FlowPolicy(
             backpressure_policy=override.backpressure_policy
             if override.backpressure_policy is not None
@@ -6708,6 +6720,11 @@ class _CompositeSubscription:
 def _require_non_empty_text(value: str, field_name: str) -> None:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{field_name} must be a non-empty string")
+
+
+def _require_optional_non_empty_text(value: str | None, field_name: str) -> None:
+    if value is not None:
+        _require_non_empty_text(value, field_name)
 
 
 def _require_integer(value: object, field: str) -> None:

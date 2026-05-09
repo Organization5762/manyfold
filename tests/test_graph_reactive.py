@@ -5303,6 +5303,29 @@ assert graph.latest(route) is None
         self.assertEqual(descriptor.async_boundary_kind, "source_async")
         self.assertEqual(descriptor.overflow_policy, "sink_block")
 
+    def test_flow_policy_rejects_empty_or_non_string_overrides(self) -> None:
+        graph_module = load_graph_module()
+
+        for field_name in (
+            "backpressure_policy",
+            "credit_class",
+            "mailbox_policy",
+            "async_boundary_kind",
+            "overflow_policy",
+        ):
+            with self.subTest(field_name=field_name, value=""):
+                with self.assertRaisesRegex(ValueError, field_name):
+                    graph_module.FlowPolicy(**{field_name: ""})
+            with self.subTest(field_name=field_name, value=1):
+                with self.assertRaisesRegex(ValueError, field_name):
+                    graph_module.FlowPolicy(**{field_name: 1})
+
+    def test_flow_policy_merge_requires_flow_policy_override(self) -> None:
+        graph_module = load_graph_module()
+
+        with self.assertRaisesRegex(TypeError, "FlowPolicy"):
+            graph_module.FlowPolicy().merged(object())
+
     def test_describe_edge_uses_mailbox_flow_defaults(self) -> None:
         graph_module = load_graph_module()
         source = graph_module.route(
