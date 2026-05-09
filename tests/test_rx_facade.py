@@ -72,6 +72,18 @@ class RxFacadeTests(unittest.TestCase):
         self.assertEqual(len(operators_module.__all__), len(set(operators_module.__all__)))
         self.assertEqual(operators_module.zip_with_list, upstream_module.zip_with_list)
 
+    def test_private_testing_facade_deduplicates_upstream_exports(self) -> None:
+        load_manyfold_package()
+        testing_module = importlib.import_module("manyfold._rx.testing")
+        upstream_module = importlib.import_module("reactivex.testing")
+
+        self.assertEqual(
+            testing_module.__all__,
+            tuple(sorted(set(upstream_module.__all__))),
+        )
+        self.assertEqual(len(testing_module.__all__), len(set(testing_module.__all__)))
+        self.assertEqual(testing_module.TestScheduler, upstream_module.TestScheduler)
+
     def test_private_subject_submodules_export_only_subject_classes(self) -> None:
         load_manyfold_package()
         expected_exports = {
@@ -166,6 +178,7 @@ class RxFacadeTests(unittest.TestCase):
             "manyfold._rx.subject.behaviorsubject": ("BehaviorSubject",),
             "manyfold._rx.subject.replaysubject": ("ReplaySubject",),
             "manyfold._rx.subject.subject": ("Subject",),
+            "manyfold._rx.testing": ("ReactiveTest", "TestScheduler"),
             "manyfold._rx.testing.marbles": ("marbles_testing",),
             "manyfold._rx.typing": ("Mapper", "Predicate", "Subscription"),
         }
