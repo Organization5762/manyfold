@@ -3,6 +3,8 @@ from __future__ import annotations
 import importlib
 import unittest
 
+from reactivex import operators as reactivex_operators, testing as reactivex_testing
+
 from tests.test_support import load_manyfold_package
 
 
@@ -167,6 +169,19 @@ class RxFacadeTests(unittest.TestCase):
                 for name in names:
                     self.assertIn(name, module.__all__)
                     self.assertIs(getattr(module, name), module.__dict__[name])
+
+    def test_dynamic_facade_exports_follow_reactivex_declared_exports(self) -> None:
+        load_manyfold_package()
+        expected_exports = {
+            "manyfold._rx.operators": reactivex_operators.__all__,
+            "manyfold._rx.testing": reactivex_testing.__all__,
+        }
+
+        for module_name, names in expected_exports.items():
+            with self.subTest(module=module_name):
+                module = importlib.import_module(module_name)
+
+                self.assertEqual(module.__all__, tuple(sorted(set(names))))
 
     def test_public_rx_facade_is_not_available(self) -> None:
         load_manyfold_package()
