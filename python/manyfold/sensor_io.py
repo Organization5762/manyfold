@@ -1562,13 +1562,17 @@ class _NoopSubscription:
 @dataclass
 class _CompositeSubscription:
     subscriptions: tuple[SubscriptionLike, ...]
+    disposed: bool = False
 
     def dispose(self) -> None:
-        first_error: BaseException | None = None
+        if self.disposed:
+            return
+        self.disposed = True
+        first_error: Exception | None = None
         for subscription in self.subscriptions:
             try:
                 subscription.dispose()
-            except BaseException as exc:
+            except Exception as exc:
                 if first_error is None:
                     first_error = exc
         if first_error is not None:
