@@ -40,6 +40,18 @@ class TestSupportTests(unittest.TestCase):
             os.pathsep.join((python_root, "/tmp/first", "/tmp/second")),
         )
 
+    def test_subprocess_pythonpath_removes_relative_repo_python_root(self) -> None:
+        python_root = str(test_support.PYTHON_ROOT)
+        relative_python_root = os.path.relpath(
+            test_support.PYTHON_ROOT,
+            start=test_support.REPO_ROOT,
+        )
+        current_pythonpath = os.pathsep.join((relative_python_root, "/tmp/project"))
+
+        pythonpath = test_support._pythonpath_with_repo_python_first(current_pythonpath)
+
+        self.assertEqual(pythonpath, os.pathsep.join((python_root, "/tmp/project")))
+
     def test_subprocess_test_env_sets_stable_pythonpath_once(self) -> None:
         python_root = str(test_support.PYTHON_ROOT)
         current_pythonpath = os.pathsep.join(
