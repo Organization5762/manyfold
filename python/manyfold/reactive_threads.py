@@ -237,8 +237,11 @@ def delivery_latency_snapshot() -> dict[str, DeliveryLatencyStats]:
 def drain_frame_thread_queue(max_items: int | None = None) -> int:
     """Run pending frame-thread callbacks and return the number drained."""
 
-    if max_items is not None and max_items <= 0:
-        return 0
+    if max_items is not None:
+        if isinstance(max_items, bool) or not isinstance(max_items, int):
+            raise ValueError("max_items must be an integer or None")
+        if max_items <= 0:
+            return 0
 
     global _FRAME_THREAD_IDENT
     _FRAME_THREAD_IDENT = get_ident()

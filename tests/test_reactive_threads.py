@@ -111,6 +111,17 @@ class ReactiveThreadsTests(unittest.TestCase):
         self.assertEqual(self.reactive_threads.drain_frame_thread_queue(), 1)
         self.assertEqual(values, [1])
 
+    def test_drain_frame_thread_queue_rejects_non_integer_limit(self) -> None:
+        for max_items in (True, 1.5, "1"):
+            with self.subTest(max_items=max_items):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "max_items must be an integer or None",
+                ):
+                    self.reactive_threads.drain_frame_thread_queue(
+                        max_items=max_items
+                    )
+
     def test_latency_snapshot_reports_percentiles_from_sorted_samples(self) -> None:
         recorder = self.reactive_threads._LatencyRecorder()
 
