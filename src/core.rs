@@ -1113,39 +1113,43 @@ impl GraphCore {
     ) -> Vec<ClosedEnvelopeCore> {
         let route = envelope.route.clone();
         let mut emitted = vec![envelope.clone()];
-        let payload = self.payload_bytes_for(&envelope);
 
         if fanout {
-            // A request write projects into shadow state before any downstream fanout
-            // so desired-state observability exists even when the device has not yet
-            // reported or applied the value.
-            if let Some(binding) = self.request_bindings.get(&route).cloned() {
-                let desired = self.direct_write(
-                    &binding.desired,
-                    payload.clone(),
-                    ProducerRefCore {
-                        producer_id: binding.request.display(),
-                        kind: ProducerKind::Reconciler,
-                    },
-                    envelope.control_epoch,
-                );
-                emitted.push(desired);
-            }
-
+            let binding = self.request_bindings.get(&route).cloned();
             let downstream = self
                 .edges
                 .iter()
                 .filter(|(source, _)| *source == route)
                 .map(|(_, sink)| sink.clone())
                 .collect::<Vec<_>>();
-            for sink in downstream {
-                let forwarded = self.direct_write(
-                    &sink,
-                    payload.clone(),
-                    envelope.producer.clone(),
-                    envelope.control_epoch,
-                );
-                emitted.extend(self.route_envelope(forwarded, false));
+
+            // A request write projects into shadow state before any downstream fanout
+            // so desired-state observability exists even when the device has not yet
+            // reported or applied the value.
+            if binding.is_some() || !downstream.is_empty() {
+                let payload = self.payload_bytes_for(&envelope);
+                if let Some(binding) = binding {
+                    let desired = self.direct_write(
+                        &binding.desired,
+                        payload.clone(),
+                        ProducerRefCore {
+                            producer_id: binding.request.display(),
+                            kind: ProducerKind::Reconciler,
+                        },
+                        envelope.control_epoch,
+                    );
+                    emitted.push(desired);
+                }
+
+                for sink in downstream {
+                    let forwarded = self.direct_write(
+                        &sink,
+                        payload.clone(),
+                        envelope.producer.clone(),
+                        envelope.control_epoch,
+                    );
+                    emitted.extend(self.route_envelope(forwarded, false));
+                }
             }
         }
 
