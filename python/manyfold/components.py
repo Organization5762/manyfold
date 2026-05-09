@@ -144,6 +144,7 @@ class Keyspace:
         if not path.is_file():
             return False
         path.unlink()
+        _prune_empty_directories(path.parent, self.store.root)
         return True
 
     def scan(self, *parts: KeyPart) -> tuple[StoreEntry, ...]:
@@ -986,6 +987,16 @@ def _write_bytes_atomic(path: Path, value: bytes) -> None:
     except BaseException:
         temporary_path.unlink(missing_ok=True)
         raise
+
+
+def _prune_empty_directories(path: Path, stop: Path) -> None:
+    current = path
+    while current != stop:
+        try:
+            current.rmdir()
+        except OSError:
+            return
+        current = current.parent
 
 
 def _heartbeat_schema() -> Schema[Heartbeat]:
