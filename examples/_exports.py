@@ -9,9 +9,9 @@ CATALOG_EXPORTS: tuple[str, ...] = (
     "EXAMPLE_CATALOG_BY_MODULE",
     "ExampleCatalogEntry",
     "README_EXAMPLE_ENTRIES",
+    "README_EXAMPLE_MODULES",
     "README_FEATURED_EXAMPLES_END",
     "README_FEATURED_EXAMPLES_START",
-    "README_EXAMPLE_MODULES",
     "REFERENCE_EXAMPLE_ENTRIES",
     "REFERENCE_EXAMPLE_ENTRY_BY_NUMBER",
     "REFERENCE_EXAMPLE_GAPS",
@@ -23,8 +23,7 @@ CATALOG_EXPORTS: tuple[str, ...] = (
     "SUPPORTED_EXAMPLE_ENTRIES",
     "SUPPORTED_EXAMPLE_MODULES",
     "catalog_entry",
-    "render_readme_featured_examples",
     "reference_example_metadata",
+    "render_readme_featured_examples",
     "sync_readme_featured_examples",
 )
-
