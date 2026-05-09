@@ -5,7 +5,6 @@ module keeps the re-export surface available to internal code without making it
 part of the public ``manyfold`` namespace.
 """
 
-from reactivex import *  # noqa: F403
 from reactivex import (
     ConnectableObservable as ConnectableObservable,
     GroupedObservable as GroupedObservable,
