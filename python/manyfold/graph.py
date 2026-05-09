@@ -291,12 +291,19 @@ class LoggingNode(Generic[T]):
             def on_completed() -> None:
                 observer.on_completed()
 
-            subscription = source.subscribe(
-                on_next,
-                on_error,
-                on_completed,
-                scheduler=scheduler,
-            )
+            try:
+                subscription = source.subscribe(
+                    on_next,
+                    on_error,
+                    on_completed,
+                    scheduler=scheduler,
+                )
+            except BaseException:
+                subscriber_count -= 1
+                if subscriber_count <= 0 and timer is not None:
+                    timer.dispose()
+                    timer = None
+                raise
 
             def dispose() -> None:
                 nonlocal subscriber_count, timer
