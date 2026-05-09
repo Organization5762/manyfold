@@ -6,6 +6,7 @@ import threading
 import time
 import unittest
 from dataclasses import dataclass
+from unittest import mock
 
 from tests.test_support import load_manyfold_graph_module
 
@@ -33,8 +34,11 @@ def str_schema(graph_module, schema_id: str):
 
 
 class ManualDisposable:
+    def __init__(self) -> None:
+        self.disposed = False
+
     def dispose(self) -> None:
-        pass
+        self.disposed = True
 
 
 class ManualCoalesceScheduler:
@@ -44,6 +48,16 @@ class ManualCoalesceScheduler:
     def schedule_relative(self, _duetime, action):
         self.callbacks.append(action)
         return ManualDisposable()
+
+
+class ManualStatsScheduler:
+    def __init__(self) -> None:
+        self.disposables: list[ManualDisposable] = []
+
+    def schedule_relative(self, _duetime, _action):
+        disposable = ManualDisposable()
+        self.disposables.append(disposable)
+        return disposable
 
 
 class ManualTimer:
@@ -932,6 +946,23 @@ class GraphReactiveTests(unittest.TestCase):
                 for message in logs.output
             )
         )
+
+    def test_instrument_stream_rolls_back_stats_timer_when_subscribe_fails(
+        self,
+    ) -> None:
+        graph_module = load_graph_module()
+        scheduler = ManualStatsScheduler()
+
+        with mock.patch.object(graph_module, "_STATS_SCHEDULER", scheduler):
+            with self.assertRaisesRegex(RuntimeError, "source unavailable"):
+                graph_module.instrument_stream(
+                    FailingObservable("source unavailable"),
+                    stream_name="numbers",
+                    log_interval_ms=1,
+                ).subscribe(lambda _value: None)
+
+        self.assertEqual(len(scheduler.disposables), 1)
+        self.assertTrue(scheduler.disposables[0].disposed)
 
     def test_observe_pipeline_installs_logging_node(self) -> None:
         graph_module = load_graph_module()
