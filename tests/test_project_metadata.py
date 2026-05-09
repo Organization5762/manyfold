@@ -54,11 +54,13 @@ class ProjectMetadataTests(unittest.TestCase):
         lines = PYPROJECT_PATH.read_text(encoding="utf-8").splitlines()
 
         keywords = _array_values(lines, "keywords")
+        classifiers = _array_values(lines, "classifiers")
         dependencies = _array_values(lines, "dependencies")
         dev_dependencies = _array_values(lines, "dev")
         script_names = _section_keys(lines, "project.scripts")
 
         self.assertEqual(keywords, tuple(sorted(keywords)))
+        self.assertEqual(classifiers, tuple(sorted(classifiers)))
         self.assertEqual(
             dependencies,
             tuple(sorted(dependencies, key=_dependency_name)),
