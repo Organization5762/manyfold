@@ -189,8 +189,13 @@ class EmbeddedProfileTests(unittest.TestCase):
     ) -> None:
         manyfold = load_manyfold_package()
 
-        with self.assertRaisesRegex(ValueError, "bulk_credit_policy must be a string"):
-            manyfold.EmbeddedRuntimeRules(bulk_credit_policy=1)
+        for value in (1, "", "   "):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "bulk_credit_policy must be a non-empty string",
+                ):
+                    manyfold.EmbeddedRuntimeRules(bulk_credit_policy=value)
 
     def test_sensor_validation_includes_firmware_local_processing_issues(
         self,
