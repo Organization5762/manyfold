@@ -43,6 +43,10 @@ __all__ = (
 ExampleRunner = Callable[[], Any]
 
 
+def _is_blank(value: str) -> bool:
+    return not value.strip()
+
+
 @dataclass(frozen=True)
 class ReferenceExample:
     """Declarative metadata for one RFC reference example."""
@@ -59,14 +63,14 @@ class ReferenceExample:
             raise TypeError("reference example number must be an integer")
         if self.number <= 0:
             raise ValueError("reference example number must be positive")
-        if not isinstance(self.title, str) or not self.title:
+        if not isinstance(self.title, str) or _is_blank(self.title):
             raise ValueError("reference example title must be a non-empty string")
-        if not isinstance(self.summary, str) or not self.summary:
+        if not isinstance(self.summary, str) or _is_blank(self.summary):
             raise ValueError("reference example summary must be a non-empty string")
         if not isinstance(self.implemented, bool):
             raise TypeError("reference example implemented flag must be a boolean")
         if self.module_name is not None and (
-            not isinstance(self.module_name, str) or not self.module_name
+            not isinstance(self.module_name, str) or _is_blank(self.module_name)
         ):
             raise ValueError("reference example module name must be a non-empty string")
         if self.runner is not None and not callable(self.runner):
