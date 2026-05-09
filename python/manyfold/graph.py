@@ -4620,6 +4620,8 @@ class Graph:
         thread_placement: NodeThreadPlacement | None = None,
     ) -> DiagramNode:
         """Register a graph-visible node for topology diagrams."""
+        if not name.strip():
+            raise ValueError("diagram node name must not be blank")
         metadata_items = tuple(
             sorted((str(key), str(value)) for key, value in (metadata or {}).items())
         )

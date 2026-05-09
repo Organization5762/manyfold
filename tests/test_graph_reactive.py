@@ -3031,6 +3031,18 @@ class GraphReactiveTests(unittest.TestCase):
             (("alpha", "first"), ("zeta", "last")),
         )
 
+    def test_registered_diagram_node_rejects_blank_name(self) -> None:
+        graph_module = load_graph_module()
+        graph = graph_module.Graph()
+
+        for name in ("", "   "):
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "diagram node name must not be blank",
+                ):
+                    graph.register_diagram_node(name)
+
     def test_context_collects_scoped_route_inputs_and_outputs(self) -> None:
         graph_module = load_graph_module()
         command = graph_module.route(
