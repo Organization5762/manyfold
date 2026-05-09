@@ -4237,6 +4237,46 @@ class GraphReactiveTests(unittest.TestCase):
         self.assertEqual(len(list(graph.middleware())), 1)
         self.assertEqual(len(list(graph.mesh_primitives())), 1)
 
+    def test_graph_runtime_registries_reject_empty_text_keys(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("imu"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("accel"),
+            variant=graph_module.Variant.Meta,
+            schema=graph_module.Schema.bytes(name="Accel"),
+        )
+        graph = graph_module.Graph()
+
+        with self.assertRaisesRegex(ValueError, "middleware name"):
+            graph.add_middleware(
+                graph_module.Middleware(
+                    name=" ",
+                    kind="validation",
+                    attachment_scope="route",
+                    target=route.display(),
+                )
+            )
+        with self.assertRaisesRegex(ValueError, "link class"):
+            graph.register_link(
+                graph_module.Link(
+                    name="tcp0",
+                    link_class="",
+                )
+            )
+        with self.assertRaisesRegex(ValueError, "mesh primitive link name"):
+            graph.add_mesh_primitive(
+                graph_module.MeshPrimitive(
+                    name="bridge_to_dashboard",
+                    kind="bridge",
+                    sources=(route,),
+                    destinations=(route,),
+                    link_name=" ",
+                )
+            )
+
     def test_publish_lazy_defers_payload_open_until_demand(self) -> None:
         graph_module = load_graph_module()
         route = graph_module.route(
