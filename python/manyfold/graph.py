@@ -1016,10 +1016,8 @@ class RetryPolicy:
     backoff_epochs: int = 0
 
     def __post_init__(self) -> None:
-        if not isinstance(self.max_attempts, int) or isinstance(self.max_attempts, bool):
-            raise ValueError("max_attempts must be an integer")
-        if not isinstance(self.backoff_epochs, int) or isinstance(self.backoff_epochs, bool):
-            raise ValueError("backoff_epochs must be an integer")
+        _require_integer(self.max_attempts, "max_attempts")
+        _require_integer(self.backoff_epochs, "backoff_epochs")
         if self.max_attempts <= 0:
             raise ValueError("max_attempts must be positive")
         if self.backoff_epochs < 0:
@@ -1047,11 +1045,14 @@ WriteTarget = Union[WriteBinding, LifecycleBinding, RouteLike]
 def _validate_control_epoch(control_epoch: int | None) -> None:
     if control_epoch is None:
         return
-    if not isinstance(control_epoch, int) or isinstance(control_epoch, bool):
-        raise ValueError("control_epoch must be a non-negative integer or None")
+    try:
+        _require_integer(control_epoch, "control_epoch")
+    except ValueError as exc:
+        raise ValueError(
+            "control_epoch must be a non-negative integer or None"
+        ) from exc
     if control_epoch < 0:
         raise ValueError("control_epoch must be a non-negative integer or None")
-
 
 @dataclass(frozen=True)
 class WriteBindings:
@@ -4190,8 +4191,7 @@ class Graph:
         name: str | None = None,
     ) -> Capacitor:
         """Install active bounded storage between source and sink."""
-        if not isinstance(capacity, int) or isinstance(capacity, bool):
-            raise ValueError("capacitor capacity must be an integer")
+        _require_integer(capacity, "capacitor capacity")
         if capacity <= 0:
             raise ValueError("capacitor capacity must be positive")
         if not isinstance(immediate, bool):
@@ -4374,8 +4374,7 @@ class Graph:
         name: str | None = None,
     ) -> Watchdog:
         """Emit a timeout pulse when reset signal is absent for too long."""
-        if not isinstance(after, int) or isinstance(after, bool):
-            raise ValueError("watchdog timeout must be an integer")
+        _require_integer(after, "watchdog timeout")
         if after <= 0:
             raise ValueError("watchdog timeout must be positive")
         resolved_name = name or self._auto_node_name(

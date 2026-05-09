@@ -2072,6 +2072,15 @@ class GraphReactiveTests(unittest.TestCase):
             ValueError, "window grace must be non-negative"
         ):
             graph.window_by_time(route, width=2, grace=-1)
+        for kwargs, message in (
+            ({"width": True}, "window width must be an integer"),
+            ({"width": 2.5}, "window width must be an integer"),
+            ({"width": 2, "grace": False}, "window grace must be an integer"),
+            ({"width": 2, "grace": 0.5}, "window grace must be an integer"),
+        ):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    graph.window_by_time(route, **kwargs)
 
     def test_window_aggregate_by_time_emits_watermark_aggregates(self) -> None:
         graph_module = load_graph_module()
@@ -2842,6 +2851,7 @@ class GraphReactiveTests(unittest.TestCase):
 
         invalid_inputs = (
             ({"capacity": True}, "capacitor capacity must be an integer"),
+            ({"capacity": 1.5}, "capacitor capacity must be an integer"),
             ({"capacity": "1"}, "capacitor capacity must be an integer"),
             ({"immediate": "yes"}, "immediate must be a boolean"),
             ({"overflow": ["latest"]}, "overflow must be a string"),
@@ -3385,6 +3395,7 @@ class GraphReactiveTests(unittest.TestCase):
 
         invalid_inputs = (
             (True, "watchdog timeout must be an integer"),
+            (1.5, "watchdog timeout must be an integer"),
             ("2", "watchdog timeout must be an integer"),
             (0, "watchdog timeout must be positive"),
         )
