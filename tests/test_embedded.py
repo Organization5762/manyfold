@@ -131,9 +131,7 @@ class EmbeddedProfileTests(unittest.TestCase):
 
         self.assertEqual(
             tuple(
-                issue
-                for issue in sensor.validate()
-                if "metadata and payload" in issue
+                issue for issue in sensor.validate() if "metadata and payload" in issue
             ),
             (
                 "bulk sensor metadata and payload owners must match",

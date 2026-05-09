@@ -64,7 +64,9 @@ class TestSupportTests(unittest.TestCase):
         ):
             env = test_support.subprocess_test_env()
 
-        self.assertEqual(env["PYTHONPATH"], os.pathsep.join((python_root, "/tmp/project")))
+        self.assertEqual(
+            env["PYTHONPATH"], os.pathsep.join((python_root, "/tmp/project"))
+        )
         self.assertEqual(env["PYTHONPATH"].split(os.pathsep).count(python_root), 1)
         self.assertEqual(env["PYTHONPATH"].split(os.pathsep).count("/tmp/project"), 1)
 
@@ -90,7 +92,9 @@ class TestSupportTests(unittest.TestCase):
             checked.append(module_name)
             return True
 
-        with mock.patch.object(test_support, "_module_available", side_effect=available):
+        with mock.patch.object(
+            test_support, "_module_available", side_effect=available
+        ):
             self.assertTrue(test_support._reactivex_available())
 
         self.assertEqual(

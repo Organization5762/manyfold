@@ -27,4 +27,7 @@ class Average:
         window_count = value_count - start
         # fsum keeps cancellation-heavy windows deterministic without copying
         # the sequence; callers may provide index-only buffers.
-        return math.fsum(values[index] for index in range(start, value_count)) / window_count
+        return (
+            math.fsum(values[index] for index in range(start, value_count))
+            / window_count
+        )

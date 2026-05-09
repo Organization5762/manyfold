@@ -15,12 +15,6 @@ from manyfold import (
 from ._shared import int_schema, sibling_route
 
 
-class UartTemperatureSensorExampleResult(TypedDict):
-    raw_latest: int
-    smoothed_latest: int
-    profile_issues: tuple[str, ...]
-
-
 def run_example() -> UartTemperatureSensorExampleResult:
     graph = Graph()
     profile = EmbeddedDeviceProfile()
@@ -55,6 +49,12 @@ def run_example() -> UartTemperatureSensorExampleResult:
         "smoothed_latest": smoothed_latest.value,
         "profile_issues": raw_sensor.validate(),
     }
+
+
+class UartTemperatureSensorExampleResult(TypedDict):
+    raw_latest: int
+    smoothed_latest: int
+    profile_issues: tuple[str, ...]
 
 
 if __name__ == "__main__":

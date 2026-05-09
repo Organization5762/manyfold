@@ -35,6 +35,179 @@ TFrame = TypeVar("TFrame")
 OverflowMode = Literal["drop_oldest", "drop_newest", "reject", "latest"]
 SensorBufferMode = Literal["latest", "fifo"]
 MessageBufferMode = Literal["bytes", "text"]
+__all__ = (
+    "BackoffPolicy",
+    "BoundedRingBuffer",
+    "ChangeFilter",
+    "Clock",
+    "DelimitedMessageBuffer",
+    "DetectionNode",
+    "DetectionNodeHandle",
+    "DoubleBuffer",
+    "DuplexSensorPeripheral",
+    "FrameAssembler",
+    "GraphAccessNode",
+    "HealthStatus",
+    "JsonEventDecoder",
+    "LocalDurableSpool",
+    "LocalSensorSource",
+    "ManualClock",
+    "ManagedGraphNode",
+    "ManagedGraphNodeHandle",
+    "ManagedRunLoop",
+    "ManagedRunLoopHandle",
+    "PeripheralAdapter",
+    "PeripheralAdapterHandle",
+    "RateMatchedSensor",
+    "ReactiveSensorHandle",
+    "ReactiveSensorSource",
+    "RetryLoop",
+    "RetryPolicy",
+    "SequenceCounter",
+    "SensorDebugEnvelope",
+    "SensorDebugStage",
+    "SensorDebugTap",
+    "SensorEvent",
+    "SensorFrame",
+    "SensorHealthHandle",
+    "SensorHealthWatchdog",
+    "SensorIdentity",
+    "SensorLocation",
+    "SensorSample",
+    "SensorSourceHandle",
+    "SensorTag",
+    "StopToken",
+    "SystemClock",
+    "ThresholdFilter",
+    "health_status_schema",
+    "sensor_event_schema",
+    "sensor_sample_schema",
+    "xor_checksum",
+)
+
+
+def sensor_sample_schema(
+    value_schema: Schema[T], schema_id: str | None = None
+) -> Schema[SensorSample[T]]:
+    """Build a JSON envelope schema for ``SensorSample[T]`` values."""
+
+    resolved_schema_id = schema_id or f"SensorSample[{value_schema.schema_id}]"
+
+    def encode(sample: SensorSample[T]) -> bytes:
+        value_payload = value_schema.encode(sample.value)
+        return _compact_json_bytes(
+            {
+                "value": base64.b64encode(value_payload).decode("ascii"),
+                "source_timestamp": sample.source_timestamp,
+                "ingest_timestamp": sample.ingest_timestamp,
+                "sequence_number": sample.sequence_number,
+                "quality": sample.quality,
+                "status": sample.status,
+            }
+        )
+
+    def decode(payload: bytes) -> SensorSample[T]:
+        data = _decode_json_mapping(
+            json.loads(payload.decode("utf-8")), "sensor sample"
+        )
+        value = value_schema.decode(_decode_base64_field(data["value"], "value"))
+        return SensorSample(
+            value=value,
+            source_timestamp=_decode_json_number(
+                data["source_timestamp"], "source_timestamp"
+            ),
+            ingest_timestamp=_decode_json_number(
+                data["ingest_timestamp"], "ingest_timestamp"
+            ),
+            sequence_number=_decode_json_int(
+                data["sequence_number"], "sequence_number"
+            ),
+            quality=_decode_optional_json_string(data.get("quality"), "quality"),
+            status=_decode_optional_json_string(data.get("status"), "status"),
+        )
+
+    return Schema(
+        schema_id=resolved_schema_id,
+        version=value_schema.version,
+        encode=encode,
+        decode=decode,
+    )
+
+
+def sensor_event_schema(schema_id: str = "SensorEvent") -> Schema[SensorEvent]:
+    """Return a JSON schema for normalized sensor events."""
+
+    def encode(event: SensorEvent) -> bytes:
+        payload = {
+            "event_type": event.event_type,
+            "data": _json_safe(event.data),
+            "observed_at": event.observed_at,
+            "identity": _json_safe(event.identity),
+            "sequence_number": event.sequence_number,
+            "raw": None
+            if event.raw is None
+            else base64.b64encode(event.raw).decode("ascii"),
+            "metadata": _json_safe(dict(event.metadata)),
+        }
+        return _compact_json_bytes(
+            payload,
+        )
+
+    def decode(payload: bytes) -> SensorEvent:
+        data = _decode_json_mapping(json.loads(payload.decode("utf-8")), "sensor event")
+        raw = data.get("raw")
+        metadata = _decode_json_mapping(data.get("metadata", {}), "metadata")
+        return SensorEvent(
+            event_type=_decode_json_string(data["event_type"], "event_type"),
+            data=_json_restore(data.get("data")),
+            observed_at=_decode_json_number(data["observed_at"], "observed_at"),
+            identity=_sensor_identity_from_json(data.get("identity")),
+            sequence_number=None
+            if data.get("sequence_number") is None
+            else _decode_json_int(data["sequence_number"], "sequence_number"),
+            raw=None if raw is None else _decode_base64_field(raw, "raw"),
+            metadata=_json_restore(metadata),
+        )
+
+    return Schema(schema_id=schema_id, version=1, encode=encode, decode=decode)
+
+
+def health_status_schema(schema_id: str = "HealthStatus") -> Schema[HealthStatus]:
+    """Return a JSON schema for local sensor health events."""
+
+    def encode(status: HealthStatus) -> bytes:
+        return _compact_json_bytes(
+            {
+                "status": status.status,
+                "observed_at": status.observed_at,
+                "message": status.message,
+                "stale": status.stale,
+                "error_count": status.error_count,
+            }
+        )
+
+    def decode(payload: bytes) -> HealthStatus:
+        data = _decode_json_mapping(
+            json.loads(payload.decode("utf-8")), "health status"
+        )
+        return HealthStatus(
+            status=_decode_health_status(data["status"]),
+            observed_at=_decode_json_number(data["observed_at"], "observed_at"),
+            message=_decode_json_string(data.get("message", ""), "message"),
+            stale=_decode_json_bool(data.get("stale", False), "stale"),
+            error_count=_decode_json_int(data.get("error_count", 0), "error_count"),
+        )
+
+    return Schema(schema_id=schema_id, version=1, encode=encode, decode=decode)
+
+
+def xor_checksum(data: bytes | bytearray | Sequence[int]) -> int:
+    """Return a small XOR checksum for packet/frame tests and adapters."""
+
+    checksum = 0
+    for value in data:
+        checksum ^= int(value) & 0xFF
+    return checksum
 
 
 class Clock(Protocol):
@@ -192,7 +365,9 @@ class StopToken:
     """Cooperative stop signal for long-lived local loops."""
 
     group: str | None = None
-    _event: threading.Event = field(default_factory=threading.Event, init=False, repr=False)
+    _event: threading.Event = field(
+        default_factory=threading.Event, init=False, repr=False
+    )
 
     def is_set(self) -> bool:
         return self._event.is_set()
@@ -215,7 +390,9 @@ class ManagedRunLoop:
     """
 
     body: Callable[[StopToken], None]
-    retry: RetryPolicy = field(default_factory=lambda: RetryPolicy(max_attempts=1_000_000))
+    retry: RetryPolicy = field(
+        default_factory=lambda: RetryPolicy(max_attempts=1_000_000)
+    )
     backoff: BackoffPolicy = field(default_factory=BackoffPolicy)
     on_error: Callable[[BaseException, int], None] | None = None
     group: str | None = None
@@ -281,15 +458,6 @@ class ManagedRunLoopHandle:
         self.disposed = True
 
 
-GraphNodeBody = Callable[[StopToken, Graph], None]
-GraphNodeControlHandler = Callable[[Any, Graph], None]
-GraphNodeErrorMapper = Callable[[BaseException, int], Any]
-Detector = Callable[[], Iterable[Any]]
-DetectionMapper = Callable[[Any], Any]
-DetectionCallback = Callable[[Any, "GraphAccessNode"], None]
-DetectionSpawner = Callable[[Any, "GraphAccessNode"], Any]
-
-
 @dataclass
 class GraphAccessNode:
     """Graph mutation capability passed to nodes that can install other nodes.
@@ -314,6 +482,15 @@ class GraphAccessNode:
     def own(self, handles: Any) -> Any:
         self.owned_handles.extend(_flatten_handles(handles))
         return handles
+
+
+GraphNodeBody = Callable[[StopToken, Graph], None]
+GraphNodeControlHandler = Callable[[Any, Graph], None]
+GraphNodeErrorMapper = Callable[[BaseException, int], Any]
+Detector = Callable[[], Iterable[Any]]
+DetectionMapper = Callable[[Any], Any]
+DetectionCallback = Callable[[Any, GraphAccessNode], None]
+DetectionSpawner = Callable[[Any, GraphAccessNode], Any]
 
 
 @dataclass
@@ -362,7 +539,9 @@ class ManagedGraphNode:
     error_route: TypedRoute[Any] | None = None
     on_control: GraphNodeControlHandler | None = None
     map_error: GraphNodeErrorMapper = lambda exc, _attempt: exc
-    retry: RetryPolicy = field(default_factory=lambda: RetryPolicy(max_attempts=1_000_000))
+    retry: RetryPolicy = field(
+        default_factory=lambda: RetryPolicy(max_attempts=1_000_000)
+    )
     backoff: BackoffPolicy = field(default_factory=BackoffPolicy)
     clock: Clock = field(default_factory=SystemClock)
     group: str | None = None
@@ -380,9 +559,7 @@ class ManagedGraphNode:
         )
         graph.register_diagram_node(
             self.name,
-            input_routes=()
-            if self.control_route is None
-            else (self.control_route,),
+            input_routes=() if self.control_route is None else (self.control_route,),
             output_routes=diagram_outputs,
             group=self.group,
         )
@@ -771,7 +948,9 @@ class SensorDebugTap:
 
     clock: Clock = field(default_factory=SystemClock)
     history_size: int = 512
-    _history: deque[SensorDebugEnvelope] = field(default_factory=deque, init=False, repr=False)
+    _history: deque[SensorDebugEnvelope] = field(
+        default_factory=deque, init=False, repr=False
+    )
 
     def __post_init__(self) -> None:
         self.history_size = _require_int(self.history_size, "history_size")
@@ -806,119 +985,6 @@ class SensorDebugTap:
 
     def snapshot(self) -> tuple[SensorDebugEnvelope, ...]:
         return tuple(self._history)
-
-
-def sensor_sample_schema(value_schema: Schema[T], schema_id: str | None = None) -> Schema[SensorSample[T]]:
-    """Build a JSON envelope schema for ``SensorSample[T]`` values."""
-
-    resolved_schema_id = schema_id or f"SensorSample[{value_schema.schema_id}]"
-
-    def encode(sample: SensorSample[T]) -> bytes:
-        value_payload = value_schema.encode(sample.value)
-        return _compact_json_bytes(
-            {
-                "value": base64.b64encode(value_payload).decode("ascii"),
-                "source_timestamp": sample.source_timestamp,
-                "ingest_timestamp": sample.ingest_timestamp,
-                "sequence_number": sample.sequence_number,
-                "quality": sample.quality,
-                "status": sample.status,
-            }
-        )
-
-    def decode(payload: bytes) -> SensorSample[T]:
-        data = _decode_json_mapping(
-            json.loads(payload.decode("utf-8")), "sensor sample"
-        )
-        value = value_schema.decode(_decode_base64_field(data["value"], "value"))
-        return SensorSample(
-            value=value,
-            source_timestamp=_decode_json_number(
-                data["source_timestamp"], "source_timestamp"
-            ),
-            ingest_timestamp=_decode_json_number(
-                data["ingest_timestamp"], "ingest_timestamp"
-            ),
-            sequence_number=_decode_json_int(data["sequence_number"], "sequence_number"),
-            quality=_decode_optional_json_string(data.get("quality"), "quality"),
-            status=_decode_optional_json_string(data.get("status"), "status"),
-        )
-
-    return Schema(
-        schema_id=resolved_schema_id,
-        version=value_schema.version,
-        encode=encode,
-        decode=decode,
-    )
-
-
-def sensor_event_schema(schema_id: str = "SensorEvent") -> Schema[SensorEvent]:
-    """Return a JSON schema for normalized sensor events."""
-
-    def encode(event: SensorEvent) -> bytes:
-        payload = {
-            "event_type": event.event_type,
-            "data": _json_safe(event.data),
-            "observed_at": event.observed_at,
-            "identity": _json_safe(event.identity),
-            "sequence_number": event.sequence_number,
-            "raw": None
-            if event.raw is None
-            else base64.b64encode(event.raw).decode("ascii"),
-            "metadata": _json_safe(dict(event.metadata)),
-        }
-        return _compact_json_bytes(
-            payload,
-        )
-
-    def decode(payload: bytes) -> SensorEvent:
-        data = _decode_json_mapping(
-            json.loads(payload.decode("utf-8")), "sensor event"
-        )
-        raw = data.get("raw")
-        metadata = _decode_json_mapping(data.get("metadata", {}), "metadata")
-        return SensorEvent(
-            event_type=_decode_json_string(data["event_type"], "event_type"),
-            data=_json_restore(data.get("data")),
-            observed_at=_decode_json_number(data["observed_at"], "observed_at"),
-            identity=_sensor_identity_from_json(data.get("identity")),
-            sequence_number=None
-            if data.get("sequence_number") is None
-            else _decode_json_int(data["sequence_number"], "sequence_number"),
-            raw=None if raw is None else _decode_base64_field(raw, "raw"),
-            metadata=_json_restore(metadata),
-        )
-
-    return Schema(schema_id=schema_id, version=1, encode=encode, decode=decode)
-
-
-def health_status_schema(schema_id: str = "HealthStatus") -> Schema[HealthStatus]:
-    """Return a JSON schema for local sensor health events."""
-
-    def encode(status: HealthStatus) -> bytes:
-        return _compact_json_bytes(
-            {
-                "status": status.status,
-                "observed_at": status.observed_at,
-                "message": status.message,
-                "stale": status.stale,
-                "error_count": status.error_count,
-            }
-        )
-
-    def decode(payload: bytes) -> HealthStatus:
-        data = _decode_json_mapping(
-            json.loads(payload.decode("utf-8")), "health status"
-        )
-        return HealthStatus(
-            status=_decode_health_status(data["status"]),
-            observed_at=_decode_json_number(data["observed_at"], "observed_at"),
-            message=_decode_json_string(data.get("message", ""), "message"),
-            stale=_decode_json_bool(data.get("stale", False), "stale"),
-            error_count=_decode_json_int(data.get("error_count", 0), "error_count"),
-        )
-
-    return Schema(schema_id=schema_id, version=1, encode=encode, decode=decode)
 
 
 @dataclass
@@ -1160,7 +1226,9 @@ class FrameAssembler(Generic[TFrame]):
     expected_count: int
     frame_id: Callable[[TFrame], Any]
     slot_id: Callable[[TFrame], Any]
-    _pending: dict[Any, dict[Any, TFrame]] = field(default_factory=dict, init=False, repr=False)
+    _pending: dict[Any, dict[Any, TFrame]] = field(
+        default_factory=dict, init=False, repr=False
+    )
 
     def __post_init__(self) -> None:
         self.expected_count = _require_int(self.expected_count, "expected_count")
@@ -1179,15 +1247,6 @@ class FrameAssembler(Generic[TFrame]):
         )
         del self._pending[resolved_frame_id]
         return (SensorFrame(frame_id=resolved_frame_id, samples=samples),)
-
-
-def xor_checksum(data: bytes | bytearray | Sequence[int]) -> int:
-    """Return a small XOR checksum for packet/frame tests and adapters."""
-
-    checksum = 0
-    for value in data:
-        checksum ^= int(value) & 0xFF
-    return checksum
 
 
 @dataclass
@@ -1503,7 +1562,9 @@ class SensorHealthHandle:
 
     def check(self) -> HealthStatus:
         now = self.watchdog.clock.now()
-        stale = self.last_seen is None or now - self.last_seen >= self.watchdog.stale_after
+        stale = (
+            self.last_seen is None or now - self.last_seen >= self.watchdog.stale_after
+        )
         if stale:
             status = HealthStatus(
                 status="stale",
@@ -1579,7 +1640,9 @@ class LocalDurableSpool(Generic[T]):
         log_subscription = log.install(graph)
 
         def append(sample: Any) -> None:
-            graph.publish(log.input(), sample.value if hasattr(sample, "value") else sample)
+            graph.publish(
+                log.input(), sample.value if hasattr(sample, "value") else sample
+            )
 
         try:
             source_subscription = graph.observe(source, replay_latest=False).subscribe(
@@ -1636,7 +1699,9 @@ def _adopt_group(component: object, group: str | None) -> None:
 def _changed_enough(new: Any, old: Any, threshold: float) -> bool:
     if isinstance(new, Mapping) and isinstance(old, Mapping):
         keys = sorted(set(new) | set(old), key=_mapping_key_sort_key)
-        return any(_changed_enough(new.get(key), old.get(key), threshold) for key in keys)
+        return any(
+            _changed_enough(new.get(key), old.get(key), threshold) for key in keys
+        )
     if isinstance(new, tuple) and isinstance(old, tuple):
         if len(new) != len(old):
             return True
@@ -1797,9 +1862,9 @@ def _sensor_identity_from_json(value: Any) -> SensorIdentity:
                 tag_value.get("variant"), "identity.tags[].variant"
             ),
             metadata={
-                _decode_json_string(key, "identity.tags[].metadata key"): _decode_json_string(
-                    item, "identity.tags[].metadata value"
-                )
+                _decode_json_string(
+                    key, "identity.tags[].metadata key"
+                ): _decode_json_string(item, "identity.tags[].metadata value")
                 for key, item in _decode_json_mapping(
                     tag_value.get("metadata", {}), "identity.tags[].metadata"
                 ).items()
@@ -1818,7 +1883,9 @@ def _sensor_identity_from_json(value: Any) -> SensorIdentity:
         id=_decode_optional_json_string(identity_value.get("id"), "identity.id"),
         tags=tags,
         location=location,
-        group=_decode_optional_json_string(identity_value.get("group"), "identity.group"),
+        group=_decode_optional_json_string(
+            identity_value.get("group"), "identity.group"
+        ),
     )
 
 
@@ -1910,54 +1977,3 @@ def _dispose_handle(handle: Any, *, timeout: float | None = None) -> None:
         return
     _call_if_present(handle, "stop")
     _call_if_present(handle, "join", timeout)
-
-
-__all__ = (
-    "BackoffPolicy",
-    "BoundedRingBuffer",
-    "ChangeFilter",
-    "Clock",
-    "DelimitedMessageBuffer",
-    "DetectionNode",
-    "DetectionNodeHandle",
-    "DoubleBuffer",
-    "DuplexSensorPeripheral",
-    "FrameAssembler",
-    "GraphAccessNode",
-    "HealthStatus",
-    "JsonEventDecoder",
-    "LocalDurableSpool",
-    "LocalSensorSource",
-    "ManualClock",
-    "ManagedGraphNode",
-    "ManagedGraphNodeHandle",
-    "ManagedRunLoop",
-    "ManagedRunLoopHandle",
-    "PeripheralAdapter",
-    "PeripheralAdapterHandle",
-    "RateMatchedSensor",
-    "ReactiveSensorHandle",
-    "ReactiveSensorSource",
-    "RetryLoop",
-    "RetryPolicy",
-    "SequenceCounter",
-    "SensorDebugEnvelope",
-    "SensorDebugStage",
-    "SensorDebugTap",
-    "SensorEvent",
-    "SensorFrame",
-    "SensorHealthHandle",
-    "SensorHealthWatchdog",
-    "SensorIdentity",
-    "SensorLocation",
-    "SensorSample",
-    "SensorSourceHandle",
-    "SensorTag",
-    "StopToken",
-    "SystemClock",
-    "ThresholdFilter",
-    "health_status_schema",
-    "sensor_event_schema",
-    "sensor_sample_schema",
-    "xor_checksum",
-)

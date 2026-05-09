@@ -16,11 +16,6 @@ from manyfold import (
 )
 
 
-class BroadcastMirrorExampleResult(TypedDict):
-    mirror_a: tuple[bytes, ...]
-    mirror_b: tuple[bytes, ...]
-
-
 def run_example() -> BroadcastMirrorExampleResult:
     graph = Graph()
     state_route = route(
@@ -80,6 +75,11 @@ def run_example() -> BroadcastMirrorExampleResult:
         "mirror_a": tuple(mirror_a),
         "mirror_b": tuple(mirror_b),
     }
+
+
+class BroadcastMirrorExampleResult(TypedDict):
+    mirror_a: tuple[bytes, ...]
+    mirror_b: tuple[bytes, ...]
 
 
 if __name__ == "__main__":

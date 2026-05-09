@@ -21,11 +21,6 @@ from tests.test_support import load_example_module, load_manyfold_package
 
 
 class ReferenceExampleSuiteTests(unittest.TestCase):
-    def _suite_by_number(self, manyfold):
-        return {
-            example.number: example for example in manyfold.reference_example_suite()
-        }
-
     def test_reference_examples_file_import_uses_repo_path_fallback(self) -> None:
         module_path = (
             Path(__file__).resolve().parents[1]
@@ -57,7 +52,9 @@ class ReferenceExampleSuiteTests(unittest.TestCase):
             spec.loader.exec_module(module)
 
         self.assertEqual(calls, ["called"])
-        self.assertEqual(module.REFERENCE_EXAMPLE_SUITE, module.reference_example_suite())
+        self.assertEqual(
+            module.REFERENCE_EXAMPLE_SUITE, module.reference_example_suite()
+        )
 
     def test_manyfold_package_exports_recent_graph_types(self) -> None:
         manyfold = load_manyfold_package()
@@ -154,7 +151,9 @@ class ReferenceExampleSuiteTests(unittest.TestCase):
         self.assertIs(manyfold.Keyspace, components_module.Keyspace)
         self.assertIs(manyfold.EventLog, components_module.EventLog)
         self.assertIs(manyfold.SnapshotStore, components_module.SnapshotStore)
-        self.assertIs(manyfold.EmbeddedDeviceProfile, embedded_module.EmbeddedDeviceProfile)
+        self.assertIs(
+            manyfold.EmbeddedDeviceProfile, embedded_module.EmbeddedDeviceProfile
+        )
         self.assertIs(manyfold.EmbeddedBulkSensor, embedded_module.EmbeddedBulkSensor)
         self.assertIs(manyfold.LazyPayloadSource, graph_module.LazyPayloadSource)
         self.assertIn("Consensus", manyfold.__all__)
@@ -168,7 +167,9 @@ class ReferenceExampleSuiteTests(unittest.TestCase):
         self.assertIn("LazyPayloadSource", manyfold.__all__)
 
     def test_top_level_stub_exports_match_runtime_package_exports(self) -> None:
-        stub_path = Path(__file__).resolve().parents[1] / "python" / "manyfold" / "__init__.pyi"
+        stub_path = (
+            Path(__file__).resolve().parents[1] / "python" / "manyfold" / "__init__.pyi"
+        )
         runtime_init_path = (
             Path(__file__).resolve().parents[1] / "python" / "manyfold" / "__init__.py"
         )
@@ -262,8 +263,18 @@ class ReferenceExampleSuiteTests(unittest.TestCase):
         manyfold = load_manyfold_package()
 
         invalid_examples = (
-            {"number": 0, "title": "Example", "summary": "Summary", "implemented": False},
-            {"number": True, "title": "Example", "summary": "Summary", "implemented": False},
+            {
+                "number": 0,
+                "title": "Example",
+                "summary": "Summary",
+                "implemented": False,
+            },
+            {
+                "number": True,
+                "title": "Example",
+                "summary": "Summary",
+                "implemented": False,
+            },
             {"number": 1, "title": "", "summary": "Summary", "implemented": False},
             {"number": 1, "title": "   ", "summary": "Summary", "implemented": False},
             {"number": 1, "title": "Example", "summary": "", "implemented": False},
@@ -578,6 +589,11 @@ class ReferenceExampleSuiteTests(unittest.TestCase):
             with self.subTest(example=example.title):
                 self.assertIsNotNone(example.runner)
                 example.runner()
+
+    def _suite_by_number(self, manyfold):
+        return {
+            example.number: example for example in manyfold.reference_example_suite()
+        }
 
 
 if __name__ == "__main__":

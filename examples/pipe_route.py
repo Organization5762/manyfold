@@ -16,11 +16,6 @@ from manyfold import (
 )
 
 
-class PipeRouteExampleResult(TypedDict):
-    latest_payload: bytes
-    latest_seq: int
-
-
 def run_example() -> PipeRouteExampleResult:
     """Pipe an Rx stream into a writable route and inspect the latest value."""
     graph = Graph()
@@ -60,6 +55,11 @@ def run_example() -> PipeRouteExampleResult:
         "latest_payload": latest.value,
         "latest_seq": latest.closed.seq_source,
     }
+
+
+class PipeRouteExampleResult(TypedDict):
+    latest_payload: bytes
+    latest_seq: int
 
 
 if __name__ == "__main__":

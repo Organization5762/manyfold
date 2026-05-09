@@ -5,11 +5,6 @@ from typing import TypedDict
 from manyfold import Graph, Schema, route
 
 
-class SimpleLatestExampleResult(TypedDict):
-    latest_payload: bytes
-    latest_seq: int
-
-
 def run_example() -> SimpleLatestExampleResult:
     """Publish changing state, then read back the current value."""
     graph = Graph()
@@ -29,6 +24,11 @@ def run_example() -> SimpleLatestExampleResult:
         "latest_payload": latest.value,
         "latest_seq": latest.closed.seq_source,
     }
+
+
+class SimpleLatestExampleResult(TypedDict):
+    latest_payload: bytes
+    latest_seq: int
 
 
 if __name__ == "__main__":

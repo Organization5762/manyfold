@@ -7,13 +7,6 @@ from manyfold import Graph, Layer, Plane, Schema, TaintDomain, Variant
 from ._shared import example_route
 
 
-class EphemeralEntropyStreamExampleResult(TypedDict):
-    latest_payload: bytes
-    replay_count: int
-    determinism_taints: tuple[str, ...]
-    latest_replay_policy: str
-
-
 def run_example() -> EphemeralEntropyStreamExampleResult:
     graph = Graph()
     entropy = example_route(
@@ -44,6 +37,13 @@ def run_example() -> EphemeralEntropyStreamExampleResult:
         "determinism_taints": determinism_taints,
         "latest_replay_policy": descriptor.retention.latest_replay_policy,
     }
+
+
+class EphemeralEntropyStreamExampleResult(TypedDict):
+    latest_payload: bytes
+    replay_count: int
+    determinism_taints: tuple[str, ...]
+    latest_replay_policy: str
 
 
 if __name__ == "__main__":

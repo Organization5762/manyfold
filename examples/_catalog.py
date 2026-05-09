@@ -12,9 +12,7 @@ from ._exports import CATALOG_EXPORTS
 
 T = TypeVar("T", bound=Hashable)
 
-__all__ = (
-    *CATALOG_EXPORTS,
-)
+__all__ = (*CATALOG_EXPORTS,)
 
 _README_INTRO_LINES = (
     "The `examples/` directory is organized as a short path through the mental",
@@ -212,7 +210,9 @@ def _sorted_readme_entries(
     return tuple(
         sorted(
             (entry for entry in entries if entry.readme_order is not None),
-            key=lambda entry: entry.readme_order if entry.readme_order is not None else -1,
+            key=lambda entry: (
+                entry.readme_order if entry.readme_order is not None else -1
+            ),
         )
     )
 
@@ -318,9 +318,7 @@ def render_readme_featured_examples() -> str:
             lines.append("")
             lines.append(f"**{group}**")
         example_path = f"examples/{entry.module_name.replace('.', '/')}.py"
-        lines.append(
-            f"- [{example_path}]({example_path}): {entry.summary}"
-        )
+        lines.append(f"- [{example_path}]({example_path}): {entry.summary}")
     lines.append("")
     lines.extend(_README_OUTRO_LINES)
     return "\n".join(lines)
@@ -437,9 +435,7 @@ def _validate_catalog() -> None:
             )
 
     readme_orders = [
-        entry.readme_order
-        for entry in readme_entries
-        if entry.readme_order is not None
+        entry.readme_order for entry in readme_entries if entry.readme_order is not None
     ]
     if any(order < 1 for order in readme_orders):
         raise ValueError("README example entries must use positive readme_order values")
@@ -450,7 +446,9 @@ def _validate_catalog() -> None:
             f"{_joined_values(duplicate_readme_orders)}"
         )
     if readme_orders and readme_orders != list(range(1, len(readme_orders) + 1)):
-        raise ValueError("README example entries must use contiguous readme_order values")
+        raise ValueError(
+            "README example entries must use contiguous readme_order values"
+        )
     readme_module_names = tuple(entry.module_name for entry in readme_entries)
     missing_readme_groups = tuple(
         module_name
@@ -494,15 +492,11 @@ def _validate_catalog() -> None:
             f"reference example numbers overlap with gaps: {overlap_numbers}"
         )
     all_reference_numbers = sorted(
-        number
-        for number in (*referenced_numbers, *gap_numbers)
-        if number is not None
+        number for number in (*referenced_numbers, *gap_numbers) if number is not None
     )
     expected_reference_numbers = list(range(1, len(all_reference_numbers) + 1))
     if all_reference_numbers != expected_reference_numbers:
-        raise ValueError(
-            "reference example numbers must be contiguous starting at 1"
-        )
+        raise ValueError("reference example numbers must be contiguous starting at 1")
 
     discovered_modules = set(_discover_manifestable_modules())
     manifest_modules = set(module_names)

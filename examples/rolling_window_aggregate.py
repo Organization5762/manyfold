@@ -7,10 +7,6 @@ from manyfold import Graph, Layer, Plane, Schema, Variant
 from ._shared import example_route, int_schema
 
 
-class RollingWindowAggregateExampleResult(TypedDict):
-    rolling_sums: tuple[int, ...]
-
-
 def run_example() -> RollingWindowAggregateExampleResult:
     graph = Graph()
     temperature = example_route(
@@ -66,6 +62,10 @@ def run_example() -> RollingWindowAggregateExampleResult:
     subscription.dispose()
 
     return {"rolling_sums": tuple(rolling_sums)}
+
+
+class RollingWindowAggregateExampleResult(TypedDict):
+    rolling_sums: tuple[int, ...]
 
 
 if __name__ == "__main__":

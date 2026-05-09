@@ -47,6 +47,7 @@ _MEMORY_RECORD_FIELDS = (
     "schema_version",
     "payload_b64",
 )
+_VALUE_FILENAME = "__value__.bin"
 
 
 @dataclass(frozen=True)
@@ -162,7 +163,9 @@ class Keyspace:
         """Return all relative keys below a prefix without reading stored bytes."""
         return tuple(
             relative_key
-            for relative_key, _full_key, _path in self._iter_value_paths(self.key(*parts))
+            for relative_key, _full_key, _path in self._iter_value_paths(
+                self.key(*parts)
+            )
         )
 
     def _iter_value_paths(self, full_prefix: Key) -> Iterator[tuple[Key, Key, Path]]:
@@ -469,13 +472,15 @@ class Memory:
         """Return decoded records for one typed route without publishing them."""
         return tuple(self._iter_records(route_ref))
 
-    def resume(self, graph: Graph, route_ref: TypedRoute[T]) -> tuple[MemoryRecord[T], ...]:
+    def resume(
+        self, graph: Graph, route_ref: TypedRoute[T]
+    ) -> tuple[MemoryRecord[T], ...]:
         """Publish remembered values for ``route_ref`` into ``graph``."""
         records = self.records(route_ref)
         for record in records:
-            payload_b64 = base64.b64encode(route_ref.schema.encode(record.value)).decode(
-                "ascii"
-            )
+            payload_b64 = base64.b64encode(
+                route_ref.schema.encode(record.value)
+            ).decode("ascii")
             resume_key = (
                 route_ref.display(),
                 payload_b64,
@@ -917,9 +922,6 @@ def _component_route(
     )
 
 
-_VALUE_FILENAME = "__value__.bin"
-
-
 def _normalize_key(parts: tuple[KeyPart, ...]) -> Key:
     return tuple(_normalize_key_part(part) for part in parts)
 
@@ -1192,7 +1194,9 @@ def _decode_replicated_log(payload: bytes) -> ReplicatedLog:
     if _is_json_tuple_payload(text):
         entries = json.loads(text.lstrip())
         return tuple(_decode_json_append_entry(entry) for entry in entries)
-    return tuple(_decode_append_entry(line.encode("utf-8")) for line in text.splitlines())
+    return tuple(
+        _decode_append_entry(line.encode("utf-8")) for line in text.splitlines()
+    )
 
 
 def _leader_state_schema() -> Schema[LeaderState]:
@@ -1274,7 +1278,9 @@ def _encode_append_entry_value(value: Any) -> AppendEntry:
     return (_encode_int(index, "index"), _encode_string(command, "command"))
 
 
-def _encode_tuple_fields(value: Any, expected_length: int, field: str) -> tuple[Any, ...]:
+def _encode_tuple_fields(
+    value: Any, expected_length: int, field: str
+) -> tuple[Any, ...]:
     if not isinstance(value, (tuple, list)) or len(value) != expected_length:
         raise ValueError(f"{field} must be a tuple with {expected_length} fields")
     return tuple(value)
@@ -1309,9 +1315,7 @@ def _encode_string_sequence(value: Any, field: str) -> tuple[str, ...]:
 def _decode_json_tuple(text: str, expected_length: int, field: str) -> list[Any]:
     value = json.loads(text.lstrip())
     if not isinstance(value, list) or len(value) != expected_length:
-        raise ValueError(
-            f"{field} must be a JSON array with {expected_length} fields"
-        )
+        raise ValueError(f"{field} must be a JSON array with {expected_length} fields")
     return value
 
 

@@ -7,22 +7,6 @@ from manyfold import Graph, Layer, Plane, Schema, Variant
 from ._shared import example_route, int_schema
 
 
-class ImuFusionJoinExampleResult(TypedDict):
-    fused_pairs: tuple[tuple[int, int], ...]
-    latest_pose: tuple[int, int] | None
-
-
-def _pose_schema() -> Schema[tuple[int, int]]:
-    return Schema(
-        schema_id="Pose",
-        version=1,
-        encode=lambda value: f"{value[0]},{value[1]}".encode("ascii"),
-        decode=lambda payload: tuple(
-            int(part) for part in payload.decode("ascii").split(",", 1)
-        ),
-    )
-
-
 def run_example() -> ImuFusionJoinExampleResult:
     graph = Graph()
     accel = example_route(
@@ -107,6 +91,22 @@ def run_example() -> ImuFusionJoinExampleResult:
         "fused_pairs": tuple(fused_pairs),
         "latest_pose": None if latest_pose is None else latest_pose.value,
     }
+
+
+class ImuFusionJoinExampleResult(TypedDict):
+    fused_pairs: tuple[tuple[int, int], ...]
+    latest_pose: tuple[int, int] | None
+
+
+def _pose_schema() -> Schema[tuple[int, int]]:
+    return Schema(
+        schema_id="Pose",
+        version=1,
+        encode=lambda value: f"{value[0]},{value[1]}".encode("ascii"),
+        decode=lambda payload: tuple(
+            int(part) for part in payload.decode("ascii").split(",", 1)
+        ),
+    )
 
 
 if __name__ == "__main__":

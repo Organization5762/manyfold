@@ -52,8 +52,15 @@ from tests.test_support import (
 
 class ExampleTests(unittest.TestCase):
     def test_repo_path_helpers_install_python_and_repo_roots_once(self) -> None:
-        module_path = Path(__file__).resolve().parents[1] / "python" / "manyfold" / "_repo_paths.py"
-        spec = importlib.util.spec_from_file_location("manyfold_repo_paths_test", module_path)
+        module_path = (
+            Path(__file__).resolve().parents[1]
+            / "python"
+            / "manyfold"
+            / "_repo_paths.py"
+        )
+        spec = importlib.util.spec_from_file_location(
+            "manyfold_repo_paths_test", module_path
+        )
         module = importlib.util.module_from_spec(spec)
         assert spec is not None and spec.loader is not None
         sys.modules[spec.name] = module
@@ -63,7 +70,9 @@ class ExampleTests(unittest.TestCase):
         repo_root = str(module.REPO_ROOT)
         original_sys_path = list(sys.path)
         try:
-            sys.path = [path for path in sys.path if path not in {python_dir, repo_root}]
+            sys.path = [
+                path for path in sys.path if path not in {python_dir, repo_root}
+            ]
 
             module.ensure_repo_import_paths()
             module.ensure_repo_import_paths()
@@ -258,7 +267,10 @@ class ExampleTests(unittest.TestCase):
         for mode, expected in (
             ("supported", SUPPORTED_EXAMPLE_MODULES),
             ("archived", ARCHIVED_EXAMPLE_MODULES),
-            ("reference", tuple(entry.module_name for entry in REFERENCE_EXAMPLE_ENTRIES)),
+            (
+                "reference",
+                tuple(entry.module_name for entry in REFERENCE_EXAMPLE_ENTRIES),
+            ),
             ("readme", README_EXAMPLE_MODULES),
         ):
             with self.subTest(mode=mode):
@@ -338,7 +350,9 @@ class ExampleTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stderr)
 
     def test_repo_root_manyfold_example_catalog_wrapper_delegates_main(self) -> None:
-        module_path = Path(__file__).resolve().parents[1] / "manyfold_example_catalog.py"
+        module_path = (
+            Path(__file__).resolve().parents[1] / "manyfold_example_catalog.py"
+        )
         spec = importlib.util.spec_from_file_location(
             "repo_root_manyfold_example_catalog_test",
             module_path,
@@ -362,8 +376,8 @@ class ExampleTests(unittest.TestCase):
             if name == "_manyfold_example_catalog_impl":
                 fake_spec = mock.Mock()
                 fake_spec.loader = mock.Mock()
-                fake_spec.loader.exec_module.side_effect = lambda target: target.__dict__.update(
-                    fake_impl.__dict__
+                fake_spec.loader.exec_module.side_effect = lambda target: (
+                    target.__dict__.update(fake_impl.__dict__)
                 )
                 return fake_spec
             return original_spec_from_file_location(name, location, *args, **kwargs)
@@ -382,7 +396,9 @@ class ExampleTests(unittest.TestCase):
     def test_repo_root_manyfold_example_catalog_wrapper_uses_python_impl_path(
         self,
     ) -> None:
-        module_path = Path(__file__).resolve().parents[1] / "manyfold_example_catalog.py"
+        module_path = (
+            Path(__file__).resolve().parents[1] / "manyfold_example_catalog.py"
+        )
         spec = importlib.util.spec_from_file_location(
             "repo_root_manyfold_example_catalog_impl_path_test",
             module_path,
@@ -399,8 +415,8 @@ class ExampleTests(unittest.TestCase):
             if name == "_manyfold_example_catalog_impl":
                 fake_spec = mock.Mock()
                 fake_spec.loader = mock.Mock()
-                fake_spec.loader.exec_module.side_effect = (
-                    lambda target: target.__dict__.update({"main": lambda argv=None: 0})
+                fake_spec.loader.exec_module.side_effect = lambda target: (
+                    target.__dict__.update({"main": lambda argv=None: 0})
                 )
                 return fake_spec
             return original_spec_from_file_location(name, location, *args, **kwargs)
@@ -412,7 +428,10 @@ class ExampleTests(unittest.TestCase):
             spec.loader.exec_module(module)
 
         self.assertIn(
-            ("_manyfold_example_catalog_impl", module.PYTHON_DIR / "manyfold_example_catalog.py"),
+            (
+                "_manyfold_example_catalog_impl",
+                module.PYTHON_DIR / "manyfold_example_catalog.py",
+            ),
             captured,
         )
         self.assertEqual(module.REPO_ROOT, module.MODULE_PATH.parent)
@@ -421,7 +440,9 @@ class ExampleTests(unittest.TestCase):
         self,
     ) -> None:
         module_path = (
-            Path(__file__).resolve().parents[1] / "python" / "manyfold_example_catalog.py"
+            Path(__file__).resolve().parents[1]
+            / "python"
+            / "manyfold_example_catalog.py"
         )
         spec = importlib.util.spec_from_file_location(
             "manyfold_example_catalog_test", module_path
@@ -459,7 +480,9 @@ class ExampleTests(unittest.TestCase):
 
     def test_manyfold_example_catalog_wrapper_preserves_none_argv(self) -> None:
         module_path = (
-            Path(__file__).resolve().parents[1] / "python" / "manyfold_example_catalog.py"
+            Path(__file__).resolve().parents[1]
+            / "python"
+            / "manyfold_example_catalog.py"
         )
         spec = importlib.util.spec_from_file_location(
             "manyfold_example_catalog_none_argv_test",
@@ -500,7 +523,9 @@ class ExampleTests(unittest.TestCase):
         self,
     ) -> None:
         module_path = (
-            Path(__file__).resolve().parents[1] / "python" / "manyfold_example_catalog.py"
+            Path(__file__).resolve().parents[1]
+            / "python"
+            / "manyfold_example_catalog.py"
         )
         spec = importlib.util.spec_from_file_location(
             "manyfold_example_catalog_file_test",
@@ -535,7 +560,9 @@ class ExampleTests(unittest.TestCase):
             / "manyfold"
             / "_repo_paths.py"
         )
-        spec = importlib.util.spec_from_file_location("manyfold_repo_paths_test", module_path)
+        spec = importlib.util.spec_from_file_location(
+            "manyfold_repo_paths_test", module_path
+        )
         module = importlib.util.module_from_spec(spec)
         assert spec is not None and spec.loader is not None
         sys.modules[spec.name] = module
@@ -546,7 +573,9 @@ class ExampleTests(unittest.TestCase):
         original_sys_path = list(sys.path)
         try:
             sys.path = [
-                path for path in original_sys_path if path not in {repo_root, python_dir}
+                path
+                for path in original_sys_path
+                if path not in {repo_root, python_dir}
             ]
 
             module.ensure_package_dir_on_path()
@@ -560,7 +589,9 @@ class ExampleTests(unittest.TestCase):
             self.assertEqual(sys.path.count(repo_root), 1)
 
             sys.path = [
-                path for path in original_sys_path if path not in {repo_root, python_dir}
+                path
+                for path in original_sys_path
+                if path not in {repo_root, python_dir}
             ]
             module.ensure_repo_import_paths()
             module.ensure_repo_import_paths()
@@ -581,7 +612,9 @@ class ExampleTests(unittest.TestCase):
             / "manyfold"
             / "_repo_paths.py"
         )
-        spec = importlib.util.spec_from_file_location("manyfold_repo_paths_test", module_path)
+        spec = importlib.util.spec_from_file_location(
+            "manyfold_repo_paths_test", module_path
+        )
         module = importlib.util.module_from_spec(spec)
         assert spec is not None and spec.loader is not None
         sys.modules[spec.name] = module
@@ -603,7 +636,9 @@ class ExampleTests(unittest.TestCase):
             / "manyfold"
             / "_repo_paths.py"
         )
-        spec = importlib.util.spec_from_file_location("manyfold_repo_paths_test", module_path)
+        spec = importlib.util.spec_from_file_location(
+            "manyfold_repo_paths_test", module_path
+        )
         module = importlib.util.module_from_spec(spec)
         assert spec is not None and spec.loader is not None
         sys.modules[spec.name] = module
@@ -653,7 +688,9 @@ class ExampleTests(unittest.TestCase):
             / "manyfold"
             / "_repo_paths.py"
         )
-        spec = importlib.util.spec_from_file_location("manyfold_repo_paths_test", module_path)
+        spec = importlib.util.spec_from_file_location(
+            "manyfold_repo_paths_test", module_path
+        )
         module = importlib.util.module_from_spec(spec)
         assert spec is not None and spec.loader is not None
         sys.modules[spec.name] = module
@@ -672,7 +709,9 @@ class ExampleTests(unittest.TestCase):
                         broken_module,
                     )
 
-                self.assertIs(sys.modules["manyfold_existing_load_test"], previous_module)
+                self.assertIs(
+                    sys.modules["manyfold_existing_load_test"], previous_module
+                )
             finally:
                 sys.modules.pop("manyfold_existing_load_test", None)
 
@@ -725,14 +764,14 @@ class ExampleTests(unittest.TestCase):
                     for entry in SUPPORTED_EXAMPLE_ENTRIES
                     if entry.readme_order is not None
                 ),
-                key=lambda entry: entry.readme_order if entry.readme_order is not None else -1,
+                key=lambda entry: (
+                    entry.readme_order if entry.readme_order is not None else -1
+                ),
             )
         )
         self.assertEqual(README_EXAMPLE_ENTRIES, expected_entries)
         self.assertTrue(README_EXAMPLE_ENTRIES)
-        self.assertTrue(
-            all(not entry.archived for entry in README_EXAMPLE_ENTRIES)
-        )
+        self.assertTrue(all(not entry.archived for entry in README_EXAMPLE_ENTRIES))
 
     def test_catalog_lookup_helpers_return_shared_metadata_objects(self) -> None:
         brightness = catalog_entry("brightness_control")
@@ -764,7 +803,9 @@ class ExampleTests(unittest.TestCase):
         archived = catalog_entry("archived.windowed_join")
 
         self.assertEqual(brightness.import_path, "examples.brightness_control")
-        self.assertTrue(brightness.file_path.samefile(Path("examples/brightness_control.py")))
+        self.assertTrue(
+            brightness.file_path.samefile(Path("examples/brightness_control.py"))
+        )
         self.assertEqual(archived.import_path, "examples.archived.windowed_join")
         self.assertTrue(
             archived.file_path.samefile(Path("examples/archived/windowed_join.py"))
@@ -812,7 +853,8 @@ class ExampleTests(unittest.TestCase):
         discovered = sorted(
             path.stem
             for path in examples_dir.glob("*.py")
-            if path.stem not in {"__init__", "_catalog", "_exports", "_shared", "catalog"}
+            if path.stem
+            not in {"__init__", "_catalog", "_exports", "_shared", "catalog"}
         )
 
         self.assertEqual(tuple(discovered), tuple(sorted(SUPPORTED_EXAMPLE_MODULES)))
@@ -1076,7 +1118,9 @@ class ExampleTests(unittest.TestCase):
         finally:
             catalog_module.REFERENCE_EXAMPLE_GAPS = original_gaps
 
-    def test_catalog_validation_rejects_manifest_drift_from_discovered_modules(self) -> None:
+    def test_catalog_validation_rejects_manifest_drift_from_discovered_modules(
+        self,
+    ) -> None:
         original_discover = catalog_module._discover_manifestable_modules
         try:
             catalog_module._discover_manifestable_modules = lambda: (
@@ -1100,7 +1144,10 @@ class ExampleTests(unittest.TestCase):
         try:
             catalog_module._discover_manifestable_modules = lambda: tuple(
                 module_name
-                for module_name in (*SUPPORTED_EXAMPLE_MODULES, *ARCHIVED_EXAMPLE_MODULES)
+                for module_name in (
+                    *SUPPORTED_EXAMPLE_MODULES,
+                    *ARCHIVED_EXAMPLE_MODULES,
+                )
                 if module_name != "simple_latest"
             )
 

@@ -18,12 +18,6 @@ from manyfold import (
 )
 
 
-class ReadThenWriteNextEpochStepExampleResult(TypedDict):
-    mirrored_writes: tuple[bytes, ...]
-    latest_payload: bytes
-    latest_seq: int
-
-
 def run_example() -> ReadThenWriteNextEpochStepExampleResult:
     """Install a shared-stream step and verify the graph sees the same writes."""
     graph = Graph()
@@ -80,6 +74,12 @@ def run_example() -> ReadThenWriteNextEpochStepExampleResult:
         "latest_payload": latest.value,
         "latest_seq": latest.closed.seq_source,
     }
+
+
+class ReadThenWriteNextEpochStepExampleResult(TypedDict):
+    mirrored_writes: tuple[bytes, ...]
+    latest_payload: bytes
+    latest_seq: int
 
 
 if __name__ == "__main__":

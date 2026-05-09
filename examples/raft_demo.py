@@ -6,12 +6,6 @@ from manyfold import Consensus, Graph
 from manyfold.components import LeaderState, QuorumState, ReplicatedLog
 
 
-class RaftDemoExampleResult(TypedDict):
-    leader_state: LeaderState
-    quorum_state: QuorumState
-    replicated_log: ReplicatedLog
-
-
 def run_example() -> RaftDemoExampleResult:
     graph = Graph()
     consensus = Consensus.install(graph, nodes=("node-a", "node-b"))
@@ -33,6 +27,12 @@ def run_example() -> RaftDemoExampleResult:
         "quorum_state": latest_quorum,
         "replicated_log": latest_log,
     }
+
+
+class RaftDemoExampleResult(TypedDict):
+    leader_state: LeaderState
+    quorum_state: QuorumState
+    replicated_log: ReplicatedLog
 
 
 if __name__ == "__main__":

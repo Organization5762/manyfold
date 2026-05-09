@@ -53,7 +53,9 @@ class RfcChecklistGenTests(unittest.TestCase):
             spec.loader.exec_module(module)
 
         self.assertEqual(calls, ["called"])
-        self.assertEqual(module.CHECKLIST_STATUS["23"][1], REFERENCE_EXAMPLE_PROGRESS_DETAIL)
+        self.assertEqual(
+            module.CHECKLIST_STATUS["23"][1], REFERENCE_EXAMPLE_PROGRESS_DETAIL
+        )
 
     def test_parse_helpers_ignore_appendix_headings_and_unknown_appendix_items(
         self,

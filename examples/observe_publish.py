@@ -16,12 +16,6 @@ from manyfold import (
 )
 
 
-class ObservePublishExampleResult(TypedDict):
-    observed_payloads: tuple[bytes, ...]
-    latest_payload: bytes
-    latest_seq: int
-
-
 def run_example() -> ObservePublishExampleResult:
     """Observe a route, then publish a second value and inspect the replay."""
     graph = Graph()
@@ -73,6 +67,12 @@ def run_example() -> ObservePublishExampleResult:
         "latest_payload": latest.value,
         "latest_seq": latest.closed.seq_source,
     }
+
+
+class ObservePublishExampleResult(TypedDict):
+    observed_payloads: tuple[bytes, ...]
+    latest_payload: bytes
+    latest_seq: int
 
 
 if __name__ == "__main__":

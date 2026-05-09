@@ -5,13 +5,6 @@ from typing import TypedDict
 from manyfold import Graph, OwnerName, Schema, StreamFamily, StreamName, WriteBindings
 
 
-class ClosedCounterLoopExampleResult(TypedDict):
-    desired_latest: bytes
-    effective_latest: bytes
-    ack_latest: bytes
-    coherence_taints: tuple[str, ...]
-
-
 def run_example() -> ClosedCounterLoopExampleResult:
     graph = Graph()
     binding = WriteBindings.logical(
@@ -48,6 +41,13 @@ def run_example() -> ClosedCounterLoopExampleResult:
         "ack_latest": ack_latest.payload_ref.inline_bytes,
         "coherence_taints": shadow.coherence_taints,
     }
+
+
+class ClosedCounterLoopExampleResult(TypedDict):
+    desired_latest: bytes
+    effective_latest: bytes
+    ack_latest: bytes
+    coherence_taints: tuple[str, ...]
 
 
 if __name__ == "__main__":

@@ -7,11 +7,6 @@ from manyfold import Graph, Layer, Plane, Variant
 from .._shared import example_route, int_schema
 
 
-class WindowedJoinExampleResult(TypedDict):
-    rolling_windows: tuple[tuple[int, ...], ...]
-    joined_values: tuple[int, ...]
-
-
 def run_example() -> WindowedJoinExampleResult:
     graph = Graph()
     accel = example_route(
@@ -69,6 +64,11 @@ def run_example() -> WindowedJoinExampleResult:
         "rolling_windows": tuple(rolling_windows),
         "joined_values": tuple(joined_values),
     }
+
+
+class WindowedJoinExampleResult(TypedDict):
+    rolling_windows: tuple[tuple[int, ...], ...]
+    joined_values: tuple[int, ...]
 
 
 if __name__ == "__main__":

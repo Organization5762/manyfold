@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Generic, TypeVar
 
 from ._manyfold_rust import Layer, Plane, Variant
@@ -26,7 +26,10 @@ _FIRMWARE_ISSUE_CHECKS: tuple[tuple[str, str], ...] = (
     ("ring_buffer_staging", "firmware agent should stage through a ring buffer"),
 )
 _EMBEDDED_RUNTIME_ISSUE_CHECKS: tuple[tuple[str, str], ...] = (
-    ("timestamps_close_to_source", "embedded routes must timestamp close to the source"),
+    (
+        "timestamps_close_to_source",
+        "embedded routes must timestamp close to the source",
+    ),
     ("keep_isr_work_minimal", "embedded routes must keep ISR work minimal"),
     (
         "use_dma_or_async_peripherals",
@@ -53,27 +56,13 @@ _BULK_RUNTIME_ISSUE_CHECKS: tuple[tuple[str, str], ...] = (
         "bulk payload paths should prefer zero-copy or shared memory strategies",
     ),
 )
-
-
-def _disabled_issue_messages(
-    owner: object, checks: tuple[tuple[str, str], ...]
-) -> tuple[str, ...]:
-    return tuple(message for field, message in checks if not getattr(owner, field))
-
-
-def _require_bool(value: object, field: str) -> None:
-    if not isinstance(value, bool):
-        raise ValueError(f"{field} must be a boolean")
-
-
-def _require_bool_fields(owner: object, fields: tuple[str, ...]) -> None:
-    for field in fields:
-        _require_bool(getattr(owner, field), field)
-
-
-def _require_non_blank_string(value: object, field: str) -> None:
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{field} must be a non-empty string")
+__all__ = (
+    "EmbeddedBulkSensor",
+    "EmbeddedDeviceProfile",
+    "EmbeddedRuntimeRules",
+    "EmbeddedScalarSensor",
+    "FirmwareAgentProfile",
+)
 
 
 @dataclass(frozen=True)
@@ -141,8 +130,8 @@ class EmbeddedRuntimeRules:
 @dataclass(frozen=True)
 class EmbeddedScalarSensor(Generic[T]):
     metadata_route: TypedRoute[T]
-    firmware: FirmwareAgentProfile = FirmwareAgentProfile()
-    rules: EmbeddedRuntimeRules = EmbeddedRuntimeRules()
+    firmware: FirmwareAgentProfile = field(default_factory=FirmwareAgentProfile)
+    rules: EmbeddedRuntimeRules = field(default_factory=EmbeddedRuntimeRules)
 
     def validate(self) -> tuple[str, ...]:
         issues = list(self.firmware.required_issues())
@@ -160,8 +149,8 @@ class EmbeddedScalarSensor(Generic[T]):
 class EmbeddedBulkSensor(Generic[TMeta]):
     metadata_route: TypedRoute[TMeta]
     payload_route: TypedRoute[bytes]
-    firmware: FirmwareAgentProfile = FirmwareAgentProfile()
-    rules: EmbeddedRuntimeRules = EmbeddedRuntimeRules()
+    firmware: FirmwareAgentProfile = field(default_factory=FirmwareAgentProfile)
+    rules: EmbeddedRuntimeRules = field(default_factory=EmbeddedRuntimeRules)
 
     def validate(self) -> tuple[str, ...]:
         issues = list(self.firmware.required_issues())
@@ -189,8 +178,8 @@ class EmbeddedBulkSensor(Generic[TMeta]):
 class EmbeddedDeviceProfile:
     """Factory for the embedded route shapes used by the examples."""
 
-    firmware: FirmwareAgentProfile = FirmwareAgentProfile()
-    rules: EmbeddedRuntimeRules = EmbeddedRuntimeRules()
+    firmware: FirmwareAgentProfile = field(default_factory=FirmwareAgentProfile)
+    rules: EmbeddedRuntimeRules = field(default_factory=EmbeddedRuntimeRules)
 
     def scalar_sensor(
         self,
@@ -249,10 +238,22 @@ class EmbeddedDeviceProfile:
         )
 
 
-__all__ = (
-    "EmbeddedBulkSensor",
-    "EmbeddedDeviceProfile",
-    "EmbeddedRuntimeRules",
-    "EmbeddedScalarSensor",
-    "FirmwareAgentProfile",
-)
+def _disabled_issue_messages(
+    owner: object, checks: tuple[tuple[str, str], ...]
+) -> tuple[str, ...]:
+    return tuple(message for field, message in checks if not getattr(owner, field))
+
+
+def _require_bool(value: object, field: str) -> None:
+    if not isinstance(value, bool):
+        raise ValueError(f"{field} must be a boolean")
+
+
+def _require_bool_fields(owner: object, fields: tuple[str, ...]) -> None:
+    for field_name in fields:
+        _require_bool(getattr(owner, field_name), field_name)
+
+
+def _require_non_blank_string(value: object, field: str) -> None:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field} must be a non-empty string")

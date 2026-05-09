@@ -18,25 +18,6 @@ from manyfold.graph import LazyPayloadSource
 from ._shared import sibling_route
 
 
-class LazyLidarPayloadExampleResult(TypedDict):
-    selected_frame: bytes
-    metadata_count: int
-    matched_frames: tuple[str, ...]
-    payload_open_requests: int
-    lazy_source_opens: int
-    unopened_lazy_payloads: int
-    profile_issues: tuple[str, ...]
-
-
-def _frame_schema() -> Schema[str]:
-    return Schema(
-        schema_id="LidarFrameMeta",
-        version=1,
-        encode=lambda value: value.encode("ascii"),
-        decode=lambda payload: payload.decode("ascii"),
-    )
-
-
 def run_example() -> LazyLidarPayloadExampleResult:
     graph = Graph()
     profile = EmbeddedDeviceProfile()
@@ -93,6 +74,25 @@ def run_example() -> LazyLidarPayloadExampleResult:
         "unopened_lazy_payloads": payload_snapshot.unopened_lazy_payloads,
         "profile_issues": lidar.validate(),
     }
+
+
+class LazyLidarPayloadExampleResult(TypedDict):
+    selected_frame: bytes
+    metadata_count: int
+    matched_frames: tuple[str, ...]
+    payload_open_requests: int
+    lazy_source_opens: int
+    unopened_lazy_payloads: int
+    profile_issues: tuple[str, ...]
+
+
+def _frame_schema() -> Schema[str]:
+    return Schema(
+        schema_id="LidarFrameMeta",
+        version=1,
+        encode=lambda value: value.encode("ascii"),
+        decode=lambda payload: payload.decode("ascii"),
+    )
 
 
 if __name__ == "__main__":

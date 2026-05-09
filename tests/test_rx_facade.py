@@ -13,9 +13,13 @@ class RxFacadeTests(unittest.TestCase):
         ops = importlib.import_module("manyfold._rx.operators")
         values: list[int] = []
 
-        subscription = rx.from_iterable([1, 2, 3]).pipe(
-            ops.map(lambda value: value + 1),
-        ).subscribe(values.append)
+        subscription = (
+            rx.from_iterable([1, 2, 3])
+            .pipe(
+                ops.map(lambda value: value + 1),
+            )
+            .subscribe(values.append)
+        )
 
         self.assertTrue(callable(getattr(subscription, "dispose", None)))
         self.assertEqual(values, [2, 3, 4])
@@ -24,7 +28,9 @@ class RxFacadeTests(unittest.TestCase):
         load_manyfold_package()
         scheduler_module = importlib.import_module("manyfold._rx.scheduler")
         subject_module = importlib.import_module("manyfold._rx.subject")
-        behavior_module = importlib.import_module("manyfold._rx.subject.behaviorsubject")
+        behavior_module = importlib.import_module(
+            "manyfold._rx.subject.behaviorsubject"
+        )
         behavior_subject = subject_module.BehaviorSubject
 
         subject = behavior_subject(1)
@@ -69,7 +75,9 @@ class RxFacadeTests(unittest.TestCase):
             operators_module.__all__,
             tuple(sorted(set(upstream_module.__all__))),
         )
-        self.assertEqual(len(operators_module.__all__), len(set(operators_module.__all__)))
+        self.assertEqual(
+            len(operators_module.__all__), len(set(operators_module.__all__))
+        )
         self.assertEqual(operators_module.zip_with_list, upstream_module.zip_with_list)
 
     def test_private_marble_facade_does_not_leak_runtime_imports(self) -> None:
@@ -204,7 +212,9 @@ class RxFacadeTests(unittest.TestCase):
                 module = importlib.import_module(module_name)
 
                 self.assertEqual(module.__all__, tuple(sorted(module.__all__)))
-                self.assertTrue(all(not name.startswith("_") for name in module.__all__))
+                self.assertTrue(
+                    all(not name.startswith("_") for name in module.__all__)
+                )
                 for name in names:
                     self.assertIn(name, module.__all__)
                     self.assertIs(getattr(module, name), module.__dict__[name])
