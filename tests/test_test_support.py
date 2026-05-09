@@ -90,6 +90,12 @@ class TestSupportTests(unittest.TestCase):
             ],
         )
 
+    def test_stub_package_exports_are_sorted(self) -> None:
+        manyfold = test_support.load_manyfold_package()
+
+        self.assertEqual(manyfold.__all__, tuple(sorted(manyfold.__all__)))
+        self.assertEqual(len(manyfold.__all__), len(set(manyfold.__all__)))
+
 
 if __name__ == "__main__":
     unittest.main()

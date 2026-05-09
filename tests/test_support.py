@@ -1196,12 +1196,14 @@ def load_manyfold_package():
     package.REFERENCE_EXAMPLE_SUITE = reference_examples.REFERENCE_EXAMPLE_SUITE
     package.ReferenceExample = reference_examples.ReferenceExample
     package.__all__ = tuple(
-        (
-            *exports.keys(),
-            "REFERENCE_EXAMPLE_SUITE",
-            "ReferenceExample",
-            "implemented_reference_examples",
-            "reference_example_suite",
+        sorted(
+            (
+                *exports.keys(),
+                "REFERENCE_EXAMPLE_SUITE",
+                "ReferenceExample",
+                "implemented_reference_examples",
+                "reference_example_suite",
+            )
         )
     )
     package.implemented_reference_examples = (
