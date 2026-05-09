@@ -110,6 +110,14 @@ def _require_integer(value: object, field: str) -> None:
         raise ValueError(f"{field} must be an integer")
 
 
+def _require_progress_value(value: object) -> int:
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ValueError("event-time progress must be a non-negative integer")
+    if value < 0:
+        raise ValueError("event-time progress must be a non-negative integer")
+    return value
+
+
 @runtime_checkable
 class SubscriptionLike(Protocol):
     def dispose(self) -> None: ...
@@ -2704,11 +2712,11 @@ class Graph:
         """Resolve event-time or watermark progress for one observed item."""
         value = self._operator_value(route_ref, native_route, item)
         if extractor is not None:
-            return extractor(value)
+            return _require_progress_value(extractor(value))
         closed = item.closed if isinstance(item, TypedEnvelope) else item
         if closed.control_epoch is not None:
-            return closed.control_epoch
-        return closed.seq_source
+            return _require_progress_value(closed.control_epoch)
+        return _require_progress_value(closed.seq_source)
 
     @staticmethod
     def _taint_key(taint: Any) -> tuple[Any, Any]:
@@ -5917,6 +5925,7 @@ class Graph:
             scheduler: object | None = None,
         ) -> SubscriptionLike:
             buffers: dict[Hashable | None, deque[tuple[int, T | bytes]]] = {}
+            dirty_partitions: set[Hashable | None] = set()
             watermarks: dict[Hashable | None, int] = {}
             latest_watermark: int | None = None
 
@@ -5970,6 +5979,8 @@ class Graph:
                     if progress < minimum_kept:
                         return
                     watermarks.setdefault(partition_key, current_watermark)
+                    if watermark_route is not None:
+                        dirty_partitions.add(partition_key)
                 buffer_for(partition_key).append((progress, value))
                 if watermark_route is None:
                     watermarks[partition_key] = progress
@@ -5989,10 +6000,19 @@ class Graph:
                     latest_watermark = progress
                 for partition_key in tuple(buffers):
                     current_watermark = watermarks.get(partition_key)
-                    if current_watermark is None or progress > current_watermark:
+                    advanced = current_watermark is None or progress > current_watermark
+                    dirty_at_current_watermark = (
+                        partition_key in dirty_partitions
+                        and current_watermark is not None
+                        and progress >= current_watermark
+                    )
+                    if not advanced and not dirty_at_current_watermark:
+                        continue
+                    if advanced:
                         watermarks[partition_key] = progress
                     prune(partition_key)
                     emit_window(partition_key)
+                    dirty_partitions.discard(partition_key)
 
             source_sub = self.observe(source, replay_latest=False).subscribe(
                 on_next, scheduler=scheduler
@@ -6166,12 +6186,15 @@ class Graph:
         *,
         within: int,
         combine: Callable[[TIn | bytes, TRight | bytes], TOut],
+        left_time: Callable[[TIn | bytes], int] | None = None,
+        right_time: Callable[[TRight | bytes], int] | None = None,
     ) -> Observable[TOut]:
-        """Join nearby events from both sides within a bounded sequence interval.
+        """Join nearby events from both sides within a bounded progress interval.
 
-        The current scaffold does not model full event timestamps yet, so this
-        operator uses `seq_source` as a stable event-order surrogate. It keeps
-        a recent buffer on each side and emits joined values whenever the
+        Progress defaults to `control_epoch` when present and then `seq_source`.
+        Pass `left_time` and/or `right_time` to extract explicit event-time
+        progress from typed values or raw bytes. The operator keeps a bounded
+        recent buffer on each side and emits joined values whenever the
         opposite side has events within the requested distance.
         """
         _require_integer(within, "interval join distance")
@@ -6180,8 +6203,8 @@ class Graph:
         left_route = self._coerce_route_ref(left)
         right_route = self._coerce_route_ref(right)
 
-        def prune(buffer: deque[tuple[int, Any]], seq: int) -> None:
-            minimum = seq - within
+        def prune(buffer: deque[tuple[int, Any]], frontier: int) -> None:
+            minimum = frontier - within
             while buffer and buffer[0][0] < minimum:
                 buffer.popleft()
 
@@ -6191,27 +6214,40 @@ class Graph:
         ) -> SubscriptionLike:
             left_buffer: deque[tuple[int, TIn | bytes]] = deque()
             right_buffer: deque[tuple[int, TRight | bytes]] = deque()
+            progress_frontier = 0
 
             def on_left(item: TypedEnvelope[TIn] | ClosedEnvelope) -> None:
-                closed = item.closed if isinstance(item, TypedEnvelope) else item
-                seq = closed.seq_source
+                nonlocal progress_frontier
+                progress = self._progress_value(
+                    left,
+                    left_route,
+                    item,
+                    extractor=left_time,
+                )
                 value = self._operator_value(left, left_route, item)
-                left_buffer.append((seq, value))
-                prune(left_buffer, seq)
-                prune(right_buffer, seq)
-                for right_seq, right_value in tuple(right_buffer):
-                    if abs(seq - right_seq) <= within:
+                progress_frontier = max(progress_frontier, progress)
+                left_buffer.append((progress, value))
+                prune(left_buffer, progress_frontier)
+                prune(right_buffer, progress_frontier)
+                for right_progress, right_value in tuple(right_buffer):
+                    if abs(progress - right_progress) <= within:
                         observer.on_next(combine(value, right_value))
 
             def on_right(item: TypedEnvelope[TRight] | ClosedEnvelope) -> None:
-                closed = item.closed if isinstance(item, TypedEnvelope) else item
-                seq = closed.seq_source
+                nonlocal progress_frontier
+                progress = self._progress_value(
+                    right,
+                    right_route,
+                    item,
+                    extractor=right_time,
+                )
                 value = self._operator_value(right, right_route, item)
-                right_buffer.append((seq, value))
-                prune(right_buffer, seq)
-                prune(left_buffer, seq)
-                for left_seq, left_value in tuple(left_buffer):
-                    if abs(seq - left_seq) <= within:
+                progress_frontier = max(progress_frontier, progress)
+                right_buffer.append((progress, value))
+                prune(right_buffer, progress_frontier)
+                prune(left_buffer, progress_frontier)
+                for left_progress, left_value in tuple(left_buffer):
+                    if abs(progress - left_progress) <= within:
                         observer.on_next(combine(left_value, value))
 
             left_sub = self.observe(left, replay_latest=False).subscribe(

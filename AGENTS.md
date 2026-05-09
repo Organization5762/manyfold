@@ -26,6 +26,10 @@ If the default `uv` cache is blocked by sandbox permissions, set
 `UV_CACHE_DIR=.cache/uv` for `uv sync` and verification commands before
 retrying.
 
+If `git fetch` or commit operations fail because the worktree gitdir is not
+writable, make a fresh clone under the writable automation workspace and do the
+release work there instead of forcing the broken worktree.
+
 ## Verification
 
 Use the smallest command that covers the changed surface:

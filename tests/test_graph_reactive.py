@@ -2114,6 +2114,100 @@ assert graph.latest(route) is None
 
         self.assertEqual(windows, [[22]])
 
+    def test_window_by_time_duplicate_watermarks_emit_only_dirty_windows(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("imu"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("late_temperature"),
+            variant=graph_module.Variant.Meta,
+            schema=int_schema(graph_module, "LateTemperature"),
+        )
+        watermark = graph_module.route(
+            plane=graph_module.Plane.State,
+            layer=graph_module.Layer.Internal,
+            owner=graph_module.OwnerName("scheduler"),
+            family=graph_module.StreamFamily("tick"),
+            stream=graph_module.StreamName("late_watermark"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="LateWatermarkTick"),
+        )
+        graph = graph_module.Graph()
+
+        windows = []
+        subscription = graph.window_by_time(
+            route,
+            width=3,
+            watermark=watermark,
+            grace=1,
+        ).subscribe(windows.append)
+        graph.publish(route, 20, control_epoch=10)
+        graph.publish(route, 22, control_epoch=12)
+        graph.publish(watermark, b"tick-12", control_epoch=12)
+        graph.publish(watermark, b"tick-12", control_epoch=12)
+        graph.publish(route, 21, control_epoch=11)
+        graph.publish(watermark, b"tick-12", control_epoch=12)
+        graph.publish(watermark, b"tick-12", control_epoch=12)
+        subscription.dispose()
+
+        self.assertEqual(windows, [[20, 22], [20, 21, 22]])
+
+    def test_window_by_time_rejects_invalid_event_time_progress(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("imu"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("invalid_progress"),
+            variant=graph_module.Variant.Meta,
+            schema=int_schema(graph_module, "InvalidProgress"),
+        )
+        watermark = graph_module.route(
+            plane=graph_module.Plane.State,
+            layer=graph_module.Layer.Internal,
+            owner=graph_module.OwnerName("scheduler"),
+            family=graph_module.StreamFamily("tick"),
+            stream=graph_module.StreamName("invalid_progress_watermark"),
+            variant=graph_module.Variant.Event,
+            schema=int_schema(graph_module, "InvalidProgressWatermark"),
+        )
+
+        for event_time in (lambda _value: True, lambda _value: -1):
+            with self.subTest(event_time=event_time):
+                graph = graph_module.Graph()
+                subscription = graph.window_by_time(
+                    route,
+                    width=2,
+                    event_time=event_time,
+                ).subscribe(lambda _items: None)
+                try:
+                    with self.assertRaisesRegex(
+                        ValueError,
+                        "event-time progress must be a non-negative integer",
+                    ):
+                        graph.publish(route, 20)
+                finally:
+                    subscription.dispose()
+
+        graph = graph_module.Graph()
+        subscription = graph.window_by_time(
+            route,
+            width=2,
+            watermark=watermark,
+            watermark_time=lambda _value: "later",
+        ).subscribe(lambda _items: None)
+        try:
+            with self.assertRaisesRegex(
+                ValueError,
+                "event-time progress must be a non-negative integer",
+            ):
+                graph.publish(watermark, 2)
+        finally:
+            subscription.dispose()
+
     def test_window_by_time_rejects_invalid_width_and_grace(self) -> None:
         graph_module = load_graph_module()
         route = graph_module.route(
@@ -2453,6 +2547,89 @@ assert graph.latest(route) is None
         subscription.dispose()
 
         self.assertEqual(joined, [(100, 7), (101, 7), (100, 8), (101, 8), (101, 9)])
+
+    def test_interval_join_uses_explicit_event_time_progress(self) -> None:
+        graph_module = load_graph_module()
+
+        left = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("imu"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("event_time_accel"),
+            variant=graph_module.Variant.Meta,
+            schema=str_schema(graph_module, "EventTimeAccel"),
+        )
+        right = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("imu"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("event_time_gyro"),
+            variant=graph_module.Variant.Meta,
+            schema=str_schema(graph_module, "EventTimeGyro"),
+        )
+        graph = graph_module.Graph()
+
+        def progress(value: str) -> int:
+            return int(value.split(":")[1])
+
+        joined = []
+        subscription = graph.interval_join(
+            left,
+            right,
+            within=2,
+            combine=lambda accel, gyro: f"{accel}+{gyro}",
+            left_time=progress,
+            right_time=progress,
+        ).subscribe(joined.append)
+        graph.publish(right, "gyro:10")
+        graph.publish(left, "accel:9")
+        graph.publish(left, "accel:30")
+        graph.publish(right, "gyro:32")
+        graph.publish(left, "accel:20")
+        subscription.dispose()
+
+        self.assertEqual(joined, ["accel:9+gyro:10", "accel:30+gyro:32"])
+
+    def test_interval_join_rejects_invalid_event_time_progress(self) -> None:
+        graph_module = load_graph_module()
+
+        left = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("imu"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("bad_event_time_accel"),
+            variant=graph_module.Variant.Meta,
+            schema=int_schema(graph_module, "BadEventTimeAccel"),
+        )
+        right = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("imu"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("bad_event_time_gyro"),
+            variant=graph_module.Variant.Meta,
+            schema=int_schema(graph_module, "BadEventTimeGyro"),
+        )
+        graph = graph_module.Graph()
+
+        subscription = graph.interval_join(
+            left,
+            right,
+            within=1,
+            combine=lambda accel, gyro: (accel, gyro),
+            left_time=lambda _value: False,
+        ).subscribe(lambda _joined: None)
+        try:
+            with self.assertRaisesRegex(
+                ValueError,
+                "event-time progress must be a non-negative integer",
+            ):
+                graph.publish(left, 1)
+        finally:
+            subscription.dispose()
 
     def test_interval_join_accepts_raw_route_refs_and_rejects_negative_distance(
         self,

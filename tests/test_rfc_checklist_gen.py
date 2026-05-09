@@ -100,6 +100,10 @@ class RfcChecklistGenTests(unittest.TestCase):
             "trigger-driven rolling window aggregation",
             generator.CHECKLIST_STATUS["14"][1],
         )
+        self.assertIn(
+            "validated event-time progress",
+            generator.CHECKLIST_STATUS["10"][1],
+        )
         self.assertIn("lookup join", generator.CHECKLIST_STATUS["14"][1])
         self.assertIn(
             "route credit snapshots",
@@ -108,7 +112,7 @@ class RfcChecklistGenTests(unittest.TestCase):
             ][1],
         )
         self.assertIn(
-            "bounded interval joins",
+            "bounded event-time interval joins",
             generator.APPENDIX_STATUS["Windows, aggregations, and streaming joins"][1],
         )
         self.assertIn(
@@ -155,6 +159,12 @@ class RfcChecklistGenTests(unittest.TestCase):
         self.assertIn(
             "lookup joins",
             appendix_by_title["Windows, aggregations, and streaming joins"].detail,
+        )
+        self.assertIn(
+            "idempotent watermark releases",
+            appendix_by_title[
+                "Scheduling and out-of-order bugs made harder to express"
+            ].detail,
         )
 
     def test_checklist_output_matches_repository(self) -> None:
