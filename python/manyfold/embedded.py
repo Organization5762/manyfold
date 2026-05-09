@@ -71,6 +71,11 @@ def _require_bool_fields(owner: object, fields: tuple[str, ...]) -> None:
         _require_bool(getattr(owner, field), field)
 
 
+def _require_non_blank_string(value: object, field: str) -> None:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field} must be a non-empty string")
+
+
 @dataclass(frozen=True)
 class FirmwareAgentProfile:
     """Capabilities expected from the firmware-lite agent profile."""
@@ -117,8 +122,7 @@ class EmbeddedRuntimeRules:
             tuple(field for field, _message in _EMBEDDED_RUNTIME_ISSUE_CHECKS)
             + tuple(field for field, _message in _BULK_RUNTIME_ISSUE_CHECKS),
         )
-        if not isinstance(self.bulk_credit_policy, str):
-            raise ValueError("bulk_credit_policy must be a string")
+        _require_non_blank_string(self.bulk_credit_policy, "bulk_credit_policy")
 
     def required_issues(self) -> tuple[str, ...]:
         return _disabled_issue_messages(self, _EMBEDDED_RUNTIME_ISSUE_CHECKS)
