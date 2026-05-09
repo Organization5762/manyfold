@@ -154,6 +154,10 @@ class RouteNamespace:
     plane: Plane
     layer: Layer
 
+    def __post_init__(self) -> None:
+        _require_enum_member(self.plane, Plane, "plane")
+        _require_enum_member(self.layer, Layer, "layer")
+
 
 @dataclass(frozen=True)
 class RouteIdentity:
@@ -163,6 +167,9 @@ class RouteIdentity:
     family: StreamFamily
     stream: StreamName
     variant: Variant
+
+    def __post_init__(self) -> None:
+        _require_enum_member(self.variant, Variant, "variant")
 
     @classmethod
     def of(
@@ -278,6 +285,19 @@ class TypedRoute(Generic[T]):
     stream: StreamName
     variant: Variant
     schema: Schema[T]
+
+    def __post_init__(self) -> None:
+        _require_enum_member(self.plane, Plane, "plane")
+        _require_enum_member(self.layer, Layer, "layer")
+        _require_enum_member(self.variant, Variant, "variant")
+        if not isinstance(self.owner, OwnerName):
+            raise ValueError("owner must be an OwnerName")
+        if not isinstance(self.family, StreamFamily):
+            raise ValueError("family must be a StreamFamily")
+        if not isinstance(self.stream, StreamName):
+            raise ValueError("stream must be a StreamName")
+        if not isinstance(self.schema, Schema):
+            raise ValueError("schema must be a Schema")
 
     @cached_property
     def route_ref(self) -> RouteRef:

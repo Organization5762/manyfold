@@ -69,6 +69,50 @@ class PrimitiveTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, message):
                     manyfold.route(**kwargs)
 
+    def test_route_value_objects_reject_invalid_native_enum_values(self) -> None:
+        manyfold = load_manyfold_package()
+
+        with self.assertRaisesRegex(ValueError, "plane must be a Plane"):
+            manyfold.RouteNamespace(plane="read", layer=manyfold.Layer.Logical)
+
+        with self.assertRaisesRegex(ValueError, "layer must be a Layer"):
+            manyfold.RouteNamespace(plane=manyfold.Plane.Read, layer="logical")
+
+        with self.assertRaisesRegex(ValueError, "variant must be a Variant"):
+            manyfold.RouteIdentity.of(
+                owner="sensor",
+                family="events",
+                stream="temperature",
+                variant="meta",
+            )
+
+    def test_typed_route_rejects_invalid_direct_construction(self) -> None:
+        manyfold = load_manyfold_package()
+        kwargs = {
+            "plane": manyfold.Plane.Read,
+            "layer": manyfold.Layer.Logical,
+            "owner": manyfold.OwnerName("sensor"),
+            "family": manyfold.StreamFamily("events"),
+            "stream": manyfold.StreamName("temperature"),
+            "variant": manyfold.Variant.Meta,
+            "schema": manyfold.Schema.float(name="Temperature"),
+        }
+
+        cases = (
+            ("plane", "read", "plane must be a Plane"),
+            ("layer", "logical", "layer must be a Layer"),
+            ("owner", "sensor", "owner must be an OwnerName"),
+            ("family", "events", "family must be a StreamFamily"),
+            ("stream", "temperature", "stream must be a StreamName"),
+            ("variant", "meta", "variant must be a Variant"),
+            ("schema", bytes, "schema must be a Schema"),
+        )
+        for field, value, message in cases:
+            with self.subTest(field=field):
+                invalid_kwargs = {**kwargs, field: value}
+                with self.assertRaisesRegex(ValueError, message):
+                    manyfold.TypedRoute(**invalid_kwargs)
+
     def test_schema_rejects_empty_id(self) -> None:
         manyfold = load_manyfold_package()
 
