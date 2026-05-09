@@ -4363,6 +4363,67 @@ class GraphReactiveTests(unittest.TestCase):
         self.assertEqual(len(list(graph.middleware())), 1)
         self.assertEqual(len(list(graph.mesh_primitives())), 1)
 
+    def test_graph_registry_snapshots_are_key_sorted(self) -> None:
+        graph_module = load_graph_module()
+        source = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("imu"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("accel"),
+            variant=graph_module.Variant.Meta,
+            schema=graph_module.Schema.bytes(name="Accel"),
+        )
+        sink = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("dashboard"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("accel_copy"),
+            variant=graph_module.Variant.Meta,
+            schema=graph_module.Schema.bytes(name="AccelCopy"),
+        )
+        graph = graph_module.Graph()
+
+        for name in ("z-link", "a-link"):
+            graph.register_link(
+                graph_module.Link(
+                    name=name,
+                    link_class="TcpStreamLink",
+                    capabilities=graph_module.LinkCapabilities(ordered=True),
+                )
+            )
+        graph.add_mesh_primitive(
+            graph_module.MeshPrimitive(
+                name="z-bridge",
+                kind="bridge",
+                sources=(source,),
+                destinations=(sink,),
+                link_name="z-link",
+            )
+        )
+        graph.add_mesh_primitive(
+            graph_module.MeshPrimitive(
+                name="a-bridge",
+                kind="bridge",
+                sources=(source,),
+                destinations=(sink,),
+                link_name="a-link",
+            )
+        )
+        graph.export_route(sink)
+        graph.publish(source, b"sample")
+
+        self.assertEqual([link.name for link in graph.links()], ["a-link", "z-link"])
+        self.assertEqual(
+            [primitive.name for primitive in graph.mesh_primitives()],
+            ["a-bridge", "z-bridge"],
+        )
+        self.assertEqual(
+            [route.stream for route in graph.debug_routes()],
+            sorted(route.stream for route in graph.debug_routes()),
+        )
+
     def test_graph_runtime_registries_reject_empty_text_keys(self) -> None:
         graph_module = load_graph_module()
         route = graph_module.route(
