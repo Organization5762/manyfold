@@ -111,6 +111,37 @@ for capacity in (False, True):
 
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_graph_mailbox_rejects_blank_and_duplicate_names(self) -> None:
+        script = """
+import manyfold
+
+graph = manyfold.Graph()
+for name in ("", "   "):
+    try:
+        graph.mailbox(name)
+    except ValueError as exc:
+        assert "mailbox name must be a non-empty string" in str(exc), str(exc)
+    else:
+        raise AssertionError(f"expected ValueError for {name!r}")
+
+graph.mailbox("events")
+try:
+    graph.mailbox("events")
+except ValueError as exc:
+    assert 'mailbox "events" already exists' in str(exc), str(exc)
+else:
+    raise AssertionError("expected ValueError for duplicate mailbox")
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            check=False,
+            capture_output=True,
+            env=subprocess_test_env(),
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_mailbox_snapshot_exposes_semantics_and_delivery_counters(self) -> None:
         graph_module = load_graph_module()
         source = graph_module.route(
