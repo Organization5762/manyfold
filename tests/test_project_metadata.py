@@ -68,6 +68,7 @@ class ProjectMetadataTests(unittest.TestCase):
         dependencies = _array_values(lines, "dependencies")
         dev_dependencies = _array_values(lines, "dev")
         script_names = _section_keys(lines, "project.scripts")
+        url_names = _section_keys(lines, "project.urls")
 
         self.assertEqual(keywords, tuple(sorted(keywords)))
         self.assertEqual(classifiers, tuple(sorted(classifiers)))
@@ -80,3 +81,4 @@ class ProjectMetadataTests(unittest.TestCase):
             tuple(sorted(dev_dependencies, key=_dependency_name)),
         )
         self.assertEqual(script_names, tuple(sorted(script_names)))
+        self.assertEqual(url_names, tuple(sorted(url_names)))

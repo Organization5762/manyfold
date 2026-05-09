@@ -36,8 +36,8 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/Organization5762/manyfold"
-Repository = "https://github.com/Organization5762/manyfold"
 Issues = "https://github.com/Organization5762/manyfold/issues"
+Repository = "https://github.com/Organization5762/manyfold"
 
 [project.scripts]
 manyfold-example-catalog = "manyfold_example_catalog:main"
