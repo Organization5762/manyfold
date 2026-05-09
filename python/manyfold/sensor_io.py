@@ -1534,8 +1534,15 @@ class _CompositeSubscription:
     subscriptions: tuple[SubscriptionLike, ...]
 
     def dispose(self) -> None:
+        first_error: BaseException | None = None
         for subscription in self.subscriptions:
-            subscription.dispose()
+            try:
+                subscription.dispose()
+            except BaseException as exc:
+                if first_error is None:
+                    first_error = exc
+        if first_error is not None:
+            raise first_error
 
 
 def _group_name(group: str | None, suffix: str) -> str | None:

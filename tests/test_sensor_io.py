@@ -1644,6 +1644,29 @@ class SensorIoTests(unittest.TestCase):
         self.assertEqual([sample.value for sample in replayed], [23])
         self.assertEqual([sample.sequence_number for sample in replayed], [1])
 
+    def test_composite_subscription_disposes_all_children_after_failure(self) -> None:
+        load_manyfold_package()
+        sensor_io = sys.modules["manyfold.sensor_io"]
+        disposed: list[str] = []
+
+        class FailingSubscription:
+            def dispose(self) -> None:
+                disposed.append("failing")
+                raise RuntimeError("dispose failed")
+
+        class RecordingSubscription:
+            def dispose(self) -> None:
+                disposed.append("recording")
+
+        subscription = sensor_io._CompositeSubscription(
+            (FailingSubscription(), RecordingSubscription())
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "dispose failed"):
+            subscription.dispose()
+
+        self.assertEqual(disposed, ["failing", "recording"])
+
     def test_local_durable_spool_cleans_up_log_when_source_subscribe_fails(self) -> None:
         manyfold = load_manyfold_package()
         sample_schema = manyfold.sensor_sample_schema(_int_schema(manyfold, "Temp"))
