@@ -125,6 +125,18 @@ class ReactiveThreadsTests(unittest.TestCase):
         self.assertEqual(stats.p99_ms, 10.0)
         self.assertEqual(stats.max_ms, 10.0)
 
+    def test_latency_snapshot_clamps_non_finite_samples(self) -> None:
+        recorder = self.reactive_threads._LatencyRecorder()
+
+        for delay_s in (float("nan"), float("inf"), -0.001, 0.002):
+            recorder.record("stream", delay_s)
+
+        stats = recorder.snapshot()["stream"]
+
+        self.assertEqual(stats.count, 4)
+        self.assertEqual(stats.p50_ms, 0.0)
+        self.assertEqual(stats.max_ms, 2.0)
+
     def test_latency_snapshot_orders_streams_by_name(self) -> None:
         recorder = self.reactive_threads._LatencyRecorder()
 
