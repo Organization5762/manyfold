@@ -5,6 +5,7 @@ import importlib.util
 import os
 import sys
 import types
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -77,10 +78,23 @@ def _pythonpath_with_repo_python_first(current_pythonpath: str | None) -> str:
     python_root = str(PYTHON_ROOT)
     if not current_pythonpath:
         return python_root
-    existing_paths = [
-        path for path in current_pythonpath.split(os.pathsep) if path != python_root
-    ]
+    existing_paths = _unique_nonempty_paths(
+        path
+        for path in current_pythonpath.split(os.pathsep)
+        if path != python_root
+    )
     return os.pathsep.join((python_root, *existing_paths))
+
+
+def _unique_nonempty_paths(paths: Iterable[str]) -> tuple[str, ...]:
+    seen: set[str] = set()
+    unique_paths: list[str] = []
+    for path in paths:
+        if not path or path in seen:
+            continue
+        seen.add(path)
+        unique_paths.append(path)
+    return tuple(unique_paths)
 
 
 def install_reactivex_stub() -> None:

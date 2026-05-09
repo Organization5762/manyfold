@@ -27,9 +27,24 @@ class TestSupportTests(unittest.TestCase):
             os.pathsep.join((python_root, "/tmp/first", "/tmp/second")),
         )
 
+    def test_subprocess_pythonpath_deduplicates_inherited_paths(self) -> None:
+        python_root = str(test_support.PYTHON_ROOT)
+        current_pythonpath = os.pathsep.join(
+            ("/tmp/first", "", "/tmp/second", "/tmp/first")
+        )
+
+        pythonpath = test_support._pythonpath_with_repo_python_first(current_pythonpath)
+
+        self.assertEqual(
+            pythonpath,
+            os.pathsep.join((python_root, "/tmp/first", "/tmp/second")),
+        )
+
     def test_subprocess_test_env_sets_stable_pythonpath_once(self) -> None:
         python_root = str(test_support.PYTHON_ROOT)
-        current_pythonpath = os.pathsep.join((python_root, "/tmp/project"))
+        current_pythonpath = os.pathsep.join(
+            (python_root, "/tmp/project", "/tmp/project")
+        )
         with mock.patch.dict(
             os.environ,
             {"PYTHONPATH": current_pythonpath},
@@ -39,6 +54,7 @@ class TestSupportTests(unittest.TestCase):
 
         self.assertEqual(env["PYTHONPATH"], os.pathsep.join((python_root, "/tmp/project")))
         self.assertEqual(env["PYTHONPATH"].split(os.pathsep).count(python_root), 1)
+        self.assertEqual(env["PYTHONPATH"].split(os.pathsep).count("/tmp/project"), 1)
 
 
 if __name__ == "__main__":
