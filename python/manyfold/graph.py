@@ -5570,6 +5570,8 @@ class Graph:
         source buffers values and emits only as watermarks advance. Explicit
         watermark progress is retained even when it arrives before source data.
         """
+        _require_integer(width, "window width")
+        _require_integer(grace, "window grace")
         if width <= 0:
             raise ValueError("window width must be positive")
         if grace < 0:

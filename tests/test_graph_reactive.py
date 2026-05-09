@@ -2058,6 +2058,14 @@ class GraphReactiveTests(unittest.TestCase):
         )
         graph = graph_module.Graph()
 
+        for width in (True, "2"):
+            with self.subTest(width=width):
+                with self.assertRaisesRegex(ValueError, "window width must be an integer"):
+                    graph.window_by_time(route, width=width)
+        for grace in (False, "1"):
+            with self.subTest(grace=grace):
+                with self.assertRaisesRegex(ValueError, "window grace must be an integer"):
+                    graph.window_by_time(route, width=2, grace=grace)
         with self.assertRaisesRegex(ValueError, "window width must be positive"):
             graph.window_by_time(route, width=0)
         with self.assertRaisesRegex(
