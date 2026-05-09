@@ -1696,6 +1696,33 @@ class SensorIoTests(unittest.TestCase):
             subscription.dispose()
 
         self.assertEqual(disposed, ["failing", "recording"])
+        subscription.dispose()
+        self.assertEqual(disposed, ["failing", "recording"])
+
+    def test_composite_subscription_propagates_process_interrupts_immediately(
+        self,
+    ) -> None:
+        load_manyfold_package()
+        sensor_io = sys.modules["manyfold.sensor_io"]
+        disposed: list[str] = []
+
+        class InterruptingSubscription:
+            def dispose(self) -> None:
+                disposed.append("interrupting")
+                raise KeyboardInterrupt
+
+        class RecordingSubscription:
+            def dispose(self) -> None:
+                disposed.append("recording")
+
+        subscription = sensor_io._CompositeSubscription(
+            (InterruptingSubscription(), RecordingSubscription())
+        )
+
+        with self.assertRaises(KeyboardInterrupt):
+            subscription.dispose()
+
+        self.assertEqual(disposed, ["interrupting"])
 
     def test_local_durable_spool_cleans_up_log_when_source_subscribe_fails(self) -> None:
         manyfold = load_manyfold_package()
