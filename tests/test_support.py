@@ -66,6 +66,24 @@ MODULES_TO_RESET = (
 )
 
 
+def _module_available(module_name: str) -> bool:
+    try:
+        return importlib.util.find_spec(module_name) is not None
+    except (ImportError, ValueError):
+        return module_name in sys.modules
+
+
+def _reactivex_available() -> bool:
+    return all(
+        _module_available(module_name)
+        for module_name in (
+            "reactivex",
+            "reactivex.operators",
+            "reactivex.subject",
+        )
+    )
+
+
 def subprocess_test_env() -> dict[str, str]:
     env = dict(os.environ)
     env["PYTHONPATH"] = _pythonpath_with_repo_python_first(env.get("PYTHONPATH"))
@@ -84,14 +102,8 @@ def _pythonpath_with_repo_python_first(current_pythonpath: str | None) -> str:
 
 
 def install_reactivex_stub() -> None:
-    try:
-        import reactivex  # noqa: F401
-        import reactivex.operators  # noqa: F401
-        import reactivex.subject  # noqa: F401
-
+    if _reactivex_available():
         return
-    except ImportError:
-        pass
 
     if (
         "reactivex" in sys.modules

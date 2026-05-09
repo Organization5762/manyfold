@@ -40,6 +40,40 @@ class TestSupportTests(unittest.TestCase):
         self.assertEqual(env["PYTHONPATH"], os.pathsep.join((python_root, "/tmp/project")))
         self.assertEqual(env["PYTHONPATH"].split(os.pathsep).count(python_root), 1)
 
+    def test_module_available_uses_import_specs_for_installed_modules(self) -> None:
+        with mock.patch("importlib.util.find_spec", return_value=object()) as find_spec:
+            self.assertTrue(test_support._module_available("reactivex"))
+
+        find_spec.assert_called_once_with("reactivex")
+
+    def test_module_available_falls_back_to_loaded_modules_for_specless_stubs(
+        self,
+    ) -> None:
+        with (
+            mock.patch("importlib.util.find_spec", side_effect=ValueError),
+            mock.patch.dict("sys.modules", {"reactivex": object()}),
+        ):
+            self.assertTrue(test_support._module_available("reactivex"))
+
+    def test_reactivex_availability_checks_required_facade_modules(self) -> None:
+        checked: list[str] = []
+
+        def available(module_name: str) -> bool:
+            checked.append(module_name)
+            return True
+
+        with mock.patch.object(test_support, "_module_available", side_effect=available):
+            self.assertTrue(test_support._reactivex_available())
+
+        self.assertEqual(
+            checked,
+            [
+                "reactivex",
+                "reactivex.operators",
+                "reactivex.subject",
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
