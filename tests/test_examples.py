@@ -12,6 +12,7 @@ from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
+import examples._catalog as catalog_module
 import examples._shared as shared
 from examples import (
     ARCHIVED_EXAMPLE_ENTRIES,
@@ -150,8 +151,6 @@ class ExampleTests(unittest.TestCase):
     def test_catalog_exports_manifest_matches_examples_package_and_catalog_module(
         self,
     ) -> None:
-        import examples._catalog as catalog_module
-
         examples_package = __import__("examples")
 
         self.assertIsInstance(examples_package.__all__, tuple)
@@ -678,8 +677,6 @@ class ExampleTests(unittest.TestCase):
                 sys.modules.pop("manyfold_existing_load_test", None)
 
     def test_catalog_main_check_and_write_modes_follow_generated_output(self) -> None:
-        import examples._catalog as catalog_module
-
         generated = render_readme_featured_examples()
         original_path = catalog_module._README_PATH
         try:
@@ -872,8 +869,6 @@ class ExampleTests(unittest.TestCase):
         self.assertNotIn("observe_publish", bullet_lines)
 
     def test_catalog_validation_rejects_partial_reference_metadata(self) -> None:
-        import examples._catalog as catalog_module
-
         original_catalog = catalog_module.EXAMPLE_CATALOG
         try:
             catalog_module.EXAMPLE_CATALOG = (
@@ -893,8 +888,6 @@ class ExampleTests(unittest.TestCase):
             catalog_module.EXAMPLE_CATALOG = original_catalog
 
     def test_catalog_validation_rejects_duplicate_module_names(self) -> None:
-        import examples._catalog as catalog_module
-
         original_catalog = catalog_module.EXAMPLE_CATALOG
         duplicate = EXAMPLE_CATALOG[0]
         try:
@@ -911,8 +904,6 @@ class ExampleTests(unittest.TestCase):
     def test_catalog_validation_reports_duplicate_modules_in_first_repeat_order(
         self,
     ) -> None:
-        import examples._catalog as catalog_module
-
         original_catalog = catalog_module.EXAMPLE_CATALOG
         first_duplicate = catalog_entry("simple_latest")
         second_duplicate = catalog_entry("rate_matched_sensor")
@@ -934,8 +925,6 @@ class ExampleTests(unittest.TestCase):
             catalog_module.EXAMPLE_CATALOG = original_catalog
 
     def test_catalog_validation_rejects_non_contiguous_reference_numbers(self) -> None:
-        import examples._catalog as catalog_module
-
         original_catalog = catalog_module.EXAMPLE_CATALOG
         try:
             catalog_module.EXAMPLE_CATALOG = tuple(
@@ -954,8 +943,6 @@ class ExampleTests(unittest.TestCase):
             catalog_module.EXAMPLE_CATALOG = original_catalog
 
     def test_catalog_validation_rejects_archived_reference_examples(self) -> None:
-        import examples._catalog as catalog_module
-
         original_catalog = catalog_module.EXAMPLE_CATALOG
         try:
             catalog_module.EXAMPLE_CATALOG = (
@@ -979,8 +966,6 @@ class ExampleTests(unittest.TestCase):
     def test_catalog_validation_rejects_archived_readme_featured_examples(
         self,
     ) -> None:
-        import examples._catalog as catalog_module
-
         original_catalog = catalog_module.EXAMPLE_CATALOG
         try:
             catalog_module.EXAMPLE_CATALOG = (
@@ -1001,8 +986,6 @@ class ExampleTests(unittest.TestCase):
             catalog_module.EXAMPLE_CATALOG = original_catalog
 
     def test_catalog_validation_rejects_duplicate_readme_orders(self) -> None:
-        import examples._catalog as catalog_module
-
         original_catalog = catalog_module.EXAMPLE_CATALOG
         try:
             catalog_module.EXAMPLE_CATALOG = tuple(
@@ -1021,8 +1004,6 @@ class ExampleTests(unittest.TestCase):
             catalog_module.EXAMPLE_CATALOG = original_catalog
 
     def test_catalog_validation_rejects_duplicate_reference_numbers(self) -> None:
-        import examples._catalog as catalog_module
-
         original_catalog = catalog_module.EXAMPLE_CATALOG
         try:
             catalog_module.EXAMPLE_CATALOG = tuple(
@@ -1041,8 +1022,6 @@ class ExampleTests(unittest.TestCase):
             catalog_module.EXAMPLE_CATALOG = original_catalog
 
     def test_catalog_validation_rejects_non_positive_readme_orders(self) -> None:
-        import examples._catalog as catalog_module
-
         original_catalog = catalog_module.EXAMPLE_CATALOG
         try:
             catalog_module.EXAMPLE_CATALOG = tuple(
@@ -1061,8 +1040,6 @@ class ExampleTests(unittest.TestCase):
             catalog_module.EXAMPLE_CATALOG = original_catalog
 
     def test_catalog_validation_rejects_non_contiguous_readme_orders(self) -> None:
-        import examples._catalog as catalog_module
-
         original_catalog = catalog_module.EXAMPLE_CATALOG
         try:
             catalog_module.EXAMPLE_CATALOG = tuple(
@@ -1081,8 +1058,6 @@ class ExampleTests(unittest.TestCase):
             catalog_module.EXAMPLE_CATALOG = original_catalog
 
     def test_catalog_validation_rejects_reference_gap_overlap(self) -> None:
-        import examples._catalog as catalog_module
-
         original_gaps = catalog_module.REFERENCE_EXAMPLE_GAPS
         try:
             catalog_module.REFERENCE_EXAMPLE_GAPS = (
@@ -1102,8 +1077,6 @@ class ExampleTests(unittest.TestCase):
             catalog_module.REFERENCE_EXAMPLE_GAPS = original_gaps
 
     def test_catalog_validation_rejects_manifest_drift_from_discovered_modules(self) -> None:
-        import examples._catalog as catalog_module
-
         original_discover = catalog_module._discover_manifestable_modules
         try:
             catalog_module._discover_manifestable_modules = lambda: (
@@ -1123,8 +1096,6 @@ class ExampleTests(unittest.TestCase):
     def test_catalog_validation_rejects_manifest_entries_missing_from_discovery(
         self,
     ) -> None:
-        import examples._catalog as catalog_module
-
         original_discover = catalog_module._discover_manifestable_modules
         try:
             catalog_module._discover_manifestable_modules = lambda: tuple(
@@ -1142,8 +1113,6 @@ class ExampleTests(unittest.TestCase):
             catalog_module._discover_manifestable_modules = original_discover
 
     def test_catalog_validation_rejects_duplicate_reference_gap_numbers(self) -> None:
-        import examples._catalog as catalog_module
-
         original_gaps = catalog_module.REFERENCE_EXAMPLE_GAPS
         try:
             catalog_module.REFERENCE_EXAMPLE_GAPS = (
@@ -1170,8 +1139,6 @@ class ExampleTests(unittest.TestCase):
     def test_catalog_validation_keeps_readme_groups_in_sync_with_featured_examples(
         self,
     ) -> None:
-        import examples._catalog as catalog_module
-
         original_groups = catalog_module._README_EXAMPLE_GROUPS
         try:
             catalog_module._README_EXAMPLE_GROUPS = {
@@ -1205,8 +1172,6 @@ class ExampleTests(unittest.TestCase):
     def test_catalog_validation_rejects_gap_overlap_with_implemented_reference_example(
         self,
     ) -> None:
-        import examples._catalog as catalog_module
-
         original_gaps = catalog_module.REFERENCE_EXAMPLE_GAPS
         try:
             catalog_module.REFERENCE_EXAMPLE_GAPS = (
@@ -1226,8 +1191,6 @@ class ExampleTests(unittest.TestCase):
             catalog_module.REFERENCE_EXAMPLE_GAPS = original_gaps
 
     def test_catalog_validation_rejects_entry_without_backing_file(self) -> None:
-        import examples._catalog as catalog_module
-
         original_catalog = catalog_module.EXAMPLE_CATALOG
         try:
             catalog_module.EXAMPLE_CATALOG = (
