@@ -6161,7 +6161,7 @@ class Graph:
 
     def links(self) -> Iterator[Link]:
         """Iterate over registered links."""
-        return iter(tuple(self._links.values()))
+        return iter(tuple(self._links[name] for name in sorted(self._links)))
 
     def add_mesh_primitive(self, primitive: MeshPrimitive) -> MeshPrimitive:
         """Register an explicit mesh primitive in topology metadata."""
@@ -6204,7 +6204,12 @@ class Graph:
 
     def mesh_primitives(self) -> Iterator[MeshPrimitive]:
         """Iterate over registered mesh primitives."""
-        return iter(tuple(self._mesh_primitives.values()))
+        return iter(
+            tuple(
+                self._mesh_primitives[name]
+                for name in sorted(self._mesh_primitives)
+            )
+        )
 
     def query_service(self, owner: str = "query") -> QueryServiceRoutes:
         """Return or lazily create the query request/response routes."""
@@ -6303,7 +6308,12 @@ class Graph:
 
     def debug_routes(self) -> Iterator[RouteRef]:
         """Return the well-known debug routes created so far."""
-        return iter(tuple(self._debug_routes.values()))
+        return iter(
+            tuple(
+                self._debug_routes[event_type]
+                for event_type in sorted(self._debug_routes)
+            )
+        )
 
     def audit(self, route_ref: RouteLike | None = None) -> Iterator[DebugEvent]:
         """Return retained audit/debug events, optionally filtered by route."""
