@@ -80,7 +80,7 @@ class RxFacadeTests(unittest.TestCase):
         self.assertNotIn("typing", marble_module.__dict__)
         self.assertNotIn("warn", marble_module.__dict__)
 
-    def test_private_testing_facade_exports_intentional_snapshot(self) -> None:
+    def test_private_testing_facade_exports_only_rx_test_primitives(self) -> None:
         load_manyfold_package()
         testing_module = importlib.import_module("manyfold._rx.testing")
 
@@ -93,10 +93,12 @@ class RxFacadeTests(unittest.TestCase):
                 "ReactiveTest",
                 "Recorded",
                 "TestScheduler",
-                "is_prime",
             ),
         )
         self.assertNotIn("annotations", testing_module.__dict__)
+        self.assertNotIn("coldobservable", testing_module.__all__)
+        self.assertNotIn("hotobservable", testing_module.__all__)
+        self.assertNotIn("is_prime", testing_module.__all__)
 
     def test_private_subject_submodules_export_only_subject_classes(self) -> None:
         load_manyfold_package()

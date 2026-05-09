@@ -7,9 +7,10 @@ from reactivex.testing import (
     ReactiveTest as ReactiveTest,
     Recorded as Recorded,
     TestScheduler as TestScheduler,
-    is_prime as is_prime,
 )
 
+# Keep the private facade focused on Rx testing primitives instead of mirroring
+# incidental helpers that RxPy may add to its package exports.
 __all__ = (
     "MockDisposable",
     "OnErrorPredicate",
@@ -17,5 +18,4 @@ __all__ = (
     "ReactiveTest",
     "Recorded",
     "TestScheduler",
-    "is_prime",
 )
