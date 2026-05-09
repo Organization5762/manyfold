@@ -214,6 +214,33 @@ graph.lineage(route=None, causality_id=...)
 Use these surfaces when debugging behavior that would otherwise live in logs,
 queue dashboards, or ad hoc counters.
 
+## Manifest
+
+Use `Graph.manifest()` when you need a reviewable snapshot of graph identity,
+routes, edges, runtime nodes, middleware, links, and mesh primitives:
+
+```python
+graph.connect(source=temperature, sink=average_temperature)
+manifest = graph.manifest()
+
+print(manifest.manifest_version)
+print(manifest.edges[0].source.display())
+print(manifest.edges[0].sink.display())
+```
+
+Output:
+
+```text
+manyfold.graph.manifest.v0
+read.logical.sensor.environment.temperature.meta.v1
+read.logical.sensor.environment.average_temperature.meta.v1
+```
+
+The Python manifest keeps routes, edges, descriptors, links, and mesh
+primitives as objects. Use `Graph.manifest_json()` only when the snapshot should
+cross the serialization boundary: committed, diffed, or attached to a bug
+report.
+
 ## Example Path
 
 Start here:
