@@ -46,7 +46,7 @@ CHECKLIST_STATUS = {
     ),
     "10": (
         " ",
-        "Clock domains, taints, guarded scheduler release, and explicit taint-repair operators now exist, but broader time semantics and repair coverage are still partial.",
+        "Clock domains, taints, guarded scheduler release, validated event-time progress, idempotent watermark releases, and explicit taint-repair operators now exist, but broader time semantics and repair coverage are still partial.",
     ),
     "11": (
         " ",
@@ -62,7 +62,7 @@ CHECKLIST_STATUS = {
     ),
     "14": (
         " ",
-        "Basic stateful_map, filter, sliding window, partition-scoped rolling and event-time windows/aggregations, trigger-driven rolling window aggregation, latest-join, stream-table lookup join, and bounded interval-join operators now exist in the Python layer, but richer repartitioned/event-time semantics are still pending.",
+        "Basic stateful_map, filter, sliding window, partition-scoped rolling and event-time windows/aggregations, trigger-driven rolling window aggregation, latest-join, stream-table lookup join, and bounded event-time interval-join operators now exist in the Python layer, but richer repartitioned/event-time semantics are still pending.",
     ),
     "15": (
         "x",
@@ -125,7 +125,7 @@ APPENDIX_STATUS = {
     ),
     "Windows, aggregations, and streaming joins": (
         " ",
-        "Basic filter, sliding windows, partition-scoped watermark-aware event-time windows and aggregations, trigger-driven rolling window aggregation, latest-join composition, stream-table lookup joins, and bounded interval joins now exist, but richer repartitioned/event-time semantics are still pending.",
+        "Basic filter, sliding windows, partition-scoped watermark-aware event-time windows and aggregations, trigger-driven rolling window aggregation, latest-join composition, stream-table lookup joins, and bounded event-time interval joins now exist, but richer repartitioned/event-time semantics are still pending.",
     ),
     "Middleware as a first-class composition surface": (
         "x",
@@ -145,7 +145,7 @@ APPENDIX_STATUS = {
     ),
     "Scheduling and out-of-order bugs made harder to express": (
         " ",
-        "Guarded scheduler release and control-loop scaffolding now exist, but semantics are still incomplete.",
+        "Guarded scheduler release, validated event-time progress, and idempotent watermark releases now exist, but semantics are still incomplete.",
     ),
     "Metadata/payload split with lazy payload opening": (
         " ",

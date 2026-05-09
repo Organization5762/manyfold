@@ -195,7 +195,15 @@ graph.resistor(
 Windows and joins make time and coordination visible:
 
 ```python
-graph.window_by_time(source, width=1.0, watermark=watermark_route)
+graph.window_by_time(source, width=1, watermark=watermark_route)
+graph.interval_join(
+    left_stream,
+    right_stream,
+    within=2,
+    combine=combine_values,
+    left_time=lambda value: value.event_time,
+    right_time=lambda value: value.event_time,
+)
 graph.lookup_join(left_stream, right_state, combine=combine_values)
 ```
 
