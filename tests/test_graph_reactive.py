@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import subprocess
 import sys
 import threading
 import time
@@ -8,7 +9,7 @@ import unittest
 from dataclasses import dataclass
 from unittest import mock
 
-from tests.test_support import load_manyfold_graph_module
+from tests.test_support import load_manyfold_graph_module, subprocess_test_env
 
 
 def load_graph_module():
@@ -280,6 +281,73 @@ class GraphReactiveTests(unittest.TestCase):
 
         latest = graph.latest(route)
         self.assertIsNone(latest)
+
+    def test_native_emit_rejects_invalid_control_epochs(self) -> None:
+        script = """
+import manyfold._manyfold_rust as native
+
+route = native.RouteRef(
+    native.NamespaceRef(native.Plane.Read, native.Layer.Logical, "clock"),
+    "epoch",
+    "sample",
+    native.Variant.Meta,
+    native.SchemaRef("EpochSample", 1),
+)
+graph = native.Graph()
+
+for control_epoch in (True, False, -1, "3"):
+    try:
+        graph.emit(route, b"tick", control_epoch=control_epoch)
+    except ValueError as exc:
+        assert "control_epoch must be a non-negative integer or None" in str(exc), str(exc)
+    else:
+        raise AssertionError(f"expected ValueError for {control_epoch!r}")
+
+assert graph.latest(route) is None
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            check=False,
+            capture_output=True,
+            env=subprocess_test_env(),
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_native_writable_port_rejects_invalid_control_epochs(self) -> None:
+        script = """
+import manyfold._manyfold_rust as native
+
+route = native.RouteRef(
+    native.NamespaceRef(native.Plane.Write, native.Layer.Logical, "clock"),
+    "epoch",
+    "request",
+    native.Variant.Request,
+    native.SchemaRef("EpochRequest", 1),
+)
+graph = native.Graph()
+port = graph.writable_port(route)
+
+for control_epoch in (True, False, -1, "3"):
+    try:
+        port.write(b"tick", control_epoch=control_epoch)
+    except ValueError as exc:
+        assert "control_epoch must be a non-negative integer or None" in str(exc), str(exc)
+    else:
+        raise AssertionError(f"expected ValueError for {control_epoch!r}")
+
+assert graph.latest(route) is None
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            check=False,
+            capture_output=True,
+            env=subprocess_test_env(),
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_any_schema_preserves_local_objects_through_graph_observe(self) -> None:
         graph_module = load_graph_module()

@@ -110,6 +110,36 @@ fn validate_nonblank_text(field: &str, value: &str) -> PyResult<()> {
     Ok(())
 }
 
+fn invalid_non_negative_integer(field: &str) -> PyErr {
+    PyValueError::new_err(format!("{field} must be a non-negative integer"))
+}
+
+fn invalid_positive_integer(field: &str) -> PyErr {
+    PyValueError::new_err(format!("{field} must be a positive integer"))
+}
+
+fn extract_nonbool_u64(value: &Bound<'_, PyAny>, field: &str) -> PyResult<u64> {
+    if value.is_instance_of::<PyBool>() {
+        return Err(invalid_non_negative_integer(field));
+    }
+    value
+        .extract::<u64>()
+        .map_err(|_| invalid_non_negative_integer(field))
+}
+
+fn extract_positive_u32(value: &Bound<'_, PyAny>, field: &str) -> PyResult<u32> {
+    if value.is_instance_of::<PyBool>() {
+        return Err(invalid_positive_integer(field));
+    }
+    let parsed = value
+        .extract::<u32>()
+        .map_err(|_| invalid_positive_integer(field))?;
+    if parsed == 0 {
+        return Err(invalid_positive_integer(field));
+    }
+    Ok(parsed)
+}
+
 fn extract_positive_capacity(value: &Bound<'_, PyAny>) -> PyResult<usize> {
     if value.is_instance_of::<PyBool>() {
         return Err(PyTypeError::new_err(
@@ -121,6 +151,33 @@ fn extract_positive_capacity(value: &Bound<'_, PyAny>) -> PyResult<usize> {
         return Err(PyValueError::new_err("capacity must be greater than zero"));
     }
     Ok(capacity)
+}
+
+fn extract_logical_length_bytes(value: &Bound<'_, PyAny>) -> PyResult<u64> {
+    extract_nonbool_u64(value, "logical_length_bytes")
+}
+
+fn extract_optional_control_epoch(value: &Bound<'_, PyAny>) -> PyResult<Option<u64>> {
+    if value.is_none() {
+        return Ok(None);
+    }
+    if value.is_instance_of::<PyBool>() {
+        return Err(PyValueError::new_err(
+            "control_epoch must be a non-negative integer or None",
+        ));
+    }
+    value
+        .extract::<u64>()
+        .map(Some)
+        .map_err(|_| PyValueError::new_err("control_epoch must be a non-negative integer or None"))
+}
+
+fn extract_schedule_epoch(value: &Bound<'_, PyAny>) -> PyResult<u64> {
+    extract_nonbool_u64(value, "epoch")
+}
+
+fn extract_schema_version(value: &Bound<'_, PyAny>) -> PyResult<u32> {
+    extract_positive_u32(value, "schema version")
 }
 
 #[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
@@ -507,14 +564,15 @@ pub struct NamespaceRef {
 #[pymethods]
 impl NamespaceRef {
     #[new]
-    fn new(plane: PyPlane, layer: PyLayer, owner: String) -> Self {
-        Self {
+    fn new(plane: PyPlane, layer: PyLayer, owner: String) -> PyResult<Self> {
+        validate_nonblank_text("owner", &owner)?;
+        Ok(Self {
             inner: NamespaceRefCore {
                 plane: plane.inner,
                 layer: layer.inner,
                 owner,
             },
-        }
+        })
     }
     #[getter]
     fn plane(&self) -> PyPlane {
@@ -555,10 +613,14 @@ pub struct SchemaRef {
 #[pymethods]
 impl SchemaRef {
     #[new]
-    fn new(schema_id: String, version: u32) -> Self {
-        Self {
+    fn new(
+        schema_id: String,
+        #[pyo3(from_py_with = extract_schema_version)] version: u32,
+    ) -> PyResult<Self> {
+        validate_nonblank_text("schema_id", &schema_id)?;
+        Ok(Self {
             inner: SchemaRefCore { schema_id, version },
-        }
+        })
     }
     #[getter]
     fn schema_id(&self) -> String {
@@ -591,6 +653,8 @@ impl RouteRef {
         schema: Py<SchemaRef>,
         py: Python<'_>,
     ) -> PyResult<Self> {
+        validate_nonblank_text("family", &family)?;
+        validate_nonblank_text("stream", &stream)?;
         let inner = RouteRefCore {
             namespace: namespace.borrow(py).inner.clone(),
             family,
@@ -648,13 +712,14 @@ pub struct ProducerRef {
 #[pymethods]
 impl ProducerRef {
     #[new]
-    fn new(producer_id: String, kind: PyProducerKind) -> Self {
-        Self {
+    fn new(producer_id: String, kind: PyProducerKind) -> PyResult<Self> {
+        validate_nonblank_text("producer_id", &producer_id)?;
+        Ok(Self {
             inner: ProducerRefCore {
                 producer_id,
                 kind: kind.inner,
             },
-        }
+        })
     }
     #[getter]
     fn producer_id(&self) -> String {
@@ -681,10 +746,11 @@ pub struct RuntimeRef {
 #[pymethods]
 impl RuntimeRef {
     #[new]
-    fn new(runtime_id: String) -> Self {
-        Self {
+    fn new(runtime_id: String) -> PyResult<Self> {
+        validate_nonblank_text("runtime_id", &runtime_id)?;
+        Ok(Self {
             inner: RuntimeRefCore { runtime_id },
-        }
+        })
     }
     #[getter]
     fn runtime_id(&self) -> String {
@@ -705,10 +771,11 @@ pub struct ClockDomainRef {
 #[pymethods]
 impl ClockDomainRef {
     #[new]
-    fn new(clock_domain_id: String) -> Self {
-        Self {
+    fn new(clock_domain_id: String) -> PyResult<Self> {
+        validate_nonblank_text("clock_domain_id", &clock_domain_id)?;
+        Ok(Self {
             inner: ClockDomainRefCore { clock_domain_id },
-        }
+        })
     }
     #[getter]
     fn clock_domain_id(&self) -> String {
@@ -732,18 +799,20 @@ impl PayloadRef {
     #[pyo3(signature = (payload_id, logical_length_bytes=0, codec_id="identity".to_string(), inline_bytes=Vec::new()))]
     fn new(
         payload_id: String,
-        logical_length_bytes: u64,
+        #[pyo3(from_py_with = extract_logical_length_bytes)] logical_length_bytes: u64,
         codec_id: String,
         inline_bytes: Vec<u8>,
-    ) -> Self {
-        Self {
+    ) -> PyResult<Self> {
+        validate_nonblank_text("payload_id", &payload_id)?;
+        validate_nonblank_text("codec_id", &codec_id)?;
+        Ok(Self {
             inner: crate::core::PayloadRefCore {
                 payload_id,
                 logical_length_bytes,
                 codec_id,
                 inline_bytes,
             },
-        }
+        })
     }
     #[getter]
     fn payload_id(&self) -> String {
@@ -776,14 +845,16 @@ pub struct TaintMark {
 #[pymethods]
 impl TaintMark {
     #[new]
-    fn new(domain: PyTaintDomain, value_id: String, origin_id: String) -> Self {
-        Self {
+    fn new(domain: PyTaintDomain, value_id: String, origin_id: String) -> PyResult<Self> {
+        validate_nonblank_text("value_id", &value_id)?;
+        validate_nonblank_text("origin_id", &origin_id)?;
+        Ok(Self {
             inner: TaintMarkCore {
                 domain: domain.inner,
                 value_id,
                 origin_id,
             },
-        }
+        })
     }
     #[getter]
     fn domain(&self) -> PyTaintDomain {
@@ -814,7 +885,7 @@ pub struct ScheduleGuard {
 #[pymethods]
 impl ScheduleGuard {
     #[staticmethod]
-    fn not_before_epoch(epoch: u64) -> Self {
+    fn not_before_epoch(#[pyo3(from_py_with = extract_schedule_epoch)] epoch: u64) -> Self {
         Self {
             inner: ScheduleGuardCore {
                 condition: ScheduleConditionCore::NotBeforeEpoch(epoch),
@@ -1040,7 +1111,7 @@ impl WritablePort {
         &self,
         payload: Vec<u8>,
         producer: Option<ProducerRef>,
-        control_epoch: Option<u64>,
+        #[pyo3(from_py_with = extract_optional_control_epoch)] control_epoch: Option<u64>,
     ) -> PyResult<ClosedEnvelope> {
         let mut graph = lock_graph(&self.graph)?;
         let producer = producer
@@ -1401,15 +1472,16 @@ pub struct ControlLoop {
 #[pymethods]
 impl ControlLoop {
     #[new]
-    fn new(name: String, read_routes: Vec<RouteRef>, write_request: RouteRef) -> Self {
-        Self {
+    fn new(name: String, read_routes: Vec<RouteRef>, write_request: RouteRef) -> PyResult<Self> {
+        validate_nonblank_text("control loop name", &name)?;
+        Ok(Self {
             inner: ControlLoopCore {
                 name,
                 read_routes: read_routes.into_iter().map(|route| route.inner).collect(),
                 write_route: write_request.inner,
                 epoch: 0,
             },
-        }
+        })
     }
     #[getter]
     fn name(&self) -> String {
@@ -1469,7 +1541,7 @@ impl Graph {
         route: RouteRef,
         payload: Vec<u8>,
         producer: Option<ProducerRef>,
-        control_epoch: Option<u64>,
+        #[pyo3(from_py_with = extract_optional_control_epoch)] control_epoch: Option<u64>,
     ) -> PyResult<Vec<ClosedEnvelope>> {
         let mut graph = lock_graph(&self.state)?;
         let producer = producer
