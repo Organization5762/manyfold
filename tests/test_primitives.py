@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import math
+import subprocess
+import sys
 import unittest
 
-from tests.test_support import load_manyfold_package
+from tests.test_support import load_manyfold_package, subprocess_test_env
 
 
 class PrimitiveTests(unittest.TestCase):
@@ -112,6 +114,76 @@ class PrimitiveTests(unittest.TestCase):
                 invalid_kwargs = {**kwargs, field: value}
                 with self.assertRaisesRegex(ValueError, message):
                     manyfold.TypedRoute(**invalid_kwargs)
+
+    def test_native_reference_constructors_reject_blank_identifiers(self) -> None:
+        script = """
+import manyfold._manyfold_rust as native
+
+namespace = native.NamespaceRef(native.Plane.Read, native.Layer.Logical, "owner")
+schema = native.SchemaRef("Payload", 1)
+route = native.RouteRef(namespace, "family", "stream", native.Variant.Meta, schema)
+
+cases = (
+    (lambda: native.NamespaceRef(native.Plane.Read, native.Layer.Logical, " "), "owner"),
+    (lambda: native.SchemaRef(" ", 1), "schema_id"),
+    (lambda: native.RouteRef(namespace, " ", "stream", native.Variant.Meta, schema), "family"),
+    (lambda: native.RouteRef(namespace, "family", "", native.Variant.Meta, schema), "stream"),
+    (lambda: native.ProducerRef(" ", native.ProducerKind.Application), "producer_id"),
+    (lambda: native.RuntimeRef(" "), "runtime_id"),
+    (lambda: native.ClockDomainRef(" "), "clock_domain_id"),
+    (lambda: native.PayloadRef(" ", 0), "payload_id"),
+    (lambda: native.PayloadRef("payload", 0, " "), "codec_id"),
+    (lambda: native.TaintMark(native.TaintDomain.Time, " ", "origin"), "value_id"),
+    (lambda: native.TaintMark(native.TaintDomain.Time, "value", ""), "origin_id"),
+    (lambda: native.ControlLoop("", [route], route), "control loop name"),
+)
+
+for build, field in cases:
+    try:
+        build()
+    except ValueError as exc:
+        assert f"{field} must be a non-empty string" in str(exc), str(exc)
+    else:
+        raise AssertionError(f"expected ValueError for {field}")
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            check=False,
+            capture_output=True,
+            env=subprocess_test_env(),
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_native_reference_constructors_reject_invalid_unsigned_fields(self) -> None:
+        script = """
+import manyfold._manyfold_rust as native
+
+cases = (
+    (lambda: native.SchemaRef("Payload", 0), "schema version must be a positive integer"),
+    (lambda: native.SchemaRef("Payload", True), "schema version must be a positive integer"),
+    (lambda: native.PayloadRef("payload", True), "logical_length_bytes must be a non-negative integer"),
+    (lambda: native.ScheduleGuard.not_before_epoch(True), "epoch must be a non-negative integer"),
+)
+
+for build, message in cases:
+    try:
+        build()
+    except ValueError as exc:
+        assert message in str(exc), str(exc)
+    else:
+        raise AssertionError(f"expected ValueError for {message}")
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            check=False,
+            capture_output=True,
+            env=subprocess_test_env(),
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_schema_rejects_empty_id(self) -> None:
         manyfold = load_manyfold_package()
