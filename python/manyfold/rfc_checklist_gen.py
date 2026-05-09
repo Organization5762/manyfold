@@ -199,20 +199,17 @@ def parse_rfc_sections(
     rfc_path: Path = RFC_PATH,
 ) -> tuple[list[SectionStatus], list[AppendixStatus]]:
     lines = rfc_path.read_text(encoding="utf-8").splitlines()
-    section_matches = [
-        section
-        for line in lines
-        if line.startswith("## ")
-        for section in [_parse_section_heading(line)]
-        if section is not None
-    ]
-    appendix_matches = [
-        item
-        for line in lines
-        if line.startswith("- [")
-        for item in [_parse_appendix_item(line)]
-        if item is not None
-    ]
+    section_matches: list[SectionStatus] = []
+    appendix_matches: list[AppendixStatus] = []
+    for line in lines:
+        if line.startswith("## "):
+            section = _parse_section_heading(line)
+            if section is not None:
+                section_matches.append(section)
+        elif line.startswith("- ["):
+            appendix_item = _parse_appendix_item(line)
+            if appendix_item is not None:
+                appendix_matches.append(appendix_item)
     return section_matches, appendix_matches
 
 
