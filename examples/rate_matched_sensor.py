@@ -7,10 +7,6 @@ from manyfold import Graph, Layer, Plane, Schema, Variant
 from ._shared import example_route, int_schema
 
 
-class RateMatchedSensorExampleResult(TypedDict):
-    emitted_values: tuple[int, ...]
-
-
 def run_example() -> RateMatchedSensorExampleResult:
     graph = Graph()
     source = example_route(
@@ -61,6 +57,10 @@ def run_example() -> RateMatchedSensorExampleResult:
     subscription.dispose()
 
     return {"emitted_values": tuple(emitted_values)}
+
+
+class RateMatchedSensorExampleResult(TypedDict):
+    emitted_values: tuple[int, ...]
 
 
 if __name__ == "__main__":

@@ -821,7 +821,9 @@ class ComponentTests(unittest.TestCase):
         payload = route.schema.encode((7, "set pipe=a|b\nset mode=auto"))
 
         self.assertEqual(payload, b'[7,"set pipe=a|b\\nset mode=auto"]')
-        self.assertEqual(route.schema.decode(payload), (7, "set pipe=a|b\nset mode=auto"))
+        self.assertEqual(
+            route.schema.decode(payload), (7, "set pipe=a|b\nset mode=auto")
+        )
 
     def test_consensus_component_validates_candidate_membership(self) -> None:
         manyfold = load_manyfold_package()

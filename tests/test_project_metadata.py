@@ -16,6 +16,49 @@ PYTHON_SOURCE_ROOTS = (
 PACKAGE_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+")
 
 
+class ProjectMetadataTests(unittest.TestCase):
+    def test_python_imports_stay_at_module_scope(self) -> None:
+        violations = tuple(
+            violation
+            for path in _python_source_paths()
+            for violation in _function_local_imports(path)
+        )
+
+        self.assertEqual(violations, ())
+
+    def test_cargo_dependency_tables_stay_sorted(self) -> None:
+        lines = CARGO_TOML_PATH.read_text(encoding="utf-8").splitlines()
+
+        dependencies = _section_keys(lines, "dependencies")
+        dev_dependencies = _section_keys(lines, "dev-dependencies")
+
+        self.assertEqual(dependencies, tuple(sorted(dependencies)))
+        self.assertEqual(dev_dependencies, tuple(sorted(dev_dependencies)))
+
+    def test_pyproject_metadata_lists_stay_sorted(self) -> None:
+        lines = PYPROJECT_PATH.read_text(encoding="utf-8").splitlines()
+
+        keywords = _array_values(lines, "keywords")
+        classifiers = _array_values(lines, "classifiers")
+        dependencies = _array_values(lines, "dependencies")
+        dev_dependencies = _array_values(lines, "dev")
+        script_names = _section_keys(lines, "project.scripts")
+        url_names = _section_keys(lines, "project.urls")
+
+        self.assertEqual(keywords, tuple(sorted(keywords)))
+        self.assertEqual(classifiers, tuple(sorted(classifiers)))
+        self.assertEqual(
+            dependencies,
+            tuple(sorted(dependencies, key=_dependency_name)),
+        )
+        self.assertEqual(
+            dev_dependencies,
+            tuple(sorted(dev_dependencies, key=_dependency_name)),
+        )
+        self.assertEqual(script_names, tuple(sorted(script_names)))
+        self.assertEqual(url_names, tuple(sorted(url_names)))
+
+
 def _array_values(lines: list[str], key: str) -> tuple[str, ...]:
     values: list[str] = []
     in_array = False
@@ -58,11 +101,7 @@ def _section_keys(lines: list[str], section: str) -> tuple[str, ...]:
 
 def _python_source_paths() -> tuple[Path, ...]:
     return tuple(
-        sorted(
-            path
-            for root in PYTHON_SOURCE_ROOTS
-            for path in root.rglob("*.py")
-        )
+        sorted(path for root in PYTHON_SOURCE_ROOTS for path in root.rglob("*.py"))
     )
 
 
@@ -85,46 +124,3 @@ def _function_local_imports(path: Path) -> tuple[str, ...]:
                 break
             parent = parents.get(parent)
     return tuple(violations)
-
-
-class ProjectMetadataTests(unittest.TestCase):
-    def test_python_imports_stay_at_module_scope(self) -> None:
-        violations = tuple(
-            violation
-            for path in _python_source_paths()
-            for violation in _function_local_imports(path)
-        )
-
-        self.assertEqual(violations, ())
-
-    def test_cargo_dependency_tables_stay_sorted(self) -> None:
-        lines = CARGO_TOML_PATH.read_text(encoding="utf-8").splitlines()
-
-        dependencies = _section_keys(lines, "dependencies")
-        dev_dependencies = _section_keys(lines, "dev-dependencies")
-
-        self.assertEqual(dependencies, tuple(sorted(dependencies)))
-        self.assertEqual(dev_dependencies, tuple(sorted(dev_dependencies)))
-
-    def test_pyproject_metadata_lists_stay_sorted(self) -> None:
-        lines = PYPROJECT_PATH.read_text(encoding="utf-8").splitlines()
-
-        keywords = _array_values(lines, "keywords")
-        classifiers = _array_values(lines, "classifiers")
-        dependencies = _array_values(lines, "dependencies")
-        dev_dependencies = _array_values(lines, "dev")
-        script_names = _section_keys(lines, "project.scripts")
-        url_names = _section_keys(lines, "project.urls")
-
-        self.assertEqual(keywords, tuple(sorted(keywords)))
-        self.assertEqual(classifiers, tuple(sorted(classifiers)))
-        self.assertEqual(
-            dependencies,
-            tuple(sorted(dependencies, key=_dependency_name)),
-        )
-        self.assertEqual(
-            dev_dependencies,
-            tuple(sorted(dev_dependencies, key=_dependency_name)),
-        )
-        self.assertEqual(script_names, tuple(sorted(script_names)))
-        self.assertEqual(url_names, tuple(sorted(url_names)))

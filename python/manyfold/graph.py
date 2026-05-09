@@ -91,31 +91,25 @@ DIAGRAM_GROUP_FIELDS = frozenset(
 )
 DIAGRAM_DIRECTIONS = frozenset(("BT", "LR", "RL", "TB", "TD"))
 _PIPELINE_ROUTE_IDS = count(1)
-_THREAD_PLACEMENT_KINDS = frozenset(
-    ("main", "background", "pooled", "isolated")
-)
+_THREAD_PLACEMENT_KINDS = frozenset(("main", "background", "pooled", "isolated"))
 _POOLED_THREAD_SCHEDULERS = frozenset(("background", "blocking_io", "input"))
 _NO_PENDING: Any = object()
 _STATS_SCHEDULER = TimeoutScheduler()
 logger = logging.getLogger(__name__)
 
 
-def _require_non_empty_text(value: str, field_name: str) -> None:
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{field_name} must be a non-empty string")
-
-
-def _require_integer(value: object, field: str) -> None:
-    if not isinstance(value, int) or isinstance(value, bool):
-        raise ValueError(f"{field} must be an integer")
-
-
-def _require_progress_value(value: object) -> int:
-    if not isinstance(value, int) or isinstance(value, bool):
-        raise ValueError("event-time progress must be a non-negative integer")
-    if value < 0:
-        raise ValueError("event-time progress must be a non-negative integer")
-    return value
+def instrument_stream(
+    source: ObservableLike[T],
+    *,
+    stream_name: str,
+    log_interval_ms: int,
+) -> Observable[T]:
+    """Wrap an observable with periodic stream delivery logging."""
+    return LoggingNode(
+        name=f"{stream_name}.logging",
+        stream_name=stream_name,
+        interval_ms=log_interval_ms,
+    ).observable(source)
 
 
 @runtime_checkable
@@ -156,7 +150,9 @@ class CoalesceLatestNode(Generic[T]):
         if self.window_ms <= 0:
             return cast(Observable[T], source)
 
-        def subscribe(observer: ObserverLike[T], scheduler: object | None = None) -> Any:
+        def subscribe(
+            observer: ObserverLike[T], scheduler: object | None = None
+        ) -> Any:
             del scheduler
 
             lock = RLock()
@@ -292,7 +288,9 @@ class LoggingNode(Generic[T]):
             )
             schedule_log()
 
-        def subscribe(observer: ObserverLike[T], scheduler: object | None = None) -> Any:
+        def subscribe(
+            observer: ObserverLike[T], scheduler: object | None = None
+        ) -> Any:
             nonlocal event_count, subscriber_count, timer
             subscriber_count += 1
             schedule_log()
@@ -333,20 +331,6 @@ class LoggingNode(Generic[T]):
             return Disposable(dispose)
 
         return rx.create(subscribe)
-
-
-def instrument_stream(
-    source: ObservableLike[T],
-    *,
-    stream_name: str,
-    log_interval_ms: int,
-) -> Observable[T]:
-    """Wrap an observable with periodic stream delivery logging."""
-    return LoggingNode(
-        name=f"{stream_name}.logging",
-        stream_name=stream_name,
-        interval_ms=log_interval_ms,
-    ).observable(source)
 
 
 @dataclass(frozen=True)
@@ -431,7 +415,9 @@ class NodeThreadPlacement:
             and self.scheduler_name not in _POOLED_THREAD_SCHEDULERS
         ):
             supported = ", ".join(sorted(_POOLED_THREAD_SCHEDULERS))
-            raise ValueError(f"unknown pooled scheduler: {self.scheduler_name}; use {supported}")
+            raise ValueError(
+                f"unknown pooled scheduler: {self.scheduler_name}; use {supported}"
+            )
 
     @classmethod
     def main_thread(cls) -> NodeThreadPlacement:
@@ -700,6 +686,9 @@ class LifecycleBinding:
             )
             if route is not None
         )
+
+
+WriteTarget = Union[WriteBinding, LifecycleBinding, RouteLike]
 
 
 @dataclass(frozen=True)
@@ -1150,21 +1139,6 @@ class RetryPolicy:
         return cls(max_attempts=max_attempts, backoff_epochs=backoff_epochs)
 
 
-WriteTarget = Union[WriteBinding, LifecycleBinding, RouteLike]
-
-
-def _validate_control_epoch(control_epoch: int | None) -> None:
-    if control_epoch is None:
-        return
-    try:
-        _require_integer(control_epoch, "control_epoch")
-    except ValueError as exc:
-        raise ValueError(
-            "control_epoch must be a non-negative integer or None"
-        ) from exc
-    if control_epoch < 0:
-        raise ValueError("control_epoch must be a non-negative integer or None")
-
 @dataclass(frozen=True)
 class WriteBindings:
     """Factories for common shadow-route write binding layouts."""
@@ -1481,68 +1455,6 @@ class ReactiveWritablePort:
         )
 
 
-class _TrackedSubscription:
-    def __init__(
-        self,
-        graph: Graph,
-        route_ref: RouteRef,
-        inner: SubscriptionLike,
-        subscriber_id: str,
-    ) -> None:
-        self._graph = graph
-        self._route_ref = route_ref
-        self._inner = inner
-        self._subscriber_id = subscriber_id
-        self._disposed = False
-
-    def dispose(self) -> None:
-        if self._disposed:
-            return
-        self._disposed = True
-        route_key = self._graph._route_key(self._route_ref)
-        self._graph._subscriber_count[route_key] -= 1
-        subscribers = self._graph._route_subscribers.get(route_key)
-        if subscribers is not None:
-            subscribers.discard(self._subscriber_id)
-        self._inner.dispose()
-
-
-class _ThreadPlacementSubscription:
-    def __init__(
-        self,
-        inner: SubscriptionLike,
-        *,
-        owned_scheduler: object | None = None,
-    ) -> None:
-        self._inner = inner
-        self._owned_scheduler = owned_scheduler
-        self._disposed = False
-
-    def dispose(self) -> None:
-        if self._disposed:
-            return
-        self._disposed = True
-        self._inner.dispose()
-        if self._owned_scheduler is None:
-            return
-        dispose = getattr(self._owned_scheduler, "dispose", None)
-        if callable(dispose):
-            dispose()
-
-
-class _CompositeSubscription:
-    def __init__(self, subscriptions: Sequence[SubscriptionLike]) -> None:
-        self._subscriptions = tuple(subscriptions)
-        self._disposed = False
-
-    def dispose(self) -> None:
-        if self._disposed:
-            return
-        self._disposed = True
-        for subscription in self._subscriptions:
-            subscription.dispose()
-
-
 class GraphConnection:
     """Handle for graph-installed observation topology."""
 
@@ -1599,7 +1511,9 @@ class GraphContext:
         self._graph = graph
         self.name = name
         self.group = group
-        self.metadata = {str(key): str(value) for key, value in (metadata or {}).items()}
+        self.metadata = {
+            str(key): str(value) for key, value in (metadata or {}).items()
+        }
         self._entered = False
 
     @property
@@ -2164,7 +2078,9 @@ class Graph:
             return {
                 "name": value.name,
                 "input_routes": tuple(route.display() for route in value.input_routes),
-                "output_routes": tuple(route.display() for route in value.output_routes),
+                "output_routes": tuple(
+                    route.display() for route in value.output_routes
+                ),
                 "group": value.group,
                 "metadata": tuple(
                     {"name": name, "value": metadata_value}
@@ -2265,7 +2181,10 @@ class Graph:
     def _context_route_role(route_ref: RouteRef) -> str | None:
         if route_ref.namespace.plane == Plane.Debug:
             return None
-        if route_ref.namespace.plane == Plane.Write or route_ref.variant == Variant.Request:
+        if (
+            route_ref.namespace.plane == Plane.Write
+            or route_ref.variant == Variant.Request
+        ):
             return "input"
         return "output"
 
@@ -2464,7 +2383,9 @@ class Graph:
         source_key = self._connectable_key(source, edge_role="source")
         sink_key = self._connectable_key(sink, edge_role="sink")
         source_route = (
-            None if isinstance(source, NativeMailbox) else self._coerce_route_ref(source)
+            None
+            if isinstance(source, NativeMailbox)
+            else self._coerce_route_ref(source)
         )
         policy = (
             self._default_flow_policy_for_route(source_route)
@@ -2559,7 +2480,10 @@ class Graph:
         history = self._history.setdefault(key, [])
         history.append(envelope)
         retention = self._retention_policy_for(route_ref)
-        if retention.history_limit is not None and len(history) > retention.history_limit:
+        if (
+            retention.history_limit is not None
+            and len(history) > retention.history_limit
+        ):
             del history[: len(history) - retention.history_limit]
         self._payload_route_by_id[envelope.payload_ref.payload_id] = key
         inline_payload = bytes(envelope.payload_ref.inline_bytes)
@@ -2588,9 +2512,9 @@ class Graph:
         self._lineage_events_by_trace.setdefault(resolved_trace_id, []).append(
             self._event_index_key(event)
         )
-        self._lineage_events_by_causality.setdefault(
-            resolved_causality_id, []
-        ).append(self._event_index_key(event))
+        self._lineage_events_by_causality.setdefault(resolved_causality_id, []).append(
+            self._event_index_key(event)
+        )
         if correlation_id is not None:
             self._lineage_events_by_correlation.setdefault(correlation_id, []).append(
                 self._event_index_key(event)
@@ -2666,7 +2590,9 @@ class Graph:
         *,
         record_open: bool,
     ) -> bytes:
-        payload = self._known_payload_bytes(route_ref, envelope, record_open=record_open)
+        payload = self._known_payload_bytes(
+            route_ref, envelope, record_open=record_open
+        )
         if payload is not None:
             return payload
         opened = tuple(self._read_port(route_ref).open())
@@ -2931,7 +2857,9 @@ class Graph:
     def _binding_for_route(self, route_ref: RouteLike) -> WriteBinding | None:
         route_display = self._route_key(route_ref)
         for lifecycle in self._lifecycle_bindings.values():
-            if any(route.display() == route_display for route in lifecycle.scope_routes()):
+            if any(
+                route.display() == route_display for route in lifecycle.scope_routes()
+            ):
                 return lifecycle.binding
         for binding in self._write_bindings.values():
             for candidate in (
@@ -3185,9 +3113,7 @@ class Graph:
                 latest_replay_policy=retention.latest_replay_policy,
                 durability_class=retention.durability_class,
                 replay_window=retention.replay_window,
-                payload_retention_policy=cast(
-                    str, retention.payload_retention_policy
-                ),
+                payload_retention_policy=cast(str, retention.payload_retention_policy),
             ),
             security=DescriptorSecurityBlock(
                 read_capabilities=("read",),
@@ -3899,10 +3825,13 @@ class Graph:
 
     def _pipeline_output_route(self, node_name: str) -> TypedRoute[Any]:
         route_id = next(_PIPELINE_ROUTE_IDS)
-        safe_name = "".join(
-            char if char.isalnum() or char in ("-", "_") else "-"
-            for char in node_name
-        ).strip("-") or "node"
+        safe_name = (
+            "".join(
+                char if char.isalnum() or char in ("-", "_") else "-"
+                for char in node_name
+            ).strip("-")
+            or "node"
+        )
         return route(
             plane=Plane.Read,
             layer=Layer.Internal,
@@ -4369,12 +4298,12 @@ class Graph:
             async_boundary_kind="mailbox",
             overflow_policy=resolved.overflow_policy,
         )
-        self._mailbox_flow_policies[
-            mailbox.ingress.describe().route_display
-        ] = mailbox_policy
-        self._mailbox_flow_policies[
-            mailbox.egress.describe().route_display
-        ] = mailbox_policy
+        self._mailbox_flow_policies[mailbox.ingress.describe().route_display] = (
+            mailbox_policy
+        )
+        self._mailbox_flow_policies[mailbox.egress.describe().route_display] = (
+            mailbox_policy
+        )
         self._remember_active_context_key(
             mailbox.ingress.describe().route_display,
             "input",
@@ -4579,9 +4508,9 @@ class Graph:
         )
         self._resistors[resolved_name] = resistor
         source_route = self._coerce_route_ref(source)
-        latest: tuple[
-            T | bytes, ClosedEnvelope, LineageRecord, tuple[Any, ...]
-        ] | None = None
+        latest: (
+            tuple[T | bytes, ClosedEnvelope, LineageRecord, tuple[Any, ...]] | None
+        ) = None
 
         def emit(
             value: T | bytes,
@@ -4827,8 +4756,7 @@ class Graph:
                 )
             ),
             links=tuple(
-                self._manifest_link(self._links[name])
-                for name in sorted(self._links)
+                self._manifest_link(self._links[name]) for name in sorted(self._links)
             ),
             mesh_primitives=tuple(
                 self._manifest_mesh_primitive(self._mesh_primitives[name])
@@ -4854,11 +4782,14 @@ class Graph:
 
     def manifest_json(self) -> str:
         """Render the current graph manifest as stable, sorted JSON."""
-        return json.dumps(
-            self._manifest_block(self.manifest()),
-            indent=2,
-            sort_keys=True,
-        ) + "\n"
+        return (
+            json.dumps(
+                self._manifest_block(self.manifest()),
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n"
+        )
 
     @overload
     def latest(self, route_ref: TypedRoute[T]) -> TypedEnvelope[T] | None: ...
@@ -4960,7 +4891,9 @@ class Graph:
             key=lambda snapshot: (
                 snapshot.route_display,
                 snapshot.scheduler_epoch,
-                snapshot.not_before_epoch if snapshot.not_before_epoch is not None else -1,
+                snapshot.not_before_epoch
+                if snapshot.not_before_epoch is not None
+                else -1,
                 snapshot.attempt_count,
             )
         )
@@ -4986,8 +4919,12 @@ class Graph:
         metadata_items = tuple(
             sorted((str(key), str(value)) for key, value in (metadata or {}).items())
         )
-        input_route_refs = tuple(self._coerce_route_ref(route) for route in input_routes)
-        output_route_refs = tuple(self._coerce_route_ref(route) for route in output_routes)
+        input_route_refs = tuple(
+            self._coerce_route_ref(route) for route in input_routes
+        )
+        output_route_refs = tuple(
+            self._coerce_route_ref(route) for route in output_routes
+        )
         for route_ref in input_route_refs + output_route_refs:
             self._diagram_routes[route_ref.display()] = route_ref
         node = DiagramNode(
@@ -5068,8 +5005,7 @@ class Graph:
             )
         )
         node_ids = {
-            node_name: f"n{index}"
-            for index, node_name in enumerate(node_names)
+            node_name: f"n{index}" for index, node_name in enumerate(node_names)
         }
         route_refs = {
             **{route.display(): route for route in self.catalog()},
@@ -5098,7 +5034,7 @@ class Graph:
         for group_key in sorted(grouped_nodes):
             group_label = " / ".join(part for part in group_key if part)
             lines.append(
-                f"  subgraph g{group_index}[\"{self._diagram_escape(group_label)}\"]"
+                f'  subgraph g{group_index}["{self._diagram_escape(group_label)}"]'
             )
             for node_name in grouped_nodes[group_key]:
                 lines.append(
@@ -5214,7 +5150,7 @@ class Graph:
 
     def _diagram_node_line(self, node_id: str, metadata: dict[str, str]) -> str:
         label = self._diagram_escape(metadata["label"])
-        return f"    {node_id}[\"{label}\"]"
+        return f'    {node_id}["{label}"]'
 
     def validate_graph(self) -> Iterator[str]:
         """Return graph validation issues detected by the native layer and wrapper semantics."""
@@ -5577,7 +5513,7 @@ class Graph:
         if retry_policy is not None and ack_route is None:
             raise ValueError(
                 "retry_policy requires an ack_route or a write binding with an ack route"
-        )
+            )
         ack_baseline_seq = -1
         if ack_route is not None:
             ack_closed = self._latest_closed(ack_route)
@@ -5918,7 +5854,9 @@ class Graph:
         if grace < 0:
             raise ValueError("window grace must be non-negative")
         source_route = self._coerce_route_ref(source)
-        watermark_route = None if watermark is None else self._coerce_route_ref(watermark)
+        watermark_route = (
+            None if watermark is None else self._coerce_route_ref(watermark)
+        )
 
         def subscribe(
             observer: ObserverLike[list[T] | list[bytes]],
@@ -5958,7 +5896,9 @@ class Graph:
                 window_start = current_watermark - width + 1
                 items = [
                     value
-                    for event_time_value, value in sorted(buffer, key=lambda item: item[0])
+                    for event_time_value, value in sorted(
+                        buffer, key=lambda item: item[0]
+                    )
                     if window_start <= event_time_value <= current_watermark
                 ]
                 if items:
@@ -6364,10 +6304,7 @@ class Graph:
                 )
             self._apply_taint_repair(emitted, self._item_taints(item), repair=repair)
             key = self._route_key(output)
-            note = (
-                f"{self._taint_domain_name(repair.domain)}:"
-                f"{repair.proof}"
-            )
+            note = f"{self._taint_domain_name(repair.domain)}:{repair.proof}"
             notes = self._route_repair_notes.setdefault(key, [])
             if note not in notes:
                 notes.append(note)
@@ -6509,7 +6446,9 @@ class Graph:
         """Register middleware after enforcing RFC preservation rules."""
         _require_non_empty_text(middleware.name, "middleware name")
         _require_non_empty_text(middleware.kind, "middleware kind")
-        _require_non_empty_text(middleware.attachment_scope, "middleware attachment scope")
+        _require_non_empty_text(
+            middleware.attachment_scope, "middleware attachment scope"
+        )
         _require_non_empty_text(middleware.target, "middleware target")
         if not middleware.preserves_envelope_identity:
             raise ValueError(
@@ -6585,10 +6524,7 @@ class Graph:
     def mesh_primitives(self) -> Iterator[MeshPrimitive]:
         """Iterate over registered mesh primitives."""
         return iter(
-            tuple(
-                self._mesh_primitives[name]
-                for name in sorted(self._mesh_primitives)
-            )
+            tuple(self._mesh_primitives[name] for name in sorted(self._mesh_primitives))
         )
 
     def query_service(self, owner: str = "query") -> QueryServiceRoutes:
@@ -6705,3 +6641,96 @@ class Graph:
                 if route_display is None or event.route_display == route_display
             )
         )
+
+
+class _TrackedSubscription:
+    def __init__(
+        self,
+        graph: Graph,
+        route_ref: RouteRef,
+        inner: SubscriptionLike,
+        subscriber_id: str,
+    ) -> None:
+        self._graph = graph
+        self._route_ref = route_ref
+        self._inner = inner
+        self._subscriber_id = subscriber_id
+        self._disposed = False
+
+    def dispose(self) -> None:
+        if self._disposed:
+            return
+        self._disposed = True
+        route_key = self._graph._route_key(self._route_ref)
+        self._graph._subscriber_count[route_key] -= 1
+        subscribers = self._graph._route_subscribers.get(route_key)
+        if subscribers is not None:
+            subscribers.discard(self._subscriber_id)
+        self._inner.dispose()
+
+
+class _ThreadPlacementSubscription:
+    def __init__(
+        self,
+        inner: SubscriptionLike,
+        *,
+        owned_scheduler: object | None = None,
+    ) -> None:
+        self._inner = inner
+        self._owned_scheduler = owned_scheduler
+        self._disposed = False
+
+    def dispose(self) -> None:
+        if self._disposed:
+            return
+        self._disposed = True
+        self._inner.dispose()
+        if self._owned_scheduler is None:
+            return
+        dispose = getattr(self._owned_scheduler, "dispose", None)
+        if callable(dispose):
+            dispose()
+
+
+class _CompositeSubscription:
+    def __init__(self, subscriptions: Sequence[SubscriptionLike]) -> None:
+        self._subscriptions = tuple(subscriptions)
+        self._disposed = False
+
+    def dispose(self) -> None:
+        if self._disposed:
+            return
+        self._disposed = True
+        for subscription in self._subscriptions:
+            subscription.dispose()
+
+
+def _require_non_empty_text(value: str, field_name: str) -> None:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field_name} must be a non-empty string")
+
+
+def _require_integer(value: object, field: str) -> None:
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ValueError(f"{field} must be an integer")
+
+
+def _require_progress_value(value: object) -> int:
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ValueError("event-time progress must be a non-negative integer")
+    if value < 0:
+        raise ValueError("event-time progress must be a non-negative integer")
+    return value
+
+
+def _validate_control_epoch(control_epoch: int | None) -> None:
+    if control_epoch is None:
+        return
+    try:
+        _require_integer(control_epoch, "control_epoch")
+    except ValueError as exc:
+        raise ValueError(
+            "control_epoch must be a non-negative integer or None"
+        ) from exc
+    if control_epoch < 0:
+        raise ValueError("control_epoch must be a non-negative integer or None")

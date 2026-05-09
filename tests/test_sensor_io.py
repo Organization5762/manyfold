@@ -14,37 +14,6 @@ import reactivex as rx
 from tests.test_support import load_manyfold_package
 
 
-def _int_schema(manyfold, schema_id: str = "Int"):
-    return manyfold.Schema(
-        schema_id=schema_id,
-        version=1,
-        encode=lambda value: str(value).encode("ascii"),
-        decode=lambda payload: int(payload.decode("ascii")),
-    )
-
-
-def _exception_schema(manyfold, schema_id: str = "Exception"):
-    def encode(value: BaseException) -> bytes:
-        return f"{type(value).__name__}:{value}".encode("utf-8")
-
-    def decode(payload: bytes) -> BaseException:
-        return RuntimeError(payload.decode("utf-8"))
-
-    return manyfold.Schema(schema_id=schema_id, version=1, encode=encode, decode=decode)
-
-
-def _route(manyfold, stream: str, schema):
-    return manyfold.route(
-        plane=manyfold.Plane.Read,
-        layer=manyfold.Layer.Logical,
-        owner=manyfold.OwnerName("sensor"),
-        family=manyfold.StreamFamily("io"),
-        stream=manyfold.StreamName(stream),
-        variant=manyfold.Variant.Meta,
-        schema=schema,
-    )
-
-
 class SensorIoTests(unittest.TestCase):
     def test_sensor_io_exports_are_tuple_shaped(self) -> None:
         load_manyfold_package()
@@ -388,11 +357,26 @@ class SensorIoTests(unittest.TestCase):
 
         for kwargs, message in (
             ({"status": "green", "observed_at": 1.0}, "status must be one of"),
-            ({"status": "ok", "observed_at": math.inf}, "observed_at must be a finite number"),
-            ({"status": "ok", "observed_at": 1.0, "message": 7}, "message must be a string"),
-            ({"status": "ok", "observed_at": 1.0, "stale": "false"}, "stale must be a boolean"),
-            ({"status": "ok", "observed_at": 1.0, "error_count": True}, "error_count must be an integer"),
-            ({"status": "ok", "observed_at": 1.0, "error_count": -1}, "error_count must be non-negative"),
+            (
+                {"status": "ok", "observed_at": math.inf},
+                "observed_at must be a finite number",
+            ),
+            (
+                {"status": "ok", "observed_at": 1.0, "message": 7},
+                "message must be a string",
+            ),
+            (
+                {"status": "ok", "observed_at": 1.0, "stale": "false"},
+                "stale must be a boolean",
+            ),
+            (
+                {"status": "ok", "observed_at": 1.0, "error_count": True},
+                "error_count must be an integer",
+            ),
+            (
+                {"status": "ok", "observed_at": 1.0, "error_count": -1},
+                "error_count must be non-negative",
+            ),
         ):
             with self.subTest(kwargs=kwargs):
                 with self.assertRaisesRegex(ValueError, message):
@@ -452,7 +436,9 @@ class SensorIoTests(unittest.TestCase):
             "status": None,
         }
 
-        with self.assertRaisesRegex(ValueError, "sequence_number must be a JSON integer"):
+        with self.assertRaisesRegex(
+            ValueError, "sequence_number must be a JSON integer"
+        ):
             schema.decode(json.dumps(payload).encode("utf-8"))
 
     def test_sensor_sample_schema_rejects_non_string_quality(self) -> None:
@@ -497,7 +483,9 @@ class SensorIoTests(unittest.TestCase):
             "status": None,
         }
 
-        with self.assertRaisesRegex(ValueError, "source_timestamp must be a JSON number"):
+        with self.assertRaisesRegex(
+            ValueError, "source_timestamp must be a JSON number"
+        ):
             schema.decode(json.dumps(payload).encode("utf-8"))
 
     def test_sensor_sample_schema_rejects_non_finite_timestamp(self) -> None:
@@ -664,7 +652,9 @@ class SensorIoTests(unittest.TestCase):
             "metadata": {},
         }
 
-        with self.assertRaisesRegex(ValueError, "sequence_number must be a JSON integer"):
+        with self.assertRaisesRegex(
+            ValueError, "sequence_number must be a JSON integer"
+        ):
             schema.decode(json.dumps(payload).encode("utf-8"))
 
     def test_sensor_event_schema_rejects_boolean_observed_at(self) -> None:
@@ -1446,7 +1436,9 @@ class SensorIoTests(unittest.TestCase):
                 self.observe = FakeObservable()
 
         graph = manyfold.Graph()
-        output = _route(manyfold, "failed_control_output", manyfold.sensor_event_schema())
+        output = _route(
+            manyfold, "failed_control_output", manyfold.sensor_event_schema()
+        )
         control = _route(
             manyfold,
             "failed_control_input",
@@ -1601,7 +1593,10 @@ class SensorIoTests(unittest.TestCase):
                 "initial_delay",
                 lambda value: manyfold.SensorBackoffPolicy(initial_delay=value),
             ),
-            ("multiplier", lambda value: manyfold.SensorBackoffPolicy(multiplier=value)),
+            (
+                "multiplier",
+                lambda value: manyfold.SensorBackoffPolicy(multiplier=value),
+            ),
             ("max_delay", lambda value: manyfold.SensorBackoffPolicy(max_delay=value)),
         )
 
@@ -1660,7 +1655,9 @@ class SensorIoTests(unittest.TestCase):
 
         for buffer_size in (True, 1.5):
             with self.subTest(buffer_size=buffer_size):
-                with self.assertRaisesRegex(ValueError, "buffer_size must be an integer"):
+                with self.assertRaisesRegex(
+                    ValueError, "buffer_size must be an integer"
+                ):
                     manyfold.DoubleBuffer(buffer_size=buffer_size)  # type: ignore[arg-type]
 
         for expected_count in (False, 2.5):
@@ -1769,7 +1766,9 @@ class SensorIoTests(unittest.TestCase):
 
         self.assertEqual(disposed, ["interrupting"])
 
-    def test_local_durable_spool_cleans_up_log_when_source_subscribe_fails(self) -> None:
+    def test_local_durable_spool_cleans_up_log_when_source_subscribe_fails(
+        self,
+    ) -> None:
         manyfold = load_manyfold_package()
         sample_schema = manyfold.sensor_sample_schema(_int_schema(manyfold, "Temp"))
         route = _route(manyfold, "failed_spooled_sample", sample_schema)
@@ -1805,5 +1804,32 @@ class SensorIoTests(unittest.TestCase):
         self.assertEqual(records, ())
 
 
-if __name__ == "__main__":
-    unittest.main()
+def _int_schema(manyfold, schema_id: str = "Int"):
+    return manyfold.Schema(
+        schema_id=schema_id,
+        version=1,
+        encode=lambda value: str(value).encode("ascii"),
+        decode=lambda payload: int(payload.decode("ascii")),
+    )
+
+
+def _exception_schema(manyfold, schema_id: str = "Exception"):
+    def encode(value: BaseException) -> bytes:
+        return f"{type(value).__name__}:{value}".encode("utf-8")
+
+    def decode(payload: bytes) -> BaseException:
+        return RuntimeError(payload.decode("utf-8"))
+
+    return manyfold.Schema(schema_id=schema_id, version=1, encode=encode, decode=decode)
+
+
+def _route(manyfold, stream: str, schema):
+    return manyfold.route(
+        plane=manyfold.Plane.Read,
+        layer=manyfold.Layer.Logical,
+        owner=manyfold.OwnerName("sensor"),
+        family=manyfold.StreamFamily("io"),
+        stream=manyfold.StreamName(stream),
+        variant=manyfold.Variant.Meta,
+        schema=schema,
+    )

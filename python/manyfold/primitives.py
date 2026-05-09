@@ -44,59 +44,106 @@ _ANY_SCHEMA_LOCK = Lock()
 _ANY_SCHEMA_VALUES: dict[tuple[str, int, str], Any] = {}
 
 
-def _require_non_empty_string(value: str, field: str) -> None:
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{field} must be a non-empty string")
+SchemaLike = Any
 
 
-def _require_positive_int(value: int, field: str) -> None:
-    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
-        raise ValueError(f"{field} must be a positive integer")
+def source(route: TypedRoute[T] | RouteRef, *, replay_latest: bool = True) -> Source[T]:
+    """Mark a route as a signal source."""
+    return Source(route=route, replay_latest=replay_latest)
 
 
-def _require_enum_member(value: object, enum_type: type[Any], field: str) -> None:
-    if type(value) is str:
-        raise ValueError(f"{field} must be a {enum_type.__name__}")
-    value_token = getattr(value, "value", value)
-    members = (
-        getattr(enum_type, name)
-        for name in dir(enum_type)
-        if not name.startswith("_")
+def sink(route: TypedRoute[T] | RouteRef) -> Sink[T]:
+    """Mark a route as a signal sink."""
+    return Sink(route=route)
+
+
+@overload
+def route(
+    *,
+    owner: OwnerName | str,
+    family: StreamFamily | str,
+    stream: StreamName | str,
+    schema: SchemaLike[T],
+    plane: Plane = Plane.Read,
+    layer: Layer = Layer.Logical,
+    variant: Variant = Variant.Meta,
+    schema_id: str | None = None,
+    version: int | None = None,
+) -> TypedRoute[T]: ...
+
+
+@overload
+def route(
+    *,
+    namespace: RouteNamespace,
+    identity: RouteIdentity,
+    schema: SchemaLike[T],
+    schema_id: str | None = None,
+    version: int | None = None,
+) -> TypedRoute[T]: ...
+
+
+def route(
+    *,
+    plane: Plane | None = None,
+    layer: Layer | None = None,
+    owner: OwnerName | str | None = None,
+    family: StreamFamily | str | None = None,
+    stream: StreamName | str | None = None,
+    variant: Variant | None = None,
+    namespace: RouteNamespace | None = None,
+    identity: RouteIdentity | None = None,
+    schema: SchemaLike[T],
+    schema_id: str | None = None,
+    version: int | None = None,
+) -> TypedRoute[T]:
+    """Construct a typed route without exposing native identity plumbing."""
+    if namespace is not None:
+        if plane is not None or layer is not None:
+            raise ValueError("pass either namespace or plane/layer, not both")
+        plane = namespace.plane
+        layer = namespace.layer
+    else:
+        plane = Plane.Read if plane is None else plane
+        layer = Layer.Logical if layer is None else layer
+    if identity is not None:
+        if (
+            owner is not None
+            or family is not None
+            or stream is not None
+            or variant is not None
+        ):
+            raise ValueError(
+                "pass either identity or owner/family/stream/variant, not both"
+            )
+        owner = identity.owner
+        family = identity.family
+        stream = identity.stream
+        variant = identity.variant
+    else:
+        variant = Variant.Meta if variant is None else variant
+    missing = _missing_route_parts(
+        plane=plane,
+        layer=layer,
+        owner=owner,
+        family=family,
+        stream=stream,
+        variant=variant,
     )
-    if not any(
-        value is member
-        or value == member
-        or value_token == getattr(member, "value", member)
-        for member in members
-    ):
-        raise ValueError(f"{field} must be a {enum_type.__name__}")
-
-
-def _encode_finite_float(value: Any) -> bytes:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError("float schema values must be finite numbers")
-    number = float(value)
-    if not math.isfinite(number):
-        raise ValueError("float schema values must be finite numbers")
-    return repr(number).encode("ascii")
-
-
-def _decode_finite_float(payload: bytes) -> float:
-    try:
-        number = float(payload.decode("ascii"))
-    except (UnicodeDecodeError, ValueError) as exc:
-        raise ValueError("float schema values must be finite numbers") from exc
-    if not math.isfinite(number):
-        raise ValueError("float schema values must be finite numbers")
-    return number
-
-
-def _coerce_bytes_payload(value: Any) -> bytes:
-    if isinstance(value, bytes):
-        return value
-    if isinstance(value, (bytearray, memoryview)):
-        return bytes(value)
-    raise ValueError("bytes schema values must be bytes-like")
+    if missing:
+        raise ValueError(f"route requires: {', '.join(missing)}")
+    _require_enum_member(plane, Plane, "plane")
+    _require_enum_member(layer, Layer, "layer")
+    _require_enum_member(variant, Variant, "variant")
+    return TypedRoute(
+        plane=cast(Plane, plane),
+        layer=cast(Layer, layer),
+        owner=_coerce_owner_name(cast(OwnerName | str, owner)),
+        family=_coerce_stream_family(cast(StreamFamily | str, family)),
+        stream=_coerce_stream_name(cast(StreamName | str, stream)),
+        variant=cast(Variant, variant),
+        schema=_coerce_schema(schema, schema_id=schema_id, version=version),
+    )
 
 
 @runtime_checkable
@@ -385,181 +432,6 @@ class TypedEnvelope(Generic[T]):
         return self.closed
 
 
-def source(route: TypedRoute[T] | RouteRef, *, replay_latest: bool = True) -> Source[T]:
-    """Mark a route as a signal source."""
-    return Source(route=route, replay_latest=replay_latest)
-
-
-def sink(route: TypedRoute[T] | RouteRef) -> Sink[T]:
-    """Mark a route as a signal sink."""
-    return Sink(route=route)
-
-
-SchemaLike = Any
-
-
-def _coerce_owner_name(owner: OwnerName | str) -> OwnerName:
-    return owner if isinstance(owner, OwnerName) else OwnerName(owner)
-
-
-def _coerce_stream_family(family: StreamFamily | str) -> StreamFamily:
-    return family if isinstance(family, StreamFamily) else StreamFamily(family)
-
-
-def _coerce_stream_name(stream: StreamName | str) -> StreamName:
-    return stream if isinstance(stream, StreamName) else StreamName(stream)
-
-
-def _coerce_schema(
-    schema: SchemaLike[T],
-    *,
-    schema_id: str | None = None,
-    version: int | None = None,
-) -> Schema[T]:
-    if isinstance(schema, Schema):
-        resolved_schema_id = schema.schema_id if schema_id is None else schema_id
-        resolved_version = schema.version if version is None else version
-        if (
-            resolved_schema_id != schema.schema_id
-            or resolved_version != schema.version
-        ):
-            return Schema(
-                schema_id=resolved_schema_id,
-                version=resolved_version,
-                encode=schema.encode,
-                decode=schema.decode,
-            )
-        return schema
-    if schema is bytes:
-        if schema_id is None:
-            raise ValueError("schema_id is required when schema=bytes")
-        return cast(
-            Schema[T],
-            Schema.bytes(
-                name=schema_id, version=1 if version is None else version
-            ),
-        )
-    if not isinstance(schema, ProtobufMessageType):
-        raise ValueError("schema must be a Schema, bytes, or protobuf message type")
-    return cast(
-        Schema[T],
-        Schema.protobuf(
-            cast(ProtobufMessageType[TProto], schema),
-            schema_id=schema_id,
-            version=1 if version is None else version,
-        ),
-    )
-
-
-def _missing_route_parts(
-    *,
-    plane: Plane | None,
-    layer: Layer | None,
-    owner: OwnerName | str | None,
-    family: StreamFamily | str | None,
-    stream: StreamName | str | None,
-    variant: Variant | None,
-) -> tuple[str, ...]:
-    parts = (
-        ("plane", plane),
-        ("layer", layer),
-        ("owner", owner),
-        ("family", family),
-        ("stream", stream),
-        ("variant", variant),
-    )
-    return tuple(name for name, value in parts if value is None)
-
-
-@overload
-def route(
-    *,
-    owner: OwnerName | str,
-    family: StreamFamily | str,
-    stream: StreamName | str,
-    schema: SchemaLike[T],
-    plane: Plane = Plane.Read,
-    layer: Layer = Layer.Logical,
-    variant: Variant = Variant.Meta,
-    schema_id: str | None = None,
-    version: int | None = None,
-) -> TypedRoute[T]: ...
-
-
-@overload
-def route(
-    *,
-    namespace: RouteNamespace,
-    identity: RouteIdentity,
-    schema: SchemaLike[T],
-    schema_id: str | None = None,
-    version: int | None = None,
-) -> TypedRoute[T]: ...
-
-
-def route(
-    *,
-    plane: Plane | None = None,
-    layer: Layer | None = None,
-    owner: OwnerName | str | None = None,
-    family: StreamFamily | str | None = None,
-    stream: StreamName | str | None = None,
-    variant: Variant | None = None,
-    namespace: RouteNamespace | None = None,
-    identity: RouteIdentity | None = None,
-    schema: SchemaLike[T],
-    schema_id: str | None = None,
-    version: int | None = None,
-) -> TypedRoute[T]:
-    """Construct a typed route without exposing native identity plumbing."""
-    if namespace is not None:
-        if plane is not None or layer is not None:
-            raise ValueError("pass either namespace or plane/layer, not both")
-        plane = namespace.plane
-        layer = namespace.layer
-    else:
-        plane = Plane.Read if plane is None else plane
-        layer = Layer.Logical if layer is None else layer
-    if identity is not None:
-        if (
-            owner is not None
-            or family is not None
-            or stream is not None
-            or variant is not None
-        ):
-            raise ValueError(
-                "pass either identity or owner/family/stream/variant, not both"
-            )
-        owner = identity.owner
-        family = identity.family
-        stream = identity.stream
-        variant = identity.variant
-    else:
-        variant = Variant.Meta if variant is None else variant
-    missing = _missing_route_parts(
-        plane=plane,
-        layer=layer,
-        owner=owner,
-        family=family,
-        stream=stream,
-        variant=variant,
-    )
-    if missing:
-        raise ValueError(f"route requires: {', '.join(missing)}")
-    _require_enum_member(plane, Plane, "plane")
-    _require_enum_member(layer, Layer, "layer")
-    _require_enum_member(variant, Variant, "variant")
-    return TypedRoute(
-        plane=cast(Plane, plane),
-        layer=cast(Layer, layer),
-        owner=_coerce_owner_name(cast(OwnerName | str, owner)),
-        family=_coerce_stream_family(cast(StreamFamily | str, family)),
-        stream=_coerce_stream_name(cast(StreamName | str, stream)),
-        variant=cast(Variant, variant),
-        schema=_coerce_schema(schema, schema_id=schema_id, version=version),
-    )
-
-
 @dataclass
 class ReadThenWriteNextEpochStep(Generic[TRead, TWrite]):
     """Composable shared-stream step with one input stream and one output route."""
@@ -598,3 +470,124 @@ class ReadThenWriteNextEpochStep(Generic[TRead, TWrite]):
         if self._connection is None:
             self._connection = self._connect()
         return self._connection
+
+
+def _require_non_empty_string(value: str, field: str) -> None:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field} must be a non-empty string")
+
+
+def _require_positive_int(value: int, field: str) -> None:
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        raise ValueError(f"{field} must be a positive integer")
+
+
+def _require_enum_member(value: object, enum_type: type[Any], field: str) -> None:
+    if type(value) is str:
+        raise ValueError(f"{field} must be a {enum_type.__name__}")
+    value_token = getattr(value, "value", value)
+    members = (
+        getattr(enum_type, name) for name in dir(enum_type) if not name.startswith("_")
+    )
+    if not any(
+        value is member
+        or value == member
+        or value_token == getattr(member, "value", member)
+        for member in members
+    ):
+        raise ValueError(f"{field} must be a {enum_type.__name__}")
+
+
+def _encode_finite_float(value: Any) -> bytes:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("float schema values must be finite numbers")
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError("float schema values must be finite numbers")
+    return repr(number).encode("ascii")
+
+
+def _decode_finite_float(payload: bytes) -> float:
+    try:
+        number = float(payload.decode("ascii"))
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise ValueError("float schema values must be finite numbers") from exc
+    if not math.isfinite(number):
+        raise ValueError("float schema values must be finite numbers")
+    return number
+
+
+def _coerce_bytes_payload(value: Any) -> bytes:
+    if isinstance(value, bytes):
+        return value
+    if isinstance(value, (bytearray, memoryview)):
+        return bytes(value)
+    raise ValueError("bytes schema values must be bytes-like")
+
+
+def _coerce_owner_name(owner: OwnerName | str) -> OwnerName:
+    return owner if isinstance(owner, OwnerName) else OwnerName(owner)
+
+
+def _coerce_stream_family(family: StreamFamily | str) -> StreamFamily:
+    return family if isinstance(family, StreamFamily) else StreamFamily(family)
+
+
+def _coerce_stream_name(stream: StreamName | str) -> StreamName:
+    return stream if isinstance(stream, StreamName) else StreamName(stream)
+
+
+def _coerce_schema(
+    schema: SchemaLike[T],
+    *,
+    schema_id: str | None = None,
+    version: int | None = None,
+) -> Schema[T]:
+    if isinstance(schema, Schema):
+        resolved_schema_id = schema.schema_id if schema_id is None else schema_id
+        resolved_version = schema.version if version is None else version
+        if resolved_schema_id != schema.schema_id or resolved_version != schema.version:
+            return Schema(
+                schema_id=resolved_schema_id,
+                version=resolved_version,
+                encode=schema.encode,
+                decode=schema.decode,
+            )
+        return schema
+    if schema is bytes:
+        if schema_id is None:
+            raise ValueError("schema_id is required when schema=bytes")
+        return cast(
+            Schema[T],
+            Schema.bytes(name=schema_id, version=1 if version is None else version),
+        )
+    if not isinstance(schema, ProtobufMessageType):
+        raise ValueError("schema must be a Schema, bytes, or protobuf message type")
+    return cast(
+        Schema[T],
+        Schema.protobuf(
+            cast(ProtobufMessageType[TProto], schema),
+            schema_id=schema_id,
+            version=1 if version is None else version,
+        ),
+    )
+
+
+def _missing_route_parts(
+    *,
+    plane: Plane | None,
+    layer: Layer | None,
+    owner: OwnerName | str | None,
+    family: StreamFamily | str | None,
+    stream: StreamName | str | None,
+    variant: Variant | None,
+) -> tuple[str, ...]:
+    parts = (
+        ("plane", plane),
+        ("layer", layer),
+        ("owner", owner),
+        ("family", family),
+        ("stream", stream),
+        ("variant", variant),
+    )
+    return tuple(name for name, value in parts if value is None)

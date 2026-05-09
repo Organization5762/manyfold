@@ -43,6 +43,18 @@ __all__ = (
 ExampleRunner = Callable[[], Any]
 
 
+def reference_example_suite() -> tuple[ReferenceExample, ...]:
+    """Return the ordered RFC reference example suite."""
+
+    return REFERENCE_EXAMPLE_SUITE
+
+
+def implemented_reference_examples() -> tuple[ReferenceExample, ...]:
+    """Return the runnable subset of the RFC reference example suite."""
+
+    return _IMPLEMENTED_REFERENCE_EXAMPLES
+
+
 def _is_blank(value: str) -> bool:
     return not value.strip()
 
@@ -122,15 +134,3 @@ REFERENCE_EXAMPLE_SUITE: tuple[ReferenceExample, ...] = tuple(
 _IMPLEMENTED_REFERENCE_EXAMPLES: tuple[ReferenceExample, ...] = tuple(
     example for example in REFERENCE_EXAMPLE_SUITE if example.implemented
 )
-
-
-def reference_example_suite() -> tuple[ReferenceExample, ...]:
-    """Return the ordered RFC reference example suite."""
-
-    return REFERENCE_EXAMPLE_SUITE
-
-
-def implemented_reference_examples() -> tuple[ReferenceExample, ...]:
-    """Return the runnable subset of the RFC reference example suite."""
-
-    return _IMPLEMENTED_REFERENCE_EXAMPLES

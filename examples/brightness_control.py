@@ -15,11 +15,6 @@ from manyfold import (
 )
 
 
-class BrightnessControlExampleResult(TypedDict):
-    pwm_latest: bytes
-    pwm_seq: int
-
-
 def run_example() -> BrightnessControlExampleResult:
     graph = Graph()
     pwm_route = route(
@@ -65,6 +60,11 @@ def run_example() -> BrightnessControlExampleResult:
         "pwm_latest": latest.value,
         "pwm_seq": latest.closed.seq_source,
     }
+
+
+class BrightnessControlExampleResult(TypedDict):
+    pwm_latest: bytes
+    pwm_seq: int
 
 
 if __name__ == "__main__":

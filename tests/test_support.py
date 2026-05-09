@@ -67,60 +67,11 @@ MODULES_TO_RESET = (
 )
 
 
-def _module_available(module_name: str) -> bool:
-    try:
-        return importlib.util.find_spec(module_name) is not None
-    except (ImportError, ValueError):
-        return module_name in sys.modules
-
-
-def _reactivex_available() -> bool:
-    return all(
-        _module_available(module_name)
-        for module_name in (
-            "reactivex",
-            "reactivex.operators",
-            "reactivex.subject",
-        )
-    )
-
-
 def subprocess_test_env() -> dict[str, str]:
     env = dict(os.environ)
     env["PYTHONPATH"] = _pythonpath_with_repo_python_first(env.get("PYTHONPATH"))
     env.setdefault("UV_CACHE_DIR", str(REPO_ROOT / ".cache" / "uv"))
     return env
-
-
-def _pythonpath_with_repo_python_first(current_pythonpath: str | None) -> str:
-    python_root = str(PYTHON_ROOT)
-    if not current_pythonpath:
-        return python_root
-    resolved_python_root = PYTHON_ROOT.resolve()
-    existing_paths = _unique_nonempty_paths(
-        path
-        for path in current_pythonpath.split(os.pathsep)
-        if _resolve_pythonpath_entry(path) != resolved_python_root
-    )
-    return os.pathsep.join((python_root, *existing_paths))
-
-
-def _resolve_pythonpath_entry(path: str) -> Path:
-    entry = Path(path)
-    if not entry.is_absolute():
-        entry = REPO_ROOT / entry
-    return entry.resolve()
-
-
-def _unique_nonempty_paths(paths: Iterable[str]) -> tuple[str, ...]:
-    seen: set[str] = set()
-    unique_paths: list[str] = []
-    for path in paths:
-        if not path or path in seen:
-            continue
-        seen.add(path)
-        unique_paths.append(path)
-    return tuple(unique_paths)
 
 
 def install_reactivex_stub() -> None:
@@ -302,6 +253,13 @@ def install_reactivex_stub() -> None:
                 self._observers = []
                 super().__init__(self._subscribe_connectable)
 
+            def connect(self):
+                return self._source.subscribe(
+                    lambda item: [
+                        observer.on_next(item) for observer in list(self._observers)
+                    ]
+                )
+
             def _subscribe_connectable(self, observer=None, scheduler=None):
                 if callable(observer) and not hasattr(observer, "on_next"):
                     observer = _CallbackObserver(observer)
@@ -312,13 +270,6 @@ def install_reactivex_stub() -> None:
                         self._observers.remove(observer)
 
                 return Disposable(unsubscribe)
-
-            def connect(self):
-                return self._source.subscribe(
-                    lambda item: [
-                        observer.on_next(item) for observer in list(self._observers)
-                    ]
-                )
 
         def transform(source):
             return ConnectableObservable(source)
@@ -362,7 +313,9 @@ def install_reactivex_stub() -> None:
         "using",
         "with_latest_from",
     ):
-        setattr(rx_module, name, lambda *args, **kwargs: Observable(lambda *_: Disposable()))
+        setattr(
+            rx_module, name, lambda *args, **kwargs: Observable(lambda *_: Disposable())
+        )
     abc_module = types.ModuleType("reactivex.abc")
     disposable_module = types.ModuleType("reactivex.disposable")
     disposable_module.Disposable = Disposable
@@ -1011,15 +964,6 @@ def install_manyfold_rust_stub() -> None:
     sys.modules["manyfold._manyfold_rust"] = rust_module
 
 
-def _load_module(name: str, path: Path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    assert spec is not None and spec.loader is not None
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
 def reset_test_modules() -> None:
     for module_name in MODULES_TO_RESET:
         sys.modules.pop(module_name, None)
@@ -1230,3 +1174,61 @@ def load_example_module(name: str):
 def load_manyfold_graph_module():
     load_manyfold_package()
     return sys.modules["manyfold.graph"]
+
+
+def _module_available(module_name: str) -> bool:
+    try:
+        return importlib.util.find_spec(module_name) is not None
+    except (ImportError, ValueError):
+        return module_name in sys.modules
+
+
+def _reactivex_available() -> bool:
+    return all(
+        _module_available(module_name)
+        for module_name in (
+            "reactivex",
+            "reactivex.operators",
+            "reactivex.subject",
+        )
+    )
+
+
+def _pythonpath_with_repo_python_first(current_pythonpath: str | None) -> str:
+    python_root = str(PYTHON_ROOT)
+    if not current_pythonpath:
+        return python_root
+    resolved_python_root = PYTHON_ROOT.resolve()
+    existing_paths = _unique_nonempty_paths(
+        path
+        for path in current_pythonpath.split(os.pathsep)
+        if _resolve_pythonpath_entry(path) != resolved_python_root
+    )
+    return os.pathsep.join((python_root, *existing_paths))
+
+
+def _resolve_pythonpath_entry(path: str) -> Path:
+    entry = Path(path)
+    if not entry.is_absolute():
+        entry = REPO_ROOT / entry
+    return entry.resolve()
+
+
+def _unique_nonempty_paths(paths: Iterable[str]) -> tuple[str, ...]:
+    seen: set[str] = set()
+    unique_paths: list[str] = []
+    for path in paths:
+        if not path or path in seen:
+            continue
+        seen.add(path)
+        unique_paths.append(path)
+    return tuple(unique_paths)
+
+
+def _load_module(name: str, path: Path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec is not None and spec.loader is not None
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module

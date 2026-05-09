@@ -211,7 +211,9 @@ class GraphReactiveTests(unittest.TestCase):
             if envelope.seq_source == 1:
                 graph.publish(route, b"second")
 
-        subscription = graph._read_port(route).observe().subscribe(publish_during_replay)
+        subscription = (
+            graph._read_port(route).observe().subscribe(publish_during_replay)
+        )
         subscription.dispose()
 
         self.assertEqual(observed_sequences, [1, 2])
@@ -424,8 +426,8 @@ assert graph.latest(route) is None
         seen: list[int] = []
 
         graph.publish(route, 4)
-        connection = graph.observe(route).map(lambda value: value * 2).callback(
-            seen.append
+        connection = (
+            graph.observe(route).map(lambda value: value * 2).callback(seen.append)
         )
 
         connection.remove()
@@ -697,9 +699,13 @@ assert graph.latest(route) is None
         )
         graph = graph_module.Graph()
         seen: list[int] = []
-        connection = graph.observe(route, replay_latest=False).on_main_thread().callback(
-            seen.append,
-            name="collect-main",
+        connection = (
+            graph.observe(route, replay_latest=False)
+            .on_main_thread()
+            .callback(
+                seen.append,
+                name="collect-main",
+            )
         )
 
         try:
@@ -737,9 +743,13 @@ assert graph.latest(route) is None
             seen.append(value)
             done.set()
 
-        connection = graph.observe(route, replay_latest=False).on_pooled_thread().callback(
-            collect,
-            name="collect-pooled",
+        connection = (
+            graph.observe(route, replay_latest=False)
+            .on_pooled_thread()
+            .callback(
+                collect,
+                name="collect-pooled",
+            )
         )
 
         try:
@@ -797,7 +807,9 @@ assert graph.latest(route) is None
             )
             self.assertEqual(map_node.thread_placement.kind, "isolated")
             self.assertEqual(collect_node.thread_placement.kind, "isolated")
-            self.assertEqual(collect_node.thread_placement.thread_name, "exclusive-node")
+            self.assertEqual(
+                collect_node.thread_placement.thread_name, "exclusive-node"
+            )
         finally:
             connection.remove()
 
@@ -868,8 +880,7 @@ assert graph.latest(route) is None
             self.assertEqual(thread_ids["main"], main_thread_id)
             self.assertNotEqual(thread_ids["callback"], main_thread_id)
             placements = {
-                node.name: node.thread_placement
-                for node in graph.diagram_nodes()
+                node.name: node.thread_placement for node in graph.diagram_nodes()
             }
             self.assertEqual(placements["pooled-step"].kind, "pooled")
             self.assertEqual(placements["main-step"].kind, "main")
@@ -953,11 +964,15 @@ assert graph.latest(route) is None
         graph = graph_module.Graph()
         seen: list[int] = []
 
-        connection = graph.observe(route, replay_latest=False).coalesce_latest(
-            window_ms=100,
-            name="coalesce",
-            stream_name="numbers",
-        ).callback(seen.append)
+        connection = (
+            graph.observe(route, replay_latest=False)
+            .coalesce_latest(
+                window_ms=100,
+                name="coalesce",
+                stream_name="numbers",
+            )
+            .callback(seen.append)
+        )
         try:
             graph.publish(route, 1)
             graph.publish(route, 2)
@@ -1005,8 +1020,7 @@ assert graph.latest(route) is None
             self.assertEqual(reactive_threads.drain_frame_thread_queue(), 1)
             self.assertEqual(seen, [4])
             placements = {
-                node.name: node.thread_placement
-                for node in graph.diagram_nodes()
+                node.name: node.thread_placement for node in graph.diagram_nodes()
             }
             self.assertEqual(placements["coalesce-main"].kind, "main")
             self.assertEqual(placements["collect-main-coalesced"].kind, "main")
@@ -1102,11 +1116,15 @@ assert graph.latest(route) is None
         graph = graph_module.Graph()
         seen: list[int] = []
 
-        connection = graph.observe(route, replay_latest=False).log(
-            interval_ms=1,
-            name="log-values",
-            stream_name="numbers",
-        ).callback(seen.append)
+        connection = (
+            graph.observe(route, replay_latest=False)
+            .log(
+                interval_ms=1,
+                name="log-values",
+                stream_name="numbers",
+            )
+            .callback(seen.append)
+        )
         try:
             graph.publish(route, 7)
 
@@ -1709,7 +1727,9 @@ assert graph.latest(route) is None
 
         for value in (True, 2.5, "2"):
             with self.subTest(value=value):
-                with self.assertRaisesRegex(ValueError, "window size must be an integer"):
+                with self.assertRaisesRegex(
+                    ValueError, "window size must be an integer"
+                ):
                     graph.window(route, size=value)  # type: ignore[arg-type]
 
     def test_window_isolates_buffer_state_per_subscription(self) -> None:
@@ -2223,17 +2243,19 @@ assert graph.latest(route) is None
 
         for width in (True, "2"):
             with self.subTest(width=width):
-                with self.assertRaisesRegex(ValueError, "window width must be an integer"):
+                with self.assertRaisesRegex(
+                    ValueError, "window width must be an integer"
+                ):
                     graph.window_by_time(route, width=width)
         for grace in (False, "1"):
             with self.subTest(grace=grace):
-                with self.assertRaisesRegex(ValueError, "window grace must be an integer"):
+                with self.assertRaisesRegex(
+                    ValueError, "window grace must be an integer"
+                ):
                     graph.window_by_time(route, width=2, grace=grace)
         with self.assertRaisesRegex(ValueError, "window width must be positive"):
             graph.window_by_time(route, width=0)
-        with self.assertRaisesRegex(
-            ValueError, "window grace must be non-negative"
-        ):
+        with self.assertRaisesRegex(ValueError, "window grace must be non-negative"):
             graph.window_by_time(route, width=2, grace=-1)
         for kwargs, message in (
             ({"width": True}, "window width must be an integer"),
@@ -2679,8 +2701,9 @@ assert graph.latest(route) is None
             left.route_ref,
             right.route_ref,
             within=0,
-            combine=lambda accel, gyro: int(accel.decode("ascii"))
-            + int(gyro.decode("ascii")),
+            combine=lambda accel, gyro: (
+                int(accel.decode("ascii")) + int(gyro.decode("ascii"))
+            ),
         ).subscribe(joined.append)
         graph.publish(left, b"2")
         graph.publish(right, b"10")
@@ -2879,8 +2902,9 @@ assert graph.latest(route) is None
         subscription = graph.lookup_join(
             left.route_ref,
             right_state.route_ref,
-            combine=lambda accel, calibration: int(accel.decode("ascii"))
-            + int(calibration.decode("ascii")),
+            combine=lambda accel, calibration: (
+                int(accel.decode("ascii")) + int(calibration.decode("ascii"))
+            ),
         ).subscribe(joined.append)
 
         graph.publish(right_state, b"10")
@@ -3347,7 +3371,9 @@ assert graph.latest(route) is None
         graph_module = load_graph_module()
         graph = graph_module.Graph()
 
-        with self.assertRaisesRegex(ValueError, "unsupported Mermaid diagram direction"):
+        with self.assertRaisesRegex(
+            ValueError, "unsupported Mermaid diagram direction"
+        ):
             graph.render_diagram(direction="LR; click n0")
 
     def test_diagram_renders_registered_node_without_edges(self) -> None:
@@ -4222,7 +4248,9 @@ assert graph.latest(route) is None
             )
         )
 
-        subscription = graph.observe(route, replay_latest=False).subscribe(lambda _: None)
+        subscription = graph.observe(route, replay_latest=False).subscribe(
+            lambda _: None
+        )
 
         replay = graph.query(
             graph_module.QueryRequest(command="replay", route=route),
@@ -4345,9 +4373,7 @@ assert graph.latest(route) is None
             )
         )
         self.assertTrue(
-            any(
-                f"|parents={source.display()}@1" in item for item in response.items
-            )
+            any(f"|parents={source.display()}@1" in item for item in response.items)
         )
 
     def test_lineage_filters_by_correlation_id(self) -> None:
@@ -4466,9 +4492,7 @@ assert graph.latest(route) is None
     ) -> None:
         graph_module = load_graph_module()
 
-        with self.assertRaisesRegex(
-            ValueError, "latest_replay_policy must be one of"
-        ):
+        with self.assertRaisesRegex(ValueError, "latest_replay_policy must be one of"):
             graph_module.RouteRetentionPolicy(latest_replay_policy="forever")
         with self.assertRaisesRegex(
             ValueError, "history_limit must be positive when provided"
@@ -5028,13 +5052,17 @@ assert graph.latest(route) is None
 
         graph.publish_lazy(
             route,
-            graph_module.LazyPayloadSource(open=lambda: b"blob-1", logical_length_bytes=6),
+            graph_module.LazyPayloadSource(
+                open=lambda: b"blob-1", logical_length_bytes=6
+            ),
         )
         first = graph.latest(route.route_ref)
         self.assertIsNotNone(first)
         graph.publish_lazy(
             route,
-            graph_module.LazyPayloadSource(open=lambda: b"blob-2", logical_length_bytes=6),
+            graph_module.LazyPayloadSource(
+                open=lambda: b"blob-2", logical_length_bytes=6
+            ),
         )
 
         snapshot = graph.payload_demand_snapshot(route)
@@ -5991,12 +6019,16 @@ assert graph.latest(route) is None
 
         for value in (True, 1.5, "3"):
             with self.subTest(value=value):
-                with self.assertRaisesRegex(ValueError, "max_attempts must be an integer"):
+                with self.assertRaisesRegex(
+                    ValueError, "max_attempts must be an integer"
+                ):
                     graph_module.RetryPolicy(max_attempts=value)  # type: ignore[arg-type]
 
         for value in (False, 1.5, "3"):
             with self.subTest(value=value):
-                with self.assertRaisesRegex(ValueError, "backoff_epochs must be an integer"):
+                with self.assertRaisesRegex(
+                    ValueError, "backoff_epochs must be an integer"
+                ):
                     graph_module.RetryPolicy(  # type: ignore[arg-type]
                         max_attempts=1,
                         backoff_epochs=value,
@@ -6075,7 +6107,9 @@ assert graph.latest(route) is None
             "COHERENCE_WRITE_PENDING",
             tuple(taint.value_id for taint in request.taints),
         )
-        self.assertEqual(graph.shadow_state(binding).coherence_taints, ("COHERENCE_WRITE_PENDING",))
+        self.assertEqual(
+            graph.shadow_state(binding).coherence_taints, ("COHERENCE_WRITE_PENDING",)
+        )
 
     def test_route_audit_summarizes_write_binding_scope(self) -> None:
         graph_module = load_graph_module()
@@ -6114,9 +6148,7 @@ assert graph.latest(route) is None
                     binding.ack.display(),
                 ),
             )
-            self.assertEqual(
-                snapshot.recent_producers, ("device-adapter", "python")
-            )
+            self.assertEqual(snapshot.recent_producers, ("device-adapter", "python"))
             self.assertEqual(snapshot.active_subscribers, ("dashboard",))
             self.assertEqual(
                 snapshot.related_write_requests,
@@ -6592,9 +6624,11 @@ assert graph.latest(route) is None
         )
         graph = graph_module.Graph()
 
-        connection = graph.observe(source, replay_latest=False).moving_average(
-            window_size=3
-        ).connect(average)
+        connection = (
+            graph.observe(source, replay_latest=False)
+            .moving_average(window_size=3)
+            .connect(average)
+        )
         graph.publish(source, 72.4)
         graph.publish(source, 72.9)
         graph.publish(source, 73.7)
@@ -6803,7 +6837,8 @@ assert graph.latest(route) is None
             binding.request.display(), "write.raw.device.imu_left.lifecycle.request.v2"
         )
         self.assertEqual(
-            binding.desired.display(), "write.shadow.device.imu_left.lifecycle.desired.v2"
+            binding.desired.display(),
+            "write.shadow.device.imu_left.lifecycle.desired.v2",
         )
         self.assertEqual(
             binding.reported.display(),
@@ -6826,7 +6861,9 @@ assert graph.latest(route) is None
             "read.internal.device.imu_left.lifecycle.health.v2",
         )
 
-    def test_graph_lifecycle_registers_binding_and_supports_reconciliation(self) -> None:
+    def test_graph_lifecycle_registers_binding_and_supports_reconciliation(
+        self,
+    ) -> None:
         graph_module = load_graph_module()
         graph = graph_module.Graph()
         lifecycle = graph.lifecycle(
@@ -6846,7 +6883,9 @@ assert graph.latest(route) is None
         )
 
         self.assertEqual(shadow.coherence_taints, ("COHERENCE_STABLE",))
-        self.assertEqual(graph.shadow_state(lifecycle.request).ack.payload_ref.inline_bytes, b"ok")
+        self.assertEqual(
+            graph.shadow_state(lifecycle.request).ack.payload_ref.inline_bytes, b"ok"
+        )
 
 
 if __name__ == "__main__":

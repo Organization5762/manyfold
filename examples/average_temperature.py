@@ -5,16 +5,6 @@ from typing import TypedDict
 from manyfold import Graph, Schema, route
 
 
-class AverageTemperatureExampleResult(TypedDict):
-    latest_average: float
-    latest_seq: int
-    moving_average_node: str
-    moving_average_inputs: tuple[str, ...]
-    moving_average_outputs: tuple[str, ...]
-    moving_average_storage: str
-    moving_average_window_size: int
-
-
 def run_example() -> AverageTemperatureExampleResult:
     """Derive average temperature values from incoming temperature samples."""
     graph = Graph()
@@ -29,9 +19,11 @@ def run_example() -> AverageTemperatureExampleResult:
         schema=Schema.float(name="AverageTemperature"),
     )
 
-    subscription = graph.observe(temperature, replay_latest=False).moving_average(
-        window_size=3
-    ).connect(average_temperature)
+    subscription = (
+        graph.observe(temperature, replay_latest=False)
+        .moving_average(window_size=3)
+        .connect(average_temperature)
+    )
     graph.publish(temperature, 72.4)
     graph.publish(temperature, 72.9)
     graph.publish(temperature, 73.7)
@@ -55,6 +47,16 @@ def run_example() -> AverageTemperatureExampleResult:
         "moving_average_storage": metadata["storage"],
         "moving_average_window_size": int(metadata["window_size"]),
     }
+
+
+class AverageTemperatureExampleResult(TypedDict):
+    latest_average: float
+    latest_seq: int
+    moving_average_node: str
+    moving_average_inputs: tuple[str, ...]
+    moving_average_outputs: tuple[str, ...]
+    moving_average_storage: str
+    moving_average_window_size: int
 
 
 if __name__ == "__main__":

@@ -118,9 +118,7 @@ class ReactiveThreadsTests(unittest.TestCase):
                     ValueError,
                     "max_items must be an integer or None",
                 ):
-                    self.reactive_threads.drain_frame_thread_queue(
-                        max_items=max_items
-                    )
+                    self.reactive_threads.drain_frame_thread_queue(max_items=max_items)
 
     def test_latency_snapshot_reports_percentiles_from_sorted_samples(self) -> None:
         recorder = self.reactive_threads._LatencyRecorder()
@@ -198,7 +196,9 @@ class ReactiveThreadsTests(unittest.TestCase):
         self.assertEqual(background_values, [2, 4, 6])
         self.assertEqual(main_thread_values, [11, 12])
 
-    def test_pipe_in_background_emits_starting_value_once_per_subscription(self) -> None:
+    def test_pipe_in_background_emits_starting_value_once_per_subscription(
+        self,
+    ) -> None:
         source = self.rx.Subject()
         values: list[int | None] = []
 

@@ -7,15 +7,6 @@ from manyfold import Graph, Layer, MailboxDescriptor, Plane, Schema, Variant
 from ._shared import example_route
 
 
-class MailboxBridgeExampleResult(TypedDict):
-    capacity: int
-    available_credit: int
-    depth: int
-    dropped_messages: int
-    overflow_policy: str
-    topology_edges: tuple[tuple[str, str], ...]
-
-
 def run_example() -> MailboxBridgeExampleResult:
     graph = Graph()
     mailbox_descriptor = MailboxDescriptor(capacity=4, overflow_policy="drop_oldest")
@@ -54,6 +45,15 @@ def run_example() -> MailboxBridgeExampleResult:
         "overflow_policy": snapshot.overflow_policy,
         "topology_edges": tuple(graph.topology()),
     }
+
+
+class MailboxBridgeExampleResult(TypedDict):
+    capacity: int
+    available_credit: int
+    depth: int
+    dropped_messages: int
+    overflow_policy: str
+    topology_edges: tuple[tuple[str, str], ...]
 
 
 if __name__ == "__main__":

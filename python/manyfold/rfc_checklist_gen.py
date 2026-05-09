@@ -170,6 +170,76 @@ APPENDIX_STATUS = {
 }
 
 
+def parse_rfc_sections(
+    rfc_path: Path = RFC_PATH,
+) -> tuple[list[SectionStatus], list[AppendixStatus]]:
+    lines = rfc_path.read_text(encoding="utf-8").splitlines()
+    section_matches = [
+        section
+        for line in lines
+        if line.startswith("## ")
+        for section in [_parse_section_heading(line)]
+        if section is not None
+    ]
+    appendix_matches = [
+        item
+        for line in lines
+        if line.startswith("- [")
+        for item in [_parse_appendix_item(line)]
+        if item is not None
+    ]
+    return section_matches, appendix_matches
+
+
+def render_checklist(
+    sections: Iterable[SectionStatus], appendix_items: Iterable[AppendixStatus]
+) -> str:
+    section_lines = [
+        f"- [{section.checkbox}] {section.number}. {section.title} ({section.detail})"
+        for section in sections
+    ]
+    appendix_lines = [
+        f"- [{item.checkbox}] {item.title} ({item.detail})" for item in appendix_items
+    ]
+    lines = [
+        "# RFC Implementation Checklist",
+        "",
+        "Generated from `docs/rfc/wiregraph_rfc_rev2.md` by `manyfold-rfc-checklist`.",
+        "",
+        "## Core Sections",
+        *section_lines,
+        "",
+        "## Appendix F Acceptance Criteria",
+        *appendix_lines,
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="validate generated file without rewriting it",
+    )
+    args = parser.parse_args(argv)
+
+    sections, appendix_items = parse_rfc_sections()
+    checklist_content = render_checklist(sections, appendix_items)
+
+    if args.check:
+        current_checklist = (
+            CHECKLIST_PATH.read_text(encoding="utf-8")
+            if CHECKLIST_PATH.exists()
+            else ""
+        )
+        return 0 if current_checklist == checklist_content else 1
+
+    _write_if_changed(CHECKLIST_PATH, checklist_content)
+    return 0
+
+
 @dataclass(frozen=True)
 class SectionStatus:
     number: str
@@ -193,27 +263,6 @@ class _TextPath(Protocol):
     def read_text(self, *, encoding: str) -> str: ...
 
     def write_text(self, content: str, *, encoding: str) -> int: ...
-
-
-def parse_rfc_sections(
-    rfc_path: Path = RFC_PATH,
-) -> tuple[list[SectionStatus], list[AppendixStatus]]:
-    lines = rfc_path.read_text(encoding="utf-8").splitlines()
-    section_matches = [
-        section
-        for line in lines
-        if line.startswith("## ")
-        for section in [_parse_section_heading(line)]
-        if section is not None
-    ]
-    appendix_matches = [
-        item
-        for line in lines
-        if line.startswith("- [")
-        for item in [_parse_appendix_item(line)]
-        if item is not None
-    ]
-    return section_matches, appendix_matches
 
 
 def _parse_section_heading(line: str) -> SectionStatus | None:
@@ -243,32 +292,6 @@ def _parse_appendix_item(line: str) -> AppendixStatus | None:
     return AppendixStatus(title=title, checkbox=checkbox, detail=detail)
 
 
-def render_checklist(
-    sections: Iterable[SectionStatus], appendix_items: Iterable[AppendixStatus]
-) -> str:
-    section_lines = [
-        f"- [{section.checkbox}] {section.number}. {section.title} ({section.detail})"
-        for section in sections
-    ]
-    appendix_lines = [
-        f"- [{item.checkbox}] {item.title} ({item.detail})"
-        for item in appendix_items
-    ]
-    lines = [
-        "# RFC Implementation Checklist",
-        "",
-        "Generated from `docs/rfc/wiregraph_rfc_rev2.md` by `manyfold-rfc-checklist`.",
-        "",
-        "## Core Sections",
-        *section_lines,
-        "",
-        "## Appendix F Acceptance Criteria",
-        *appendix_lines,
-        "",
-    ]
-    return "\n".join(lines)
-
-
 def _write_if_changed(path: _TextPath, content: str) -> bool:
     """Write generated content only when the target bytes would change."""
 
@@ -276,30 +299,6 @@ def _write_if_changed(path: _TextPath, content: str) -> bool:
         return False
     path.write_text(content, encoding="utf-8")
     return True
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--check",
-        action="store_true",
-        help="validate generated file without rewriting it",
-    )
-    args = parser.parse_args(argv)
-
-    sections, appendix_items = parse_rfc_sections()
-    checklist_content = render_checklist(sections, appendix_items)
-
-    if args.check:
-        current_checklist = (
-            CHECKLIST_PATH.read_text(encoding="utf-8")
-            if CHECKLIST_PATH.exists()
-            else ""
-        )
-        return 0 if current_checklist == checklist_content else 1
-
-    _write_if_changed(CHECKLIST_PATH, checklist_content)
-    return 0
 
 
 if __name__ == "__main__":

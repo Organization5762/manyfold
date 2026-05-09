@@ -7,13 +7,6 @@ from manyfold import Graph, JoinInput, Layer, Plane, Schema, Variant
 from ._shared import example_route
 
 
-class CrossPartitionJoinExampleResult(TypedDict):
-    join_class: str
-    visible_nodes: tuple[str, ...]
-    topology_edges: tuple[tuple[str, str], ...]
-    taint_implications: tuple[str, ...]
-
-
 def run_example() -> CrossPartitionJoinExampleResult:
     graph = Graph()
     accel = example_route(
@@ -47,6 +40,13 @@ def run_example() -> CrossPartitionJoinExampleResult:
         "topology_edges": tuple(graph.topology()),
         "taint_implications": plan.taint_implications,
     }
+
+
+class CrossPartitionJoinExampleResult(TypedDict):
+    join_class: str
+    visible_nodes: tuple[str, ...]
+    topology_edges: tuple[tuple[str, str], ...]
+    taint_implications: tuple[str, ...]
 
 
 if __name__ == "__main__":

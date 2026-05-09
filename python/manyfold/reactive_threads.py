@@ -80,7 +80,9 @@ _NO_STARTING_VALUE = _NoStartingValue()
 
 
 class _LatencyRecorder:
-    def __init__(self, history_size: int = DEFAULT_DELIVERY_LATENCY_HISTORY_SIZE) -> None:
+    def __init__(
+        self, history_size: int = DEFAULT_DELIVERY_LATENCY_HISTORY_SIZE
+    ) -> None:
         if (
             not isinstance(history_size, int)
             or isinstance(history_size, bool)
@@ -215,13 +217,10 @@ def interval_in_background(
 ) -> Observable[int]:
     """Emit integer ticks on a background scheduler until ``shutdown`` fires."""
 
-    resolved_scheduler = (
-        scheduler
-        or (
-            EventLoopScheduler(thread_factory=partial(_run_on_thread, name=name))
-            if name is not None
-            else interval_scheduler()
-        )
+    resolved_scheduler = scheduler or (
+        EventLoopScheduler(thread_factory=partial(_run_on_thread, name=name))
+        if name is not None
+        else interval_scheduler()
     )
     return rx.interval(period=period, scheduler=resolved_scheduler).pipe(
         ops.take_until(shutdown),
