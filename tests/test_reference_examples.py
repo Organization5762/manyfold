@@ -265,7 +265,9 @@ class ReferenceExampleSuiteTests(unittest.TestCase):
             {"number": 0, "title": "Example", "summary": "Summary", "implemented": False},
             {"number": True, "title": "Example", "summary": "Summary", "implemented": False},
             {"number": 1, "title": "", "summary": "Summary", "implemented": False},
+            {"number": 1, "title": "   ", "summary": "Summary", "implemented": False},
             {"number": 1, "title": "Example", "summary": "", "implemented": False},
+            {"number": 1, "title": "Example", "summary": "   ", "implemented": False},
             {"number": 1, "title": "Example", "summary": "Summary", "implemented": 1},
         )
 
@@ -279,6 +281,9 @@ class ReferenceExampleSuiteTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             manyfold.ReferenceExample(1, "Example", "Summary", True, module_name="")
+
+        with self.assertRaises(ValueError):
+            manyfold.ReferenceExample(1, "Example", "Summary", True, module_name="   ")
 
         with self.assertRaises(TypeError):
             manyfold.ReferenceExample(
