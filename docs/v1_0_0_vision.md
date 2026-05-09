@@ -136,6 +136,9 @@ strategies can be added without changing the vocabulary.
 - The local in-memory runtime remains useful on its own.
 - The `manyfold.graph` module is allowed to host advanced distributed helpers
   while the top-level namespace stays narrow.
+- Python APIs should be object-shaped by default. Strings, dictionaries, and
+  path-style lookups belong at serialization, CLI, logging, and compatibility
+  boundaries, not in the primary authoring or inspection surface.
 - The lego catalog becomes executable metadata over time, not just prose.
 - Compatibility work favors explicit versioned manifests over implicit best
   effort upgrades.
@@ -189,6 +192,11 @@ The compiler should produce a graph manifest that is stable enough to diff,
 test, validate, and deploy. The runtime should execute that manifest while
 emitting the same route, edge, primitive, and taint identities back through the
 query plane.
+
+The in-process manifest API should expose typed objects, such as route refs,
+edge records, descriptor blocks, primitive records, and policy records. JSON,
+TOML, Protobuf, and string paths are serialization formats for review and
+interop; they should not become the shape users navigate in Python.
 
 ### Layer Boundaries
 
@@ -472,7 +480,8 @@ tests, and docs:
 The release should not become `1.0.0` until these gates are true:
 
 - **API gate**: public local graph and primitive APIs have typed signatures,
-  docs, and compatibility notes.
+  docs, compatibility notes, and object-shaped inspection surfaces with
+  serialization kept at explicit boundaries.
 - **Manifest gate**: graph manifests are deterministic and validated in tests.
 - **Runtime gate**: local runtime semantics are covered by real tests rather
   than stubs.

@@ -66,6 +66,8 @@ uv run python -m unittest tests.test_components.ComponentTests.test_file_store_a
 ## Working Rules
 
 - Prefer existing object-shaped API patterns over stringly helpers.
+- Keep Python APIs object-shaped: use typed refs, dataclasses, and attributes
+  instead of string keys, path strings, or dict-shaped primary surfaces.
 - Add or update tests for every meaningful behavior change.
 - Keep public API documentation and docstrings current when behavior changes.
 - When documentation examples print or otherwise produce output, show a sample

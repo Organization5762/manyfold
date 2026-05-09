@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import logging
 from collections import deque
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, is_dataclass, replace
 from itertools import count
 from threading import RLock, Timer
 from typing import (
@@ -986,6 +986,109 @@ class RouteDescriptor:
     @property
     def debug_enabled(self) -> bool:
         return self.debug.audit_enabled
+
+
+@dataclass(frozen=True)
+class ManifestRoute:
+    """One route entry in a graph manifest."""
+
+    route: RouteRef
+    descriptor: RouteDescriptor
+
+
+@dataclass(frozen=True)
+class ManifestEdge:
+    """One typed topology edge in a graph manifest."""
+
+    source: RouteRef
+    sink: RouteRef
+    flow: DescriptorFlowBlock
+
+
+@dataclass(frozen=True)
+class ManifestDiagramNode:
+    """One graph-visible diagram node in a graph manifest."""
+
+    name: str
+    input_routes: tuple[RouteRef, ...] = ()
+    output_routes: tuple[RouteRef, ...] = ()
+    group: str | None = None
+    metadata: tuple[tuple[str, str], ...] = ()
+    thread_placement: NodeThreadPlacement | None = None
+
+
+@dataclass(frozen=True)
+class ManifestLink:
+    """One transport link entry in a graph manifest."""
+
+    name: str
+    link_class: str
+    capabilities: LinkCapabilities
+
+
+@dataclass(frozen=True)
+class ManifestMeshPrimitive:
+    """One mesh primitive entry in a graph manifest."""
+
+    name: str
+    kind: str
+    sources: tuple[RouteRef, ...]
+    destinations: tuple[RouteRef, ...]
+    link_name: str | None = None
+    ordering_policy: str | None = None
+    state_budget: str | None = None
+    threshold: int | None = None
+    ack_policy: str | None = None
+
+
+@dataclass(frozen=True)
+class ManifestQueryService:
+    """Query request/response routes exposed by one service owner."""
+
+    owner: str
+    request: RouteRef
+    response: RouteRef
+
+
+@dataclass(frozen=True)
+class ManifestDebugRoute:
+    """Debug event route exposed by the graph."""
+
+    event_type: str
+    route: RouteRef
+
+
+@dataclass(frozen=True)
+class ManifestWriteBinding:
+    """Write/shadow route bundle exposed by the graph."""
+
+    name: str
+    request: RouteRef
+    desired: RouteRef
+    reported: RouteRef
+    effective: RouteRef
+    ack: RouteRef | None = None
+
+
+@dataclass(frozen=True)
+class GraphManifest:
+    """Object-shaped graph manifest for Python callers.
+
+    String-keyed dictionaries are reserved for JSON serialization so the Python
+    API can keep route, edge, and descriptor identities as first-class objects.
+    """
+
+    manifest_version: str
+    runtime: str
+    routes: tuple[ManifestRoute, ...] = ()
+    edges: tuple[ManifestEdge, ...] = ()
+    diagram_nodes: tuple[ManifestDiagramNode, ...] = ()
+    middlewares: tuple[Middleware, ...] = ()
+    links: tuple[ManifestLink, ...] = ()
+    mesh_primitives: tuple[ManifestMeshPrimitive, ...] = ()
+    query_services: tuple[ManifestQueryService, ...] = ()
+    debug_routes: tuple[ManifestDebugRoute, ...] = ()
+    write_bindings: tuple[ManifestWriteBinding, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -1989,6 +2092,166 @@ class Graph:
 
     def _route_key(self, route_ref: RouteLike) -> str:
         return self._coerce_route_ref(route_ref).display()
+
+    @staticmethod
+    def _manifest_value(value: Any) -> Any:
+        if value is None or isinstance(value, (bool, int, float, str)):
+            return value
+        if isinstance(value, bytes):
+            return value.decode("utf-8", errors="replace")
+        if isinstance(value, tuple | list):
+            return tuple(Graph._manifest_value(item) for item in value)
+        if isinstance(value, dict):
+            return {
+                str(key): Graph._manifest_value(value[key])
+                for key in sorted(value, key=str)
+            }
+        display = getattr(value, "display", None)
+        if callable(display):
+            return display()
+        as_str = getattr(value, "as_str", None)
+        if callable(as_str):
+            return as_str()
+        enum_value = getattr(value, "value", None)
+        if enum_value is not None:
+            return enum_value
+        if isinstance(value, NamespaceRef):
+            return {
+                "plane": Graph._manifest_value(value.plane),
+                "layer": Graph._manifest_value(value.layer),
+                "owner": value.owner,
+            }
+        if isinstance(value, SchemaRef):
+            return {
+                "schema_id": value.schema_id,
+                "version": value.version,
+            }
+        if isinstance(value, ProducerRef):
+            return {
+                "producer_id": value.producer_id,
+                "kind": Graph._manifest_value(value.kind),
+            }
+        if isinstance(value, ManifestRoute):
+            descriptor = value.descriptor
+            return {
+                "route": value.route.display(),
+                "identity": Graph._manifest_block(descriptor.identity),
+                "schema": Graph._manifest_block(descriptor.schema),
+                "time": Graph._manifest_block(descriptor.time),
+                "ordering": Graph._manifest_block(descriptor.ordering),
+                "flow": Graph._manifest_block(descriptor.flow),
+                "retention": Graph._manifest_block(descriptor.retention),
+                "security": Graph._manifest_block(descriptor.security),
+                "visibility": Graph._manifest_block(descriptor.visibility),
+                "environment": Graph._manifest_block(descriptor.environment),
+                "debug": Graph._manifest_block(descriptor.debug),
+            }
+        if isinstance(value, ManifestEdge):
+            return {
+                "source": value.source.display(),
+                "sink": value.sink.display(),
+                "flow": Graph._manifest_block(value.flow),
+            }
+        if isinstance(value, ManifestDiagramNode):
+            return {
+                "name": value.name,
+                "input_routes": tuple(route.display() for route in value.input_routes),
+                "output_routes": tuple(route.display() for route in value.output_routes),
+                "group": value.group,
+                "metadata": tuple(
+                    {"name": name, "value": metadata_value}
+                    for name, metadata_value in sorted(value.metadata)
+                ),
+                "thread_placement": None
+                if value.thread_placement is None
+                else Graph._manifest_block(value.thread_placement),
+            }
+        if is_dataclass(value):
+            return Graph._manifest_block(value)
+        return str(value)
+
+    @staticmethod
+    def _manifest_block(value: Any) -> dict[str, Any]:
+        return {
+            field.name: Graph._manifest_value(getattr(value, field.name))
+            for field in fields(value)
+        }
+
+    def _manifest_route(self, route_ref: RouteRef) -> ManifestRoute:
+        return ManifestRoute(
+            route=route_ref,
+            descriptor=self.describe_route(route_ref),
+        )
+
+    def _manifest_edge(
+        self,
+        source: str,
+        sink: str,
+        route_refs: dict[str, RouteRef],
+    ) -> ManifestEdge:
+        try:
+            source_ref = route_refs[source]
+            sink_ref = route_refs[sink]
+        except KeyError as exc:
+            raise RuntimeError(
+                "topology edge references a route outside the graph catalog"
+            ) from exc
+        return ManifestEdge(
+            source=source_ref,
+            sink=sink_ref,
+            flow=self.describe_edge(source=source_ref, sink=sink_ref),
+        )
+
+    def _manifest_diagram_node(
+        self,
+        node: DiagramNode,
+        route_refs: dict[str, RouteRef],
+    ) -> ManifestDiagramNode:
+        return ManifestDiagramNode(
+            name=node.name,
+            input_routes=tuple(route_refs[route] for route in node.input_routes),
+            output_routes=tuple(route_refs[route] for route in node.output_routes),
+            group=node.group,
+            metadata=tuple(sorted(node.metadata)),
+            thread_placement=node.thread_placement,
+        )
+
+    def _manifest_link(self, link: Link) -> ManifestLink:
+        return ManifestLink(
+            name=link.name,
+            link_class=link.link_class,
+            capabilities=link.capabilities,
+        )
+
+    def _manifest_mesh_primitive(
+        self,
+        primitive: MeshPrimitive,
+    ) -> ManifestMeshPrimitive:
+        return ManifestMeshPrimitive(
+            name=primitive.name,
+            kind=primitive.kind,
+            sources=primitive.sources,
+            destinations=primitive.destinations,
+            link_name=primitive.link_name,
+            ordering_policy=primitive.ordering_policy,
+            state_budget=primitive.state_budget,
+            threshold=primitive.threshold,
+            ack_policy=primitive.ack_policy,
+        )
+
+    def _manifest_write_binding(
+        self,
+        name: str,
+        binding: WriteBinding,
+    ) -> ManifestWriteBinding:
+        return ManifestWriteBinding(
+            name=name,
+            request=binding.request,
+            desired=binding.desired,
+            reported=binding.reported,
+            effective=binding.effective,
+            ack=binding.ack,
+        )
 
     @staticmethod
     def _context_route_role(route_ref: RouteRef) -> str | None:
@@ -4520,6 +4783,74 @@ class Graph:
     ) -> DescriptorFlowBlock:
         """Resolve the RFC flow descriptor for one source->sink edge."""
         return self._resolved_edge_flow_policy(source, sink)
+
+    def manifest(self) -> GraphManifest:
+        """Return a deterministic object-shaped graph manifest snapshot."""
+        catalog_route_refs = {route.display(): route for route in self.catalog()}
+        route_refs = {
+            **self._diagram_routes,
+            **catalog_route_refs,
+        }
+        return GraphManifest(
+            manifest_version="manyfold.graph.manifest.v0",
+            runtime="in_memory",
+            routes=tuple(
+                self._manifest_route(route)
+                for route in sorted(
+                    catalog_route_refs.values(),
+                    key=lambda route: route.display(),
+                )
+            ),
+            edges=tuple(
+                self._manifest_edge(source, sink, route_refs)
+                for source, sink in sorted(self.topology())
+            ),
+            diagram_nodes=tuple(
+                self._manifest_diagram_node(node, route_refs)
+                for node in sorted(
+                    self._diagram_nodes.values(),
+                    key=lambda node: node.name,
+                )
+            ),
+            middlewares=tuple(
+                sorted(
+                    self._middlewares,
+                    key=lambda middleware: middleware.name,
+                )
+            ),
+            links=tuple(
+                self._manifest_link(self._links[name])
+                for name in sorted(self._links)
+            ),
+            mesh_primitives=tuple(
+                self._manifest_mesh_primitive(self._mesh_primitives[name])
+                for name in sorted(self._mesh_primitives)
+            ),
+            query_services=tuple(
+                ManifestQueryService(
+                    owner=owner,
+                    request=service.request,
+                    response=service.response,
+                )
+                for owner, service in sorted(self._query_services.items())
+            ),
+            debug_routes=tuple(
+                ManifestDebugRoute(event_type=event_type, route=route)
+                for event_type, route in sorted(self._debug_routes.items())
+            ),
+            write_bindings=tuple(
+                self._manifest_write_binding(name, binding)
+                for name, binding in sorted(self._write_bindings.items())
+            ),
+        )
+
+    def manifest_json(self) -> str:
+        """Render the current graph manifest as stable, sorted JSON."""
+        return json.dumps(
+            self._manifest_block(self.manifest()),
+            indent=2,
+            sort_keys=True,
+        ) + "\n"
 
     @overload
     def latest(self, route_ref: TypedRoute[T]) -> TypedEnvelope[T] | None: ...

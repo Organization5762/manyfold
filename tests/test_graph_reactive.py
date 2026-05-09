@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import sys
 import threading
 import time
@@ -4442,6 +4443,87 @@ class GraphReactiveTests(unittest.TestCase):
             [route.stream for route in graph.debug_routes()],
             sorted(route.stream for route in graph.debug_routes()),
         )
+
+    def test_manifest_is_deterministic_and_json_compatible(self) -> None:
+        graph_module = load_graph_module()
+        source = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("imu"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("accel"),
+            variant=graph_module.Variant.Meta,
+            schema=graph_module.Schema.bytes(name="Accel"),
+        )
+        sink = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("dashboard"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("accel_copy"),
+            variant=graph_module.Variant.Meta,
+            schema=graph_module.Schema.bytes(name="AccelCopy"),
+        )
+        graph = graph_module.Graph()
+        graph.add_middleware(
+            graph_module.Middleware(
+                name="validate_accel",
+                kind="validation",
+                attachment_scope="route",
+                target=source.display(),
+            )
+        )
+        graph.register_link(
+            graph_module.Link(
+                name="tcp0",
+                link_class="TcpStreamLink",
+                capabilities=graph_module.LinkCapabilities(
+                    ordered=True,
+                    reliable=True,
+                ),
+            )
+        )
+        graph.add_mesh_primitive(
+            graph_module.MeshPrimitive(
+                name="bridge_to_dashboard",
+                kind="bridge",
+                sources=(source,),
+                destinations=(sink,),
+                link_name="tcp0",
+            )
+        )
+        graph.register_diagram_node(
+            "planner",
+            input_routes=(source,),
+            output_routes=(sink,),
+            group="control",
+            thread_placement=graph_module.NodeThreadPlacement.main_thread(),
+        )
+        graph.query_service()
+
+        manifest = graph.manifest()
+        rendered = graph.manifest_json()
+
+        self.assertEqual(manifest, graph.manifest())
+        self.assertEqual(json.loads(rendered), json.loads(graph.manifest_json()))
+        self.assertEqual(manifest.manifest_version, "manyfold.graph.manifest.v0")
+        self.assertEqual([link.name for link in manifest.links], ["tcp0"])
+        self.assertTrue(manifest.links[0].capabilities.ordered)
+        self.assertEqual(
+            [primitive.name for primitive in manifest.mesh_primitives],
+            ["bridge_to_dashboard"],
+        )
+        self.assertEqual(manifest.edges[0].source.display(), source.display())
+        self.assertEqual(manifest.edges[0].sink.display(), sink.display())
+        self.assertEqual(manifest.edges[0].flow.backpressure_policy, "propagate")
+        self.assertEqual(manifest.edges[0].flow.credit_class, "default")
+        self.assertEqual(manifest.edges[0].flow.mailbox_policy, "none")
+        self.assertEqual(manifest.edges[0].flow.async_boundary_kind, "inline")
+        self.assertEqual(manifest.edges[0].flow.overflow_policy, "reject_write")
+        self.assertEqual(manifest.diagram_nodes[0].name, "planner")
+        self.assertEqual(manifest.diagram_nodes[0].thread_placement.kind, "main")
+        self.assertEqual(manifest.query_services[0].owner, "query")
+        self.assertIn(source.display(), [route.route.display() for route in manifest.routes])
 
     def test_graph_runtime_registries_reject_empty_text_keys(self) -> None:
         graph_module = load_graph_module()
