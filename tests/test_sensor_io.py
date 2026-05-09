@@ -1468,6 +1468,30 @@ class SensorIoTests(unittest.TestCase):
         self.assertEqual(frames[0].samples, ((7, 0, "a"), (7, 1, "b")))
         self.assertEqual(manyfold.xor_checksum([0xAA, 0x0F, 0x01]), 0xA4)
 
+    def test_sensor_batching_helpers_reject_non_integer_sizes(self) -> None:
+        manyfold = load_manyfold_package()
+
+        for capacity in (True, 1.5):
+            with self.subTest(capacity=capacity):
+                with self.assertRaisesRegex(ValueError, "capacity must be an integer"):
+                    manyfold.BoundedRingBuffer(capacity=capacity)  # type: ignore[arg-type]
+
+        for buffer_size in (True, 1.5):
+            with self.subTest(buffer_size=buffer_size):
+                with self.assertRaisesRegex(ValueError, "buffer_size must be an integer"):
+                    manyfold.DoubleBuffer(buffer_size=buffer_size)  # type: ignore[arg-type]
+
+        for expected_count in (False, 2.5):
+            with self.subTest(expected_count=expected_count):
+                with self.assertRaisesRegex(
+                    ValueError, "expected_count must be an integer"
+                ):
+                    manyfold.FrameAssembler(
+                        expected_count=expected_count,  # type: ignore[arg-type]
+                        frame_id=lambda sample: sample[0],
+                        slot_id=lambda sample: sample[1],
+                    )
+
     def test_frame_assembler_orders_mixed_slot_ids_deterministically(self) -> None:
         manyfold = load_manyfold_package()
         assembler = manyfold.FrameAssembler[tuple[int, object, str]](

@@ -534,6 +534,7 @@ class BoundedRingBuffer(Generic[T]):
     rejected: int = 0
 
     def __post_init__(self) -> None:
+        self.capacity = _require_int(self.capacity, "capacity")
         if self.capacity <= 0:
             raise ValueError("capacity must be positive")
         if self.overflow not in {"drop_oldest", "drop_newest", "reject", "latest"}:
@@ -1047,6 +1048,7 @@ class DoubleBuffer(Generic[TFrame]):
     )
 
     def __post_init__(self) -> None:
+        self.buffer_size = _require_int(self.buffer_size, "buffer_size")
         if self.buffer_size <= 0:
             raise ValueError("buffer_size must be positive")
 
@@ -1087,6 +1089,7 @@ class FrameAssembler(Generic[TFrame]):
     _pending: dict[Any, dict[Any, TFrame]] = field(default_factory=dict, init=False, repr=False)
 
     def __post_init__(self) -> None:
+        self.expected_count = _require_int(self.expected_count, "expected_count")
         if self.expected_count <= 0:
             raise ValueError("expected_count must be positive")
 
