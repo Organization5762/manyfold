@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 from collections import deque
 from dataclasses import dataclass, field, replace
 from itertools import count
@@ -142,7 +141,6 @@ class CoalesceLatestNode(Generic[T]):
             pending: Any = _NO_PENDING
             timer: Any | None = None
             fallback_timer: Timer | None = None
-            due_time: float | None = None
             generation = 0
             window_seconds = self.window_ms / 1000
 
@@ -156,7 +154,7 @@ class CoalesceLatestNode(Generic[T]):
                     fallback_timer = None
 
             def flush(expected_generation: int | None = None) -> None:
-                nonlocal pending, due_time
+                nonlocal pending
                 with lock:
                     if (
                         expected_generation is not None
@@ -166,16 +164,14 @@ class CoalesceLatestNode(Generic[T]):
                     value = pending
                     pending = _NO_PENDING
                     cancel_timers()
-                    due_time = None
                 if value is not _NO_PENDING:
                     observer.on_next(value)
 
-            def schedule_flush(now: float) -> None:
-                nonlocal timer, fallback_timer, due_time, generation
+            def schedule_flush() -> None:
+                nonlocal timer, fallback_timer, generation
                 cancel_timers()
                 generation += 1
                 scheduled_generation = generation
-                due_time = now + window_seconds
                 timer = reactive_threads.coalesce_scheduler().schedule_relative(
                     window_seconds,
                     lambda *_: flush(scheduled_generation),
@@ -189,26 +185,23 @@ class CoalesceLatestNode(Generic[T]):
 
             def on_next(value: T) -> None:
                 nonlocal pending
-                now = time.monotonic()
                 with lock:
                     pending = value
-                    schedule_flush(now)
+                    schedule_flush()
 
             def on_error(error: Exception) -> None:
-                nonlocal pending, due_time, generation
+                nonlocal pending, generation
                 with lock:
                     generation += 1
                     cancel_timers()
                     pending = _NO_PENDING
-                    due_time = None
                 observer.on_error(error)
 
             def on_completed() -> None:
-                nonlocal due_time, generation
+                nonlocal generation
                 with lock:
                     generation += 1
                     cancel_timers()
-                    due_time = None
                 flush()
                 observer.on_completed()
 
@@ -220,13 +213,12 @@ class CoalesceLatestNode(Generic[T]):
             )
 
             def dispose() -> None:
-                nonlocal pending, due_time, generation
+                nonlocal pending, generation
                 subscription.dispose()
                 with lock:
                     generation += 1
                     pending = _NO_PENDING
                     cancel_timers()
-                    due_time = None
 
             return Disposable(dispose)
 
