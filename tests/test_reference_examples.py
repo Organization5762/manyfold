@@ -258,6 +258,38 @@ class ReferenceExampleSuiteTests(unittest.TestCase):
             manyfold.implemented_reference_examples(),
         )
 
+    def test_reference_example_rejects_invalid_identity_metadata(self) -> None:
+        manyfold = load_manyfold_package()
+
+        invalid_examples = (
+            {"number": 0, "title": "Example", "summary": "Summary", "implemented": False},
+            {"number": True, "title": "Example", "summary": "Summary", "implemented": False},
+            {"number": 1, "title": "", "summary": "Summary", "implemented": False},
+            {"number": 1, "title": "Example", "summary": "", "implemented": False},
+            {"number": 1, "title": "Example", "summary": "Summary", "implemented": 1},
+        )
+
+        for kwargs in invalid_examples:
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaises((TypeError, ValueError)):
+                    manyfold.ReferenceExample(**kwargs)
+
+    def test_reference_example_rejects_invalid_runner_metadata(self) -> None:
+        manyfold = load_manyfold_package()
+
+        with self.assertRaises(ValueError):
+            manyfold.ReferenceExample(1, "Example", "Summary", True, module_name="")
+
+        with self.assertRaises(TypeError):
+            manyfold.ReferenceExample(
+                1,
+                "Example",
+                "Summary",
+                True,
+                module_name="examples.simple_latest",
+                runner="run",
+            )
+
     def test_reference_example_suite_uses_shared_example_catalog(self) -> None:
         manyfold = load_manyfold_package()
 
