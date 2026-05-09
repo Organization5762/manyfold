@@ -139,6 +139,25 @@ class ReferenceExampleSuiteTests(unittest.TestCase):
         self.assertNotIn("ResistorPolicy", manyfold.__all__)
         self.assertNotIn("WatchdogPolicy", manyfold.__all__)
 
+    def test_manyfold_package_re_exports_graph_manifest_types(self) -> None:
+        manyfold = load_manyfold_package()
+        graph_module = sys.modules["manyfold.graph"]
+
+        for name in (
+            "GraphManifest",
+            "ManifestDebugRoute",
+            "ManifestDiagramNode",
+            "ManifestEdge",
+            "ManifestLink",
+            "ManifestMeshPrimitive",
+            "ManifestQueryService",
+            "ManifestRoute",
+            "ManifestWriteBinding",
+        ):
+            with self.subTest(name=name):
+                self.assertIs(getattr(manyfold, name), getattr(graph_module, name))
+                self.assertIn(name, manyfold.__all__)
+
     def test_manyfold_package_re_exports_example_facing_helpers(self) -> None:
         manyfold = load_manyfold_package()
         components_module = sys.modules["manyfold.components"]
