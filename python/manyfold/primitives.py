@@ -91,6 +91,14 @@ def _decode_finite_float(payload: bytes) -> float:
     return number
 
 
+def _coerce_bytes_payload(value: Any) -> bytes:
+    if isinstance(value, bytes):
+        return value
+    if isinstance(value, (bytearray, memoryview)):
+        return bytes(value)
+    raise ValueError("bytes schema values must be bytes-like")
+
+
 @runtime_checkable
 class ProtobufMessage(Protocol):
     def SerializeToString(self) -> bytes: ...
@@ -229,8 +237,8 @@ class Schema(Generic[T]):
         return cls(
             schema_id=name,
             version=version,
-            encode=bytes,
-            decode=bytes,
+            encode=_coerce_bytes_payload,
+            decode=_coerce_bytes_payload,
         )
 
     @classmethod

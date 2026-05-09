@@ -89,6 +89,26 @@ class PrimitiveTests(unittest.TestCase):
                 ):
                     manyfold.Schema.bytes(name="Temperature", version=version)
 
+    def test_bytes_schema_preserves_bytes_like_payloads(self) -> None:
+        manyfold = load_manyfold_package()
+        schema = manyfold.Schema.bytes(name="RawFrame")
+
+        self.assertEqual(schema.encode(b"abc"), b"abc")
+        self.assertEqual(schema.encode(bytearray(b"abc")), b"abc")
+        self.assertEqual(schema.decode(memoryview(b"abc")), b"abc")
+
+    def test_bytes_schema_rejects_scalar_and_text_payloads(self) -> None:
+        manyfold = load_manyfold_package()
+        schema = manyfold.Schema.bytes(name="RawFrame")
+
+        for value in (3, True, "abc", ["a"]):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "bytes schema values must be bytes-like",
+                ):
+                    schema.encode(value)
+
     def test_route_rejects_unknown_schema_shapes_clearly(self) -> None:
         manyfold = load_manyfold_package()
 
