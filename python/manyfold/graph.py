@@ -410,6 +410,12 @@ class NodeThreadPlacement:
         if self.kind not in _THREAD_PLACEMENT_KINDS:
             raise ValueError(f"unknown node thread placement: {self.kind}")
         if (
+            self.kind == "isolated"
+            and self.thread_name is not None
+            and (not isinstance(self.thread_name, str) or not self.thread_name.strip())
+        ):
+            raise ValueError("isolated thread name must be a non-empty string")
+        if (
             self.kind == "pooled"
             and self.scheduler_name not in _POOLED_THREAD_SCHEDULERS
         ):

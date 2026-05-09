@@ -732,6 +732,17 @@ class GraphReactiveTests(unittest.TestCase):
         finally:
             connection.remove()
 
+    def test_isolated_thread_placement_rejects_empty_names(self) -> None:
+        graph_module = load_graph_module()
+
+        for name in ("", " ", 3):
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "isolated thread name must be a non-empty string",
+                ):
+                    graph_module.NodeThreadPlacement.isolated_thread(name)
+
     def test_pipeline_can_return_to_prior_thread_placement(self) -> None:
         graph_module = load_graph_module()
         reactive_threads = importlib.import_module("manyfold.reactive_threads")
