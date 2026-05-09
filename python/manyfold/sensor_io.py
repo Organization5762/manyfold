@@ -683,6 +683,25 @@ class HealthStatus:
     stale: bool = False
     error_count: int = 0
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "status", _decode_health_status(self.status))
+        object.__setattr__(
+            self,
+            "observed_at",
+            _require_finite_number(self.observed_at, "observed_at"),
+        )
+        if not isinstance(self.message, str):
+            raise ValueError("message must be a string")
+        if not isinstance(self.stale, bool):
+            raise ValueError("stale must be a boolean")
+        object.__setattr__(
+            self,
+            "error_count",
+            _require_int(self.error_count, "error_count"),
+        )
+        if self.error_count < 0:
+            raise ValueError("error_count must be non-negative")
+
 
 class SensorDebugStage(str, Enum):
     """Observable stages for sensor input debugging."""

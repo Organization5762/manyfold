@@ -338,6 +338,21 @@ class SensorIoTests(unittest.TestCase):
             b'"stale":false,"status":"ok"}',
         )
 
+    def test_health_status_rejects_invalid_values(self) -> None:
+        manyfold = load_manyfold_package()
+
+        for kwargs, message in (
+            ({"status": "green", "observed_at": 1.0}, "status must be one of"),
+            ({"status": "ok", "observed_at": math.inf}, "observed_at must be a finite number"),
+            ({"status": "ok", "observed_at": 1.0, "message": 7}, "message must be a string"),
+            ({"status": "ok", "observed_at": 1.0, "stale": "false"}, "stale must be a boolean"),
+            ({"status": "ok", "observed_at": 1.0, "error_count": True}, "error_count must be an integer"),
+            ({"status": "ok", "observed_at": 1.0, "error_count": -1}, "error_count must be non-negative"),
+        ):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    manyfold.HealthStatus(**kwargs)
+
     def test_sensor_schemas_reject_non_object_payloads(self) -> None:
         manyfold = load_manyfold_package()
         sample_schema = manyfold.sensor_sample_schema(_int_schema(manyfold, "Temp"))
@@ -716,9 +731,8 @@ class SensorIoTests(unittest.TestCase):
                 b'"stale":false,"status":"ok"}'
             )
 
-        status = manyfold.HealthStatus(status="ok", observed_at=-math.inf)
-        with self.assertRaisesRegex(ValueError, "Out of range float values"):
-            health_schema.encode(status)
+        with self.assertRaisesRegex(ValueError, "observed_at must be a finite number"):
+            manyfold.HealthStatus(status="ok", observed_at=-math.inf)
 
     def test_sequence_counter_assigns_monotonic_numbers(self) -> None:
         manyfold = load_manyfold_package()
