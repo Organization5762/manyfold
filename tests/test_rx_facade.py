@@ -72,6 +72,32 @@ class RxFacadeTests(unittest.TestCase):
         self.assertEqual(len(operators_module.__all__), len(set(operators_module.__all__)))
         self.assertEqual(operators_module.zip_with_list, upstream_module.zip_with_list)
 
+    def test_private_marble_facade_does_not_leak_runtime_imports(self) -> None:
+        load_manyfold_package()
+        marble_module = importlib.import_module("manyfold._rx.testing.marbles")
+
+        self.assertNotIn("datetime", marble_module.__dict__)
+        self.assertNotIn("typing", marble_module.__dict__)
+        self.assertNotIn("warn", marble_module.__dict__)
+
+    def test_private_testing_facade_exports_intentional_snapshot(self) -> None:
+        load_manyfold_package()
+        testing_module = importlib.import_module("manyfold._rx.testing")
+
+        self.assertEqual(
+            testing_module.__all__,
+            (
+                "MockDisposable",
+                "OnErrorPredicate",
+                "OnNextPredicate",
+                "ReactiveTest",
+                "Recorded",
+                "TestScheduler",
+                "is_prime",
+            ),
+        )
+        self.assertNotIn("annotations", testing_module.__dict__)
+
     def test_private_subject_submodules_export_only_subject_classes(self) -> None:
         load_manyfold_package()
         expected_exports = {
@@ -166,6 +192,7 @@ class RxFacadeTests(unittest.TestCase):
             "manyfold._rx.subject.behaviorsubject": ("BehaviorSubject",),
             "manyfold._rx.subject.replaysubject": ("ReplaySubject",),
             "manyfold._rx.subject.subject": ("Subject",),
+            "manyfold._rx.testing": ("ReactiveTest", "TestScheduler"),
             "manyfold._rx.testing.marbles": ("marbles_testing",),
             "manyfold._rx.typing": ("Mapper", "Predicate", "Subscription"),
         }
