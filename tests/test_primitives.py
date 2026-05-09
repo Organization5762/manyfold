@@ -89,6 +89,20 @@ class PrimitiveTests(unittest.TestCase):
                 ):
                     manyfold.Schema.bytes(name="Temperature", version=version)
 
+    def test_route_rejects_unknown_schema_shapes_clearly(self) -> None:
+        manyfold = load_manyfold_package()
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "schema must be a Schema, bytes, or protobuf message type",
+        ):
+            manyfold.route(
+                owner="sensor",
+                family="events",
+                stream="temperature",
+                schema=object(),
+            )
+
     def test_any_schema_rejects_unknown_process_local_tokens_clearly(self) -> None:
         manyfold = load_manyfold_package()
         schema = manyfold.Schema.any("RuntimeHandle")

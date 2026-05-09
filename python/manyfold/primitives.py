@@ -406,6 +406,8 @@ def _coerce_schema(
                 name=schema_id, version=1 if version is None else version
             ),
         )
+    if not isinstance(schema, ProtobufMessageType):
+        raise ValueError("schema must be a Schema, bytes, or protobuf message type")
     return cast(
         Schema[T],
         Schema.protobuf(
