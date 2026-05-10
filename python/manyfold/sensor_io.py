@@ -329,7 +329,16 @@ class BackoffPolicy:
             raise ValueError("attempt_index must be positive")
         if attempt_index <= 1:
             return 0.0
-        delay = self.initial_delay * (self.multiplier ** (attempt_index - 2))
+        try:
+            delay = self.initial_delay * (self.multiplier ** (attempt_index - 2))
+        except OverflowError:
+            if self.max_delay is None:
+                raise
+            return self.max_delay
+        if not math.isfinite(delay):
+            if self.max_delay is None:
+                raise OverflowError("backoff delay overflowed")
+            return self.max_delay
         if self.max_delay is not None:
             delay = min(delay, self.max_delay)
         return delay
