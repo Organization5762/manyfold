@@ -564,6 +564,12 @@ class Memory:
                     f"memory file {self.path} line {line_number} field {field} "
                     "must be a string"
                 )
+        for field in ("route", "schema_id"):
+            if not record[field].strip():
+                raise ValueError(
+                    f"memory file {self.path} line {line_number} field {field} "
+                    "must be a non-empty string"
+                )
         for field in ("seq_source", "schema_version"):
             if not _is_plain_int(record[field]):
                 raise ValueError(
