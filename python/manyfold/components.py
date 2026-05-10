@@ -135,7 +135,7 @@ class Keyspace:
         """Store bytes under a keyspace-relative key."""
         path = self._value_path(self.key(*parts))
         path.parent.mkdir(parents=True, exist_ok=True)
-        _write_bytes_atomic(path, bytes(value))
+        _write_bytes_atomic(path, _normalize_bytes(value))
 
     def get(self, *parts: KeyPart) -> bytes | None:
         """Return bytes for a keyspace-relative key, if present."""
@@ -961,6 +961,14 @@ def _normalize_key_part(part: KeyPart) -> str:
     if "\x00" in key:
         raise ValueError("key parts cannot contain NUL bytes")
     return key
+
+
+def _normalize_bytes(value: object) -> bytes:
+    if isinstance(value, bytes):
+        return value
+    if isinstance(value, bytearray | memoryview):
+        return bytes(value)
+    raise ValueError("stored values must be bytes-like")
 
 
 def _encode_key_part(part: str) -> str:

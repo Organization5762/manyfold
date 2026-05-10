@@ -152,6 +152,23 @@ class ComponentTests(unittest.TestCase):
                     ):
                         keyspace.put(part, value=b"nope")
 
+    def test_file_store_rejects_non_bytes_values(self) -> None:
+        manyfold = load_manyfold_package()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            keyspace = manyfold.FileStore(temp_dir).prefix("safe")
+
+            for value in ("text", 3, object()):
+                with self.subTest(value=value):
+                    with self.assertRaisesRegex(ValueError, "bytes-like"):
+                        keyspace.put("payload", value=value)  # type: ignore[arg-type]
+
+            keyspace.put("mutable", value=bytearray(b"ok"))
+            keyspace.put("view", value=memoryview(b"view"))
+
+            self.assertEqual(keyspace.get("mutable"), b"ok")
+            self.assertEqual(keyspace.get("view"), b"view")
+
     def test_direct_keyspace_construction_normalizes_key_parts(self) -> None:
         manyfold = load_manyfold_package()
 
