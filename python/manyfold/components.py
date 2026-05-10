@@ -647,11 +647,11 @@ class Consensus:
     ) -> None:
         if not nodes:
             raise ValueError("nodes must contain at least one node")
-        if not all(isinstance(node, str) and node for node in nodes):
+        if not all(isinstance(node, str) and node.strip() for node in nodes):
             raise ValueError("nodes must contain non-empty string identifiers")
         if len(nodes) != len(set(nodes)):
             raise ValueError("nodes must contain unique node identifiers")
-        if not isinstance(candidate_id, str) or not candidate_id:
+        if not isinstance(candidate_id, str) or not candidate_id.strip():
             raise ValueError("candidate_id must be a non-empty string")
         if candidate_id not in nodes:
             raise ValueError("candidate_id must be present in nodes")
@@ -938,7 +938,7 @@ def _component_route(
 
 
 def _require_component_name(value: object, field: str) -> None:
-    if not isinstance(value, str) or not value:
+    if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{field} must be a non-empty string")
 
 

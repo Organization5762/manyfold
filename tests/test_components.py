@@ -372,6 +372,8 @@ class ComponentTests(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "event log name"):
                 manyfold.EventLog("", keyspace, schema)
+            with self.assertRaisesRegex(ValueError, "event log name"):
+                manyfold.EventLog("   ", keyspace, schema, owner="commands")
             with self.assertRaisesRegex(ValueError, "keyspace must be a Keyspace"):
                 manyfold.EventLog(
                     "commands",
@@ -541,6 +543,13 @@ class ComponentTests(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "snapshot store name"):
                 manyfold.SnapshotStore("", keyspace, schema)
+            with self.assertRaisesRegex(ValueError, "snapshot store name"):
+                manyfold.SnapshotStore(
+                    "   ",
+                    keyspace,
+                    schema,
+                    owner="state_snapshot",
+                )
             with self.assertRaisesRegex(ValueError, "keyspace must be a Keyspace"):
                 manyfold.SnapshotStore(
                     "state_snapshot",
@@ -942,7 +951,7 @@ class ComponentTests(unittest.TestCase):
     def test_consensus_component_rejects_non_string_node_ids(self) -> None:
         manyfold = load_manyfold_package()
 
-        for nodes in (("", "node-b"), ("node-a", 7)):
+        for nodes in (("", "node-b"), ("node-a", "   "), ("node-a", 7)):
             with self.subTest(nodes=nodes):
                 with self.assertRaisesRegex(
                     ValueError,
@@ -957,7 +966,7 @@ class ComponentTests(unittest.TestCase):
     def test_consensus_component_rejects_invalid_candidate_id_type(self) -> None:
         manyfold = load_manyfold_package()
 
-        for candidate_id in ("", 7):
+        for candidate_id in ("", "   ", 7):
             with self.subTest(candidate_id=candidate_id):
                 with self.assertRaisesRegex(
                     ValueError,
