@@ -117,7 +117,7 @@ class PrimitiveTests(unittest.TestCase):
 
     def test_source_and_sink_reject_invalid_direct_construction(self) -> None:
         manyfold = load_manyfold_package()
-        route = manyfold.route(
+        typed_route = manyfold.route(
             owner="sensor",
             family="events",
             stream="temperature",
@@ -126,15 +126,23 @@ class PrimitiveTests(unittest.TestCase):
 
         cases = (
             (
-                lambda: manyfold.Source(route=object()),
+                lambda: manyfold.Source(route="not-a-route"),
                 "source route must be a TypedRoute or RouteRef",
             ),
             (
-                lambda: manyfold.Source(route=route, replay_latest=1),
+                lambda: manyfold.Source(route=typed_route, replay_latest="yes"),
                 "source replay_latest must be a boolean",
             ),
             (
-                lambda: manyfold.Sink(route="read.logical.sensor.events.temperature.meta.v1"),
+                lambda: manyfold.Sink(route="not-a-route"),
+                "sink route must be a TypedRoute or RouteRef",
+            ),
+            (
+                lambda: manyfold.source("not-a-route"),
+                "source route must be a TypedRoute or RouteRef",
+            ),
+            (
+                lambda: manyfold.sink("not-a-route"),
                 "sink route must be a TypedRoute or RouteRef",
             ),
         )
@@ -142,6 +150,19 @@ class PrimitiveTests(unittest.TestCase):
             with self.subTest(message=message):
                 with self.assertRaisesRegex(ValueError, message):
                     build()
+
+    def test_source_and_sink_accept_native_route_refs(self) -> None:
+        manyfold = load_manyfold_package()
+        typed_route = manyfold.route(
+            owner="sensor",
+            family="events",
+            stream="temperature",
+            schema=manyfold.Schema.float(name="Temperature"),
+        )
+        native_route = typed_route.route_ref
+
+        self.assertEqual(manyfold.Source(native_route).display(), typed_route.display())
+        self.assertEqual(manyfold.Sink(native_route).display(), typed_route.display())
 
     def test_native_reference_constructors_reject_blank_identifiers(self) -> None:
         script = """
