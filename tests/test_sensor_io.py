@@ -1078,6 +1078,65 @@ class SensorIoTests(unittest.TestCase):
 
         self.assertEqual(received, [7])
 
+    def test_managed_graph_node_rejects_invalid_configuration(self) -> None:
+        manyfold = load_manyfold_package()
+        output = _route(manyfold, "valid_node_output", _int_schema(manyfold, "Output"))
+        errors = _route(manyfold, "valid_node_errors", _exception_schema(manyfold))
+
+        def body(stop, _graph):
+            stop.set()
+
+        invalid_inputs = (
+            ({"name": ""}, "name must be a non-empty string"),
+            ({"body": object()}, "body must be callable"),
+            ({"output_routes": object()}, "output_routes must be a tuple"),
+            ({"output_routes": (object(),)}, "output_routes must contain only"),
+            ({"control_route": object()}, "control_route must be a TypedRoute"),
+            ({"error_route": object()}, "error_route must be a TypedRoute"),
+            ({"on_control": object()}, "on_control must be callable"),
+            ({"map_error": object()}, "map_error must be callable"),
+            ({"retry": object()}, "retry must be a RetryPolicy"),
+            ({"backoff": object()}, "backoff must be a BackoffPolicy"),
+            ({"clock": object()}, r"clock must provide now\(\)"),
+            ({"group": object()}, "group must be a string"),
+            ({"start_immediately": "yes"}, "start_immediately must be a boolean"),
+            ({"daemon": "yes"}, "daemon must be a boolean"),
+        )
+
+        for kwargs, message in invalid_inputs:
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    manyfold.ManagedGraphNode(
+                        **{
+                            "name": "valid-node",
+                            "body": body,
+                            "output_routes": (output,),
+                            "error_route": errors,
+                            "start_immediately": False,
+                            **kwargs,
+                        }
+                    )
+
+    def test_managed_graph_node_requires_control_handler_for_control_route(
+        self,
+    ) -> None:
+        manyfold = load_manyfold_package()
+        control = _route(
+            manyfold,
+            "unhandled_node_control",
+            _int_schema(manyfold, "Control"),
+        )
+
+        with self.assertRaisesRegex(
+            ValueError, "on_control is required when control_route is provided"
+        ):
+            manyfold.ManagedGraphNode(
+                name="unhandled-control-node",
+                body=lambda stop, _graph: stop.set(),
+                control_route=control,
+                start_immediately=False,
+            )
+
     def test_managed_graph_node_appears_in_diagram(self) -> None:
         manyfold = load_manyfold_package()
         graph = manyfold.Graph()
@@ -1143,6 +1202,48 @@ class SensorIoTests(unittest.TestCase):
         handle.loop_handle.loop.run(handle.loop_handle.token)
 
         self.assertIsNone(graph.latest(detected))
+
+    def test_detection_node_rejects_invalid_configuration(self) -> None:
+        manyfold = load_manyfold_package()
+        detected = _route(
+            manyfold,
+            "valid_detection_items",
+            _int_schema(manyfold, "Detected"),
+        )
+        errors = _route(
+            manyfold,
+            "valid_detection_errors",
+            _exception_schema(manyfold),
+        )
+
+        invalid_inputs = (
+            ({"name": ""}, "name must be a non-empty string"),
+            ({"detector": object()}, "detector must be callable"),
+            ({"output_route": object()}, "output_route must be a TypedRoute"),
+            ({"mapper": object()}, "mapper must be callable"),
+            ({"on_detect": object()}, "on_detect must be callable"),
+            ({"spawn": object()}, "spawn must be callable"),
+            ({"error_route": object()}, "error_route must be a TypedRoute"),
+            ({"retry": object()}, "retry must be a RetryPolicy"),
+            ({"backoff": object()}, "backoff must be a BackoffPolicy"),
+            ({"group": object()}, "group must be a string"),
+            ({"start_immediately": "yes"}, "start_immediately must be a boolean"),
+            ({"daemon": "yes"}, "daemon must be a boolean"),
+        )
+
+        for kwargs, message in invalid_inputs:
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    manyfold.DetectionNode(
+                        **{
+                            "name": "valid-detection",
+                            "detector": lambda: iter(()),
+                            "output_route": detected,
+                            "error_route": errors,
+                            "start_immediately": False,
+                            **kwargs,
+                        }
+                    )
 
     def test_detection_node_can_spawn_downstream_sources(self) -> None:
         manyfold = load_manyfold_package()

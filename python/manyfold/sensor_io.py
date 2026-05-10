@@ -560,6 +560,30 @@ class ManagedGraphNode:
     daemon: bool = True
 
     def __post_init__(self) -> None:
+        self.name = _require_non_empty_string(self.name, "managed graph node name")
+        _require_callable(self.body, "managed graph node body")
+        self.output_routes = _require_typed_route_tuple(
+            self.output_routes, "managed graph node output_routes"
+        )
+        self.control_route = _require_optional_typed_route(
+            self.control_route, "managed graph node control_route"
+        )
+        self.error_route = _require_optional_typed_route(
+            self.error_route, "managed graph node error_route"
+        )
+        if self.on_control is not None:
+            _require_callable(self.on_control, "managed graph node on_control")
+        _require_callable(self.map_error, "managed graph node map_error")
+        if not isinstance(self.retry, RetryPolicy):
+            raise ValueError("managed graph node retry must be a RetryPolicy")
+        if not isinstance(self.backoff, BackoffPolicy):
+            raise ValueError("managed graph node backoff must be a BackoffPolicy")
+        _require_clock(self.clock, "managed graph node clock")
+        self.group = _require_optional_string(self.group, "managed graph node group")
+        self.start_immediately = _require_bool(
+            self.start_immediately, "managed graph node start_immediately"
+        )
+        self.daemon = _require_bool(self.daemon, "managed graph node daemon")
         _adopt_group(self.clock, self.group)
         if self.control_route is not None and self.on_control is None:
             raise ValueError("on_control is required when control_route is provided")
@@ -637,6 +661,30 @@ class DetectionNode:
     group: str | None = None
     start_immediately: bool = True
     daemon: bool = True
+
+    def __post_init__(self) -> None:
+        self.name = _require_non_empty_string(self.name, "detection node name")
+        _require_callable(self.detector, "detection node detector")
+        self.output_route = _require_typed_route(
+            self.output_route, "detection node output_route"
+        )
+        _require_callable(self.mapper, "detection node mapper")
+        if self.on_detect is not None:
+            _require_callable(self.on_detect, "detection node on_detect")
+        if self.spawn is not None:
+            _require_callable(self.spawn, "detection node spawn")
+        self.error_route = _require_optional_typed_route(
+            self.error_route, "detection node error_route"
+        )
+        if not isinstance(self.retry, RetryPolicy):
+            raise ValueError("detection node retry must be a RetryPolicy")
+        if not isinstance(self.backoff, BackoffPolicy):
+            raise ValueError("detection node backoff must be a BackoffPolicy")
+        self.group = _require_optional_string(self.group, "detection node group")
+        self.start_immediately = _require_bool(
+            self.start_immediately, "detection node start_immediately"
+        )
+        self.daemon = _require_bool(self.daemon, "detection node daemon")
 
     def install(self, graph: Graph) -> "DetectionNodeHandle":
         graph_access = GraphAccessNode(graph=graph)
@@ -1830,10 +1878,57 @@ def _require_string(value: Any, field: str) -> str:
     return value
 
 
+def _require_non_empty_string(value: Any, field: str) -> str:
+    text = _require_string(value, field)
+    if not text.strip():
+        raise ValueError(f"{field} must be a non-empty string")
+    return text
+
+
 def _require_optional_string(value: Any, field: str) -> str | None:
     if value is None:
         return None
     return _require_string(value, field)
+
+
+def _require_bool(value: Any, field: str) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError(f"{field} must be a boolean")
+    return value
+
+
+def _require_callable(value: Any, field: str) -> None:
+    if not callable(value):
+        raise ValueError(f"{field} must be callable")
+
+
+def _require_clock(value: Any, field: str) -> None:
+    if not callable(getattr(value, "now", None)):
+        raise ValueError(f"{field} must provide now()")
+
+
+def _require_typed_route(value: Any, field: str) -> TypedRoute[Any]:
+    if not isinstance(value, TypedRoute):
+        raise ValueError(f"{field} must be a TypedRoute")
+    return value
+
+
+def _require_optional_typed_route(value: Any, field: str) -> TypedRoute[Any] | None:
+    if value is None:
+        return None
+    return _require_typed_route(value, field)
+
+
+def _require_typed_route_tuple(value: Any, field: str) -> tuple[TypedRoute[Any], ...]:
+    if isinstance(value, str):
+        raise ValueError(f"{field} must be a tuple of TypedRoute values")
+    try:
+        routes = tuple(value)
+    except TypeError as exc:
+        raise ValueError(f"{field} must be a tuple of TypedRoute values") from exc
+    if not all(isinstance(route_ref, TypedRoute) for route_ref in routes):
+        raise ValueError(f"{field} must contain only TypedRoute values")
+    return routes
 
 
 def _require_mapping(value: Any, field: str) -> Mapping[Any, Any]:
