@@ -569,6 +569,43 @@ assert graph.latest(route) is None
         self.assertEqual(graph.disconnect(source=source, sink=sink), True)
         self.assertEqual(graph.disconnect(source=source, sink=sink), False)
 
+    def test_graph_rejects_invalid_route_like_objects_before_native_calls(
+        self,
+    ) -> None:
+        graph_module = load_graph_module()
+        valid_route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("valid_route"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="ValidRoute"),
+        )
+        graph = graph_module.Graph()
+        invalid_route = object()
+
+        cases = (
+            lambda: graph.register_port(invalid_route),
+            lambda: graph.latest(invalid_route),
+            lambda: tuple(graph.replay(invalid_route)),
+            lambda: graph.publish(invalid_route, b"payload"),
+            lambda: graph.connect(source=invalid_route, sink=valid_route),
+            lambda: graph.connect(source=valid_route, sink=invalid_route),
+            lambda: graph.describe_route(invalid_route),
+            lambda: graph.configure_retention(
+                invalid_route,
+                graph_module.RouteRetentionPolicy(latest_replay_policy="latest_only"),
+            ),
+        )
+        for case in cases:
+            with self.subTest(case=case):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "route must be a TypedRoute, RouteRef, Source, or Sink",
+                ):
+                    case()
+
     def test_typed_envelopes_close_to_immutable_closed_facts(self) -> None:
         graph_module = load_graph_module()
         route = graph_module.route(

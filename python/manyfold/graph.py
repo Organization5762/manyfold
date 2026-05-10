@@ -2031,7 +2031,9 @@ class Graph:
             return self._coerce_route_ref(route_ref.route)
         if isinstance(route_ref, TypedRoute):
             return route_ref.route_ref
-        return route_ref
+        if isinstance(route_ref, RouteRef):
+            return route_ref
+        raise ValueError("route must be a TypedRoute, RouteRef, Source, or Sink")
 
     @staticmethod
     def _typed_route(route_ref: RouteLike) -> TypedRoute[Any] | None:
