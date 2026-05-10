@@ -1424,6 +1424,36 @@ class SensorIoTests(unittest.TestCase):
         self.assertEqual(source.clock.group, "ambient")
         self.assertEqual(handle.group, "ambient")
 
+    def test_local_sensor_source_rejects_invalid_configuration(self) -> None:
+        manyfold = load_manyfold_package()
+        sample_schema = manyfold.sensor_sample_schema(_int_schema(manyfold, "Temp"))
+        route = _route(manyfold, "invalid_local_source", sample_schema)
+
+        invalid_inputs = (
+            ({"route": object()}, "route must be a TypedRoute"),
+            ({"read": object()}, "read must be callable"),
+            ({"clock": object()}, r"clock must provide now\(\)"),
+            ({"retry": object()}, "retry must be a RetryPolicy"),
+            ({"backoff": object()}, "backoff must be a BackoffPolicy"),
+            ({"sequence": object()}, "sequence must be a SequenceCounter"),
+            ({"group": object()}, "group must be a string"),
+            ({"quality": object()}, "quality must be a string"),
+            ({"status": object()}, "status must be a string"),
+            ({"error_count": True}, "error_count must be an integer"),
+            ({"error_count": -1}, "error_count must be non-negative"),
+        )
+
+        for kwargs, message in invalid_inputs:
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    manyfold.LocalSensorSource(
+                        **{
+                            "route": route,
+                            "read": lambda: 21,
+                            **kwargs,
+                        }
+                    )
+
     def test_reactive_sensor_source_publishes_observable_samples(self) -> None:
         manyfold = load_manyfold_package()
 
@@ -1451,6 +1481,40 @@ class SensorIoTests(unittest.TestCase):
         self.assertEqual(latest.value.sequence_number, 2)
         self.assertEqual(handle.group, "imu")
         self.assertEqual([event.source_id for event in tap.snapshot()], ["imu", "imu"])
+
+    def test_reactive_sensor_source_rejects_invalid_configuration(self) -> None:
+        manyfold = load_manyfold_package()
+        sample_schema = manyfold.sensor_sample_schema(_int_schema(manyfold, "Accel"))
+        route = _route(manyfold, "invalid_reactive_source", sample_schema)
+        tap = manyfold.SensorDebugTap()
+
+        invalid_inputs = (
+            ({"route": object()}, "route must be a TypedRoute"),
+            ({"observable": object()}, r"observable must provide subscribe\(\)"),
+            ({"mapper": object()}, "mapper must be callable"),
+            ({"wrap_sample": "yes"}, "wrap_sample must be a boolean"),
+            ({"clock": object()}, r"clock must provide now\(\)"),
+            ({"sequence": object()}, "sequence must be a SequenceCounter"),
+            ({"identity": object()}, "identity must be a SensorIdentity"),
+            ({"group": object()}, "group must be a string"),
+            ({"debug_tap": object()}, "debug_tap must be a SensorDebugTap"),
+            ({"debug_stage": "raw"}, "debug_stage must be a SensorDebugStage"),
+            ({"stream_name": object()}, "stream_name must be a string"),
+            ({"source_id": object()}, "source_id must be a string"),
+        )
+
+        for kwargs, message in invalid_inputs:
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    manyfold.ReactiveSensorSource(
+                        **{
+                            "route": route,
+                            "observable": rx.from_iterable(()),
+                            "mapper": lambda value: value,
+                            "debug_tap": tap,
+                            **kwargs,
+                        }
+                    )
 
     def test_sensor_debug_tap_retains_bounded_history(self) -> None:
         manyfold = load_manyfold_package()
@@ -1611,6 +1675,51 @@ class SensorIoTests(unittest.TestCase):
         handle.dispose()
 
         self.assertEqual(peripheral.inputs, [9])
+
+    def test_peripheral_adapter_rejects_invalid_configuration(self) -> None:
+        manyfold = load_manyfold_package()
+
+        class FakePeripheral:
+            def __init__(self) -> None:
+                self.observe = rx.from_iterable(())
+
+        route = _route(manyfold, "invalid_peripheral", manyfold.sensor_event_schema())
+        control = _route(
+            manyfold,
+            "invalid_peripheral_control",
+            _int_schema(manyfold, "Control"),
+        )
+        tap = manyfold.SensorDebugTap()
+
+        invalid_inputs = (
+            ({"peripheral": object()}, r"peripheral must provide observe\.subscribe"),
+            ({"route": object()}, "route must be a TypedRoute"),
+            ({"mapper": object()}, "mapper must be callable"),
+            ({"event_type": object()}, "event_type must be a string"),
+            ({"wrap_sample": "yes"}, "wrap_sample must be a boolean"),
+            ({"control_route": object()}, "control_route must be a TypedRoute"),
+            ({"clock": object()}, r"clock must provide now\(\)"),
+            ({"sequence": object()}, "sequence must be a SequenceCounter"),
+            ({"identity": object()}, "identity must be a SensorIdentity"),
+            ({"group": object()}, "group must be a string"),
+            ({"run_on_install": "yes"}, "run_on_install must be a boolean"),
+            ({"stop_on_dispose": "yes"}, "stop_on_dispose must be a boolean"),
+            ({"debug_tap": object()}, "debug_tap must be a SensorDebugTap"),
+        )
+
+        for kwargs, message in invalid_inputs:
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    manyfold.PeripheralAdapter(
+                        **{
+                            "peripheral": FakePeripheral(),
+                            "route": route,
+                            "control_route": control,
+                            "debug_tap": tap,
+                            "run_on_install": False,
+                            **kwargs,
+                        }
+                    )
 
     def test_peripheral_adapter_disposes_output_subscription_when_control_subscribe_fails(
         self,
@@ -1799,6 +1908,39 @@ class SensorIoTests(unittest.TestCase):
         self.assertIsNotNone(latest)
         assert latest is not None
         self.assertEqual(latest.value.status, "stale")
+
+    def test_sensor_health_watchdog_rejects_invalid_configuration(self) -> None:
+        manyfold = load_manyfold_package()
+        source = _route(
+            manyfold,
+            "invalid_health_sample",
+            _int_schema(manyfold, "Sample"),
+        )
+        health = _route(
+            manyfold,
+            "invalid_health",
+            manyfold.health_status_schema(),
+        )
+
+        invalid_inputs = (
+            ({"source": object()}, "source must be a TypedRoute"),
+            ({"health_route": object()}, "route must be a TypedRoute"),
+            ({"clock": object()}, r"clock must provide now\(\)"),
+            ({"stale_message": object()}, "stale_message must be a string"),
+            ({"group": object()}, "group must be a string"),
+        )
+
+        for kwargs, message in invalid_inputs:
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    manyfold.SensorHealthWatchdog(
+                        **{
+                            "source": source,
+                            "health_route": health,
+                            "stale_after": 5.0,
+                            **kwargs,
+                        }
+                    )
 
     def test_sensor_timing_policies_reject_non_finite_values(self) -> None:
         manyfold = load_manyfold_package()

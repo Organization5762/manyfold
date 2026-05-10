@@ -1398,6 +1398,28 @@ class LocalSensorSource(Generic[T]):
     error_count: int = 0
 
     def __post_init__(self) -> None:
+        self.route = _require_typed_route(self.route, "local sensor source route")
+        _require_callable(self.read, "local sensor source read")
+        _require_clock(self.clock, "local sensor source clock")
+        self.retry = _require_retry_policy(self.retry, "local sensor source retry")
+        self.backoff = _require_backoff_policy(
+            self.backoff, "local sensor source backoff"
+        )
+        self.sequence = _require_sequence_counter(
+            self.sequence, "local sensor source sequence"
+        )
+        self.group = _require_optional_string(self.group, "local sensor source group")
+        self.quality = _require_optional_string(
+            self.quality, "local sensor source quality"
+        )
+        self.status = _require_optional_string(
+            self.status, "local sensor source status"
+        )
+        self.error_count = _require_int(
+            self.error_count, "local sensor source error_count"
+        )
+        if self.error_count < 0:
+            raise ValueError("local sensor source error_count must be non-negative")
         _adopt_group(self.sequence, self.group)
         _adopt_group(self.clock, self.group)
 
@@ -1464,6 +1486,32 @@ class ReactiveSensorSource:
     source_id: str | None = None
 
     def __post_init__(self) -> None:
+        self.route = _require_typed_route(self.route, "reactive sensor source route")
+        _require_observable(self.observable, "reactive sensor source observable")
+        _require_callable(self.mapper, "reactive sensor source mapper")
+        self.wrap_sample = _require_bool(
+            self.wrap_sample, "reactive sensor source wrap_sample"
+        )
+        _require_clock(self.clock, "reactive sensor source clock")
+        self.sequence = _require_sequence_counter(
+            self.sequence, "reactive sensor source sequence"
+        )
+        self.identity = _require_sensor_identity(
+            self.identity, "reactive sensor source identity"
+        )
+        self.group = _require_optional_string(self.group, "reactive sensor source group")
+        self.debug_tap = _require_optional_debug_tap(
+            self.debug_tap, "reactive sensor source debug_tap"
+        )
+        self.debug_stage = _require_sensor_debug_stage(
+            self.debug_stage, "reactive sensor source debug_stage"
+        )
+        self.stream_name = _require_optional_string(
+            self.stream_name, "reactive sensor source stream_name"
+        )
+        self.source_id = _require_optional_string(
+            self.source_id, "reactive sensor source source_id"
+        )
         _adopt_group(self.clock, self.group)
         _adopt_group(self.sequence, self.group)
 
@@ -1542,6 +1590,37 @@ class PeripheralAdapter:
     debug_tap: SensorDebugTap | None = None
 
     def __post_init__(self) -> None:
+        _require_peripheral(self.peripheral, "peripheral adapter peripheral")
+        self.route = _require_typed_route(self.route, "peripheral adapter route")
+        if self.mapper is not None:
+            _require_callable(self.mapper, "peripheral adapter mapper")
+        self.event_type = _require_optional_string(
+            self.event_type, "peripheral adapter event_type"
+        )
+        self.wrap_sample = _require_bool(
+            self.wrap_sample, "peripheral adapter wrap_sample"
+        )
+        self.control_route = _require_optional_typed_route(
+            self.control_route, "peripheral adapter control_route"
+        )
+        _require_clock(self.clock, "peripheral adapter clock")
+        self.sequence = _require_sequence_counter(
+            self.sequence, "peripheral adapter sequence"
+        )
+        if self.identity is not None:
+            self.identity = _require_sensor_identity(
+                self.identity, "peripheral adapter identity"
+            )
+        self.group = _require_optional_string(self.group, "peripheral adapter group")
+        self.run_on_install = _require_bool(
+            self.run_on_install, "peripheral adapter run_on_install"
+        )
+        self.stop_on_dispose = _require_bool(
+            self.stop_on_dispose, "peripheral adapter stop_on_dispose"
+        )
+        self.debug_tap = _require_optional_debug_tap(
+            self.debug_tap, "peripheral adapter debug_tap"
+        )
         _adopt_group(self.clock, self.group)
         _adopt_group(self.sequence, self.group)
 
@@ -1724,9 +1803,18 @@ class SensorHealthWatchdog:
     group: str | None = None
 
     def __post_init__(self) -> None:
+        self.source = _require_typed_route(self.source, "sensor health source")
+        self.health_route = _require_typed_route(
+            self.health_route, "sensor health route"
+        )
         self.stale_after = _require_finite_number(self.stale_after, "stale_after")
         if self.stale_after < 0:
             raise ValueError("stale_after must be non-negative")
+        _require_clock(self.clock, "sensor health clock")
+        self.stale_message = _require_string(
+            self.stale_message, "sensor health stale_message"
+        )
+        self.group = _require_optional_string(self.group, "sensor health group")
         _adopt_group(self.clock, self.group)
 
     def install(self, graph: Graph) -> SensorHealthHandle:
@@ -1902,9 +1990,58 @@ def _require_callable(value: Any, field: str) -> None:
         raise ValueError(f"{field} must be callable")
 
 
+def _require_observable(value: Any, field: str) -> None:
+    if not callable(getattr(value, "subscribe", None)):
+        raise ValueError(f"{field} must provide subscribe()")
+
+
+def _require_peripheral(value: Any, field: str) -> None:
+    observe = getattr(value, "observe", None)
+    if not callable(getattr(observe, "subscribe", None)):
+        raise ValueError(f"{field} must provide observe.subscribe()")
+
+
 def _require_clock(value: Any, field: str) -> None:
     if not callable(getattr(value, "now", None)):
         raise ValueError(f"{field} must provide now()")
+
+
+def _require_retry_policy(value: Any, field: str) -> RetryPolicy:
+    if not isinstance(value, RetryPolicy):
+        raise ValueError(f"{field} must be a RetryPolicy")
+    return value
+
+
+def _require_backoff_policy(value: Any, field: str) -> BackoffPolicy:
+    if not isinstance(value, BackoffPolicy):
+        raise ValueError(f"{field} must be a BackoffPolicy")
+    return value
+
+
+def _require_sequence_counter(value: Any, field: str) -> SequenceCounter:
+    if not isinstance(value, SequenceCounter):
+        raise ValueError(f"{field} must be a SequenceCounter")
+    return value
+
+
+def _require_sensor_identity(value: Any, field: str) -> SensorIdentity:
+    if not isinstance(value, SensorIdentity):
+        raise ValueError(f"{field} must be a SensorIdentity")
+    return value
+
+
+def _require_optional_debug_tap(value: Any, field: str) -> SensorDebugTap | None:
+    if value is None:
+        return None
+    if not isinstance(value, SensorDebugTap):
+        raise ValueError(f"{field} must be a SensorDebugTap")
+    return value
+
+
+def _require_sensor_debug_stage(value: Any, field: str) -> SensorDebugStage:
+    if not isinstance(value, SensorDebugStage):
+        raise ValueError(f"{field} must be a SensorDebugStage")
+    return value
 
 
 def _require_typed_route(value: Any, field: str) -> TypedRoute[Any]:
