@@ -322,6 +322,10 @@ class Schema(Generic[T]):
         schema_id: str | None = None,
         version: int = 1,
     ) -> Schema[TProto]:
+        if not isinstance(message_type, ProtobufMessageType):
+            raise ValueError(
+                "protobuf schema message_type must provide __name__ and FromString"
+            )
         schema_name = schema_id or message_type.__name__
         return cls(
             schema_id=schema_name,

@@ -325,6 +325,15 @@ for build, message in cases:
                 schema=object(),
             )
 
+    def test_protobuf_schema_rejects_invalid_message_type_clearly(self) -> None:
+        manyfold = load_manyfold_package()
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "protobuf schema message_type must provide __name__ and FromString",
+        ):
+            manyfold.Schema.protobuf(object())  # type: ignore[arg-type]
+
     def test_any_schema_rejects_unknown_process_local_tokens_clearly(self) -> None:
         manyfold = load_manyfold_package()
         schema = manyfold.Schema.any("RuntimeHandle")
