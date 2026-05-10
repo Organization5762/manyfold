@@ -346,6 +346,22 @@ class ComponentTests(unittest.TestCase):
         self.assertEqual([record.index for record in records], [1, 2])
         self.assertEqual([record.value for record in records], ["first", "second"])
 
+    def test_event_log_rejects_invalid_construction_inputs(self) -> None:
+        manyfold = load_manyfold_package()
+        schema = manyfold.Schema.bytes(name="Command")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            keyspace = manyfold.FileStore(temp_dir).prefix("commands")
+
+            with self.assertRaisesRegex(ValueError, "event log name"):
+                manyfold.EventLog("", keyspace, schema)
+            with self.assertRaisesRegex(ValueError, "keyspace must be a Keyspace"):
+                manyfold.EventLog(
+                    "commands",
+                    object(),  # type: ignore[arg-type]
+                    schema,
+                )
+
     def test_event_log_serializes_concurrent_appends(self) -> None:
         manyfold = load_manyfold_package()
 
@@ -498,6 +514,22 @@ class ComponentTests(unittest.TestCase):
                             schema,
                             key=key,
                         )
+
+    def test_snapshot_store_rejects_invalid_construction_inputs(self) -> None:
+        manyfold = load_manyfold_package()
+        schema = manyfold.Schema.bytes(name="SnapshotBytes")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            keyspace = manyfold.FileStore(temp_dir).prefix("state")
+
+            with self.assertRaisesRegex(ValueError, "snapshot store name"):
+                manyfold.SnapshotStore("", keyspace, schema)
+            with self.assertRaisesRegex(ValueError, "keyspace must be a Keyspace"):
+                manyfold.SnapshotStore(
+                    "state_snapshot",
+                    object(),  # type: ignore[arg-type]
+                    schema,
+                )
 
     def test_snapshot_store_serializes_concurrent_writes_and_publishes(self) -> None:
         manyfold = load_manyfold_package()

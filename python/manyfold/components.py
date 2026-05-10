@@ -213,6 +213,8 @@ class EventLog(Generic[T]):
         *,
         owner: str | None = None,
     ) -> None:
+        _require_component_name(name, "event log name")
+        _require_keyspace(keyspace)
         self.name = name
         self.keyspace = keyspace
         self.schema = schema
@@ -313,6 +315,8 @@ class SnapshotStore(Generic[T]):
         owner: str | None = None,
         key: KeyPart = "latest",
     ) -> None:
+        _require_component_name(name, "snapshot store name")
+        _require_keyspace(keyspace)
         self.name = name
         self.keyspace = keyspace
         self.schema = schema
@@ -925,6 +929,16 @@ def _component_route(
         variant=variant,
         schema=schema,
     )
+
+
+def _require_component_name(value: object, field: str) -> None:
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{field} must be a non-empty string")
+
+
+def _require_keyspace(value: object) -> None:
+    if not isinstance(value, Keyspace):
+        raise ValueError("keyspace must be a Keyspace")
 
 
 def _normalize_key(parts: tuple[KeyPart, ...]) -> Key:
