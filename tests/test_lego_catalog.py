@@ -57,18 +57,65 @@ class LegoCatalogTests(unittest.TestCase):
         self.assertEqual(
             lego_catalog._duplicate_requirements_by_lego(
                 (
-                    manyfold.Lego("Bridge", "communication", "local", "", ("Pipe",)),
+                    manyfold.Lego(
+                        "Bridge",
+                        "communication",
+                        "local",
+                        "Connects routes.",
+                        ("Pipe",),
+                    ),
                     manyfold.Lego(
                         "Pipe",
                         "communication",
                         "local",
-                        "",
+                        "Moves events.",
                         ("RouteRef", "Schema", "RouteRef"),
                     ),
                 )
             ),
             ("Pipe: RouteRef",),
         )
+
+    def test_lego_constructor_rejects_blank_identity_text(self) -> None:
+        manyfold = load_manyfold_package()
+
+        for kwargs, message in (
+            ({"name": " "}, "name must be a non-empty string"),
+            ({"role": ""}, "role must be a non-empty string"),
+            ({"layer": "\t"}, "layer must be a non-empty string"),
+            ({"contract": ""}, "contract must be a non-empty string"),
+        ):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    manyfold.Lego(
+                        **{
+                            "name": "Widget",
+                            "role": "compute",
+                            "layer": "local",
+                            "contract": "Does one thing.",
+                            **kwargs,
+                        }
+                    )
+
+    def test_lego_constructor_rejects_malformed_text_tuples(self) -> None:
+        manyfold = load_manyfold_package()
+
+        for kwargs, message in (
+            ({"requires": ["Clock"]}, "requires must be a tuple of strings"),
+            ({"provides": (" ",)}, "provides must contain non-empty strings"),
+            ({"knobs": (1,)}, "knobs must contain non-empty strings"),
+        ):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    manyfold.Lego(
+                        **{
+                            "name": "Widget",
+                            "role": "compute",
+                            "layer": "local",
+                            "contract": "Does one thing.",
+                            **kwargs,
+                        }
+                    )
 
     def test_consensus_dependencies_are_lowered_components(self) -> None:
         manyfold = load_manyfold_package()

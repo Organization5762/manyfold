@@ -65,8 +65,27 @@ class Lego:
     provides: tuple[str, ...] = ()
     knobs: tuple[str, ...] = ()
 
+    def __post_init__(self) -> None:
+        for field_name in ("name", "role", "layer", "contract"):
+            _require_non_blank_text(getattr(self, field_name), field_name)
+        for field_name in ("requires", "provides", "knobs"):
+            _require_text_tuple(getattr(self, field_name), field_name)
+
 
 _LEGO_NAME_KEY = attrgetter("name")
+
+
+def _require_non_blank_text(value: object, field_name: str) -> None:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"lego {field_name} must be a non-empty string")
+
+
+def _require_text_tuple(value: object, field_name: str) -> None:
+    if not isinstance(value, tuple):
+        raise ValueError(f"lego {field_name} must be a tuple of strings")
+    if any(not isinstance(item, str) or not item.strip() for item in value):
+        raise ValueError(f"lego {field_name} must contain non-empty strings")
+
 
 _LEGOS = (
     # Atoms.
