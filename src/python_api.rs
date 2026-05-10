@@ -1686,9 +1686,13 @@ impl Graph {
 
     fn install(&self, loop_ref: ControlLoop) -> PyResult<()> {
         let mut graph = lock_graph(&self.state)?;
-        graph
-            .loops
-            .insert(loop_ref.inner.name.clone(), loop_ref.inner.clone());
+        let name = loop_ref.inner.name.clone();
+        if graph.loops.contains_key(&name) {
+            return Err(PyValueError::new_err(format!(
+                "control loop {name:?} is already installed"
+            )));
+        }
+        graph.loops.insert(name, loop_ref.inner.clone());
         Ok(())
     }
 
