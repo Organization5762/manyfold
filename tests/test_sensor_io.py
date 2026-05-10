@@ -118,6 +118,67 @@ class SensorIoTests(unittest.TestCase):
 
         self.assertEqual(identity.tags, (tag,))
 
+    def test_sensor_sample_rejects_invalid_values(self) -> None:
+        manyfold = load_manyfold_package()
+        valid_kwargs = {
+            "value": 21,
+            "source_timestamp": 1.0,
+            "ingest_timestamp": 1.5,
+            "sequence_number": 1,
+        }
+
+        for kwargs, message in (
+            (
+                {"source_timestamp": math.nan},
+                "source_timestamp must be a finite number",
+            ),
+            (
+                {"ingest_timestamp": "1.5"},
+                "ingest_timestamp must be a finite number",
+            ),
+            ({"sequence_number": True}, "sequence_number must be an integer"),
+            ({"sequence_number": -1}, "sequence_number must be non-negative"),
+            ({"quality": 1}, "quality must be a string"),
+            ({"status": False}, "status must be a string"),
+        ):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    manyfold.SensorSample(**{**valid_kwargs, **kwargs})
+
+    def test_sensor_event_rejects_invalid_values(self) -> None:
+        manyfold = load_manyfold_package()
+        valid_kwargs = {
+            "event_type": "radio.packet",
+            "data": {},
+            "observed_at": 1.5,
+        }
+
+        for kwargs, message in (
+            ({"event_type": True}, "event_type must be a string"),
+            ({"event_type": " "}, "event_type must be a non-empty string"),
+            ({"observed_at": math.inf}, "observed_at must be a finite number"),
+            ({"identity": "sensor"}, "identity must be a SensorIdentity"),
+            ({"sequence_number": False}, "sequence_number must be an integer"),
+            ({"sequence_number": -1}, "sequence_number must be non-negative"),
+            ({"raw": "payload"}, "raw must be bytes-like"),
+            ({"metadata": []}, "metadata must be a mapping"),
+        ):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    manyfold.SensorEvent(**{**valid_kwargs, **kwargs})
+
+    def test_sensor_event_normalizes_raw_bytes_like_payloads(self) -> None:
+        manyfold = load_manyfold_package()
+
+        event = manyfold.SensorEvent(
+            event_type="radio.packet",
+            data={},
+            observed_at=1.5,
+            raw=bytearray(b"abc"),
+        )
+
+        self.assertEqual(event.raw, b"abc")
+
     def test_bounded_ring_buffer_enforces_overflow_policy(self) -> None:
         manyfold = load_manyfold_package()
         buffer = manyfold.BoundedRingBuffer[int](capacity=2, overflow="drop_oldest")
@@ -399,6 +460,14 @@ class SensorIoTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, message):
                     schema.decode(payload)
 
+    def test_sensor_sample_schema_rejects_invalid_value_schema(self) -> None:
+        manyfold = load_manyfold_package()
+
+        with self.assertRaisesRegex(
+            ValueError, "sensor sample value_schema must be a Schema"
+        ):
+            manyfold.sensor_sample_schema(object())  # type: ignore[arg-type]
+
     def test_health_status_schema_rejects_string_stale_flag(self) -> None:
         manyfold = load_manyfold_package()
         health_schema = manyfold.health_status_schema()
@@ -500,14 +569,15 @@ class SensorIoTests(unittest.TestCase):
                 b'"source_timestamp":NaN,"status":null,"value":"MjE="}'
             )
 
-        sample = manyfold.SensorSample(
-            value=21,
-            source_timestamp=math.nan,
-            ingest_timestamp=1.5,
-            sequence_number=1,
-        )
-        with self.assertRaisesRegex(ValueError, "Out of range float values"):
-            schema.encode(sample)
+        with self.assertRaisesRegex(
+            ValueError, "source_timestamp must be a finite number"
+        ):
+            manyfold.SensorSample(
+                value=21,
+                source_timestamp=math.nan,
+                ingest_timestamp=1.5,
+                sequence_number=1,
+            )
 
     def test_sensor_event_schema_rejects_invalid_nested_bytes_base64(self) -> None:
         manyfold = load_manyfold_package()
@@ -704,13 +774,12 @@ class SensorIoTests(unittest.TestCase):
                 b'"metadata":{},"observed_at":1.5,"raw":null,"sequence_number":7}'
             )
 
-        event = manyfold.SensorEvent(
-            event_type="radio.packet",
-            data={},
-            observed_at=math.inf,
-        )
-        with self.assertRaisesRegex(ValueError, "Out of range float values"):
-            schema.encode(event)
+        with self.assertRaisesRegex(ValueError, "observed_at must be a finite number"):
+            manyfold.SensorEvent(
+                event_type="radio.packet",
+                data={},
+                observed_at=math.inf,
+            )
 
     def test_health_status_schema_rejects_string_error_count(self) -> None:
         manyfold = load_manyfold_package()

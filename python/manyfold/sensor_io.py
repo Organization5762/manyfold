@@ -91,6 +91,8 @@ def sensor_sample_schema(
 ) -> Schema[SensorSample[T]]:
     """Build a JSON envelope schema for ``SensorSample[T]`` values."""
 
+    if not isinstance(value_schema, Schema):
+        raise ValueError("sensor sample value_schema must be a Schema")
     resolved_schema_id = schema_id or f"SensorSample[{value_schema.schema_id}]"
 
     def encode(sample: SensorSample[T]) -> bytes:
@@ -886,6 +888,32 @@ class SensorSample(Generic[T]):
     quality: str | None = None
     status: str | None = None
 
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "source_timestamp",
+            _require_finite_number(self.source_timestamp, "source_timestamp"),
+        )
+        object.__setattr__(
+            self,
+            "ingest_timestamp",
+            _require_finite_number(self.ingest_timestamp, "ingest_timestamp"),
+        )
+        sequence_number = _require_int(self.sequence_number, "sequence_number")
+        if sequence_number < 0:
+            raise ValueError("sequence_number must be non-negative")
+        object.__setattr__(self, "sequence_number", sequence_number)
+        object.__setattr__(
+            self,
+            "quality",
+            _require_optional_string(self.quality, "quality"),
+        )
+        object.__setattr__(
+            self,
+            "status",
+            _require_optional_string(self.status, "status"),
+        )
+
 
 @dataclass(frozen=True)
 class SensorEvent:
@@ -898,6 +926,33 @@ class SensorEvent:
     sequence_number: int | None = None
     raw: bytes | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        event_type = _require_string(self.event_type, "event_type")
+        if not event_type.strip():
+            raise ValueError("event_type must be a non-empty string")
+        object.__setattr__(self, "event_type", event_type)
+        object.__setattr__(
+            self,
+            "observed_at",
+            _require_finite_number(self.observed_at, "observed_at"),
+        )
+        if not isinstance(self.identity, SensorIdentity):
+            raise ValueError("identity must be a SensorIdentity")
+        if self.sequence_number is not None:
+            sequence_number = _require_int(self.sequence_number, "sequence_number")
+            if sequence_number < 0:
+                raise ValueError("sequence_number must be non-negative")
+            object.__setattr__(self, "sequence_number", sequence_number)
+        if self.raw is not None:
+            if not isinstance(self.raw, bytes | bytearray | memoryview):
+                raise ValueError("raw must be bytes-like")
+            object.__setattr__(self, "raw", bytes(self.raw))
+        object.__setattr__(
+            self,
+            "metadata",
+            _require_mapping(self.metadata, "metadata"),
+        )
 
 
 @dataclass(frozen=True)
