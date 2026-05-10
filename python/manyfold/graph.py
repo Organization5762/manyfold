@@ -614,6 +614,15 @@ class LazyPayloadSource:
     logical_length_bytes: int | None = None
     codec_id: str = "identity"
 
+    def __post_init__(self) -> None:
+        if not callable(self.open):
+            raise ValueError("lazy payload open must be callable")
+        if self.logical_length_bytes is not None:
+            _require_non_negative_integer(
+                self.logical_length_bytes, "logical_length_bytes"
+            )
+        _require_non_empty_text(self.codec_id, "codec_id")
+
 
 @dataclass(frozen=True)
 class Capacitor:
@@ -6730,6 +6739,11 @@ def _require_optional_non_empty_text(value: str | None, field_name: str) -> None
 def _require_integer(value: object, field: str) -> None:
     if not isinstance(value, int) or isinstance(value, bool):
         raise ValueError(f"{field} must be an integer")
+
+
+def _require_non_negative_integer(value: object, field: str) -> None:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ValueError(f"{field} must be a non-negative integer")
 
 
 def _require_progress_value(value: object) -> int:

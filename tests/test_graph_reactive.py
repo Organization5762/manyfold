@@ -4894,6 +4894,32 @@ assert graph.latest(route) is None
         self.assertEqual(snapshot.cache_hits, 0)
         self.assertEqual(snapshot.unopened_lazy_payloads, 0)
 
+    def test_lazy_payload_source_rejects_invalid_configuration(self) -> None:
+        graph_module = load_graph_module()
+
+        cases = (
+            (
+                {"open": b"payload"},
+                "lazy payload open must be callable",
+            ),
+            (
+                {"open": lambda: b"payload", "logical_length_bytes": -1},
+                "logical_length_bytes must be a non-negative integer",
+            ),
+            (
+                {"open": lambda: b"payload", "logical_length_bytes": True},
+                "logical_length_bytes must be a non-negative integer",
+            ),
+            (
+                {"open": lambda: b"payload", "codec_id": " "},
+                "codec_id must be a non-empty string",
+            ),
+        )
+        for kwargs, message in cases:
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    graph_module.LazyPayloadSource(**kwargs)
+
     def test_payload_demand_query_reports_lazy_open_accounting(self) -> None:
         graph_module = load_graph_module()
         route = graph_module.route(
