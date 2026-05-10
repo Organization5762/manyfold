@@ -1003,6 +1003,7 @@ def load_manyfold_package():
         "Clock": sensor_io.Clock,
         "DetectionNode": sensor_io.DetectionNode,
         "DetectionNodeHandle": sensor_io.DetectionNodeHandle,
+        "DiagramNode": graph.DiagramNode,
         "ClockDomainRef": rust.ClockDomainRef,
         "ClosedEnvelope": rust.ClosedEnvelope,
         "Consensus": components.Consensus,
@@ -1066,6 +1067,7 @@ def load_manyfold_package():
         "Memory": components.Memory,
         "MemoryRecord": components.MemoryRecord,
         "NamespaceRef": rust.NamespaceRef,
+        "NodeThreadPlacement": graph.NodeThreadPlacement,
         "OpenedEnvelope": rust.OpenedEnvelope,
         "OwnerName": primitives.OwnerName,
         "PayloadDemandSnapshot": graph.PayloadDemandSnapshot,
@@ -1157,12 +1159,14 @@ def load_manyfold_package():
     package.REFERENCE_EXAMPLE_SUITE = reference_examples.REFERENCE_EXAMPLE_SUITE
     package.ReferenceExample = reference_examples.ReferenceExample
     package.__all__ = tuple(
-        (
-            *exports.keys(),
-            "REFERENCE_EXAMPLE_SUITE",
-            "ReferenceExample",
-            "implemented_reference_examples",
-            "reference_example_suite",
+        sorted(
+            (
+                *exports.keys(),
+                "REFERENCE_EXAMPLE_SUITE",
+                "ReferenceExample",
+                "implemented_reference_examples",
+                "reference_example_suite",
+            )
         )
     )
     package.implemented_reference_examples = (
