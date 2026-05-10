@@ -7,6 +7,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CARGO_TOML_PATH = PROJECT_ROOT / "Cargo.toml"
+NATIVE_STUB_PATH = PROJECT_ROOT / "python" / "manyfold" / "_manyfold_rust" / "__init__.pyi"
 PYPROJECT_PATH = PROJECT_ROOT / "pyproject.toml"
 PYTHON_SOURCE_ROOTS = (
     PROJECT_ROOT / "examples",
@@ -58,6 +59,12 @@ class ProjectMetadataTests(unittest.TestCase):
         self.assertEqual(script_names, tuple(sorted(script_names)))
         self.assertEqual(url_names, tuple(sorted(url_names)))
 
+    def test_native_stub_exports_stay_sorted(self) -> None:
+        exports = _module_all_assignment(NATIVE_STUB_PATH)
+
+        self.assertEqual(exports, tuple(sorted(exports)))
+        self.assertEqual(len(exports), len(set(exports)))
+
 
 def _array_values(lines: list[str], key: str) -> tuple[str, ...]:
     values: list[str] = []
@@ -97,6 +104,24 @@ def _section_keys(lines: list[str], section: str) -> tuple[str, ...]:
     if not in_section:
         raise AssertionError(f"pyproject.toml does not define section {section!r}")
     return tuple(keys)
+
+
+def _module_all_assignment(path: Path) -> tuple[str, ...]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(isinstance(target, ast.Name) and target.id == "__all__" for target in node.targets):
+            continue
+        if not isinstance(node.value, ast.List | ast.Tuple):
+            raise AssertionError(f"{path} __all__ must be a literal list or tuple")
+        exports: list[str] = []
+        for item in node.value.elts:
+            if not isinstance(item, ast.Constant) or not isinstance(item.value, str):
+                raise AssertionError(f"{path} __all__ must contain only string literals")
+            exports.append(item.value)
+        return tuple(exports)
+    raise AssertionError(f"{path} does not define __all__")
 
 
 def _python_source_paths() -> tuple[Path, ...]:
