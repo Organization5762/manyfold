@@ -383,6 +383,26 @@ class SensorIoTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual(schema.decode(first).data, {"2": "string"})
 
+    def test_sensor_event_schema_restores_mapping_keys_deterministically(self) -> None:
+        manyfold = load_manyfold_package()
+        schema = manyfold.sensor_event_schema()
+
+        first = schema.decode(
+            b'{"event_type":"radio.packet","data":{"z":1,"a":2},'
+            b'"observed_at":1.0,"identity":null,"sequence_number":null,'
+            b'"raw":null,"metadata":{"stage":"rx","crc_ok":true}}'
+        )
+        second = schema.decode(
+            b'{"event_type":"radio.packet","data":{"a":2,"z":1},'
+            b'"observed_at":1.0,"identity":null,"sequence_number":null,'
+            b'"raw":null,"metadata":{"crc_ok":true,"stage":"rx"}}'
+        )
+
+        self.assertEqual(tuple(first.data), ("a", "z"))
+        self.assertEqual(tuple(second.data), ("a", "z"))
+        self.assertEqual(tuple(first.metadata), ("crc_ok", "stage"))
+        self.assertEqual(tuple(second.metadata), ("crc_ok", "stage"))
+
     def test_sensor_schemas_encode_compact_sorted_json(self) -> None:
         manyfold = load_manyfold_package()
         sample_schema = manyfold.sensor_sample_schema(_int_schema(manyfold, "Temp"))

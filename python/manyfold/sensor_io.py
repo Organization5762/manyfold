@@ -1879,7 +1879,12 @@ def _json_restore(value: Any) -> Any:
     if isinstance(value, Mapping):
         if set(value) == {"__bytes_b64__"}:
             return _decode_base64_field(value["__bytes_b64__"], "__bytes_b64__")
-        return {str(key): _json_restore(item) for key, item in value.items()}
+        return {
+            str(key): _json_restore(item)
+            for key, item in sorted(
+                value.items(), key=lambda pair: _mapping_key_sort_key(pair[0])
+            )
+        }
     if isinstance(value, list):
         return [_json_restore(item) for item in value]
     return value
