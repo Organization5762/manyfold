@@ -6,7 +6,7 @@ import argparse
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Protocol
+from typing import Iterable, Mapping, Protocol
 
 try:
     from ._repo_paths import ensure_repo_import_paths
@@ -188,6 +188,7 @@ def parse_rfc_sections(
         for item in [_parse_appendix_item(line)]
         if item is not None
     ]
+    _validate_status_coverage(section_matches, appendix_matches)
     return section_matches, appendix_matches
 
 
@@ -290,6 +291,43 @@ def _parse_appendix_item(line: str) -> AppendixStatus | None:
         return None
     checkbox, detail = status
     return AppendixStatus(title=title, checkbox=checkbox, detail=detail)
+
+
+def _validate_status_coverage(
+    sections: list[SectionStatus], appendix_items: list[AppendixStatus]
+) -> None:
+    section_numbers = [section.number for section in sections]
+    appendix_titles = [item.title for item in appendix_items]
+
+    section_issues = _coverage_issues(
+        expected=CHECKLIST_STATUS,
+        actual=section_numbers,
+        label="RFC section status",
+    )
+    appendix_issues = _coverage_issues(
+        expected=APPENDIX_STATUS,
+        actual=appendix_titles,
+        label="appendix status",
+    )
+    issues = (*section_issues, *appendix_issues)
+    if issues:
+        raise ValueError("; ".join(issues))
+
+
+def _coverage_issues(
+    *, expected: Mapping[str, object], actual: list[str], label: str
+) -> tuple[str, ...]:
+    expected_keys = set(expected)
+    actual_keys = set(actual)
+    duplicate_keys = tuple(key for key in actual_keys if actual.count(key) > 1)
+    issues: list[str] = []
+    if missing_keys := tuple(sorted(expected_keys - actual_keys)):
+        issues.append(f"missing {label} entries: {', '.join(missing_keys)}")
+    if extra_keys := tuple(sorted(actual_keys - expected_keys)):
+        issues.append(f"unknown {label} entries: {', '.join(extra_keys)}")
+    if duplicate_keys:
+        issues.append(f"duplicate {label} entries: {', '.join(sorted(duplicate_keys))}")
+    return tuple(issues)
 
 
 def _write_if_changed(path: _TextPath, content: str) -> bool:
