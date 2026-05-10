@@ -53,6 +53,31 @@ class ExampleCatalogEntry:
     reference_number: int | None = None
     reference_title: str | None = None
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.module_name, str) or not self.module_name.strip():
+            raise ValueError("example catalog module name must be a non-empty string")
+        if not isinstance(self.summary, str) or not self.summary.strip():
+            raise ValueError("example catalog summary must be a non-empty string")
+        if not isinstance(self.archived, bool):
+            raise TypeError("example catalog archived flag must be a boolean")
+        if self.readme_order is not None and (
+            isinstance(self.readme_order, bool)
+            or not isinstance(self.readme_order, int)
+        ):
+            raise TypeError("example catalog readme_order must be an integer")
+        if self.reference_number is not None and (
+            isinstance(self.reference_number, bool)
+            or not isinstance(self.reference_number, int)
+        ):
+            raise TypeError("example catalog reference number must be an integer")
+        if self.reference_title is not None and (
+            not isinstance(self.reference_title, str)
+            or not self.reference_title.strip()
+        ):
+            raise ValueError(
+                "example catalog reference title must be a non-empty string"
+            )
+
     @property
     def is_reference_example(self) -> bool:
         return self.reference_number is not None and self.reference_title is not None
@@ -77,6 +102,18 @@ class ReferenceExampleGap:
     reference_number: int
     reference_title: str
     summary: str
+
+    def __post_init__(self) -> None:
+        if isinstance(self.reference_number, bool) or not isinstance(
+            self.reference_number, int
+        ):
+            raise TypeError("reference example gap number must be an integer")
+        if self.reference_number <= 0:
+            raise ValueError("reference example gap number must be positive")
+        if not isinstance(self.reference_title, str) or not self.reference_title.strip():
+            raise ValueError("reference example gap title must be a non-empty string")
+        if not isinstance(self.summary, str) or not self.summary.strip():
+            raise ValueError("reference example gap summary must be a non-empty string")
 
 
 EXAMPLE_CATALOG: tuple[ExampleCatalogEntry, ...] = (
