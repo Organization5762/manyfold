@@ -199,6 +199,21 @@ class LegoCatalogTests(unittest.TestCase):
 
         self.assertEqual(manyfold.dependency_closure_of("Bytes"), ())
 
+    def test_catalog_queries_reject_malformed_lookup_text(self) -> None:
+        manyfold = load_manyfold_package()
+
+        for lookup, value, message in (
+            (manyfold.get_lego, (""), "name must be a non-empty string"),
+            (manyfold.dependencies_of, (" "), "name must be a non-empty string"),
+            (manyfold.dependency_closure_of, (None), "name must be a non-empty string"),
+            (manyfold.dependents_of, (1), "name must be a non-empty string"),
+            (manyfold.legos_by_role, ("\t"), "role must be a non-empty string"),
+            (manyfold.legos_by_layer, (b"local"), "layer must be a non-empty string"),
+        ):
+            with self.subTest(lookup=lookup.__name__, value=value):
+                with self.assertRaisesRegex(ValueError, message):
+                    lookup(value)
+
 
 if __name__ == "__main__":
     unittest.main()

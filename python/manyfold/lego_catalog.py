@@ -19,6 +19,7 @@ def all_legos() -> tuple[Lego, ...]:
 
 def get_lego(name: str) -> Lego:
     """Return one lego by exact name."""
+    _require_non_blank_text(name, "name")
     try:
         return _BY_NAME[name]
     except KeyError as exc:
@@ -45,11 +46,13 @@ def dependents_of(name: str) -> tuple[Lego, ...]:
 
 def legos_by_role(role: str) -> tuple[Lego, ...]:
     """Return legos with the requested primary role sorted by name."""
+    _require_non_blank_text(role, "role")
     return _LEGOS_BY_ROLE.get(role, ())
 
 
 def legos_by_layer(layer: str) -> tuple[Lego, ...]:
     """Return legos in the requested dependency layer sorted by name."""
+    _require_non_blank_text(layer, "layer")
     return _LEGOS_BY_LAYER.get(layer, ())
 
 
