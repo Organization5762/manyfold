@@ -56,6 +56,12 @@ _BULK_RUNTIME_ISSUE_CHECKS: tuple[tuple[str, str], ...] = (
         "bulk payload paths should prefer zero-copy or shared memory strategies",
     ),
 )
+_FIRMWARE_BOOL_FIELDS = tuple(field for field, _message in _FIRMWARE_ISSUE_CHECKS) + (
+    "flash_backed_retention",
+)
+_RUNTIME_BOOL_FIELDS = tuple(
+    field for field, _message in _EMBEDDED_RUNTIME_ISSUE_CHECKS
+) + tuple(field for field, _message in _BULK_RUNTIME_ISSUE_CHECKS)
 __all__ = (
     "EmbeddedBulkSensor",
     "EmbeddedDeviceProfile",
@@ -80,11 +86,7 @@ class FirmwareAgentProfile:
     flash_backed_retention: bool = False
 
     def __post_init__(self) -> None:
-        _require_bool_fields(
-            self,
-            tuple(field for field, _message in _FIRMWARE_ISSUE_CHECKS)
-            + ("flash_backed_retention",),
-        )
+        _require_bool_fields(self, _FIRMWARE_BOOL_FIELDS)
 
     def required_issues(self) -> tuple[str, ...]:
         return _disabled_issue_messages(self, _FIRMWARE_ISSUE_CHECKS)
@@ -106,11 +108,7 @@ class EmbeddedRuntimeRules:
     bulk_credit_policy: str = _BULK_CREDIT_POLICY
 
     def __post_init__(self) -> None:
-        _require_bool_fields(
-            self,
-            tuple(field for field, _message in _EMBEDDED_RUNTIME_ISSUE_CHECKS)
-            + tuple(field for field, _message in _BULK_RUNTIME_ISSUE_CHECKS),
-        )
+        _require_bool_fields(self, _RUNTIME_BOOL_FIELDS)
         _require_non_blank_string(self.bulk_credit_policy, "bulk_credit_policy")
 
     def required_issues(self) -> tuple[str, ...]:
