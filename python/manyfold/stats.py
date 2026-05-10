@@ -6,6 +6,8 @@ import math
 from dataclasses import dataclass
 from typing import Sequence
 
+__all__ = ("Average",)
+
 
 @dataclass(frozen=True)
 class Average:
