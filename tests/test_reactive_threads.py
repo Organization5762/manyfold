@@ -77,6 +77,30 @@ class ReactiveThreadsTests(unittest.TestCase):
             },
         )
 
+    def test_legacy_scheduler_env_errors_name_legacy_variable(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"HEART_RX_BACKGROUND_MAX_WORKERS": "many"},
+            clear=False,
+        ):
+            with self.assertRaisesRegex(
+                ValueError,
+                "HEART_RX_BACKGROUND_MAX_WORKERS must be an integer",
+            ):
+                self.reactive_threads.background_scheduler()
+
+    def test_legacy_scheduler_env_minimum_errors_name_legacy_variable(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"HEART_RX_BACKGROUND_MAX_WORKERS": "0"},
+            clear=False,
+        ):
+            with self.assertRaisesRegex(
+                ValueError,
+                "HEART_RX_BACKGROUND_MAX_WORKERS must be at least 1",
+            ):
+                self.reactive_threads.background_scheduler()
+
     def test_deliver_on_frame_thread_queues_until_drained(self) -> None:
         source = self.rx.Subject()
         values: list[int] = []

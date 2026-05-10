@@ -446,15 +446,16 @@ def _env_int(
     default: int,
     minimum: int = 1,
 ) -> int:
-    raw_value = os.environ.get(name, os.environ.get(legacy_name))
+    source_name = name if name in os.environ else legacy_name
+    raw_value = os.environ.get(source_name)
     if raw_value is None or raw_value.strip() == "":
         return default
     try:
         value = int(raw_value)
     except ValueError as exc:
-        raise ValueError(f"{name} must be an integer") from exc
+        raise ValueError(f"{source_name} must be an integer") from exc
     if value < minimum:
-        raise ValueError(f"{name} must be at least {minimum}")
+        raise ValueError(f"{source_name} must be at least {minimum}")
     return value
 
 
