@@ -247,6 +247,10 @@ class Schema(Generic[T]):
     def __post_init__(self) -> None:
         _require_non_empty_string(self.schema_id, "schema_id")
         _require_positive_int(self.version, "schema version")
+        if not callable(self.encode):
+            raise ValueError("schema encode must be callable")
+        if not callable(self.decode):
+            raise ValueError("schema decode must be callable")
 
     @classmethod
     def any(cls, schema_id: str = "Any", version: int = 1) -> Schema[Any]:

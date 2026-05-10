@@ -205,6 +205,24 @@ for build, message in cases:
                 ):
                     manyfold.Schema.bytes(name="Temperature", version=version)
 
+    def test_schema_rejects_non_callable_codec_hooks(self) -> None:
+        manyfold = load_manyfold_package()
+
+        valid_kwargs = {
+            "schema_id": "Payload",
+            "version": 1,
+            "encode": lambda value: bytes(value),
+            "decode": lambda payload: payload,
+        }
+        cases = (
+            ("encode", b"not-callable", "schema encode must be callable"),
+            ("decode", object(), "schema decode must be callable"),
+        )
+        for field, value, message in cases:
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(ValueError, message):
+                    manyfold.Schema(**{**valid_kwargs, field: value})
+
     def test_bytes_schema_preserves_bytes_like_payloads(self) -> None:
         manyfold = load_manyfold_package()
         schema = manyfold.Schema.bytes(name="RawFrame")
