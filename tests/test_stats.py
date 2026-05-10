@@ -2,10 +2,16 @@ from __future__ import annotations
 
 import unittest
 
+import manyfold.stats as stats
 from manyfold.stats import Average
 
 
 class StatsTests(unittest.TestCase):
+    def test_stats_exports_are_explicit(self) -> None:
+        self.assertEqual(stats.__all__, ("Average",))
+        for name in stats.__all__:
+            self.assertIn(name, stats.__dict__)
+
     def test_average_uses_latest_values_within_window(self) -> None:
         self.assertEqual(Average(window_size=3)([1.0, 2.0, 9.0, 10.0]), 7.0)
 
