@@ -801,6 +801,10 @@ def install_manyfold_rust_stub() -> None:
             return True
 
         def install(self, control_loop):
+            if control_loop.name in self._loops:
+                raise ValueError(
+                    f"control loop {control_loop.name!r} is already installed"
+                )
             self._loops[control_loop.name] = control_loop
 
         def tick_control_loop(self, name):

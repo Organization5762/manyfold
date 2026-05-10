@@ -1165,6 +1165,40 @@ assert graph.latest(route) is None
         self.assertEqual(latest.value, b"TWO")
         self.assertEqual(latest.closed.seq_source, 2)
 
+    def test_install_rejects_duplicate_native_control_loop_names(self) -> None:
+        graph_module = load_graph_module()
+        read_state = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("motor"),
+            family=graph_module.StreamFamily("speed"),
+            stream=graph_module.StreamName("state"),
+            variant=graph_module.Variant.State,
+            schema=graph_module.Schema.bytes(name="SpeedState"),
+        )
+        write_request = graph_module.route(
+            plane=graph_module.Plane.Write,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("motor"),
+            family=graph_module.StreamFamily("speed"),
+            stream=graph_module.StreamName("pid"),
+            variant=graph_module.Variant.Request,
+            schema=graph_module.Schema.bytes(name="SpeedPid"),
+        )
+        graph = graph_module.Graph()
+        control_loop = graph_module.ControlLoops.with_routes(
+            "speed-control",
+            read_routes=[read_state],
+            write_request=write_request,
+        )
+
+        graph.install(control_loop)
+        with self.assertRaisesRegex(
+            ValueError,
+            "control loop 'speed-control' is already installed",
+        ):
+            graph.install(control_loop)
+
     def test_plan_join_exposes_repartition_nodes(self) -> None:
         graph_module = load_graph_module()
         left = graph_module.route(
