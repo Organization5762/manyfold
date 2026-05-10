@@ -165,6 +165,74 @@ class EmbeddedProfileTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, message):
                     manyfold.FirmwareAgentProfile(**kwargs)
 
+    def test_embedded_device_profile_rejects_invalid_configuration_objects(
+        self,
+    ) -> None:
+        manyfold = load_manyfold_package()
+
+        for kwargs, message in (
+            ({"firmware": object()}, "firmware must be a FirmwareAgentProfile"),
+            ({"rules": object()}, "rules must be an EmbeddedRuntimeRules"),
+        ):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    manyfold.EmbeddedDeviceProfile(**kwargs)
+
+    def test_scalar_sensor_rejects_invalid_configuration_objects(self) -> None:
+        manyfold = load_manyfold_package()
+        metadata_route = manyfold.route(
+            owner=manyfold.OwnerName("uart-temp"),
+            family=manyfold.StreamFamily("sensor"),
+            stream=manyfold.StreamName("temperature"),
+            schema=manyfold.Schema.bytes(name="Temperature"),
+        )
+
+        for kwargs, message in (
+            ({"metadata_route": object()}, "metadata_route must be a TypedRoute"),
+            ({"firmware": object()}, "firmware must be a FirmwareAgentProfile"),
+            ({"rules": object()}, "rules must be an EmbeddedRuntimeRules"),
+        ):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    manyfold.EmbeddedScalarSensor(
+                        **{"metadata_route": metadata_route, **kwargs}
+                    )
+
+    def test_bulk_sensor_rejects_invalid_configuration_objects(self) -> None:
+        manyfold = load_manyfold_package()
+        metadata_route = manyfold.route(
+            owner=manyfold.OwnerName("lidar"),
+            family=manyfold.StreamFamily("scan"),
+            stream=manyfold.StreamName("meta"),
+            layer=manyfold.Layer.Logical,
+            variant=manyfold.Variant.Meta,
+            schema=manyfold.Schema.bytes(name="LidarMeta"),
+        )
+        payload_route = manyfold.route(
+            owner=manyfold.OwnerName("lidar"),
+            family=manyfold.StreamFamily("scan"),
+            stream=manyfold.StreamName("payload"),
+            layer=manyfold.Layer.Bulk,
+            variant=manyfold.Variant.Payload,
+            schema=manyfold.Schema.bytes(name="LidarPayload"),
+        )
+
+        for kwargs, message in (
+            ({"metadata_route": object()}, "metadata_route must be a TypedRoute"),
+            ({"payload_route": object()}, "payload_route must be a TypedRoute"),
+            ({"firmware": object()}, "firmware must be a FirmwareAgentProfile"),
+            ({"rules": object()}, "rules must be an EmbeddedRuntimeRules"),
+        ):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    manyfold.EmbeddedBulkSensor(
+                        **{
+                            "metadata_route": metadata_route,
+                            "payload_route": payload_route,
+                            **kwargs,
+                        }
+                    )
+
     def test_embedded_runtime_rules_reject_non_boolean_flags(self) -> None:
         manyfold = load_manyfold_package()
 

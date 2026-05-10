@@ -133,6 +133,11 @@ class EmbeddedScalarSensor(Generic[T]):
     firmware: FirmwareAgentProfile = field(default_factory=FirmwareAgentProfile)
     rules: EmbeddedRuntimeRules = field(default_factory=EmbeddedRuntimeRules)
 
+    def __post_init__(self) -> None:
+        _require_typed_route(self.metadata_route, "metadata_route")
+        _require_firmware_profile(self.firmware, "firmware")
+        _require_runtime_rules(self.rules, "rules")
+
     def validate(self) -> tuple[str, ...]:
         issues = list(self.firmware.required_issues())
         issues.extend(self.rules.required_issues())
@@ -151,6 +156,12 @@ class EmbeddedBulkSensor(Generic[TMeta]):
     payload_route: TypedRoute[bytes]
     firmware: FirmwareAgentProfile = field(default_factory=FirmwareAgentProfile)
     rules: EmbeddedRuntimeRules = field(default_factory=EmbeddedRuntimeRules)
+
+    def __post_init__(self) -> None:
+        _require_typed_route(self.metadata_route, "metadata_route")
+        _require_typed_route(self.payload_route, "payload_route")
+        _require_firmware_profile(self.firmware, "firmware")
+        _require_runtime_rules(self.rules, "rules")
 
     def validate(self) -> tuple[str, ...]:
         issues = list(self.firmware.required_issues())
@@ -180,6 +191,10 @@ class EmbeddedDeviceProfile:
 
     firmware: FirmwareAgentProfile = field(default_factory=FirmwareAgentProfile)
     rules: EmbeddedRuntimeRules = field(default_factory=EmbeddedRuntimeRules)
+
+    def __post_init__(self) -> None:
+        _require_firmware_profile(self.firmware, "firmware")
+        _require_runtime_rules(self.rules, "rules")
 
     def scalar_sensor(
         self,
@@ -257,3 +272,18 @@ def _require_bool_fields(owner: object, fields: tuple[str, ...]) -> None:
 def _require_non_blank_string(value: object, field: str) -> None:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{field} must be a non-empty string")
+
+
+def _require_firmware_profile(value: object, field: str) -> None:
+    if not isinstance(value, FirmwareAgentProfile):
+        raise ValueError(f"{field} must be a FirmwareAgentProfile")
+
+
+def _require_runtime_rules(value: object, field: str) -> None:
+    if not isinstance(value, EmbeddedRuntimeRules):
+        raise ValueError(f"{field} must be an EmbeddedRuntimeRules")
+
+
+def _require_typed_route(value: object, field: str) -> None:
+    if not isinstance(value, TypedRoute):
+        raise ValueError(f"{field} must be a TypedRoute")
