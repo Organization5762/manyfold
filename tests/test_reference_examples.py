@@ -20,6 +20,23 @@ from examples import (
 from tests.test_support import load_example_module, load_manyfold_package
 
 
+def _module_all_exports(module: ast.Module) -> tuple[str, ...]:
+    for node in module.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(
+            isinstance(target, ast.Name) and target.id == "__all__"
+            for target in node.targets
+        ):
+            continue
+        return tuple(
+            value.value
+            for value in node.value.elts
+            if isinstance(value, ast.Constant) and isinstance(value.value, str)
+        )
+    raise AssertionError("module does not define __all__")
+
+
 class ReferenceExampleSuiteTests(unittest.TestCase):
     def test_reference_examples_file_import_uses_repo_path_fallback(self) -> None:
         module_path = (
@@ -195,30 +212,13 @@ class ReferenceExampleSuiteTests(unittest.TestCase):
         manyfold = load_manyfold_package()
         stub_module = ast.parse(stub_path.read_text(encoding="utf-8"))
         runtime_init_module = ast.parse(runtime_init_path.read_text(encoding="utf-8"))
-
-        def exports_from(module: ast.Module) -> tuple[str, ...]:
-            for node in module.body:
-                if not isinstance(node, ast.Assign):
-                    continue
-                if not any(
-                    isinstance(target, ast.Name) and target.id == "__all__"
-                    for target in node.targets
-                ):
-                    continue
-                return tuple(
-                    value.value
-                    for value in node.value.elts
-                    if isinstance(value, ast.Constant) and isinstance(value.value, str)
-                )
-            self.fail("module does not define __all__")
+        stub_exports = _module_all_exports(stub_module)
+        runtime_exports = _module_all_exports(runtime_init_module)
 
         self.assertIsInstance(manyfold.__all__, tuple)
-        self.assertEqual(exports_from(stub_module), exports_from(runtime_init_module))
-        self.assertEqual(manyfold.__all__, exports_from(runtime_init_module))
-        self.assertEqual(
-            exports_from(runtime_init_module),
-            tuple(sorted(exports_from(runtime_init_module))),
-        )
+        self.assertEqual(stub_exports, runtime_exports)
+        self.assertEqual(manyfold.__all__, runtime_exports)
+        self.assertEqual(runtime_exports, tuple(sorted(runtime_exports)))
 
     def test_manyfold_modules_keep_imports_at_module_scope(self) -> None:
         package_path = Path(__file__).resolve().parents[1] / "python" / "manyfold"
