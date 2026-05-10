@@ -30,8 +30,10 @@ class ProjectMetadataTests(unittest.TestCase):
     def test_cargo_dependency_tables_stay_sorted(self) -> None:
         lines = CARGO_TOML_PATH.read_text(encoding="utf-8").splitlines()
 
-        dependencies = _section_keys(lines, "dependencies")
-        dev_dependencies = _section_keys(lines, "dev-dependencies")
+        dependencies = _section_keys(lines, "dependencies", source_name="Cargo.toml")
+        dev_dependencies = _section_keys(
+            lines, "dev-dependencies", source_name="Cargo.toml"
+        )
 
         self.assertEqual(dependencies, tuple(sorted(dependencies)))
         self.assertEqual(dev_dependencies, tuple(sorted(dev_dependencies)))
@@ -43,8 +45,12 @@ class ProjectMetadataTests(unittest.TestCase):
         classifiers = _array_values(lines, "classifiers")
         dependencies = _array_values(lines, "dependencies")
         dev_dependencies = _array_values(lines, "dev")
-        script_names = _section_keys(lines, "project.scripts")
-        url_names = _section_keys(lines, "project.urls")
+        script_names = _section_keys(
+            lines, "project.scripts", source_name="pyproject.toml"
+        )
+        url_names = _section_keys(
+            lines, "project.urls", source_name="pyproject.toml"
+        )
 
         self.assertEqual(keywords, tuple(sorted(keywords)))
         self.assertEqual(classifiers, tuple(sorted(classifiers)))
@@ -64,6 +70,16 @@ class ProjectMetadataTests(unittest.TestCase):
 
         self.assertEqual(exports, tuple(sorted(exports)))
         self.assertEqual(len(exports), len(set(exports)))
+
+    def test_toml_section_errors_name_source_file(self) -> None:
+        with self.assertRaisesRegex(
+            AssertionError, "Cargo.toml does not define section 'missing'"
+        ):
+            _section_keys(
+                ("[package]", 'name = "manyfold"'),
+                "missing",
+                source_name="Cargo.toml",
+            )
 
 
 def _array_values(lines: list[str], key: str) -> tuple[str, ...]:
@@ -88,7 +104,9 @@ def _dependency_name(requirement: str) -> str:
     return match.group(0).lower()
 
 
-def _section_keys(lines: list[str], section: str) -> tuple[str, ...]:
+def _section_keys(
+    lines: list[str] | tuple[str, ...], section: str, *, source_name: str
+) -> tuple[str, ...]:
     keys: list[str] = []
     in_section = False
     header = f"[{section}]"
@@ -102,7 +120,7 @@ def _section_keys(lines: list[str], section: str) -> tuple[str, ...]:
         if in_section and stripped and not stripped.startswith("#"):
             keys.append(stripped.split("=", 1)[0].strip())
     if not in_section:
-        raise AssertionError(f"pyproject.toml does not define section {section!r}")
+        raise AssertionError(f"{source_name} does not define section {section!r}")
     return tuple(keys)
 
 
