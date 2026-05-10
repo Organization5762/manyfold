@@ -811,6 +811,46 @@ class ExampleTests(unittest.TestCase):
             archived.file_path.samefile(Path("examples/archived/windowed_join.py"))
         )
 
+    def test_catalog_entry_rejects_blank_metadata(self) -> None:
+        with self.assertRaisesRegex(ValueError, "module name must be a non-empty"):
+            ExampleCatalogEntry(" ", "Broken blank module name.")
+        with self.assertRaisesRegex(ValueError, "summary must be a non-empty"):
+            ExampleCatalogEntry("simple_latest", "")
+        with self.assertRaisesRegex(ValueError, "reference title must be a non-empty"):
+            ExampleCatalogEntry(
+                "simple_latest",
+                "Broken blank reference title.",
+                reference_number=99,
+                reference_title=" ",
+            )
+
+    def test_catalog_entry_rejects_boolean_numeric_metadata(self) -> None:
+        with self.assertRaisesRegex(TypeError, "readme_order must be an integer"):
+            ExampleCatalogEntry(
+                "simple_latest",
+                "Broken boolean README order.",
+                readme_order=True,
+            )
+        with self.assertRaisesRegex(TypeError, "reference number must be an integer"):
+            ExampleCatalogEntry(
+                "simple_latest",
+                "Broken boolean reference number.",
+                reference_number=True,
+                reference_title="Broken reference",
+            )
+
+    def test_reference_example_gap_rejects_blank_metadata(self) -> None:
+        with self.assertRaisesRegex(ValueError, "gap title must be a non-empty"):
+            ReferenceExampleGap(1, " ", "Broken blank title.")
+        with self.assertRaisesRegex(ValueError, "gap summary must be a non-empty"):
+            ReferenceExampleGap(1, "Missing example", "")
+
+    def test_reference_example_gap_rejects_invalid_numbers(self) -> None:
+        with self.assertRaisesRegex(TypeError, "gap number must be an integer"):
+            ReferenceExampleGap(True, "Missing example", "Broken boolean number.")
+        with self.assertRaisesRegex(ValueError, "gap number must be positive"):
+            ReferenceExampleGap(0, "Missing example", "Broken zero number.")
+
     def test_catalog_lookup_helpers_raise_clear_errors_for_unknown_values(self) -> None:
         with self.assertRaisesRegex(KeyError, "unknown example module"):
             catalog_entry("missing_example")
