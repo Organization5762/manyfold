@@ -214,6 +214,7 @@ class ReferenceExampleSuiteTests(unittest.TestCase):
 
         self.assertIsInstance(manyfold.__all__, tuple)
         self.assertEqual(exports_from(stub_module), exports_from(runtime_init_module))
+        self.assertEqual(manyfold.__all__, exports_from(runtime_init_module))
         self.assertEqual(
             exports_from(runtime_init_module),
             tuple(sorted(exports_from(runtime_init_module))),
