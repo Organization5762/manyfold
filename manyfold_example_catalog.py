@@ -3,20 +3,31 @@
 from __future__ import annotations
 
 import importlib.util
+import sys
 from pathlib import Path
 
 MODULE_PATH = Path(__file__).resolve()
 REPO_ROOT = MODULE_PATH.parent
 PYTHON_DIR = REPO_ROOT / "python"
 IMPL_PATH = PYTHON_DIR / "manyfold_example_catalog.py"
+_IMPL_MODULE_NAME = "_manyfold_example_catalog_impl"
 
 _SPEC = importlib.util.spec_from_file_location(
-    "_manyfold_example_catalog_impl",
+    _IMPL_MODULE_NAME,
     IMPL_PATH,
 )
 assert _SPEC is not None and _SPEC.loader is not None
 _MODULE = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(_MODULE)
+_PREVIOUS_MODULE = sys.modules.get(_IMPL_MODULE_NAME)
+sys.modules[_IMPL_MODULE_NAME] = _MODULE
+try:
+    _SPEC.loader.exec_module(_MODULE)
+except BaseException:
+    if _PREVIOUS_MODULE is None:
+        sys.modules.pop(_IMPL_MODULE_NAME, None)
+    else:
+        sys.modules[_IMPL_MODULE_NAME] = _PREVIOUS_MODULE
+    raise
 
 main = _MODULE.main
 
