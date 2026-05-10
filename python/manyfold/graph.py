@@ -1834,7 +1834,9 @@ class RoutePipeline(Generic[T]):
         )
 
         def apply(value: T) -> tuple[bool, float]:
-            values.append(node.transform(value))
+            candidate = node.transform(value)
+            average((candidate,))
+            values.append(candidate)
             return True, average(tuple(values))
 
         return self._graph._connect_transform_pipeline(

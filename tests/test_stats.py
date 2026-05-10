@@ -31,6 +31,14 @@ class StatsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "at least one value"):
             Average(window_size=3)([])
 
+    def test_average_rejects_non_finite_or_non_numeric_values(self) -> None:
+        for value in (True, float("nan"), float("inf"), "3"):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(
+                    ValueError, "average values must be finite numbers"
+                ):
+                    Average(window_size=3)([1.0, value])  # type: ignore[list-item]
+
     def test_average_rejects_non_positive_window_size(self) -> None:
         with self.assertRaisesRegex(ValueError, "must be positive"):
             Average(window_size=0)

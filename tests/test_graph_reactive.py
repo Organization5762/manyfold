@@ -6985,6 +6985,46 @@ assert graph.latest(route) is None
         with self.assertRaisesRegex(ValueError, "average window size must be positive"):
             graph.observe(source).moving_average(window_size=0)
 
+    def test_route_pipeline_moving_average_rejects_invalid_sample_without_poisoning_window(
+        self,
+    ) -> None:
+        graph_module = load_graph_module()
+        source = graph_module.route(
+            owner="sensor",
+            family="environment",
+            stream="temperature",
+            schema=graph_module.Schema(
+                schema_id="Temperature",
+                version=1,
+                encode=lambda value: repr(value).encode("ascii"),
+                decode=lambda payload: float(payload.decode("ascii")),
+            ),
+        )
+        average = graph_module.route(
+            owner="sensor",
+            family="environment",
+            stream="average_temperature",
+            schema=graph_module.Schema.float(name="AverageTemperature"),
+        )
+        graph = graph_module.Graph()
+        connection = (
+            graph.observe(source, replay_latest=False)
+            .moving_average(window_size=3)
+            .connect(average)
+        )
+
+        graph.publish(source, 72.0)
+        with self.assertRaisesRegex(
+            ValueError, "average values must be finite numbers"
+        ):
+            graph.publish(source, float("nan"))
+        graph.publish(source, 74.0)
+
+        latest = graph.latest(average)
+        assert latest is not None
+        self.assertEqual(latest.value, 73.0)
+        connection.dispose()
+
     def test_route_preserves_existing_schema_version_without_override(self) -> None:
         graph_module = load_graph_module()
         primitives = sys.modules["manyfold.primitives"]

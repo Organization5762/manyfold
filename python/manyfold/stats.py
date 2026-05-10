@@ -28,6 +28,18 @@ class Average:
         # fsum keeps cancellation-heavy windows deterministic without copying
         # the sequence; callers may provide index-only buffers.
         return (
-            math.fsum(values[index] for index in range(start, value_count))
+            math.fsum(
+                _require_finite_number(values[index])
+                for index in range(start, value_count)
+            )
             / window_count
         )
+
+
+def _require_finite_number(value: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("average values must be finite numbers")
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError("average values must be finite numbers")
+    return number
