@@ -1855,6 +1855,115 @@ assert graph.latest(route) is None
                 ):
                     graph.window(route, size=value)  # type: ignore[arg-type]
 
+    def test_graph_operators_reject_non_callable_callbacks(self) -> None:
+        graph_module = load_graph_module()
+        source = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("imu"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("source"),
+            variant=graph_module.Variant.Meta,
+            schema=int_schema(graph_module, "Source"),
+        )
+        state = graph_module.route(
+            plane=graph_module.Plane.State,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("catalog"),
+            family=graph_module.StreamFamily("device"),
+            stream=graph_module.StreamName("state"),
+            variant=graph_module.Variant.State,
+            schema=int_schema(graph_module, "State"),
+        )
+        output = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("imu"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("output"),
+            variant=graph_module.Variant.Meta,
+            schema=int_schema(graph_module, "Output"),
+        )
+        graph = graph_module.Graph()
+
+        cases = (
+            (
+                "stateful_map step",
+                lambda: graph.stateful_map(
+                    source,
+                    initial_state=0,
+                    step="sum",
+                    output=output,
+                ),
+            ),
+            (
+                "filter predicate",
+                lambda: graph.filter(source, predicate="positive"),
+            ),
+            (
+                "window partition_by",
+                lambda: graph.window(source, size=2, partition_by="key"),
+            ),
+            (
+                "window aggregate",
+                lambda: graph.window_aggregate(source, size=2, aggregate="sum"),
+            ),
+            (
+                "window event_time",
+                lambda: graph.window_by_time(source, width=2, event_time="clock"),
+            ),
+            (
+                "window watermark_time",
+                lambda: graph.window_by_time(
+                    source,
+                    width=2,
+                    watermark=state,
+                    watermark_time="clock",
+                ),
+            ),
+            (
+                "join combine",
+                lambda: graph.join_latest(source, state, combine="pair"),
+            ),
+            (
+                "lookup join combine",
+                lambda: graph.lookup_join(source, state, combine="pair"),
+            ),
+            (
+                "interval join combine",
+                lambda: graph.interval_join(
+                    source,
+                    state,
+                    within=1,
+                    combine="pair",
+                ),
+            ),
+            (
+                "interval join left_time",
+                lambda: graph.interval_join(
+                    source,
+                    state,
+                    within=1,
+                    combine=lambda left, right: (left, right),
+                    left_time="clock",
+                ),
+            ),
+            (
+                "interval join right_time",
+                lambda: graph.interval_join(
+                    source,
+                    state,
+                    within=1,
+                    combine=lambda left, right: (left, right),
+                    right_time="clock",
+                ),
+            ),
+        )
+        for field, call in cases:
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(ValueError, f"{field} must be callable"):
+                    call()
+
     def test_window_isolates_buffer_state_per_subscription(self) -> None:
         graph_module = load_graph_module()
         route = graph_module.route(

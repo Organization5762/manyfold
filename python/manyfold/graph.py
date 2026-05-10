@@ -5702,6 +5702,7 @@ class Graph:
         output: TypedRoute[TOut],
     ) -> SubscriptionLike:
         """Apply a stateful step function and publish each emitted value to `output`."""
+        _require_callable(step, "stateful_map step")
         state = initial_state
         source_route = self._coerce_route_ref(source)
 
@@ -5737,6 +5738,7 @@ class Graph:
         primitive. Typed routes deliver decoded values to the predicate, while
         raw route refs continue to expose payload bytes.
         """
+        _require_callable(predicate, "filter predicate")
         source_route = self._coerce_route_ref(source)
 
         def subscribe(
@@ -5779,6 +5781,7 @@ class Graph:
             raise ValueError("window size must be an integer")
         if size <= 0:
             raise ValueError("window size must be positive")
+        _require_optional_callable(partition_by, "window partition_by")
         source_route = self._coerce_route_ref(source)
         trigger_route = None if trigger is None else self._coerce_route_ref(trigger)
 
@@ -5849,6 +5852,8 @@ class Graph:
         replayed latest value (if any) plus each future update, or only when an
         explicit trigger route advances.
         """
+        _require_callable(aggregate, "window aggregate")
+        _require_optional_callable(partition_by, "window partition_by")
 
         def subscribe(
             observer: ObserverLike[TOut],
@@ -5895,6 +5900,9 @@ class Graph:
             raise ValueError("window width must be positive")
         if grace < 0:
             raise ValueError("window grace must be non-negative")
+        _require_optional_callable(partition_by, "window partition_by")
+        _require_optional_callable(event_time, "window event_time")
+        _require_optional_callable(watermark_time, "window watermark_time")
         source_route = self._coerce_route_ref(source)
         watermark_route = (
             None if watermark is None else self._coerce_route_ref(watermark)
@@ -6037,6 +6045,10 @@ class Graph:
         watermark_time: Callable[[Any | bytes], int] | None = None,
     ) -> Observable[TOut]:
         """Aggregate watermark-aware event-time windows from `source`."""
+        _require_callable(aggregate, "window aggregate")
+        _require_optional_callable(partition_by, "window partition_by")
+        _require_optional_callable(event_time, "window event_time")
+        _require_optional_callable(watermark_time, "window watermark_time")
 
         def subscribe(
             observer: ObserverLike[TOut],
@@ -6066,6 +6078,7 @@ class Graph:
         combine: Callable[[TIn, TRight], TOut],
     ) -> Observable[TOut]:
         """Combine each incoming side with the latest value from the other side."""
+        _require_callable(combine, "join combine")
         left_route = self._coerce_route_ref(left)
         right_route = self._coerce_route_ref(right)
 
@@ -6122,6 +6135,7 @@ class Graph:
         materialized lookup value; they do not emit output until a left-side
         event arrives. This matches the RFC's stream-table lookup shape.
         """
+        _require_callable(combine, "lookup join combine")
         left_route = self._coerce_route_ref(left)
         right_route = self._coerce_route_ref(right_state)
 
@@ -6182,6 +6196,9 @@ class Graph:
         _require_integer(within, "interval join distance")
         if within < 0:
             raise ValueError("interval join distance must be non-negative")
+        _require_callable(combine, "interval join combine")
+        _require_optional_callable(left_time, "interval join left_time")
+        _require_optional_callable(right_time, "interval join right_time")
         left_route = self._coerce_route_ref(left)
         right_route = self._coerce_route_ref(right)
 
@@ -6760,6 +6777,16 @@ def _require_optional_non_empty_text(value: str | None, field_name: str) -> None
 def _require_integer(value: object, field: str) -> None:
     if not isinstance(value, int) or isinstance(value, bool):
         raise ValueError(f"{field} must be an integer")
+
+
+def _require_callable(value: object, field: str) -> None:
+    if not callable(value):
+        raise ValueError(f"{field} must be callable")
+
+
+def _require_optional_callable(value: object, field: str) -> None:
+    if value is not None:
+        _require_callable(value, field)
 
 
 def _require_optional_thread_placement(value: object) -> None:
