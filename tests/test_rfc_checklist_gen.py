@@ -169,6 +169,36 @@ class RfcChecklistGenTests(unittest.TestCase):
             ].detail,
         )
 
+    def test_parse_rfc_sections_rejects_unreferenced_status_entries(self) -> None:
+        generator = load_generator()
+        original_checklist_status = generator.CHECKLIST_STATUS
+        original_appendix_status = generator.APPENDIX_STATUS
+
+        try:
+            generator.CHECKLIST_STATUS = {
+                **original_checklist_status,
+                "99": (" ", "Stale section status."),
+            }
+            with self.assertRaisesRegex(
+                ValueError,
+                "missing RFC section status entries: 99",
+            ):
+                generator.parse_rfc_sections()
+
+            generator.CHECKLIST_STATUS = original_checklist_status
+            generator.APPENDIX_STATUS = {
+                **original_appendix_status,
+                "Unreferenced appendix status": (" ", "Stale appendix status."),
+            }
+            with self.assertRaisesRegex(
+                ValueError,
+                "missing appendix status entries: Unreferenced appendix status",
+            ):
+                generator.parse_rfc_sections()
+        finally:
+            generator.CHECKLIST_STATUS = original_checklist_status
+            generator.APPENDIX_STATUS = original_appendix_status
+
     def test_checklist_output_matches_repository(self) -> None:
         generator = load_generator()
         sections, appendix_items = generator.parse_rfc_sections()
