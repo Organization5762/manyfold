@@ -1544,6 +1544,43 @@ class SensorIoTests(unittest.TestCase):
                         capacity=capacity,  # type: ignore[arg-type]
                     )
 
+    def test_rate_matched_sensor_rejects_invalid_configuration(self) -> None:
+        manyfold = load_manyfold_package()
+        source = _route(manyfold, "invalid_rate_config_raw", _int_schema(manyfold, "Raw"))
+        sink = _route(
+            manyfold,
+            "invalid_rate_config_sampled",
+            _int_schema(manyfold, "Sampled"),
+        )
+        demand = _route(
+            manyfold,
+            "invalid_rate_config_demand",
+            manyfold.Schema.bytes(name="Demand"),
+        )
+
+        invalid_inputs = (
+            ({"source": object()}, "source must be a TypedRoute"),
+            ({"sink": object()}, "sink must be a TypedRoute"),
+            ({"demand": object()}, "demand must be a TypedRoute"),
+            ({"mode": "oldest"}, "mode must be 'latest' or 'fifo'"),
+            ({"clock": object()}, r"clock must provide now\(\)"),
+            ({"name": object()}, "name must be a string"),
+            ({"group": object()}, "group must be a string"),
+        )
+
+        for kwargs, message in invalid_inputs:
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    manyfold.RateMatchedSensor(
+                        **{
+                            "source": source,
+                            "sink": sink,
+                            "demand": demand,
+                            "capacity": 1,
+                            **kwargs,
+                        }
+                    )
+
     def test_sensor_health_watchdog_reports_stale_input(self) -> None:
         manyfold = load_manyfold_package()
         graph = manyfold.Graph()

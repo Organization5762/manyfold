@@ -1528,14 +1528,24 @@ class RateMatchedSensor:
     group: str | None = None
 
     def __post_init__(self) -> None:
+        if not isinstance(self.source, TypedRoute):
+            raise ValueError("rate matched sensor source must be a TypedRoute")
+        if not isinstance(self.sink, TypedRoute):
+            raise ValueError("rate matched sensor sink must be a TypedRoute")
+        if self.demand is not None and not isinstance(self.demand, TypedRoute):
+            raise ValueError("rate matched sensor demand must be a TypedRoute")
         self.capacity = _require_int(self.capacity, "capacity")
         if self.capacity <= 0:
             raise ValueError("capacity must be positive")
+        if self.mode not in {"latest", "fifo"}:
+            raise ValueError("mode must be 'latest' or 'fifo'")
+        if not callable(getattr(self.clock, "now", None)):
+            raise ValueError("rate matched sensor clock must provide now()")
+        self.name = _require_optional_string(self.name, "name")
+        self.group = _require_optional_string(self.group, "group")
         _adopt_group(self.clock, self.group)
 
     def install(self, graph: Graph) -> Any:
-        if self.mode not in {"latest", "fifo"}:
-            raise ValueError("mode must be 'latest' or 'fifo'")
         if self.mode == "latest":
             # Keep one latest value no matter what capacity was requested.
             capacity = 1
