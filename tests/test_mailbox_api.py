@@ -11,6 +11,16 @@ def load_graph_module():
     return load_manyfold_graph_module()
 
 
+def run_manyfold_script(script: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, "-c", script],
+        check=False,
+        capture_output=True,
+        env=subprocess_test_env(),
+        text=True,
+    )
+
+
 class MailboxApiTests(unittest.TestCase):
     def test_native_flow_snapshot_exposes_largest_queue_depth(self) -> None:
         script = """
@@ -39,13 +49,7 @@ graph.publish(producer, b"three")
 snapshot = graph.flow_snapshot(mailbox.ingress)
 assert snapshot.largest_queue_depth == 3, snapshot
 """
-        result = subprocess.run(
-            [sys.executable, "-c", script],
-            check=False,
-            capture_output=True,
-            env=subprocess_test_env(),
-            text=True,
-        )
+        result = run_manyfold_script(script)
 
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -79,13 +83,7 @@ for kwargs, expected in cases:
     else:
         raise AssertionError(f"expected ValueError for {kwargs}")
 """
-        result = subprocess.run(
-            [sys.executable, "-c", script],
-            check=False,
-            capture_output=True,
-            env=subprocess_test_env(),
-            text=True,
-        )
+        result = run_manyfold_script(script)
 
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -101,13 +99,7 @@ for capacity in (False, True):
     else:
         raise AssertionError(f"expected TypeError for {capacity!r}")
 """
-        result = subprocess.run(
-            [sys.executable, "-c", script],
-            check=False,
-            capture_output=True,
-            env=subprocess_test_env(),
-            text=True,
-        )
+        result = run_manyfold_script(script)
 
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -132,13 +124,7 @@ except ValueError as exc:
 else:
     raise AssertionError("expected ValueError for duplicate mailbox")
 """
-        result = subprocess.run(
-            [sys.executable, "-c", script],
-            check=False,
-            capture_output=True,
-            env=subprocess_test_env(),
-            text=True,
-        )
+        result = run_manyfold_script(script)
 
         self.assertEqual(result.returncode, 0, result.stderr)
 
