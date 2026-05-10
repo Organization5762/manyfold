@@ -684,6 +684,95 @@ assert graph.latest(route) is None
 
         self.assertEqual(seen, [5])
 
+    def test_pipeline_nodes_reject_invalid_direct_configuration(self) -> None:
+        graph_module = load_graph_module()
+        cases = (
+            (
+                "callback name",
+                lambda: graph_module.CallbackNode("", lambda value: None),
+                "callback node name must be a non-empty string",
+            ),
+            (
+                "callback receive",
+                lambda: graph_module.CallbackNode("callback", object()),
+                "callback node receive must be callable",
+            ),
+            (
+                "map name",
+                lambda: graph_module.MapNode(" ", lambda value: value),
+                "map node name must be a non-empty string",
+            ),
+            (
+                "map transform",
+                lambda: graph_module.MapNode("map", object()),
+                "map node transform must be callable",
+            ),
+            (
+                "filter name",
+                lambda: graph_module.FilterNode("", lambda value: True),
+                "filter node name must be a non-empty string",
+            ),
+            (
+                "filter predicate",
+                lambda: graph_module.FilterNode("filter", object()),
+                "filter node predicate must be callable",
+            ),
+            (
+                "logging name",
+                lambda: graph_module.PipelineLoggingNode(
+                    name="",
+                    stream_name="numbers",
+                    interval_ms=1,
+                ),
+                "logging node name must be a non-empty string",
+            ),
+            (
+                "logging stream",
+                lambda: graph_module.PipelineLoggingNode(
+                    name="log",
+                    stream_name=" ",
+                    interval_ms=1,
+                ),
+                "logging stream_name must be a non-empty string",
+            ),
+        )
+        for label, factory, message in cases:
+            with self.subTest(label=label):
+                with self.assertRaisesRegex(ValueError, message):
+                    factory()
+
+    def test_pipeline_nodes_reject_invalid_thread_placement(self) -> None:
+        graph_module = load_graph_module()
+        cases = (
+            lambda: graph_module.CallbackNode(
+                "callback",
+                lambda value: None,
+                thread_placement=object(),
+            ),
+            lambda: graph_module.MapNode(
+                "map",
+                lambda value: value,
+                thread_placement=object(),
+            ),
+            lambda: graph_module.FilterNode(
+                "filter",
+                lambda value: True,
+                thread_placement=object(),
+            ),
+            lambda: graph_module.PipelineLoggingNode(
+                name="log",
+                stream_name="numbers",
+                interval_ms=1,
+                thread_placement=object(),
+            ),
+        )
+        for factory in cases:
+            with self.assertRaisesRegex(
+                ValueError,
+                "thread_placement must be a NodeThreadPlacement or None",
+            ):
+                factory()
+
     def test_pipeline_can_place_following_nodes_on_main_thread(self) -> None:
         graph_module = load_graph_module()
         reactive_threads = importlib.import_module("manyfold.reactive_threads")

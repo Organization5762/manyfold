@@ -1615,6 +1615,12 @@ class CallbackNode(_ThreadPlaceableNode, Generic[T]):
     receive: Callable[[T], None]
     thread_placement: NodeThreadPlacement | None = None
 
+    def __post_init__(self) -> None:
+        _require_non_empty_text(self.name, "callback node name")
+        if not callable(self.receive):
+            raise ValueError("callback node receive must be callable")
+        _require_optional_thread_placement(self.thread_placement)
+
 
 @dataclass(frozen=True)
 class MapNode(_ThreadPlaceableNode, Generic[TIn, TOut]):
@@ -1624,6 +1630,12 @@ class MapNode(_ThreadPlaceableNode, Generic[TIn, TOut]):
     transform: Callable[[TIn], TOut]
     thread_placement: NodeThreadPlacement | None = None
 
+    def __post_init__(self) -> None:
+        _require_non_empty_text(self.name, "map node name")
+        if not callable(self.transform):
+            raise ValueError("map node transform must be callable")
+        _require_optional_thread_placement(self.thread_placement)
+
 
 @dataclass(frozen=True)
 class FilterNode(_ThreadPlaceableNode, Generic[T]):
@@ -1632,6 +1644,12 @@ class FilterNode(_ThreadPlaceableNode, Generic[T]):
     name: str
     predicate: Callable[[T], bool]
     thread_placement: NodeThreadPlacement | None = None
+
+    def __post_init__(self) -> None:
+        _require_non_empty_text(self.name, "filter node name")
+        if not callable(self.predicate):
+            raise ValueError("filter node predicate must be callable")
+        _require_optional_thread_placement(self.thread_placement)
 
 
 @dataclass(frozen=True)
@@ -1644,7 +1662,10 @@ class PipelineLoggingNode(_ThreadPlaceableNode, Generic[T]):
     thread_placement: NodeThreadPlacement | None = None
 
     def __post_init__(self) -> None:
+        _require_non_empty_text(self.name, "logging node name")
+        _require_non_empty_text(self.stream_name, "logging stream_name")
         _require_integer(self.interval_ms, "logging interval_ms")
+        _require_optional_thread_placement(self.thread_placement)
 
     def observable(self, source: ObservableLike[T]) -> Observable[T]:
         return LoggingNode(
@@ -6739,6 +6760,11 @@ def _require_optional_non_empty_text(value: str | None, field_name: str) -> None
 def _require_integer(value: object, field: str) -> None:
     if not isinstance(value, int) or isinstance(value, bool):
         raise ValueError(f"{field} must be an integer")
+
+
+def _require_optional_thread_placement(value: object) -> None:
+    if value is not None and not isinstance(value, NodeThreadPlacement):
+        raise ValueError("thread_placement must be a NodeThreadPlacement or None")
 
 
 def _require_non_negative_integer(value: object, field: str) -> None:
