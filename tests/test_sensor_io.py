@@ -851,6 +851,16 @@ class SensorIoTests(unittest.TestCase):
                 ):
                     policy.delay_for_attempt(attempt_index)  # type: ignore[arg-type]
 
+    def test_backoff_policy_clamps_overflow_to_max_delay(self) -> None:
+        manyfold = load_manyfold_package()
+        policy = manyfold.SensorBackoffPolicy(
+            initial_delay=1.0,
+            multiplier=1e308,
+            max_delay=5.0,
+        )
+
+        self.assertEqual(policy.delay_for_attempt(4), 5.0)
+
     def test_retry_policy_normalizes_retryable_exception_classes(self) -> None:
         manyfold = load_manyfold_package()
 
