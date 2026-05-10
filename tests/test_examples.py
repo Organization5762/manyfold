@@ -436,6 +436,40 @@ class ExampleTests(unittest.TestCase):
         )
         self.assertEqual(module.REPO_ROOT, module.MODULE_PATH.parent)
 
+    def test_repo_root_manyfold_example_catalog_wrapper_cleans_failed_impl_load(
+        self,
+    ) -> None:
+        module_path = (
+            Path(__file__).resolve().parents[1] / "manyfold_example_catalog.py"
+        )
+        spec = importlib.util.spec_from_file_location(
+            "repo_root_manyfold_example_catalog_failed_impl_test",
+            module_path,
+        )
+        module = importlib.util.module_from_spec(spec)
+        assert spec is not None and spec.loader is not None
+        sys.modules[spec.name] = module
+
+        original_spec_from_file_location = importlib.util.spec_from_file_location
+
+        def fake_spec_from_file_location(name: str, location, *args, **kwargs):
+            if name == "_manyfold_example_catalog_impl":
+                fake_spec = mock.Mock()
+                fake_spec.loader = mock.Mock()
+                fake_spec.loader.exec_module.side_effect = SystemExit(9)
+                return fake_spec
+            return original_spec_from_file_location(name, location, *args, **kwargs)
+
+        sys.modules.pop("_manyfold_example_catalog_impl", None)
+        with mock.patch(
+            "importlib.util.spec_from_file_location",
+            side_effect=fake_spec_from_file_location,
+        ):
+            with self.assertRaises(SystemExit):
+                spec.loader.exec_module(module)
+
+        self.assertNotIn("_manyfold_example_catalog_impl", sys.modules)
+
     def test_manyfold_example_catalog_wrapper_delegates_argv_and_adds_repo_root(
         self,
     ) -> None:
