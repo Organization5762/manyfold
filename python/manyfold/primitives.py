@@ -216,6 +216,12 @@ class RouteIdentity:
     variant: Variant
 
     def __post_init__(self) -> None:
+        if not isinstance(self.owner, OwnerName):
+            raise ValueError("owner must be an OwnerName")
+        if not isinstance(self.family, StreamFamily):
+            raise ValueError("family must be a StreamFamily")
+        if not isinstance(self.stream, StreamName):
+            raise ValueError("stream must be a StreamName")
         _require_enum_member(self.variant, Variant, "variant")
 
     @classmethod

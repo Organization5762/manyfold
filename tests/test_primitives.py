@@ -88,6 +88,25 @@ class PrimitiveTests(unittest.TestCase):
                 variant="meta",
             )
 
+    def test_route_identity_rejects_invalid_direct_construction(self) -> None:
+        manyfold = load_manyfold_package()
+        kwargs = {
+            "owner": manyfold.OwnerName("sensor"),
+            "family": manyfold.StreamFamily("events"),
+            "stream": manyfold.StreamName("temperature"),
+            "variant": manyfold.Variant.Meta,
+        }
+
+        cases = (
+            ("owner", "sensor", "owner must be an OwnerName"),
+            ("family", "events", "family must be a StreamFamily"),
+            ("stream", "temperature", "stream must be a StreamName"),
+        )
+        for field, value, message in cases:
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(ValueError, message):
+                    manyfold.RouteIdentity(**{**kwargs, field: value})
+
     def test_typed_route_rejects_invalid_direct_construction(self) -> None:
         manyfold = load_manyfold_package()
         kwargs = {
