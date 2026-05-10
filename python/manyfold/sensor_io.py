@@ -1641,10 +1641,20 @@ class LocalDurableSpool(Generic[T]):
     schema: Schema[T]
     group: str | None = None
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.name, str) or not self.name.strip():
+            raise ValueError("local durable spool name must be a non-empty string")
+        if not isinstance(self.keyspace, Keyspace):
+            raise ValueError("local durable spool keyspace must be a Keyspace")
+        if not isinstance(self.schema, Schema):
+            raise ValueError("local durable spool schema must be a Schema")
+
     def event_log(self) -> EventLog[T]:
         return EventLog(self.name, self.keyspace, self.schema)
 
     def install(self, graph: Graph, source: TypedRoute[T]) -> SubscriptionLike:
+        if not isinstance(source, TypedRoute):
+            raise ValueError("local durable spool source must be a TypedRoute")
         log = self.event_log()
         log_subscription = log.install(graph)
 

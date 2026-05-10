@@ -1726,6 +1726,43 @@ class SensorIoTests(unittest.TestCase):
         self.assertEqual([sample.value for sample in replayed], [23])
         self.assertEqual([sample.sequence_number for sample in replayed], [1])
 
+    def test_local_durable_spool_rejects_invalid_configuration(self) -> None:
+        manyfold = load_manyfold_package()
+        sample_schema = manyfold.sensor_sample_schema(_int_schema(manyfold, "Temp"))
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            keyspace = manyfold.FileStore(temp_dir).prefix("sensor", "spool")
+            with self.assertRaisesRegex(ValueError, "spool name"):
+                manyfold.LocalDurableSpool("", keyspace, sample_schema)
+            with self.assertRaisesRegex(ValueError, "keyspace must be a Keyspace"):
+                manyfold.LocalDurableSpool(
+                    "sensor_spool",
+                    object(),  # type: ignore[arg-type]
+                    sample_schema,
+                )
+            with self.assertRaisesRegex(ValueError, "schema must be a Schema"):
+                manyfold.LocalDurableSpool(
+                    "sensor_spool",
+                    keyspace,
+                    object(),  # type: ignore[arg-type]
+                )
+
+    def test_local_durable_spool_rejects_invalid_source_before_installing_log(
+        self,
+    ) -> None:
+        manyfold = load_manyfold_package()
+        sample_schema = manyfold.sensor_sample_schema(_int_schema(manyfold, "Temp"))
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            keyspace = manyfold.FileStore(temp_dir).prefix("sensor", "spool")
+            graph = manyfold.Graph()
+            spool = manyfold.LocalDurableSpool("sensor_spool", keyspace, sample_schema)
+
+            with self.assertRaisesRegex(ValueError, "source must be a TypedRoute"):
+                spool.install(graph, object())  # type: ignore[arg-type]
+
+            self.assertEqual(spool.event_log().records(), ())
+
     def test_composite_subscription_disposes_all_children_after_failure(self) -> None:
         load_manyfold_package()
         sensor_io = sys.modules["manyfold.sensor_io"]
