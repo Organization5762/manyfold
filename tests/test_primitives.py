@@ -115,6 +115,34 @@ class PrimitiveTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, message):
                     manyfold.TypedRoute(**invalid_kwargs)
 
+    def test_source_and_sink_reject_invalid_direct_construction(self) -> None:
+        manyfold = load_manyfold_package()
+        route = manyfold.route(
+            owner="sensor",
+            family="events",
+            stream="temperature",
+            schema=manyfold.Schema.float(name="Temperature"),
+        )
+
+        cases = (
+            (
+                lambda: manyfold.Source(route=object()),
+                "source route must be a TypedRoute or RouteRef",
+            ),
+            (
+                lambda: manyfold.Source(route=route, replay_latest=1),
+                "source replay_latest must be a boolean",
+            ),
+            (
+                lambda: manyfold.Sink(route="read.logical.sensor.events.temperature.meta.v1"),
+                "sink route must be a TypedRoute or RouteRef",
+            ),
+        )
+        for build, message in cases:
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(ValueError, message):
+                    build()
+
     def test_native_reference_constructors_reject_blank_identifiers(self) -> None:
         script = """
 import manyfold._manyfold_rust as native

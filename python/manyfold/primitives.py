@@ -405,6 +405,12 @@ class Source(Generic[T]):
     route: TypedRoute[T] | RouteRef
     replay_latest: bool = True
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.route, (TypedRoute, RouteRef)):
+            raise ValueError("source route must be a TypedRoute or RouteRef")
+        if not isinstance(self.replay_latest, bool):
+            raise ValueError("source replay_latest must be a boolean")
+
     def display(self) -> str:
         return self.route.display()
 
@@ -418,6 +424,10 @@ class Sink(Generic[T]):
     """
 
     route: TypedRoute[T] | RouteRef
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.route, (TypedRoute, RouteRef)):
+            raise ValueError("sink route must be a TypedRoute or RouteRef")
 
     def display(self) -> str:
         return self.route.display()
