@@ -462,6 +462,20 @@ class LinkCapabilities:
     clock_sync_support: bool = False
     mtu_bound: bool = False
 
+    def __post_init__(self) -> None:
+        for field_name in (
+            "ordered",
+            "reliable",
+            "replayable",
+            "zero_copy",
+            "payload_lazy_open",
+            "encrypted",
+            "authenticated",
+            "clock_sync_support",
+            "mtu_bound",
+        ):
+            _require_bool(getattr(self, field_name), field_name)
+
 
 @dataclass(frozen=True)
 class Link:
@@ -470,6 +484,12 @@ class Link:
     name: str
     link_class: str
     capabilities: LinkCapabilities = field(default_factory=LinkCapabilities)
+
+    def __post_init__(self) -> None:
+        _require_non_empty_text(self.name, "link name")
+        _require_non_empty_text(self.link_class, "link class")
+        if not isinstance(self.capabilities, LinkCapabilities):
+            raise ValueError("link capabilities must be LinkCapabilities")
 
 
 @dataclass(frozen=True)
@@ -504,6 +524,18 @@ class CapabilityGrant:
     debug_read: bool = False
     graph_validation: bool = False
 
+    def __post_init__(self) -> None:
+        _require_non_empty_text(self.principal_id, "principal_id")
+        for field_name in (
+            "metadata_read",
+            "payload_open",
+            "write_request",
+            "replay_read",
+            "debug_read",
+            "graph_validation",
+        ):
+            _require_bool(getattr(self, field_name), field_name)
+
 
 @dataclass(frozen=True)
 class QueryRequest:
@@ -517,6 +549,21 @@ class QueryRequest:
     lineage_trace_id: str | None = None
     lineage_causality_id: str | None = None
     lineage_correlation_id: str | None = None
+
+    def __post_init__(self) -> None:
+        _require_non_empty_text(self.command, "query command")
+        _require_optional_non_empty_text(self.join_name, "query join_name")
+        _require_optional_non_empty_text(self.principal_id, "query principal_id")
+        _require_optional_non_empty_text(self.correlation_id, "query correlation_id")
+        _require_optional_non_empty_text(
+            self.lineage_trace_id, "query lineage_trace_id"
+        )
+        _require_optional_non_empty_text(
+            self.lineage_causality_id, "query lineage_causality_id"
+        )
+        _require_optional_non_empty_text(
+            self.lineage_correlation_id, "query lineage_correlation_id"
+        )
 
 
 @dataclass(frozen=True)
@@ -6592,6 +6639,7 @@ class Graph:
 
     def query_service(self, owner: str = "query") -> QueryServiceRoutes:
         """Return or lazily create the query request/response routes."""
+        _require_non_empty_text(owner, "query service owner")
         if owner not in self._query_services:
             request = self.register_port(
                 self._make_internal_route(
@@ -6628,6 +6676,8 @@ class Graph:
         service_owner: str = "query",
     ) -> QueryResponse:
         """Execute a typed query through the query-plane stream model."""
+        _require_non_empty_text(requester_id, "requester_id")
+        _require_non_empty_text(service_owner, "query service owner")
         service = self.query_service(service_owner)
         correlation_id = request.correlation_id or self._correlation_id()
         request_payload = json.dumps(
@@ -6781,6 +6831,11 @@ def _require_optional_non_empty_text(value: str | None, field_name: str) -> None
 def _require_integer(value: object, field: str) -> None:
     if not isinstance(value, int) or isinstance(value, bool):
         raise ValueError(f"{field} must be an integer")
+
+
+def _require_bool(value: object, field: str) -> None:
+    if not isinstance(value, bool):
+        raise ValueError(f"{field} must be a boolean")
 
 
 def _require_callable(value: object, field: str) -> None:

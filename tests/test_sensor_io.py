@@ -264,6 +264,12 @@ class SensorIoTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "delimiter must not be empty"):
             manyfold.DelimitedMessageBuffer(delimiter=b"")
 
+    def test_delimited_message_buffer_rejects_non_bytes_delimiter(self) -> None:
+        manyfold = load_manyfold_package()
+
+        with self.assertRaisesRegex(ValueError, "delimiter must be bytes-like"):
+            manyfold.DelimitedMessageBuffer(delimiter="\\n")  # type: ignore[arg-type]
+
     def test_delimited_message_buffer_rejects_unknown_mode(self) -> None:
         manyfold = load_manyfold_package()
 
@@ -275,6 +281,17 @@ class SensorIoTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "text delimiter must be valid UTF-8"):
             manyfold.DelimitedMessageBuffer(delimiter=b"\xff", mode="text")
+
+    def test_delimited_message_buffer_rejects_non_bytes_append_data(self) -> None:
+        manyfold = load_manyfold_package()
+
+        byte_buffer = manyfold.DelimitedMessageBuffer()
+        text_buffer = manyfold.DelimitedMessageBuffer(mode="text")
+
+        with self.assertRaisesRegex(ValueError, "data must be bytes-like"):
+            byte_buffer.append(7)  # type: ignore[arg-type]
+        with self.assertRaisesRegex(ValueError, "data must be bytes-like"):
+            text_buffer.append(7)  # type: ignore[arg-type]
 
     def test_json_event_decoder_returns_sensor_events(self) -> None:
         manyfold = load_manyfold_package()
@@ -315,17 +332,21 @@ class SensorIoTests(unittest.TestCase):
         missing = decoder.decode(b'{"data":"ok"}')
         null = decoder.decode(b'{"event_type":null,"data":"ok"}')
         empty = decoder.decode(b'{"event_type":"","data":"ok"}')
+        whitespace = decoder.decode(b'{"event_type":"   ","data":"ok"}')
 
         self.assertIsNotNone(missing)
         self.assertIsNotNone(null)
         self.assertIsNotNone(empty)
+        self.assertIsNotNone(whitespace)
         assert missing is not None
         assert null is not None
         assert empty is not None
+        assert whitespace is not None
         self.assertEqual(missing.event_type, "sensor.default")
         self.assertEqual(null.event_type, "sensor.default")
         self.assertEqual(empty.event_type, "sensor.default")
-        self.assertEqual(decoder.sequence.peek(), 3)
+        self.assertEqual(whitespace.event_type, "sensor.default")
+        self.assertEqual(decoder.sequence.peek(), 4)
 
     def test_json_event_decoder_rejects_non_string_event_type(self) -> None:
         manyfold = load_manyfold_package()
@@ -334,6 +355,41 @@ class SensorIoTests(unittest.TestCase):
         self.assertIsNone(decoder.decode(b'{"event_type":7,"data":"ok"}'))
         self.assertIsNone(decoder.decode(b'{"event_type":false,"data":"ok"}'))
         self.assertIsNone(decoder.decode(b'{"event_type":[],"data":"ok"}'))
+        self.assertEqual(decoder.sequence.peek(), 0)
+
+    def test_json_event_decoder_rejects_non_standard_json_constants(self) -> None:
+        manyfold = load_manyfold_package()
+        decoder = manyfold.JsonEventDecoder()
+
+        self.assertIsNone(decoder.decode(b'{"event_type":"sensor.temp","data":NaN}'))
+        self.assertIsNone(
+            decoder.decode(b'{"event_type":"sensor.temp","quality":Infinity}')
+        )
+        self.assertIsNone(
+            decoder.decode(b'{"event_type":"sensor.temp","quality":-Infinity}')
+        )
+        self.assertEqual(decoder.sequence.peek(), 0)
+
+    def test_json_event_decoder_rejects_invalid_configuration(self) -> None:
+        manyfold = load_manyfold_package()
+
+        for kwargs, message in (
+            ({"clock": object()}, "json event decoder clock must provide now"),
+            ({"identity": object()}, "json event decoder identity must be a SensorIdentity"),
+            ({"sequence": object()}, "json event decoder sequence must be a SequenceCounter"),
+            ({"default_event_type": " "}, "default_event_type must be a non-empty string"),
+            ({"group": 7}, "group must be a string"),
+        ):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    manyfold.JsonEventDecoder(**kwargs)
+
+    def test_json_event_decoder_rejects_non_bytes_message(self) -> None:
+        manyfold = load_manyfold_package()
+        decoder = manyfold.JsonEventDecoder()
+
+        with self.assertRaisesRegex(ValueError, "message must be bytes-like"):
+            decoder.decode(7)  # type: ignore[arg-type]
         self.assertEqual(decoder.sequence.peek(), 0)
 
     def test_sensor_event_schema_round_trips_identity_and_raw_bytes(self) -> None:
@@ -928,6 +984,26 @@ class SensorIoTests(unittest.TestCase):
             loop.run(read)
         self.assertEqual(attempts, 2)
 
+    def test_retry_loop_rejects_invalid_configuration(self) -> None:
+        manyfold = load_manyfold_package()
+
+        for kwargs, message in (
+            ({"retry": object()}, "retry must be a RetryPolicy"),
+            ({"backoff": object()}, "backoff must be a BackoffPolicy"),
+            ({"sleep": object()}, "sleep must be callable"),
+            ({"group": object()}, "group must be a string"),
+        ):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    manyfold.RetryLoop(**kwargs)
+
+    def test_retry_loop_rejects_non_callable_operation(self) -> None:
+        manyfold = load_manyfold_package()
+        loop = manyfold.RetryLoop()
+
+        with self.assertRaisesRegex(ValueError, "operation must be callable"):
+            loop.run(object())  # type: ignore[arg-type]
+
     def test_backoff_policy_rejects_invalid_attempt_indexes(self) -> None:
         manyfold = load_manyfold_package()
         policy = manyfold.SensorBackoffPolicy.fixed(0.5)
@@ -1002,6 +1078,29 @@ class SensorIoTests(unittest.TestCase):
         self.assertEqual(errors, [("not ready", 1)])
         self.assertEqual(sleeps, [0.5])
         self.assertTrue(stop.is_set())
+
+    def test_managed_run_loop_rejects_invalid_configuration(self) -> None:
+        manyfold = load_manyfold_package()
+
+        for kwargs, message in (
+            ({"body": object()}, "body must be callable"),
+            ({"retry": object()}, "retry must be a RetryPolicy"),
+            ({"backoff": object()}, "backoff must be a BackoffPolicy"),
+            ({"on_error": object()}, "on_error must be callable"),
+            ({"group": object()}, "group must be a string"),
+        ):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    manyfold.ManagedRunLoop(
+                        **{"body": lambda stop: stop.set(), **kwargs}
+                    )
+
+    def test_managed_run_loop_rejects_invalid_stop_token(self) -> None:
+        manyfold = load_manyfold_package()
+        loop = manyfold.ManagedRunLoop(body=lambda stop: stop.set())
+
+        with self.assertRaisesRegex(ValueError, "stop must be a StopToken"):
+            loop.run(object())  # type: ignore[arg-type]
 
     def test_managed_run_loop_dispose_stops_thread(self) -> None:
         manyfold = load_manyfold_package()

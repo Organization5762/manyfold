@@ -5103,6 +5103,49 @@ assert graph.latest(route) is None
                 )
             )
 
+    def test_graph_metadata_records_reject_invalid_construction_inputs(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("imu"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("accel"),
+            variant=graph_module.Variant.Meta,
+            schema=graph_module.Schema.bytes(name="Accel"),
+        )
+
+        with self.assertRaisesRegex(ValueError, "ordered must be a boolean"):
+            graph_module.LinkCapabilities(ordered="yes")
+        with self.assertRaisesRegex(
+            ValueError, "link capabilities must be LinkCapabilities"
+        ):
+            graph_module.Link(
+                name="tcp0",
+                link_class="TcpStreamLink",
+                capabilities=object(),
+            )
+        with self.assertRaisesRegex(ValueError, "principal_id"):
+            graph_module.CapabilityGrant(principal_id="", route=route)
+        with self.assertRaisesRegex(ValueError, "payload_open must be a boolean"):
+            graph_module.CapabilityGrant(
+                principal_id="dashboard",
+                route=route,
+                payload_open="yes",
+            )
+        with self.assertRaisesRegex(ValueError, "query command"):
+            graph_module.QueryRequest(command="")
+        with self.assertRaisesRegex(ValueError, "query principal_id"):
+            graph_module.QueryRequest(command="manifest", principal_id=" ")
+        graph = graph_module.Graph()
+        with self.assertRaisesRegex(ValueError, "query service owner"):
+            graph.query_service(" ")
+        with self.assertRaisesRegex(ValueError, "requester_id"):
+            graph.query(
+                graph_module.QueryRequest(command="manifest"),
+                requester_id="",
+            )
+
     def test_publish_lazy_defers_payload_open_until_demand(self) -> None:
         graph_module = load_graph_module()
         route = graph_module.route(

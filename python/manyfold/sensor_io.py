@@ -355,7 +355,14 @@ class RetryLoop:
     sleep: Callable[[float], None] = time.sleep
     group: str | None = None
 
+    def __post_init__(self) -> None:
+        self.retry = _require_retry_policy(self.retry, "retry loop retry")
+        self.backoff = _require_backoff_policy(self.backoff, "retry loop backoff")
+        _require_callable(self.sleep, "retry loop sleep")
+        self.group = _require_optional_string(self.group, "retry loop group")
+
     def run(self, operation: Callable[[], T]) -> T:
+        _require_callable(operation, "retry loop operation")
         last_error: BaseException | None = None
         for attempt in range(1, self.retry.max_attempts + 1):
             delay = self.backoff.delay_for_attempt(attempt)
@@ -408,7 +415,20 @@ class ManagedRunLoop:
     on_error: Callable[[BaseException, int], None] | None = None
     group: str | None = None
 
+    def __post_init__(self) -> None:
+        _require_callable(self.body, "managed run loop body")
+        self.retry = _require_retry_policy(self.retry, "managed run loop retry")
+        self.backoff = _require_backoff_policy(
+            self.backoff,
+            "managed run loop backoff",
+        )
+        if self.on_error is not None:
+            _require_callable(self.on_error, "managed run loop on_error")
+        self.group = _require_optional_string(self.group, "managed run loop group")
+
     def run(self, stop: StopToken | None = None) -> None:
+        if stop is not None and not isinstance(stop, StopToken):
+            raise ValueError("managed run loop stop must be a StopToken")
         token = stop or StopToken(group=self.group)
         consecutive_failures = 0
         while not token.is_set():
@@ -1117,6 +1137,7 @@ class DelimitedMessageBuffer:
     _text_delimiter_len: int = field(default=0, init=False, repr=False)
 
     def __post_init__(self) -> None:
+        self.delimiter = _require_bytes_like(self.delimiter, "delimiter")
         if not self.delimiter:
             raise ValueError("delimiter must not be empty")
         if self.mode not in ("bytes", "text"):
@@ -1135,7 +1156,10 @@ class DelimitedMessageBuffer:
             return len(self._text_buffer)
         return len(self._bytes_buffer)
 
-    def append(self, data: bytes | bytearray | str) -> tuple[bytes | str, ...]:
+    def append(
+        self,
+        data: bytes | bytearray | memoryview | str,
+    ) -> tuple[bytes | str, ...]:
         if self.mode == "text":
             if isinstance(data, str):
                 if self._text_decoder.getstate()[0]:
@@ -1144,12 +1168,15 @@ class DelimitedMessageBuffer:
                     )
                 self._text_buffer += data
             else:
-                self._text_buffer += self._text_decoder.decode(bytes(data), final=False)
+                self._text_buffer += self._text_decoder.decode(
+                    _require_bytes_like(data, "data"),
+                    final=False,
+                )
             return tuple(self._drain_text())
         if isinstance(data, str):
             self._bytes_buffer.extend(data.encode("utf-8"))
         else:
-            self._bytes_buffer.extend(data)
+            self._bytes_buffer.extend(_require_bytes_like(data, "data"))
         return tuple(self._drain_bytes())
 
     def clear(self) -> None:
@@ -1187,6 +1214,20 @@ class JsonEventDecoder:
     group: str | None = None
 
     def __post_init__(self) -> None:
+        _require_clock(self.clock, "json event decoder clock")
+        self.identity = _require_sensor_identity(
+            self.identity,
+            "json event decoder identity",
+        )
+        self.sequence = _require_sequence_counter(
+            self.sequence,
+            "json event decoder sequence",
+        )
+        self.default_event_type = _require_non_empty_string(
+            self.default_event_type,
+            "default_event_type",
+        )
+        self.group = _require_optional_string(self.group, "group")
         _adopt_group(self.clock, self.group)
         _adopt_group(self.sequence, self.group)
         if self.group is not None and self.identity.group is None:
@@ -1197,8 +1238,15 @@ class JsonEventDecoder:
                 group=self.group,
             )
 
-    def decode(self, message: bytes | bytearray | str) -> SensorEvent | None:
-        raw = message.encode("utf-8") if isinstance(message, str) else bytes(message)
+    def decode(
+        self,
+        message: bytes | bytearray | memoryview | str,
+    ) -> SensorEvent | None:
+        raw = (
+            message.encode("utf-8")
+            if isinstance(message, str)
+            else _require_bytes_like(message, "message")
+        )
         try:
             text = raw.decode("utf-8").strip()
         except UnicodeDecodeError:
@@ -1206,13 +1254,16 @@ class JsonEventDecoder:
         if not text:
             return None
         try:
-            parsed = json.loads(text)
-        except json.JSONDecodeError:
+            parsed = json.loads(text, parse_constant=_reject_json_constant)
+        except (json.JSONDecodeError, ValueError):
             return None
         if not isinstance(parsed, Mapping):
             return None
         event_type_value = parsed.get("event_type", self.default_event_type)
-        if event_type_value is None or event_type_value == "":
+        if (
+            event_type_value is None
+            or (isinstance(event_type_value, str) and not event_type_value.strip())
+        ):
             event_type = self.default_event_type
         elif isinstance(event_type_value, str):
             event_type = event_type_value
@@ -1985,6 +2036,12 @@ def _require_bool(value: Any, field: str) -> bool:
     return value
 
 
+def _require_bytes_like(value: Any, field: str) -> bytes:
+    if not isinstance(value, (bytes, bytearray, memoryview)):
+        raise ValueError(f"{field} must be bytes-like")
+    return bytes(value)
+
+
 def _require_callable(value: Any, field: str) -> None:
     if not callable(value):
         raise ValueError(f"{field} must be callable")
@@ -2167,6 +2224,10 @@ def _decode_health_status(value: Any) -> Literal["ok", "stale", "error"]:
     if status in ("ok", "stale", "error"):
         return status
     raise ValueError("status must be one of: ok, stale, error")
+
+
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"invalid JSON constant: {value}")
 
 
 def _sensor_identity_from_json(value: Any) -> SensorIdentity:
