@@ -178,6 +178,17 @@ class ReactiveThreadsTests(unittest.TestCase):
 
         self.assertEqual(list(recorder.snapshot()), ["a-stream", "z-stream"])
 
+    def test_latency_recorder_rejects_blank_stream_names(self) -> None:
+        recorder = self.reactive_threads._LatencyRecorder()
+
+        for stream_name in ("", "   ", object()):
+            with self.subTest(stream_name=stream_name):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "stream_name must be a non-empty string",
+                ):
+                    recorder.record(stream_name, 0.001)
+
     def test_latency_recorder_rejects_non_positive_history_size(self) -> None:
         for history_size in (0, -1, False, 1.5):
             with self.subTest(history_size=history_size):

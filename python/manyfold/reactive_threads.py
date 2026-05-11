@@ -96,6 +96,8 @@ class _LatencyRecorder:
         self._lock = Lock()
 
     def record(self, stream_name: str, delay_s: float) -> None:
+        if not isinstance(stream_name, str) or not stream_name.strip():
+            raise ValueError("stream_name must be a non-empty string")
         if not math.isfinite(delay_s):
             delay_s = 0.0
         with self._lock:
