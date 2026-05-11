@@ -126,10 +126,13 @@ def _reference_example(
     return _missing_reference_example(metadata)
 
 
-REFERENCE_EXAMPLE_SUITE: tuple[ReferenceExample, ...] = tuple(
-    _reference_example(reference_example_metadata(number))
-    for number in REFERENCE_EXAMPLE_NUMBERS
-)
+if reference_example_metadata is None:
+    REFERENCE_EXAMPLE_SUITE: tuple[ReferenceExample, ...] = ()
+else:
+    REFERENCE_EXAMPLE_SUITE = tuple(
+        _reference_example(reference_example_metadata(number))
+        for number in REFERENCE_EXAMPLE_NUMBERS
+    )
 
 _IMPLEMENTED_REFERENCE_EXAMPLES: tuple[ReferenceExample, ...] = tuple(
     example for example in REFERENCE_EXAMPLE_SUITE if example.implemented

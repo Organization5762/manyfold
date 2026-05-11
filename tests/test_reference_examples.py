@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import builtins
 import importlib.util
 import sys
 import types
@@ -72,6 +73,56 @@ class ReferenceExampleSuiteTests(unittest.TestCase):
         self.assertEqual(
             module.REFERENCE_EXAMPLE_SUITE, module.reference_example_suite()
         )
+
+    def test_reference_examples_file_import_skips_catalog_when_examples_missing(
+        self,
+    ) -> None:
+        module_path = (
+            Path(__file__).resolve().parents[1]
+            / "python"
+            / "manyfold"
+            / "reference_examples.py"
+        )
+        spec = importlib.util.spec_from_file_location(
+            "manyfold_reference_examples_missing_examples_test",
+            module_path,
+        )
+        module = importlib.util.module_from_spec(spec)
+        assert spec is not None and spec.loader is not None
+        sys.modules[spec.name] = module
+
+        real_import = builtins.__import__
+        calls: list[str] = []
+        fake_manyfold = types.ModuleType("manyfold")
+        fake_manyfold.__path__ = []  # type: ignore[attr-defined]
+        fake_repo_paths = types.ModuleType("manyfold._repo_paths")
+        fake_repo_paths.ensure_repo_import_paths = lambda: calls.append("called")
+
+        def import_without_examples(
+            name: str,
+            globals: dict[str, object] | None = None,
+            locals: dict[str, object] | None = None,
+            fromlist: tuple[str, ...] = (),
+            level: int = 0,
+        ) -> object:
+            if name == "examples":
+                raise ModuleNotFoundError("No module named 'examples'", name="examples")
+            return real_import(name, globals, locals, fromlist, level)
+
+        with mock.patch.dict(
+            sys.modules,
+            {
+                "manyfold": fake_manyfold,
+                "manyfold._repo_paths": fake_repo_paths,
+            },
+        ):
+            with mock.patch("builtins.__import__", side_effect=import_without_examples):
+                spec.loader.exec_module(module)
+
+        self.assertEqual(calls, ["called"])
+        self.assertEqual(module.reference_example_suite(), ())
+        self.assertEqual(module.implemented_reference_examples(), ())
+        self.assertEqual(module.REFERENCE_EXAMPLE_SUITE, ())
 
     def test_manyfold_package_exports_recent_graph_types(self) -> None:
         manyfold = load_manyfold_package()
