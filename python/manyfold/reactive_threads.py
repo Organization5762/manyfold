@@ -96,8 +96,8 @@ class _LatencyRecorder:
         self._lock = Lock()
 
     def record(self, stream_name: str, delay_s: float) -> None:
-        if not isinstance(stream_name, str) or not stream_name.strip():
-            raise ValueError("stream_name must be a non-empty string")
+        stream_name = _require_non_empty_string(stream_name, "stream_name")
+        delay_s = _require_number(delay_s, "delay_s")
         if not math.isfinite(delay_s):
             delay_s = 0.0
         with self._lock:
@@ -423,6 +423,20 @@ def materialize_sequence(sequence: Iterable[T]) -> Observable[T]:
     """Return a materialized observable over an iterable sequence."""
 
     return rx.from_iterable(sequence).pipe(ops.share())
+
+
+def _require_non_empty_string(value: Any, field: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{field} must be a string")
+    if not value.strip():
+        raise ValueError(f"{field} must be a non-empty string")
+    return value
+
+
+def _require_number(value: Any, field: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{field} must be a number")
+    return float(value)
 
 
 def _latency_stats(values: tuple[float, ...]) -> DeliveryLatencyStats:
