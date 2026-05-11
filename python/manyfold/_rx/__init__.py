@@ -52,9 +52,9 @@ from reactivex import (
     with_latest_from as with_latest_from,
     zip as zip,
 )
-from reactivex.subject import Subject as Subject
 
 from . import abc as abc
+from .subject import Subject as Subject
 
 __all__ = (
     "ConnectableObservable",

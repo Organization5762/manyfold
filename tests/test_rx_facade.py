@@ -235,6 +235,7 @@ class RxFacadeTests(unittest.TestCase):
         self.assertIs(graph_module.rx, rx_module)
         self.assertIs(primitives_module.Observable, rx_module.Observable)
         self.assertNotIn("reactivex", graph_module.__dict__)
+        self.assertIs(rx_module.Subject, subject_module.Subject)
         self.assertIs(graph_module.Subject, subject_module.Subject)
 
 
