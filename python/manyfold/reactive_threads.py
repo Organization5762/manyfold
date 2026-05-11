@@ -511,8 +511,8 @@ def _run_background_observable(
 
 __all__ = (
     "DEFAULT_DELIVERY_LATENCY_HISTORY_SIZE",
-    "FRAME_THREAD_LATENCY_STREAM",
     "DeliveryLatencyStats",
+    "FRAME_THREAD_LATENCY_STREAM",
     "background_scheduler",
     "background_threaded_observable",
     "blocking_io_scheduler",
@@ -533,6 +533,6 @@ __all__ = (
     "replay_scheduler",
     "reset_reactive_threading_state_for_tests",
     "scheduler_diagnostics",
-    "start_with_once",
     "shutdown",
+    "start_with_once",
 )

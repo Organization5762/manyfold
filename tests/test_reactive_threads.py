@@ -30,6 +30,14 @@ class ReactiveThreadsTests(unittest.TestCase):
 
     def test_reactive_threads_exports_are_tuple_shaped(self) -> None:
         self.assertIsInstance(self.reactive_threads.__all__, tuple)
+        self.assertEqual(
+            self.reactive_threads.__all__,
+            tuple(sorted(self.reactive_threads.__all__)),
+        )
+        self.assertEqual(
+            len(self.reactive_threads.__all__),
+            len(set(self.reactive_threads.__all__)),
+        )
         for name in self.reactive_threads.__all__:
             with self.subTest(name=name):
                 self.assertTrue(hasattr(self.reactive_threads, name))
