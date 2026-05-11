@@ -204,6 +204,12 @@ class ComponentTests(unittest.TestCase):
             ):
                 manyfold.Keyspace(store, "safe")  # type: ignore[arg-type]
 
+    def test_direct_keyspace_construction_rejects_invalid_store(self) -> None:
+        manyfold = load_manyfold_package()
+
+        with self.assertRaisesRegex(ValueError, "keyspace store must be a FileStore"):
+            manyfold.Keyspace(object())  # type: ignore[arg-type]
+
     def test_file_store_allows_key_part_matching_value_filename(self) -> None:
         manyfold = load_manyfold_package()
 

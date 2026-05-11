@@ -119,6 +119,8 @@ class Keyspace:
     parts: Key = ()
 
     def __post_init__(self) -> None:
+        if not isinstance(self.store, FileStore):
+            raise ValueError("keyspace store must be a FileStore")
         if not isinstance(self.parts, tuple):
             raise ValueError("keyspace parts must be a tuple of strings or integers")
         object.__setattr__(self, "parts", _normalize_key(self.parts))
