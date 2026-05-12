@@ -55,7 +55,7 @@ CHECKLIST_STATUS = {
     ),
     "12": (
         " ",
-        "In-memory graph, mailboxes, and guarded scheduler/control-loop ticking exist, but execution semantics are still incomplete.",
+        "In-memory graph, mailboxes, guarded scheduler/control-loop ticking, and validated local sensor lifecycle timeouts exist, but execution semantics are still incomplete.",
     ),
     "13": (
         " ",
@@ -146,7 +146,7 @@ APPENDIX_STATUS = {
     ),
     "Scheduling and out-of-order bugs made harder to express": (
         " ",
-        "Guarded scheduler release, validated event-time progress, and idempotent watermark releases now exist, but semantics are still incomplete.",
+        "Guarded scheduler release, validated event-time progress, idempotent watermark releases, and validated local lifecycle timeouts now exist, but semantics are still incomplete.",
     ),
     "Metadata/payload split with lazy payload opening": (
         " ",

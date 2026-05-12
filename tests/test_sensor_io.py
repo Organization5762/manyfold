@@ -1157,6 +1157,56 @@ class SensorIoTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "stop must be a StopToken"):
             loop.run(object())  # type: ignore[arg-type]
 
+    def test_stop_token_rejects_invalid_wait_timeouts(self) -> None:
+        manyfold = load_manyfold_package()
+        token = manyfold.StopToken()
+
+        invalid_inputs = (
+            (True, "timeout must be a finite number"),
+            ("1.0", "timeout must be a finite number"),
+            (math.nan, "timeout must be a finite number"),
+            (-0.1, "timeout must be non-negative"),
+        )
+
+        for timeout, message in invalid_inputs:
+            with self.subTest(timeout=timeout):
+                with self.assertRaisesRegex(ValueError, message):
+                    token.wait(timeout=timeout)  # type: ignore[arg-type]
+
+    def test_managed_run_loop_rejects_invalid_thread_start_options(self) -> None:
+        manyfold = load_manyfold_package()
+        loop = manyfold.ManagedRunLoop(body=lambda stop: stop.set())
+
+        with self.assertRaisesRegex(ValueError, "thread name must be a non-empty string"):
+            loop.start_thread(name="")
+        with self.assertRaisesRegex(ValueError, "daemon must be a boolean"):
+            loop.start_thread(
+                name="manyfold-test-invalid-daemon",
+                daemon="yes",  # type: ignore[arg-type]
+            )
+
+    def test_managed_run_loop_handle_rejects_invalid_lifecycle_timeouts(self) -> None:
+        manyfold = load_manyfold_package()
+        loop = manyfold.ManagedRunLoop(body=lambda stop: stop.set())
+
+        invalid_inputs = (
+            (False, "timeout must be a finite number"),
+            (object(), "timeout must be a finite number"),
+            (math.inf, "timeout must be a finite number"),
+            (-1.0, "timeout must be non-negative"),
+        )
+
+        for method_name in ("join", "dispose"):
+            for timeout, message in invalid_inputs:
+                with self.subTest(method=method_name, timeout=timeout):
+                    handle = manyfold.ManagedRunLoopHandle(
+                        loop=loop,
+                        token=manyfold.StopToken(),
+                        thread=threading.Thread(target=lambda: None),
+                    )
+                    with self.assertRaisesRegex(ValueError, message):
+                        getattr(handle, method_name)(timeout=timeout)
+
     def test_managed_run_loop_dispose_stops_thread(self) -> None:
         manyfold = load_manyfold_package()
         entered = threading.Event()
@@ -2375,6 +2425,28 @@ class SensorIoTests(unittest.TestCase):
             subscription.dispose()
 
         self.assertEqual(disposed, ["interrupting"])
+
+    def test_dispose_handle_uses_timeout_aware_signature_without_retrying_type_errors(
+        self,
+    ) -> None:
+        load_manyfold_package()
+        sensor_io = sys.modules["manyfold.sensor_io"]
+        calls: list[tuple[str, float | None]] = []
+
+        class NoTimeoutDispose:
+            def dispose(self) -> None:
+                calls.append(("no-timeout", None))
+
+        class TimeoutDispose:
+            def dispose(self, *, timeout: float | None = None) -> None:
+                calls.append(("timeout", timeout))
+                raise TypeError("inner dispose failure")
+
+        sensor_io._dispose_handle(NoTimeoutDispose(), timeout=0.25)
+        with self.assertRaisesRegex(TypeError, "inner dispose failure"):
+            sensor_io._dispose_handle(TimeoutDispose(), timeout=0.5)
+
+        self.assertEqual(calls, [("no-timeout", None), ("timeout", 0.5)])
 
     def test_local_durable_spool_cleans_up_log_when_source_subscribe_fails(
         self,

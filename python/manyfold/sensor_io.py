@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import binascii
 import codecs
+import inspect
 import json
 import math
 import threading
@@ -394,6 +395,7 @@ class StopToken:
         self._event.set()
 
     def wait(self, timeout: float | None = None) -> bool:
+        timeout = _require_optional_timeout(timeout, "timeout")
         return self._event.wait(timeout)
 
 
@@ -453,6 +455,8 @@ class ManagedRunLoop:
         name: str,
         daemon: bool = True,
     ) -> "ManagedRunLoopHandle":
+        name = _require_non_empty_string(name, "thread name")
+        daemon = _require_bool(daemon, "daemon")
         token = StopToken(group=self.group)
         thread = threading.Thread(
             target=self.run,
@@ -478,10 +482,12 @@ class ManagedRunLoopHandle:
         self.token.set()
 
     def join(self, timeout: float | None = None) -> None:
+        timeout = _require_optional_timeout(timeout, "timeout")
         if self.thread.ident is not None:
             self.thread.join(timeout=timeout)
 
     def dispose(self, timeout: float | None = None) -> None:
+        timeout = _require_optional_timeout(timeout, "timeout")
         if self.disposed:
             return
         self.stop()
@@ -542,9 +548,11 @@ class ManagedGraphNodeHandle:
         self.loop_handle.stop()
 
     def join(self, timeout: float | None = None) -> None:
+        timeout = _require_optional_timeout(timeout, "timeout")
         self.loop_handle.join(timeout=timeout)
 
     def dispose(self, timeout: float | None = None) -> None:
+        timeout = _require_optional_timeout(timeout, "timeout")
         if self.disposed:
             return
         if self.control_subscription is not None:
@@ -767,11 +775,13 @@ class DetectionNodeHandle:
             _call_if_present(handle, "stop")
 
     def join(self, timeout: float | None = None) -> None:
+        timeout = _require_optional_timeout(timeout, "timeout")
         self.node_handle.join(timeout=timeout)
         for handle in tuple(self.spawned_handles):
             _call_if_present(handle, "join", timeout)
 
     def dispose(self, timeout: float | None = None) -> None:
+        timeout = _require_optional_timeout(timeout, "timeout")
         if self.disposed:
             return
         for handle in reversed(tuple(self.spawned_handles)):
@@ -2016,6 +2026,15 @@ def _require_finite_number(value: float, field: str) -> float:
     return number
 
 
+def _require_optional_timeout(value: float | None, field: str) -> float | None:
+    if value is None:
+        return None
+    timeout = _require_finite_number(value, field)
+    if timeout < 0:
+        raise ValueError(f"{field} must be non-negative")
+    return timeout
+
+
 def _is_exception_class(value: object) -> bool:
     return isinstance(value, type) and issubclass(value, BaseException)
 
@@ -2355,6 +2374,25 @@ def _call_if_present(target: Any, name: str, *args: Any) -> Any:
     return None
 
 
+def _call_accepts_keyword(target: Callable[..., Any], keyword: str) -> bool:
+    try:
+        parameters = inspect.signature(target).parameters.values()
+    except (TypeError, ValueError):
+        return True
+    return any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD
+        or (
+            parameter.name == keyword
+            and parameter.kind
+            in (
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                inspect.Parameter.KEYWORD_ONLY,
+            )
+        )
+        for parameter in parameters
+    )
+
+
 def _flatten_handles(value: Any) -> list[Any]:
     if value is None:
         return []
@@ -2366,11 +2404,12 @@ def _flatten_handles(value: Any) -> list[Any]:
 
 
 def _dispose_handle(handle: Any, *, timeout: float | None = None) -> None:
+    timeout = _require_optional_timeout(timeout, "timeout")
     dispose = getattr(handle, "dispose", None)
     if callable(dispose):
-        try:
+        if _call_accepts_keyword(dispose, "timeout"):
             dispose(timeout=timeout)
-        except TypeError:
+        else:
             dispose()
         return
     _call_if_present(handle, "stop")
