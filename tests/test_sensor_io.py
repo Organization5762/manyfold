@@ -1162,6 +1162,23 @@ class SensorIoTests(unittest.TestCase):
                 ):
                     manyfold.SensorRetryPolicy(retry_on=retry_on)  # type: ignore[arg-type]
 
+    def test_stop_token_rejects_invalid_group_and_timeout(self) -> None:
+        manyfold = load_manyfold_package()
+
+        with self.assertRaisesRegex(ValueError, "stop token group must be a string"):
+            manyfold.StopToken(group=object())  # type: ignore[arg-type]
+
+        token = manyfold.StopToken()
+        for timeout, message in (
+            (True, "stop token timeout must be a finite number"),
+            ("0.1", "stop token timeout must be a finite number"),
+            (float("nan"), "stop token timeout must be a finite number"),
+            (-0.1, "stop token timeout must be non-negative"),
+        ):
+            with self.subTest(timeout=timeout):
+                with self.assertRaisesRegex(ValueError, message):
+                    token.wait(timeout)  # type: ignore[arg-type]
+
     def test_managed_run_loop_retries_until_stopped(self) -> None:
         manyfold = load_manyfold_package()
         attempts = 0
@@ -1220,6 +1237,20 @@ class SensorIoTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "stop must be a StopToken"):
             loop.run(object())  # type: ignore[arg-type]
+
+    def test_managed_run_loop_rejects_invalid_thread_options(self) -> None:
+        manyfold = load_manyfold_package()
+        loop = manyfold.ManagedRunLoop(body=lambda stop: stop.set())
+
+        for kwargs, message in (
+            ({"name": " "}, "managed run loop thread name must be a non-empty string"),
+            ({"daemon": "yes"}, "managed run loop thread daemon must be a boolean"),
+        ):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    loop.start_thread(
+                        **{"name": "manyfold-test-managed-loop", **kwargs}
+                    )
 
     def test_managed_run_loop_dispose_stops_thread(self) -> None:
         manyfold = load_manyfold_package()

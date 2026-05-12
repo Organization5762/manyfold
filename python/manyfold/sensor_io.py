@@ -387,6 +387,9 @@ class StopToken:
         default_factory=threading.Event, init=False, repr=False
     )
 
+    def __post_init__(self) -> None:
+        self.group = _require_optional_string(self.group, "stop token group")
+
     def is_set(self) -> bool:
         return self._event.is_set()
 
@@ -394,7 +397,7 @@ class StopToken:
         self._event.set()
 
     def wait(self, timeout: float | None = None) -> bool:
-        return self._event.wait(timeout)
+        return self._event.wait(_require_optional_timeout(timeout, "stop token timeout"))
 
 
 @dataclass
@@ -453,6 +456,8 @@ class ManagedRunLoop:
         name: str,
         daemon: bool = True,
     ) -> "ManagedRunLoopHandle":
+        name = _require_non_empty_string(name, "managed run loop thread name")
+        daemon = _require_bool(daemon, "managed run loop thread daemon")
         token = StopToken(group=self.group)
         thread = threading.Thread(
             target=self.run,
@@ -2038,6 +2043,15 @@ def _require_finite_number(value: float, field: str) -> float:
     if not math.isfinite(number):
         raise ValueError(f"{field} must be a finite number")
     return number
+
+
+def _require_optional_timeout(value: Any, field: str) -> float | None:
+    if value is None:
+        return None
+    timeout = _require_finite_number(value, field)
+    if timeout < 0:
+        raise ValueError(f"{field} must be non-negative")
+    return timeout
 
 
 def _is_exception_class(value: object) -> bool:
