@@ -20,8 +20,8 @@ required-features = ["stub-gen"]
 [features]
 default = []
 python = ["dep:pyo3"]
-python-extension = ["python", "pyo3/extension-module"]
-stub-gen = ["python", "pyo3/auto-initialize", "dep:pyo3-stub-gen"]
+python-extension = ["pyo3/extension-module", "python"]
+stub-gen = ["dep:pyo3-stub-gen", "pyo3/auto-initialize", "python"]
 
 [dependencies]
 pyo3 = { version = "0.28.2", features = ["abi3-py310"], optional = true }

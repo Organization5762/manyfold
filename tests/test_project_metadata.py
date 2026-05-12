@@ -38,6 +38,19 @@ class ProjectMetadataTests(unittest.TestCase):
         self.assertEqual(dependencies, tuple(sorted(dependencies)))
         self.assertEqual(dev_dependencies, tuple(sorted(dev_dependencies)))
 
+    def test_cargo_feature_dependency_lists_stay_sorted(self) -> None:
+        lines = CARGO_TOML_PATH.read_text(encoding="utf-8").splitlines()
+        features = _inline_array_values_by_key(
+            lines,
+            "features",
+            source_name="Cargo.toml",
+        )
+
+        for name, values in features.items():
+            with self.subTest(feature=name):
+                self.assertEqual(values, tuple(sorted(values)))
+                self.assertEqual(len(values), len(set(values)))
+
     def test_pyproject_metadata_lists_stay_sorted(self) -> None:
         lines = PYPROJECT_PATH.read_text(encoding="utf-8").splitlines()
 
@@ -122,6 +135,31 @@ def _section_keys(
     if not in_section:
         raise AssertionError(f"{source_name} does not define section {section!r}")
     return tuple(keys)
+
+
+def _inline_array_values_by_key(
+    lines: list[str] | tuple[str, ...], section: str, *, source_name: str
+) -> dict[str, tuple[str, ...]]:
+    values_by_key: dict[str, tuple[str, ...]] = {}
+    in_section = False
+    header = f"[{section}]"
+    for line in lines:
+        stripped = line.strip()
+        if stripped == header:
+            in_section = True
+            continue
+        if in_section and stripped.startswith("["):
+            return values_by_key
+        if not in_section or not stripped or stripped.startswith("#"):
+            continue
+        key, raw_value = stripped.split("=", 1)
+        raw_items = raw_value.strip().removeprefix("[").removesuffix("]")
+        values_by_key[key.strip()] = tuple(
+            item.strip().strip('"') for item in raw_items.split(",") if item.strip()
+        )
+    if not in_section:
+        raise AssertionError(f"{source_name} does not define section {section!r}")
+    return values_by_key
 
 
 def _module_all_assignment(path: Path) -> tuple[str, ...]:
