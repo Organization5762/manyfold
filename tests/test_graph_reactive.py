@@ -3676,13 +3676,25 @@ assert graph.latest(route) is None
         graph_module = load_graph_module()
         graph = graph_module.Graph()
 
-        for name in ("", "   "):
+        for name in ("", "   ", 3):
             with self.subTest(name=name):
                 with self.assertRaisesRegex(
                     ValueError,
                     "diagram node name must not be blank",
                 ):
                     graph.register_diagram_node(name)
+
+    def test_context_rejects_blank_or_non_string_name(self) -> None:
+        graph_module = load_graph_module()
+        graph = graph_module.Graph()
+
+        for name in ("", "   ", object()):
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "context name must not be blank",
+                ):
+                    graph.context(name=name)
 
     def test_context_collects_scoped_route_inputs_and_outputs(self) -> None:
         graph_module = load_graph_module()

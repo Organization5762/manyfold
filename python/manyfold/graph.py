@@ -1574,7 +1574,7 @@ class GraphContext:
         group: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> None:
-        if not name.strip():
+        if not isinstance(name, str) or not name.strip():
             raise ValueError("context name must not be blank")
         self._graph = graph
         self.name = name
@@ -5007,7 +5007,7 @@ class Graph:
         thread_placement: NodeThreadPlacement | None = None,
     ) -> DiagramNode:
         """Register a graph-visible node for topology diagrams."""
-        if not name.strip():
+        if not isinstance(name, str) or not name.strip():
             raise ValueError("diagram node name must not be blank")
         metadata_items = tuple(
             sorted((str(key), str(value)) for key, value in (metadata or {}).items())

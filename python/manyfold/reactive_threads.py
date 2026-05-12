@@ -205,8 +205,10 @@ def replay_scheduler() -> TimeoutScheduler:
 def create_default_thread_factory(name: str) -> Callable[[StartableTarget], Thread]:
     """Build a non-daemon thread factory for Rx event-loop schedulers."""
 
+    thread_name = _require_thread_name(name)
+
     def default_thread_factory(target: StartableTarget) -> Thread:
-        return Thread(target=target, daemon=False, name=name)
+        return Thread(target=target, daemon=False, name=thread_name)
 
     return default_thread_factory
 
@@ -219,9 +221,11 @@ def interval_in_background(
 ) -> Observable[int]:
     """Emit integer ticks on a background scheduler until ``shutdown`` fires."""
 
+    period = _require_positive_timedelta(period)
+    thread_name = None if name is None else _require_thread_name(name)
     resolved_scheduler = scheduler or (
-        EventLoopScheduler(thread_factory=partial(_run_on_thread, name=name))
-        if name is not None
+        EventLoopScheduler(thread_factory=partial(_run_on_thread, name=thread_name))
+        if thread_name is not None
         else interval_scheduler()
     )
     return rx.interval(period=period, scheduler=resolved_scheduler).pipe(
@@ -344,7 +348,9 @@ def pipe_to_background_event_loop(
 ) -> Observable[Any]:
     """Pipe a stream through an event loop running on a background thread."""
 
-    scheduler = EventLoopScheduler(thread_factory=partial(_run_on_thread, name=name))
+    scheduler = EventLoopScheduler(
+        thread_factory=partial(_run_on_thread, name=_require_thread_name(name))
+    )
     return pipe(source, ops.observe_on(scheduler), *operators)
 
 
@@ -355,7 +361,9 @@ def pipe_to_background_thread(
 ) -> Observable[Any]:
     """Pipe a stream through a dedicated background thread executor."""
 
-    scheduler = NewThreadScheduler(thread_factory=partial(_run_on_thread, name=name))
+    scheduler = NewThreadScheduler(
+        thread_factory=partial(_run_on_thread, name=_require_thread_name(name))
+    )
     return pipe(source, ops.observe_on(scheduler), *operators)
 
 
@@ -366,12 +374,13 @@ def background_threaded_observable(
 ) -> Iterator[Observable[T]]:
     """Subscribe to an observable on a daemon thread and yield its subject."""
 
-    logger.debug("Starting background stream thread %s", name)
+    thread_name = _require_thread_name(name)
+    logger.debug("Starting background stream thread %s", thread_name)
     subject: Subject[T] = Subject()
     ready = Event()
     run = _BackgroundObservableRun()
     thread = Thread(
-        name=name,
+        name=thread_name,
         target=_run_background_observable,
         args=(subject, observable, ready, run),
         daemon=True,
@@ -433,10 +442,22 @@ def _require_non_empty_string(value: Any, field: str) -> str:
     return value
 
 
+def _require_thread_name(value: Any) -> str:
+    return _require_non_empty_string(value, "thread name")
+
+
 def _require_number(value: Any, field: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{field} must be a number")
     return float(value)
+
+
+def _require_positive_timedelta(value: Any) -> timedelta:
+    if not isinstance(value, timedelta):
+        raise ValueError("period must be a timedelta")
+    if value <= timedelta(0):
+        raise ValueError("period must be positive")
+    return value
 
 
 def _latency_stats(values: tuple[float, ...]) -> DeliveryLatencyStats:
@@ -499,7 +520,7 @@ def _dispose_scheduler(scheduler: SchedulerBase | None) -> None:
 
 
 def _run_on_thread(target: StartableTarget, name: str) -> Thread:
-    return Thread(target=target, daemon=False, name=name)
+    return Thread(target=target, daemon=False, name=_require_thread_name(name))
 
 
 def _enqueue_frame_thread_task(callback: Callable[[], None]) -> None:

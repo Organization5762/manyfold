@@ -97,6 +97,47 @@ class ReactiveThreadsTests(unittest.TestCase):
             ):
                 self.reactive_threads.background_scheduler()
 
+    def test_thread_helpers_reject_invalid_thread_names(self) -> None:
+        source = self.rx.Subject()
+
+        for name in ("", " ", 7):
+            with self.subTest(helper="create_default_thread_factory", name=name):
+                with self.assertRaisesRegex(ValueError, "thread name"):
+                    self.reactive_threads.create_default_thread_factory(name)
+
+            with self.subTest(helper="interval_in_background", name=name):
+                with self.assertRaisesRegex(ValueError, "thread name"):
+                    self.reactive_threads.interval_in_background(
+                        self.reactive_threads.timedelta(milliseconds=1),
+                        name=name,
+                    )
+
+            with self.subTest(helper="pipe_to_background_event_loop", name=name):
+                with self.assertRaisesRegex(ValueError, "thread name"):
+                    self.reactive_threads.pipe_to_background_event_loop(source, name)
+
+            with self.subTest(helper="pipe_to_background_thread", name=name):
+                with self.assertRaisesRegex(ValueError, "thread name"):
+                    self.reactive_threads.pipe_to_background_thread(source, name)
+
+            with self.subTest(helper="background_threaded_observable", name=name):
+                with self.assertRaisesRegex(ValueError, "thread name"):
+                    with self.reactive_threads.background_threaded_observable(
+                        source,
+                        name=name,
+                    ):
+                        pass
+
+    def test_interval_in_background_rejects_invalid_periods(self) -> None:
+        for period, message in (
+            (0.001, "period must be a timedelta"),
+            (self.reactive_threads.timedelta(0), "period must be positive"),
+            (self.reactive_threads.timedelta(microseconds=-1), "period must be positive"),
+        ):
+            with self.subTest(period=period):
+                with self.assertRaisesRegex(ValueError, message):
+                    self.reactive_threads.interval_in_background(period)
+
     def test_legacy_scheduler_env_minimum_errors_name_legacy_variable(self) -> None:
         with patch.dict(
             os.environ,
