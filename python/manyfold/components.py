@@ -306,7 +306,9 @@ class EventLog(Generic[T]):
                     value=self.schema.decode(entry.value),
                 )
             )
-        return tuple(sorted(records, key=lambda record: record.index))
+        # Keyspace scans are stable by decoded key, and canonical log indexes are
+        # fixed-width decimal strings, so lexical key order is numeric index order.
+        return tuple(records)
 
     def replay(self, graph: Graph) -> tuple[EventLogRecord[T], ...]:
         """Publish durable records to the committed output route."""
