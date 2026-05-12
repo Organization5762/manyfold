@@ -196,6 +196,24 @@ class ExampleTests(unittest.TestCase):
         ):
             getattr(examples_package, "missing_symbol")
 
+    def test_catalog_lookups_reject_malformed_keys_before_dict_lookup(self) -> None:
+        for value in ("", "   ", None):
+            with self.subTest(lookup="catalog_entry", value=value):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "example catalog module name must be a non-empty string",
+                ):
+                    catalog_entry(value)  # type: ignore[arg-type]
+
+        for value, error_type, message in (
+            (True, TypeError, "reference example number must be an integer"),
+            ("1", TypeError, "reference example number must be an integer"),
+            (0, ValueError, "reference example number must be positive"),
+        ):
+            with self.subTest(lookup="reference_example_metadata", value=value):
+                with self.assertRaisesRegex(error_type, message):
+                    reference_example_metadata(value)  # type: ignore[arg-type]
+
     def test_examples_package_dir_exposes_all_lazy_exports(self) -> None:
         examples_package = __import__("examples")
 
