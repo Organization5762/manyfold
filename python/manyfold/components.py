@@ -1316,7 +1316,7 @@ def _decode_replicated_log(payload: bytes) -> ReplicatedLog:
     if not text:
         return ()
     if _is_json_tuple_payload(text):
-        entries = json.loads(text.lstrip())
+        entries = _decode_json_array(text, "replicated log")
         return tuple(_decode_json_append_entry(entry) for entry in entries)
     return tuple(
         _decode_append_entry(line.encode("utf-8")) for line in text.splitlines()
@@ -1437,9 +1437,19 @@ def _encode_string_sequence(value: Any, field: str) -> tuple[str, ...]:
 
 
 def _decode_json_tuple(text: str, expected_length: int, field: str) -> list[Any]:
-    value = json.loads(text.lstrip())
-    if not isinstance(value, list) or len(value) != expected_length:
+    value = _decode_json_array(text, field)
+    if len(value) != expected_length:
         raise ValueError(f"{field} must be a JSON array with {expected_length} fields")
+    return value
+
+
+def _decode_json_array(text: str, field: str) -> list[Any]:
+    try:
+        value = json.loads(text.lstrip())
+    except JSONDecodeError as exc:
+        raise ValueError(f"{field} must be valid JSON") from exc
+    if not isinstance(value, list):
+        raise ValueError(f"{field} must be a JSON array")
     return value
 
 
