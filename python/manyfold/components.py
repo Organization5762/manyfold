@@ -217,6 +217,7 @@ class EventLog(Generic[T]):
     ) -> None:
         _require_component_name(name, "event log name")
         _require_keyspace(keyspace)
+        _require_schema(schema)
         self.name = name
         self.keyspace = keyspace
         self.schema = schema
@@ -319,6 +320,7 @@ class SnapshotStore(Generic[T]):
     ) -> None:
         _require_component_name(name, "snapshot store name")
         _require_keyspace(keyspace)
+        _require_schema(schema)
         self.name = name
         self.keyspace = keyspace
         self.schema = schema
@@ -947,6 +949,11 @@ def _require_component_name(value: object, field: str) -> None:
 def _require_keyspace(value: object) -> None:
     if not isinstance(value, Keyspace):
         raise ValueError("keyspace must be a Keyspace")
+
+
+def _require_schema(value: object) -> None:
+    if not isinstance(value, Schema):
+        raise ValueError("schema must be a Schema")
 
 
 def _normalize_key(parts: tuple[KeyPart, ...]) -> Key:

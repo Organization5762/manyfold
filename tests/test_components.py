@@ -12,6 +12,15 @@ from unittest.mock import patch
 from tests.test_support import load_manyfold_package
 
 
+class _FakeProtobufMessage:
+    @staticmethod
+    def FromString(_payload: bytes) -> _FakeProtobufMessage:
+        return _FakeProtobufMessage()
+
+    def SerializeToString(self) -> bytes:
+        return b"fake"
+
+
 class ComponentTests(unittest.TestCase):
     def test_components_module_exports_intentional_surface(self) -> None:
         load_manyfold_package()
@@ -386,6 +395,12 @@ class ComponentTests(unittest.TestCase):
                     object(),  # type: ignore[arg-type]
                     schema,
                 )
+            with self.assertRaisesRegex(ValueError, "schema must be a Schema"):
+                manyfold.EventLog(
+                    "commands",
+                    keyspace,
+                    _FakeProtobufMessage,  # type: ignore[arg-type]
+                )
 
     def test_event_log_serializes_concurrent_appends(self) -> None:
         manyfold = load_manyfold_package()
@@ -561,6 +576,12 @@ class ComponentTests(unittest.TestCase):
                     "state_snapshot",
                     object(),  # type: ignore[arg-type]
                     schema,
+                )
+            with self.assertRaisesRegex(ValueError, "schema must be a Schema"):
+                manyfold.SnapshotStore(
+                    "state_snapshot",
+                    keyspace,
+                    _FakeProtobufMessage,  # type: ignore[arg-type]
                 )
 
     def test_snapshot_store_serializes_concurrent_writes_and_publishes(self) -> None:
