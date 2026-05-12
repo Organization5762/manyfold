@@ -4106,6 +4106,100 @@ assert graph.latest(route) is None
                 with self.assertRaisesRegex(ValueError, message):
                     build()
 
+    def test_manifest_records_reject_invalid_fields(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            owner="board",
+            family="sensor",
+            stream="reading",
+            schema=int_schema(graph_module, "BoardReading"),
+        )
+        route_ref = route.route_ref
+
+        cases = (
+            (
+                lambda: graph_module.ManifestLink(
+                    name="",
+                    link_class="TcpStreamLink",
+                    capabilities=graph_module.LinkCapabilities(),
+                ),
+                "manifest link name must be a non-empty string",
+            ),
+            (
+                lambda: graph_module.ManifestLink(
+                    name="tcp0",
+                    link_class="TcpStreamLink",
+                    capabilities=object(),
+                ),
+                "manifest link capabilities must be LinkCapabilities",
+            ),
+            (
+                lambda: graph_module.ManifestMeshPrimitive(
+                    name="bridge",
+                    kind="fanout",
+                    sources=(route,),
+                    destinations=(route_ref,),
+                ),
+                "manifest mesh primitive sources must be a RouteRef",
+            ),
+            (
+                lambda: graph_module.ManifestMeshPrimitive(
+                    name="bridge",
+                    kind="fanout",
+                    sources=(route_ref,),
+                    destinations=(route_ref,),
+                    threshold=-1,
+                ),
+                "manifest mesh primitive threshold must be a non-negative integer",
+            ),
+            (
+                lambda: graph_module.ManifestQueryService(
+                    owner="",
+                    request=route_ref,
+                    response=route_ref,
+                ),
+                "manifest query service owner must be a non-empty string",
+            ),
+            (
+                lambda: graph_module.ManifestDebugRoute(
+                    event_type="write",
+                    route=object(),
+                ),
+                "manifest debug route route must be a RouteRef",
+            ),
+            (
+                lambda: graph_module.ManifestWriteBinding(
+                    name="sensor_write",
+                    request=route_ref,
+                    desired=route_ref,
+                    reported=object(),
+                    effective=route_ref,
+                ),
+                "manifest write binding reported must be a RouteRef",
+            ),
+            (
+                lambda: graph_module.GraphManifest(
+                    manifest_version="manyfold.graph.manifest.v0",
+                    runtime="in_memory",
+                    routes=[object()],
+                ),
+                "manifest routes must be a tuple of ManifestRoute values",
+            ),
+            (
+                lambda: graph_module.GraphManifest(
+                    manifest_version="manyfold.graph.manifest.v0",
+                    runtime="in_memory",
+                    links=(object(),),
+                ),
+                "manifest links must contain only ManifestLink values",
+            ),
+        )
+
+        for build, message in cases:
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(ValueError, message):
+                    build()
+
     def test_register_diagram_node_rejects_invalid_optional_fields(self) -> None:
         graph_module = load_graph_module()
         graph = graph_module.Graph()

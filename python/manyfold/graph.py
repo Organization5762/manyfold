@@ -1564,6 +1564,12 @@ class ManifestLink:
     link_class: str
     capabilities: LinkCapabilities
 
+    def __post_init__(self) -> None:
+        _require_non_empty_text(self.name, "manifest link name")
+        _require_non_empty_text(self.link_class, "manifest link class")
+        if not isinstance(self.capabilities, LinkCapabilities):
+            raise ValueError("manifest link capabilities must be LinkCapabilities")
+
 
 @dataclass(frozen=True)
 class ManifestMeshPrimitive:
@@ -1579,6 +1585,47 @@ class ManifestMeshPrimitive:
     threshold: int | None = None
     ack_policy: str | None = None
 
+    def __post_init__(self) -> None:
+        _require_non_empty_text(self.name, "manifest mesh primitive name")
+        _require_non_empty_text(self.kind, "manifest mesh primitive kind")
+        object.__setattr__(
+            self,
+            "sources",
+            _require_route_ref_tuple(
+                self.sources,
+                "manifest mesh primitive sources",
+            ),
+        )
+        object.__setattr__(
+            self,
+            "destinations",
+            _require_route_ref_tuple(
+                self.destinations,
+                "manifest mesh primitive destinations",
+            ),
+        )
+        _require_optional_non_empty_text(
+            self.link_name,
+            "manifest mesh primitive link_name",
+        )
+        _require_optional_non_empty_text(
+            self.ordering_policy,
+            "manifest mesh primitive ordering_policy",
+        )
+        _require_optional_non_empty_text(
+            self.state_budget,
+            "manifest mesh primitive state_budget",
+        )
+        if self.threshold is not None:
+            _require_non_negative_integer(
+                self.threshold,
+                "manifest mesh primitive threshold",
+            )
+        _require_optional_non_empty_text(
+            self.ack_policy,
+            "manifest mesh primitive ack_policy",
+        )
+
 
 @dataclass(frozen=True)
 class ManifestQueryService:
@@ -1588,6 +1635,11 @@ class ManifestQueryService:
     request: RouteRef
     response: RouteRef
 
+    def __post_init__(self) -> None:
+        _require_non_empty_text(self.owner, "manifest query service owner")
+        _require_route_ref(self.request, "manifest query service request")
+        _require_route_ref(self.response, "manifest query service response")
+
 
 @dataclass(frozen=True)
 class ManifestDebugRoute:
@@ -1595,6 +1647,10 @@ class ManifestDebugRoute:
 
     event_type: str
     route: RouteRef
+
+    def __post_init__(self) -> None:
+        _require_non_empty_text(self.event_type, "manifest debug route event_type")
+        _require_route_ref(self.route, "manifest debug route route")
 
 
 @dataclass(frozen=True)
@@ -1607,6 +1663,15 @@ class ManifestWriteBinding:
     reported: RouteRef
     effective: RouteRef
     ack: RouteRef | None = None
+
+    def __post_init__(self) -> None:
+        _require_non_empty_text(self.name, "manifest write binding name")
+        _require_route_ref(self.request, "manifest write binding request")
+        _require_route_ref(self.desired, "manifest write binding desired")
+        _require_route_ref(self.reported, "manifest write binding reported")
+        _require_route_ref(self.effective, "manifest write binding effective")
+        if self.ack is not None:
+            _require_route_ref(self.ack, "manifest write binding ack")
 
 
 @dataclass(frozen=True)
@@ -1628,6 +1693,83 @@ class GraphManifest:
     query_services: tuple[ManifestQueryService, ...] = ()
     debug_routes: tuple[ManifestDebugRoute, ...] = ()
     write_bindings: tuple[ManifestWriteBinding, ...] = ()
+
+    def __post_init__(self) -> None:
+        _require_non_empty_text(self.manifest_version, "manifest version")
+        _require_non_empty_text(self.runtime, "manifest runtime")
+        object.__setattr__(
+            self,
+            "routes",
+            _require_manifest_tuple(
+                self.routes,
+                ManifestRoute,
+                "manifest routes",
+            ),
+        )
+        object.__setattr__(
+            self,
+            "edges",
+            _require_manifest_tuple(self.edges, ManifestEdge, "manifest edges"),
+        )
+        object.__setattr__(
+            self,
+            "diagram_nodes",
+            _require_manifest_tuple(
+                self.diagram_nodes,
+                ManifestDiagramNode,
+                "manifest diagram_nodes",
+            ),
+        )
+        object.__setattr__(
+            self,
+            "middlewares",
+            _require_manifest_tuple(
+                self.middlewares,
+                Middleware,
+                "manifest middlewares",
+            ),
+        )
+        object.__setattr__(
+            self,
+            "links",
+            _require_manifest_tuple(self.links, ManifestLink, "manifest links"),
+        )
+        object.__setattr__(
+            self,
+            "mesh_primitives",
+            _require_manifest_tuple(
+                self.mesh_primitives,
+                ManifestMeshPrimitive,
+                "manifest mesh_primitives",
+            ),
+        )
+        object.__setattr__(
+            self,
+            "query_services",
+            _require_manifest_tuple(
+                self.query_services,
+                ManifestQueryService,
+                "manifest query_services",
+            ),
+        )
+        object.__setattr__(
+            self,
+            "debug_routes",
+            _require_manifest_tuple(
+                self.debug_routes,
+                ManifestDebugRoute,
+                "manifest debug_routes",
+            ),
+        )
+        object.__setattr__(
+            self,
+            "write_bindings",
+            _require_manifest_tuple(
+                self.write_bindings,
+                ManifestWriteBinding,
+                "manifest write_bindings",
+            ),
+        )
 
 
 @dataclass(frozen=True)
@@ -7443,6 +7585,19 @@ def _require_string_tuple(value: object, field: str) -> tuple[str, ...]:
     for item in value:
         if not isinstance(item, str):
             raise ValueError(f"{field}[] must be a string")
+    return value
+
+
+def _require_manifest_tuple(
+    value: object,
+    item_type: type[T],
+    field: str,
+) -> tuple[T, ...]:
+    if not isinstance(value, tuple):
+        raise ValueError(f"{field} must be a tuple of {item_type.__name__} values")
+    for item in value:
+        if not isinstance(item, item_type):
+            raise ValueError(f"{field} must contain only {item_type.__name__} values")
     return value
 
 
