@@ -1969,9 +1969,13 @@ def _adopt_group(component: object, group: str | None) -> None:
 
 def _changed_enough(new: Any, old: Any, threshold: float) -> bool:
     if isinstance(new, Mapping) and isinstance(old, Mapping):
-        keys = sorted(set(new) | set(old), key=_mapping_key_sort_key)
+        new_keys = set(new)
+        old_keys = set(old)
+        if new_keys != old_keys:
+            return True
         return any(
-            _changed_enough(new.get(key), old.get(key), threshold) for key in keys
+            _changed_enough(new[key], old[key], threshold)
+            for key in sorted(new_keys, key=_mapping_key_sort_key)
         )
     if isinstance(new, tuple) and isinstance(old, tuple):
         if len(new) != len(old):
