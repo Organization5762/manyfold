@@ -651,6 +651,8 @@ class QueryRequest:
 
     def __post_init__(self) -> None:
         _require_non_empty_text(self.command, "query command")
+        if self.route is not None:
+            _require_route_like(self.route, "query route")
         _require_optional_non_empty_text(self.join_name, "query join_name")
         _require_optional_non_empty_text(self.principal_id, "query principal_id")
         _require_optional_non_empty_text(self.correlation_id, "query correlation_id")
@@ -672,6 +674,13 @@ class QueryResponse:
     command: str
     correlation_id: str
     items: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        _require_non_empty_text(self.command, "query response command")
+        _require_non_empty_text(
+            self.correlation_id, "query response correlation_id"
+        )
+        _require_string_tuple(self.items, "query response items")
 
 
 @dataclass(frozen=True)
@@ -812,6 +821,10 @@ class QueryServiceRoutes:
 
     request: RouteRef
     response: RouteRef
+
+    def __post_init__(self) -> None:
+        _require_route_ref(self.request, "query service request")
+        _require_route_ref(self.response, "query service response")
 
 
 @dataclass(frozen=True)
@@ -6822,6 +6835,8 @@ class Graph:
         service_owner: str = "query",
     ) -> QueryResponse:
         """Execute a typed query through the query-plane stream model."""
+        if not isinstance(request, QueryRequest):
+            raise ValueError("query request must be a QueryRequest")
         _require_non_empty_text(requester_id, "requester_id")
         _require_non_empty_text(service_owner, "query service owner")
         service = self.query_service(service_owner)
@@ -7025,6 +7040,15 @@ def _require_text_tuple(value: object, field: str) -> tuple[str, ...]:
         raise ValueError(f"{field} must be a tuple of strings")
     for item in value:
         _require_non_empty_text(item, f"{field}[]")
+    return value
+
+
+def _require_string_tuple(value: object, field: str) -> tuple[str, ...]:
+    if not isinstance(value, tuple):
+        raise ValueError(f"{field} must be a tuple of strings")
+    for item in value:
+        if not isinstance(item, str):
+            raise ValueError(f"{field}[] must be a string")
     return value
 
 

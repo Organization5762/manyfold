@@ -5442,11 +5442,32 @@ assert graph.latest(route) is None
             )
         with self.assertRaisesRegex(ValueError, "query command"):
             graph_module.QueryRequest(command="")
+        with self.assertRaisesRegex(ValueError, "query route"):
+            graph_module.QueryRequest(command="latest", route=object())
         with self.assertRaisesRegex(ValueError, "query principal_id"):
             graph_module.QueryRequest(command="manifest", principal_id=" ")
+        with self.assertRaisesRegex(ValueError, "query response command"):
+            graph_module.QueryResponse(command="", correlation_id="abc", items=())
+        with self.assertRaisesRegex(ValueError, "query response correlation_id"):
+            graph_module.QueryResponse(
+                command="manifest", correlation_id="", items=()
+            )
+        with self.assertRaisesRegex(ValueError, "query response items"):
+            graph_module.QueryResponse(
+                command="manifest",
+                correlation_id="abc",
+                items=("ok", 1),
+            )
+        with self.assertRaisesRegex(ValueError, "query service request"):
+            graph_module.QueryServiceRoutes(request=object(), response=route.route_ref)
+        with self.assertRaisesRegex(ValueError, "query service response"):
+            graph_module.QueryServiceRoutes(request=route.route_ref, response=object())
         graph = graph_module.Graph()
         with self.assertRaisesRegex(ValueError, "query service owner"):
             graph.query_service(" ")
+        with self.assertRaisesRegex(ValueError, "query request"):
+            graph.query(object())
+        self.assertEqual(graph.manifest().query_services, ())
         with self.assertRaisesRegex(ValueError, "requester_id"):
             graph.query(
                 graph_module.QueryRequest(command="manifest"),
