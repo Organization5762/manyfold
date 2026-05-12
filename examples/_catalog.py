@@ -338,6 +338,7 @@ REFERENCE_EXAMPLE_GAP_BY_NUMBER: dict[int, ReferenceExampleGap] = {
 def catalog_entry(module_name: str) -> ExampleCatalogEntry:
     """Return one catalog entry by module name."""
 
+    _require_module_name(module_name)
     try:
         return EXAMPLE_CATALOG_BY_MODULE[module_name]
     except KeyError as error:
@@ -349,6 +350,7 @@ def reference_example_metadata(
 ) -> ExampleCatalogEntry | ReferenceExampleGap:
     """Return implemented or gap metadata for one RFC reference example number."""
 
+    _require_reference_number(number)
     if entry := REFERENCE_EXAMPLE_ENTRY_BY_NUMBER.get(number):
         return entry
     if gap := REFERENCE_EXAMPLE_GAP_BY_NUMBER.get(number):
@@ -431,6 +433,18 @@ def _manifest_for_list_mode(mode: str) -> tuple[str, ...]:
     if mode == "readme":
         return README_EXAMPLE_MODULES
     raise ValueError(f"unknown catalog list mode {mode!r}")
+
+
+def _require_module_name(module_name: object) -> None:
+    if not isinstance(module_name, str) or not module_name.strip():
+        raise ValueError("example catalog module name must be a non-empty string")
+
+
+def _require_reference_number(number: object) -> None:
+    if isinstance(number, bool) or not isinstance(number, int):
+        raise TypeError("reference example number must be an integer")
+    if number <= 0:
+        raise ValueError("reference example number must be positive")
 
 
 def _duplicate_values(values: Iterable[T]) -> tuple[T, ...]:
