@@ -961,6 +961,12 @@ class RouteRetentionPolicy:
     history_limit: int | None = None
 
     def __post_init__(self) -> None:
+        _require_non_empty_text(
+            self.latest_replay_policy,
+            "latest_replay_policy",
+        )
+        _require_non_empty_text(self.durability_class, "durability_class")
+        _require_non_empty_text(self.replay_window, "replay_window")
         allowed = {"none", "latest_only", "bounded_history"}
         if self.latest_replay_policy not in allowed:
             raise ValueError(
@@ -3661,6 +3667,8 @@ class Graph:
         policy: RouteRetentionPolicy,
     ) -> RouteRetentionPolicy:
         """Override replay and retention semantics for one route."""
+        if not isinstance(policy, RouteRetentionPolicy):
+            raise ValueError("retention policy must be a RouteRetentionPolicy")
         native_route = self.register_port(route_ref)
         key = native_route.display()
         default = self._default_retention_policy(native_route)

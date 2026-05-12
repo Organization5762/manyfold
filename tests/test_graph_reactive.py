@@ -4850,6 +4850,30 @@ assert graph.latest(route) is None
                 latest_replay_policy="latest_only",
                 payload_retention_policy="forever_cache",
             )
+        for kwargs, message in (
+            ({"latest_replay_policy": ""}, "latest_replay_policy"),
+            (
+                {"latest_replay_policy": "latest_only", "durability_class": ""},
+                "durability_class",
+            ),
+            (
+                {"latest_replay_policy": "latest_only", "replay_window": None},
+                "replay_window",
+            ),
+        ):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    graph_module.RouteRetentionPolicy(**kwargs)  # type: ignore[arg-type]
+
+    def test_configure_retention_rejects_invalid_policy_before_route(self) -> None:
+        graph_module = load_graph_module()
+        graph = graph_module.Graph()
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "retention policy must be a RouteRetentionPolicy",
+        ):
+            graph.configure_retention(object(), object())  # type: ignore[arg-type]
 
     def test_query_plane_streams_and_capabilities(self) -> None:
         graph_module = load_graph_module()
