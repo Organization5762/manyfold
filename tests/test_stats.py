@@ -33,6 +33,18 @@ class StatsTests(unittest.TestCase):
 
         self.assertEqual(Average(window_size=3)(IndexOnlyValues()), 7.0)  # type: ignore[arg-type]
 
+    def test_average_single_value_window_reads_only_latest_value(self) -> None:
+        class LatestOnlyValues:
+            def __len__(self) -> int:
+                return 4
+
+            def __getitem__(self, index: int) -> float:
+                if index != 3:
+                    raise AssertionError("single-value average should read latest only")
+                return 10.0
+
+        self.assertEqual(Average(window_size=1)(LatestOnlyValues()), 10.0)  # type: ignore[arg-type]
+
     def test_average_rejects_empty_values(self) -> None:
         with self.assertRaisesRegex(ValueError, "at least one value"):
             Average(window_size=3)([])
