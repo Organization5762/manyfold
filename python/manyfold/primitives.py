@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from functools import cached_property
+from functools import cached_property, lru_cache
 from itertools import count
 from threading import Lock
 from typing import (
@@ -510,16 +510,22 @@ def _require_enum_member(value: object, enum_type: type[Any], field: str) -> Non
     if type(value) is str:
         raise ValueError(f"{field} must be a {enum_type.__name__}")
     value_token = getattr(value, "value", value)
-    members = (
-        getattr(enum_type, name) for name in dir(enum_type) if not name.startswith("_")
-    )
     if not any(
         value is member
         or value == member
         or value_token == getattr(member, "value", member)
-        for member in members
+        for member in _enum_members(enum_type)
     ):
         raise ValueError(f"{field} must be a {enum_type.__name__}")
+
+
+@lru_cache(maxsize=None)
+def _enum_members(enum_type: type[Any]) -> tuple[Any, ...]:
+    """Cache PyO3 enum-like class members for hot route validation paths."""
+
+    return tuple(
+        getattr(enum_type, name) for name in dir(enum_type) if not name.startswith("_")
+    )
 
 
 def _encode_finite_float(value: Any) -> bytes:
