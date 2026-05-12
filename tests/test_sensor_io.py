@@ -228,6 +228,20 @@ class SensorIoTests(unittest.TestCase):
         self.assertEqual(tuple(buffer), (4,))
         self.assertEqual(buffer.dropped, 3)
 
+    def test_bounded_ring_buffer_rejects_invalid_configuration(self) -> None:
+        manyfold = load_manyfold_package()
+
+        for kwargs, message in (
+            ({"overflow": False}, "overflow must be a string"),
+            ({"overflow": "spill"}, "overflow must be one of"),
+            ({"ordering": 7}, "ordering must be a string"),
+            ({"ordering": "lifo"}, "only fifo ordering is currently supported"),
+            ({"group": object()}, "group must be a string"),
+        ):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    manyfold.BoundedRingBuffer(capacity=1, **kwargs)
+
     def test_delimited_message_buffer_reassembles_bytes_and_text(self) -> None:
         manyfold = load_manyfold_package()
         byte_buffer = manyfold.DelimitedMessageBuffer()
@@ -973,6 +987,7 @@ class SensorIoTests(unittest.TestCase):
             ({"current": True}, "current must be an integer"),
             ({"step": 1.5}, "step must be an integer"),
             ({"step": True}, "step must be an integer"),
+            ({"group": 7}, "group must be a string"),
         ):
             with self.subTest(kwargs=kwargs):
                 with self.assertRaisesRegex(ValueError, message):
@@ -2199,6 +2214,9 @@ class SensorIoTests(unittest.TestCase):
                     ValueError, "buffer_size must be an integer"
                 ):
                     manyfold.DoubleBuffer(buffer_size=buffer_size)  # type: ignore[arg-type]
+
+        with self.assertRaisesRegex(ValueError, "group must be a string"):
+            manyfold.DoubleBuffer(buffer_size=1, group=7)  # type: ignore[arg-type]
 
         for expected_count in (False, 2.5):
             with self.subTest(expected_count=expected_count):

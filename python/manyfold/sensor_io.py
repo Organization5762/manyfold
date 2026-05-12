@@ -796,12 +796,15 @@ class BoundedRingBuffer(Generic[T]):
         self.capacity = _require_int(self.capacity, "capacity")
         if self.capacity <= 0:
             raise ValueError("capacity must be positive")
+        self.overflow = _require_string(self.overflow, "overflow")
         if self.overflow not in {"drop_oldest", "drop_newest", "reject", "latest"}:
             raise ValueError(
                 "overflow must be one of 'drop_oldest', 'drop_newest', 'reject', or 'latest'"
             )
+        self.ordering = _require_string(self.ordering, "ordering")
         if self.ordering != "fifo":
             raise ValueError("only fifo ordering is currently supported")
+        self.group = _require_optional_string(self.group, "group")
 
     def push(self, item: T) -> bool:
         if len(self._items) < self.capacity:
@@ -852,6 +855,7 @@ class SequenceCounter:
         self.step = _require_int(self.step, "step")
         if self.step <= 0:
             raise ValueError("step must be positive")
+        self.group = _require_optional_string(self.group, "group")
 
     def next(self) -> int:
         self.current += self.step
@@ -1358,6 +1362,7 @@ class DoubleBuffer(Generic[TFrame]):
         self.buffer_size = _require_int(self.buffer_size, "buffer_size")
         if self.buffer_size <= 0:
             raise ValueError("buffer_size must be positive")
+        self.group = _require_optional_string(self.group, "group")
 
     def push(self, sample: TFrame) -> tuple[int, tuple[TFrame, ...]] | None:
         buffer = self._buffers[self._active]
