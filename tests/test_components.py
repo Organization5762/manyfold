@@ -54,6 +54,91 @@ class ComponentTests(unittest.TestCase):
         for name in components.__all__:
             self.assertIn(name, components.__dict__)
 
+    def test_component_data_records_validate_direct_construction(self) -> None:
+        manyfold = load_manyfold_package()
+
+        entry = manyfold.StoreEntry(
+            key=("payloads", 1),
+            full_key=("root", "payloads", 1),
+            value=bytearray(b"ok"),
+        )
+        self.assertEqual(entry.key, ("payloads", "1"))
+        self.assertEqual(entry.full_key, ("root", "payloads", "1"))
+        self.assertEqual(entry.value, b"ok")
+
+        invalid_store_entries = (
+            {"key": "payloads", "full_key": ("root",), "value": b"ok"},
+            {"key": ("payloads",), "full_key": "root", "value": b"ok"},
+            {"key": ("payloads",), "full_key": ("root",), "value": "ok"},
+        )
+        for kwargs in invalid_store_entries:
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaises(ValueError):
+                    manyfold.StoreEntry(**kwargs)  # type: ignore[arg-type]
+
+        with self.assertRaisesRegex(ValueError, "event log record index"):
+            manyfold.EventLogRecord(index=-1, value=b"bad")
+        with self.assertRaisesRegex(ValueError, "memory record route"):
+            manyfold.MemoryRecord(
+                route_display="",
+                value=b"bad",
+                seq_source=0,
+                control_epoch=None,
+            )
+        with self.assertRaisesRegex(ValueError, "memory record seq_source"):
+            manyfold.MemoryRecord(
+                route_display="route",
+                value=b"bad",
+                seq_source=True,
+                control_epoch=None,
+            )
+        with self.assertRaisesRegex(ValueError, "memory record control_epoch"):
+            manyfold.MemoryRecord(
+                route_display="route",
+                value=b"bad",
+                seq_source=0,
+                control_epoch=-1,
+            )
+
+    def test_component_route_bundles_validate_direct_construction(self) -> None:
+        manyfold = load_manyfold_package()
+        append = manyfold.route(
+            plane=manyfold.Plane.Write,
+            layer=manyfold.Layer.Logical,
+            owner=manyfold.OwnerName("demo"),
+            family=manyfold.StreamFamily("events"),
+            stream=manyfold.StreamName("append"),
+            variant=manyfold.Variant.Request,
+            schema=manyfold.Schema.bytes(name="EventBytes"),
+        )
+        committed = manyfold.route(
+            plane=manyfold.Plane.Read,
+            layer=manyfold.Layer.Logical,
+            owner=manyfold.OwnerName("demo"),
+            family=manyfold.StreamFamily("events"),
+            stream=manyfold.StreamName("committed"),
+            variant=manyfold.Variant.Meta,
+            schema=manyfold.Schema.bytes(name="EventBytes"),
+        )
+
+        self.assertEqual(
+            manyfold.EventLogRoutes(append=append, committed=committed).append,
+            append,
+        )
+        self.assertEqual(
+            manyfold.SnapshotStoreRoutes(write=append, latest=committed).latest,
+            committed,
+        )
+
+        with self.assertRaisesRegex(ValueError, "append route"):
+            manyfold.EventLogRoutes(append=object(), committed=committed)
+        with self.assertRaisesRegex(ValueError, "committed route"):
+            manyfold.EventLogRoutes(append=append, committed=object())
+        with self.assertRaisesRegex(ValueError, "write route"):
+            manyfold.SnapshotStoreRoutes(write=object(), latest=committed)
+        with self.assertRaisesRegex(ValueError, "latest route"):
+            manyfold.SnapshotStoreRoutes(write=append, latest=object())
+
     def test_file_store_addresses_bytes_by_nested_keyspace_prefix(self) -> None:
         manyfold = load_manyfold_package()
 

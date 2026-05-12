@@ -58,6 +58,15 @@ class StoreEntry:
     full_key: Key
     value: bytes
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.key, tuple):
+            raise ValueError("store entry key must be a tuple")
+        if not isinstance(self.full_key, tuple):
+            raise ValueError("store entry full_key must be a tuple")
+        object.__setattr__(self, "key", _normalize_key(self.key))
+        object.__setattr__(self, "full_key", _normalize_key(self.full_key))
+        object.__setattr__(self, "value", _normalize_bytes(self.value))
+
 
 @dataclass(frozen=True)
 class EventLogRecord(Generic[T]):
@@ -65,6 +74,9 @@ class EventLogRecord(Generic[T]):
 
     index: int
     value: T
+
+    def __post_init__(self) -> None:
+        _require_non_negative_int(self.index, "event log record index")
 
 
 @dataclass(frozen=True)
@@ -74,6 +86,10 @@ class EventLogRoutes(Generic[T]):
     append: TypedRoute[T]
     committed: TypedRoute[T]
 
+    def __post_init__(self) -> None:
+        _require_typed_route(self.append, "append route")
+        _require_typed_route(self.committed, "committed route")
+
 
 @dataclass(frozen=True)
 class SnapshotStoreRoutes(Generic[T]):
@@ -81,6 +97,10 @@ class SnapshotStoreRoutes(Generic[T]):
 
     write: TypedRoute[T]
     latest: TypedRoute[T]
+
+    def __post_init__(self) -> None:
+        _require_typed_route(self.write, "write route")
+        _require_typed_route(self.latest, "latest route")
 
 
 class FileStore:
@@ -420,6 +440,15 @@ class MemoryRecord(Generic[T]):
     value: T
     seq_source: int
     control_epoch: int | None
+
+    def __post_init__(self) -> None:
+        _require_component_name(self.route_display, "memory record route")
+        _require_non_negative_int(self.seq_source, "memory record seq_source")
+        if self.control_epoch is not None:
+            _require_non_negative_int(
+                self.control_epoch,
+                "memory record control_epoch",
+            )
 
 
 class Memory:
@@ -963,6 +992,11 @@ def _require_typed_route(value: object, field: str) -> TypedRoute[Any]:
     if not isinstance(value, TypedRoute):
         raise ValueError(f"{field} must be a TypedRoute")
     return value
+
+
+def _require_non_negative_int(value: object, field: str) -> None:
+    if not _is_plain_int(value) or value < 0:
+        raise ValueError(f"{field} must be a non-negative integer")
 
 
 def _normalize_memory_path(value: object) -> Path:
