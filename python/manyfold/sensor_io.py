@@ -1397,6 +1397,8 @@ class FrameAssembler(Generic[TFrame]):
         self.expected_count = _require_int(self.expected_count, "expected_count")
         if self.expected_count <= 0:
             raise ValueError("expected_count must be positive")
+        _require_callable(self.frame_id, "frame_id")
+        _require_callable(self.slot_id, "slot_id")
 
     def add(self, sample: TFrame) -> tuple[SensorFrame[TFrame], ...]:
         resolved_frame_id = self.frame_id(sample)

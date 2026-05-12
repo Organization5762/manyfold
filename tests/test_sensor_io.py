@@ -2197,6 +2197,21 @@ class SensorIoTests(unittest.TestCase):
                         slot_id=lambda sample: sample[1],
                     )
 
+    def test_frame_assembler_rejects_non_callable_selectors(self) -> None:
+        manyfold = load_manyfold_package()
+
+        for kwargs, message in (
+            ({"frame_id": "frame"}, "frame_id must be callable"),
+            ({"slot_id": None}, "slot_id must be callable"),
+        ):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    manyfold.FrameAssembler(
+                        expected_count=2,
+                        frame_id=kwargs.get("frame_id", lambda sample: sample[0]),
+                        slot_id=kwargs.get("slot_id", lambda sample: sample[1]),
+                    )
+
     def test_frame_assembler_orders_mixed_slot_ids_deterministically(self) -> None:
         manyfold = load_manyfold_package()
         assembler = manyfold.FrameAssembler[tuple[int, object, str]](
