@@ -463,6 +463,33 @@ class ComponentTests(unittest.TestCase):
         self.assertEqual([record.index for record in records], [1, 2])
         self.assertEqual([record.value for record in records], ["first", "second"])
 
+    def test_event_log_records_only_reads_canonical_top_level_keys(self) -> None:
+        manyfold = load_manyfold_package()
+        schema = manyfold.Schema(
+            schema_id="SparseCommand",
+            version=1,
+            encode=lambda value: value.encode("ascii"),
+            decode=lambda payload: payload.decode("ascii"),
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            keyspace = manyfold.FileStore(temp_dir).prefix("commands")
+            keyspace.put("00000000000000000001", value=b"first")
+            keyspace.put("nested", "00000000000000000002", value=b"stray")
+            log = manyfold.EventLog("commands", keyspace, schema)
+            original_get = keyspace.get
+            fetched_keys: list[tuple[str, ...]] = []
+
+            def tracking_get(_keyspace, *parts: str) -> bytes | None:
+                fetched_keys.append(tuple(parts))
+                return original_get(*parts)
+
+            with patch.object(manyfold.Keyspace, "get", tracking_get):
+                records = log.records()
+
+        self.assertEqual(fetched_keys, [("00000000000000000001",)])
+        self.assertEqual([record.value for record in records], ["first"])
+
     def test_event_log_rejects_invalid_construction_inputs(self) -> None:
         manyfold = load_manyfold_package()
         schema = manyfold.Schema.bytes(name="Command")
