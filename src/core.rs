@@ -1162,6 +1162,14 @@ impl GraphCore {
         emitted
     }
 
+    fn route_display_key(route: &RouteRefCore) -> String {
+        route.display()
+    }
+
+    fn envelope_trace_key(envelope: &ClosedEnvelopeCore) -> (u64, String) {
+        (envelope.seq_source, envelope.route.display())
+    }
+
     pub fn write(
         &mut self,
         route: &RouteRefCore,
@@ -1201,7 +1209,7 @@ impl GraphCore {
         match query {
             QueryKindCore::Catalog => {
                 let mut routes = self.descriptors.keys().cloned().collect::<Vec<_>>();
-                routes.sort_by_key(RouteRefCore::display);
+                routes.sort_by_cached_key(Self::route_display_key);
                 QueryResultCore::Catalog(routes)
             }
             QueryKindCore::DescribeRoute(route) => QueryResultCore::DescribeRoute(
@@ -1224,7 +1232,7 @@ impl GraphCore {
             }
             QueryKindCore::Trace => {
                 let mut items = self.latest.values().cloned().collect::<Vec<_>>();
-                items.sort_by_key(|item| (item.seq_source, item.route.display()));
+                items.sort_by_cached_key(Self::envelope_trace_key);
                 QueryResultCore::Trace(items)
             }
             QueryKindCore::Replay(route) => {
