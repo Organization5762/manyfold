@@ -84,6 +84,21 @@ class ProjectMetadataTests(unittest.TestCase):
         self.assertEqual(exports, tuple(sorted(exports)))
         self.assertEqual(len(exports), len(set(exports)))
 
+    def test_literal_module_exports_stay_sorted(self) -> None:
+        failures: list[str] = []
+        for path in _python_source_paths():
+            exports = _literal_module_all_assignment(path)
+            if exports is None:
+                continue
+            if exports != tuple(sorted(exports)):
+                failures.append(f"{path.relative_to(PROJECT_ROOT)} __all__ is unsorted")
+            if len(exports) != len(set(exports)):
+                failures.append(
+                    f"{path.relative_to(PROJECT_ROOT)} __all__ contains duplicates"
+                )
+
+        self.assertEqual(failures, [])
+
     def test_toml_section_errors_name_source_file(self) -> None:
         with self.assertRaisesRegex(
             AssertionError, "Cargo.toml does not define section 'missing'"
@@ -178,6 +193,27 @@ def _module_all_assignment(path: Path) -> tuple[str, ...]:
             exports.append(item.value)
         return tuple(exports)
     raise AssertionError(f"{path} does not define __all__")
+
+
+def _literal_module_all_assignment(path: Path) -> tuple[str, ...] | None:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(
+            isinstance(target, ast.Name) and target.id == "__all__"
+            for target in node.targets
+        ):
+            continue
+        if not isinstance(node.value, ast.List | ast.Tuple):
+            return None
+        exports: list[str] = []
+        for item in node.value.elts:
+            if not isinstance(item, ast.Constant) or not isinstance(item.value, str):
+                return None
+            exports.append(item.value)
+        return tuple(exports)
+    return None
 
 
 def _python_source_paths() -> tuple[Path, ...]:
