@@ -1480,15 +1480,23 @@ class SensorIoTests(unittest.TestCase):
         accessed_keys: list[str] = []
 
         class LoggedDict(dict[str, float]):
-            def get(self, key, default=None):
+            def __getitem__(self, key: str) -> float:
                 accessed_keys.append(key)
-                return super().get(key, default)
+                return super().__getitem__(key)
 
         threshold = manyfold.ThresholdFilter[dict[str, float]](threshold=0.5)
 
         self.assertTrue(threshold.accepts({"z": 0.0, "a": 0.0}))
         self.assertFalse(threshold.accepts(LoggedDict({"z": 0.1, "a": 0.1})))
         self.assertEqual(accessed_keys, ["a", "z"])
+
+    def test_threshold_filter_detects_mapping_key_shape_changes(self) -> None:
+        manyfold = load_manyfold_package()
+        threshold = manyfold.ThresholdFilter[dict[str, None]](threshold=0.5)
+
+        self.assertTrue(threshold.accepts({"present": None}))
+        self.assertTrue(threshold.accepts({}))
+        self.assertTrue(threshold.accepts({"present": None}))
 
     def test_threshold_filter_rejects_non_finite_thresholds_and_detects_non_finite_transitions(
         self,
