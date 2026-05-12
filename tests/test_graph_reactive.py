@@ -83,6 +83,21 @@ class FailingObservable:
         raise RuntimeError(self.message)
 
 
+class _ManifestMappingKey:
+    __module__ = "graph.alpha"
+
+    def __str__(self) -> str:
+        return "slot"
+
+
+class _OtherManifestMappingKey:
+    __module__ = "graph.beta"
+    __qualname__ = "_ManifestMappingKey"
+
+    def __str__(self) -> str:
+        return "slot"
+
+
 class GraphReactiveTests(unittest.TestCase):
     def test_producer_kind_exposes_all_runtime_kinds(self) -> None:
         graph_module = load_graph_module()
@@ -5630,6 +5645,20 @@ assert graph.latest(route) is None
         self.assertEqual(manifest.diagram_nodes[0].thread_placement.kind, "main")
         self.assertEqual(manifest.query_services[0].owner, "query")
         self.assertIn(source.display(), [route.route.display() for route in manifest.routes])
+
+    def test_manifest_value_orders_string_colliding_mapping_keys(self) -> None:
+        graph_module = load_graph_module()
+        left = _ManifestMappingKey()
+        right = _OtherManifestMappingKey()
+
+        self.assertEqual(
+            graph_module.Graph._manifest_value({right: "right", left: "left"}),
+            {"slot": "right"},
+        )
+        self.assertEqual(
+            graph_module.Graph._manifest_value({left: "left", right: "right"}),
+            {"slot": "right"},
+        )
 
     def test_graph_runtime_registries_reject_empty_text_keys(self) -> None:
         graph_module = load_graph_module()
