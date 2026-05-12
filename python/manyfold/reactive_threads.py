@@ -433,7 +433,8 @@ def reset_reactive_threading_state_for_tests() -> None:
 def materialize_sequence(sequence: Iterable[T]) -> Observable[T]:
     """Return a materialized observable over an iterable sequence."""
 
-    return rx.from_iterable(sequence).pipe(ops.share())
+    snapshot = tuple(sequence)
+    return rx.from_iterable(snapshot)
 
 
 def _require_non_empty_string(value: Any, field: str) -> str:
