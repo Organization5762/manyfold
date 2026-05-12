@@ -25,6 +25,8 @@ class Average:
         value_count = len(values)
         if value_count == 0:
             raise ValueError("average requires at least one value")
+        if self.window_size == 1:
+            return _require_finite_number(values[value_count - 1])
         start = max(0, value_count - self.window_size)
         window_count = value_count - start
         # fsum keeps cancellation-heavy windows deterministic without copying
