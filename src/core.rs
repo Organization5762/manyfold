@@ -1155,7 +1155,7 @@ impl GraphCore {
             }
         }
 
-        if let Some(egress) = self.try_enqueue_mailbox(&route, envelope.clone()) {
+        if let Some(egress) = self.try_enqueue_mailbox(&route, envelope) {
             emitted.extend(self.try_drain_mailbox_for_source(&egress));
         }
 
