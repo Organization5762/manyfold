@@ -33,6 +33,11 @@ class StatsTests(unittest.TestCase):
 
         self.assertEqual(Average(window_size=3)(IndexOnlyValues()), 7.0)  # type: ignore[arg-type]
 
+    def test_average_accepts_one_shot_iterables_with_bounded_window(self) -> None:
+        values = (value for value in ("outside-window", 2.0, 4.0))
+
+        self.assertEqual(Average(window_size=2)(values), 3.0)  # type: ignore[arg-type]
+
     def test_average_rejects_empty_values(self) -> None:
         with self.assertRaisesRegex(ValueError, "at least one value"):
             Average(window_size=3)([])
