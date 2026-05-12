@@ -1523,6 +1523,20 @@ class SensorIoTests(unittest.TestCase):
                 ):
                     manyfold.ThresholdFilter[float](threshold=threshold)  # type: ignore[arg-type]
 
+    def test_change_and_threshold_filters_reject_non_callable_keys(self) -> None:
+        manyfold = load_manyfold_package()
+
+        with self.assertRaisesRegex(ValueError, "change filter key must be callable"):
+            manyfold.ChangeFilter[int](key=None)  # type: ignore[arg-type]
+
+        with self.assertRaisesRegex(
+            ValueError, "threshold filter key must be callable"
+        ):
+            manyfold.ThresholdFilter[int](
+                threshold=1.0,
+                key="value",  # type: ignore[arg-type]
+            )
+
     def test_local_sensor_source_publishes_sensor_samples(self) -> None:
         manyfold = load_manyfold_package()
         graph = manyfold.Graph()

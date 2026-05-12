@@ -1293,6 +1293,9 @@ class ChangeFilter(Generic[T]):
     _last: Any = field(default=None, init=False, repr=False)
     _has_last: bool = field(default=False, init=False, repr=False)
 
+    def __post_init__(self) -> None:
+        _require_callable(self.key, "change filter key")
+
     def accepts(self, value: T) -> bool:
         current = self.key(value)
         if not self._has_last or current != self._last:
@@ -1315,6 +1318,7 @@ class ThresholdFilter(Generic[T]):
         self.threshold = _require_finite_number(self.threshold, "threshold")
         if self.threshold < 0:
             raise ValueError("threshold must be non-negative")
+        _require_callable(self.key, "threshold filter key")
 
     def accepts(self, value: T) -> bool:
         current = self.key(value)
