@@ -1250,15 +1250,10 @@ impl GraphCore {
                 for (_, _, issue) in schema_mismatches {
                     issues.push(issue);
                 }
-                let mut invalid_mailboxes = self
-                    .mailboxes
-                    .iter()
-                    .filter(|(_, mailbox)| mailbox.descriptor.capacity == 0)
-                    .map(|(name, _)| name)
-                    .collect::<Vec<_>>();
-                invalid_mailboxes.sort();
-                for name in invalid_mailboxes {
-                    issues.push(format!("Mailbox {name} must declare positive capacity"));
+                for (name, mailbox) in self.mailboxes.iter() {
+                    if mailbox.descriptor.capacity == 0 {
+                        issues.push(format!("Mailbox {name} must declare positive capacity"));
+                    }
                 }
                 QueryResultCore::ValidateGraph(issues)
             }
