@@ -467,6 +467,17 @@ class ReadThenWriteNextEpochStep(Generic[TRead, TWrite]):
     _connect: Callable[[], SubscriptionLike]
     _connection: SubscriptionLike | None = None
 
+    def __post_init__(self) -> None:
+        _require_non_empty_string(self.name, "step name")
+        _require_observable(self.read, "read")
+        if not isinstance(self.output, TypedRoute):
+            raise ValueError("output must be a TypedRoute")
+        _require_observable(self.write, "write")
+        if not callable(self._connect):
+            raise ValueError("connect must be callable")
+        if self._connection is not None:
+            _require_subscription(self._connection, "connection")
+
     @classmethod
     def map(
         cls,
@@ -477,6 +488,8 @@ class ReadThenWriteNextEpochStep(Generic[TRead, TWrite]):
         transform: Callable[[TRead], TWrite],
     ) -> ReadThenWriteNextEpochStep[TRead, TWrite]:
         """Map one observable input into one typed output stream."""
+        if not callable(transform):
+            raise ValueError("transform must be callable")
         write_stream = read.pipe(
             ops.map(transform),
             ops.publish(),
@@ -526,6 +539,16 @@ def _enum_members(enum_type: type[Any]) -> tuple[Any, ...]:
     return tuple(
         getattr(enum_type, name) for name in dir(enum_type) if not name.startswith("_")
     )
+
+
+def _require_observable(value: object, field: str) -> None:
+    if not isinstance(value, Observable):
+        raise ValueError(f"{field} must be an Observable")
+
+
+def _require_subscription(value: object, field: str) -> None:
+    if not isinstance(value, SubscriptionLike):
+        raise ValueError(f"{field} must provide dispose")
 
 
 def _encode_finite_float(value: Any) -> bytes:

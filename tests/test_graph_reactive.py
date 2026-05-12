@@ -1343,6 +1343,50 @@ assert graph.latest(route) is None
         self.assertEqual(latest.value, b"TWO")
         self.assertEqual(latest.closed.seq_source, 2)
 
+    def test_read_then_write_next_epoch_step_rejects_invalid_construction(self) -> None:
+        graph_module = load_graph_module()
+        read = graph_module.rx.from_iterable([b"one"])
+        write_request = graph_module.route(
+            plane=graph_module.Plane.Write,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("motor"),
+            family=graph_module.StreamFamily("speed"),
+            stream=graph_module.StreamName("pid"),
+            variant=graph_module.Variant.Request,
+            schema=graph_module.Schema.bytes(name="SpeedPid"),
+        )
+        write = read.pipe(graph_module.ops.publish())
+        valid_kwargs = {
+            "name": "Step",
+            "read": read,
+            "output": write_request,
+            "write": write,
+            "_connect": write.connect,
+        }
+
+        cases = (
+            ({"name": " "}, "step name must be a non-empty string"),
+            ({"read": object()}, "read must be an Observable"),
+            ({"output": object()}, "output must be a TypedRoute"),
+            ({"write": object()}, "write must be an Observable"),
+            ({"_connect": object()}, "connect must be callable"),
+            ({"_connection": object()}, "connection must provide dispose"),
+        )
+        for override, message in cases:
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(ValueError, message):
+                    graph_module.ReadThenWriteNextEpochStep(
+                        **{**valid_kwargs, **override}
+                    )
+
+        with self.assertRaisesRegex(ValueError, "transform must be callable"):
+            graph_module.ReadThenWriteNextEpochStep.map(
+                name="Step",
+                read=read,
+                output=write_request,
+                transform=object(),
+            )
+
     def test_install_rejects_duplicate_native_control_loop_names(self) -> None:
         graph_module = load_graph_module()
         read_state = graph_module.route(
