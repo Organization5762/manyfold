@@ -46,6 +46,13 @@ class EmbeddedProfileTests(unittest.TestCase):
             sensor.validate(),
         )
 
+    def test_bulk_credit_policy_is_trimmed_before_validation(self) -> None:
+        manyfold = load_manyfold_package()
+        rules = manyfold.EmbeddedRuntimeRules(bulk_credit_policy=" bytes ")
+
+        self.assertEqual(rules.bulk_credit_policy, "bytes")
+        self.assertEqual(rules.bulk_issues(), ())
+
     def test_embedded_module_exports_intentional_profile_surface(self) -> None:
         manyfold = load_manyfold_package()
         embedded = sys.modules["manyfold.embedded"]

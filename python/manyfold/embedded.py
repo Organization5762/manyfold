@@ -109,7 +109,11 @@ class EmbeddedRuntimeRules:
 
     def __post_init__(self) -> None:
         _require_bool_fields(self, _RUNTIME_BOOL_FIELDS)
-        _require_non_blank_string(self.bulk_credit_policy, "bulk_credit_policy")
+        object.__setattr__(
+            self,
+            "bulk_credit_policy",
+            _require_non_blank_string(self.bulk_credit_policy, "bulk_credit_policy"),
+        )
 
     def required_issues(self) -> tuple[str, ...]:
         return _disabled_issue_messages(self, _EMBEDDED_RUNTIME_ISSUE_CHECKS)
@@ -267,9 +271,10 @@ def _require_bool_fields(owner: object, fields: tuple[str, ...]) -> None:
         _require_bool(getattr(owner, field_name), field_name)
 
 
-def _require_non_blank_string(value: object, field: str) -> None:
+def _require_non_blank_string(value: object, field: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{field} must be a non-empty string")
+    return value.strip()
 
 
 def _require_firmware_profile(value: object, field: str) -> None:
