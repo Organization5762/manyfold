@@ -149,6 +149,24 @@ class ExampleTests(unittest.TestCase):
         self.assertIs(examples_package.ExampleCatalogEntry, ExampleCatalogEntry)
         self.assertIs(examples_package.ReferenceExampleGap, ReferenceExampleGap)
 
+    def test_example_catalog_entry_rejects_non_positive_ordering_metadata(
+        self,
+    ) -> None:
+        with self.assertRaisesRegex(ValueError, "readme_order must be positive"):
+            ExampleCatalogEntry(
+                "synthetic_example",
+                "Synthetic example.",
+                readme_order=0,
+            )
+
+        with self.assertRaisesRegex(ValueError, "reference number must be positive"):
+            ExampleCatalogEntry(
+                "synthetic_example",
+                "Synthetic example.",
+                reference_number=0,
+                reference_title="Synthetic example",
+            )
+
     def test_shared_example_helpers_keep_explicit_exports(self) -> None:
         self.assertEqual(
             shared.__all__,
@@ -1137,23 +1155,11 @@ class ExampleTests(unittest.TestCase):
         finally:
             catalog_module.EXAMPLE_CATALOG = original_catalog
 
-    def test_catalog_validation_rejects_non_positive_readme_orders(self) -> None:
-        original_catalog = catalog_module.EXAMPLE_CATALOG
-        try:
-            catalog_module.EXAMPLE_CATALOG = tuple(
-                replace(entry, readme_order=0)
-                if entry.module_name == "simple_latest"
-                else entry
-                for entry in original_catalog
-            )
+    def test_catalog_entry_replacement_rejects_non_positive_readme_order(self) -> None:
+        entry = catalog_entry("simple_latest")
 
-            with self.assertRaisesRegex(
-                ValueError,
-                "must use positive readme_order values",
-            ):
-                catalog_module._validate_catalog()
-        finally:
-            catalog_module.EXAMPLE_CATALOG = original_catalog
+        with self.assertRaisesRegex(ValueError, "readme_order must be positive"):
+            replace(entry, readme_order=0)
 
     def test_catalog_validation_rejects_non_contiguous_readme_orders(self) -> None:
         original_catalog = catalog_module.EXAMPLE_CATALOG
