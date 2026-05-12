@@ -471,6 +471,7 @@ class Memory:
         replay_latest: bool = True,
     ) -> SubscriptionLike:
         """Append future values for ``route_ref`` to disk."""
+        _require_graph(graph)
         route_ref = _require_typed_route(route_ref, "memory route")
 
         def on_next(envelope: TypedEnvelope[T]) -> None:
@@ -520,6 +521,7 @@ class Memory:
         self, graph: Graph, route_ref: TypedRoute[T]
     ) -> tuple[MemoryRecord[T], ...]:
         """Publish remembered values for ``route_ref`` into ``graph``."""
+        _require_graph(graph)
         route_ref = _require_typed_route(route_ref, "memory route")
         records = self.records(route_ref)
         for record in records:
@@ -986,6 +988,11 @@ def _require_keyspace(value: object) -> None:
 def _require_schema(value: object) -> None:
     if not isinstance(value, Schema):
         raise ValueError("schema must be a Schema")
+
+
+def _require_graph(value: object) -> None:
+    if not isinstance(value, Graph):
+        raise ValueError("graph must be a Graph")
 
 
 def _require_typed_route(value: object, field: str) -> TypedRoute[Any]:

@@ -1616,6 +1616,29 @@ class ComponentTests(unittest.TestCase):
             ):
                 manyfold.Memory(path).records(consumer_route)
 
+    def test_memory_chip_rejects_invalid_graph_before_side_effects(self) -> None:
+        manyfold = load_manyfold_package()
+        route = manyfold.route(
+            plane=manyfold.Plane.Read,
+            layer=manyfold.Layer.Logical,
+            owner=manyfold.OwnerName("demo"),
+            family=manyfold.StreamFamily("memory"),
+            stream=manyfold.StreamName("bytes"),
+            variant=manyfold.Variant.Meta,
+            schema=manyfold.Schema.bytes(name="MemoryBytes"),
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "memory.jsonl"
+            memory = manyfold.Memory(path)
+
+            with self.assertRaisesRegex(ValueError, "graph must be a Graph"):
+                memory.remember(object(), route)  # type: ignore[arg-type]
+            self.assertFalse(path.exists())
+            with self.assertRaisesRegex(ValueError, "graph must be a Graph"):
+                memory.resume(object(), route)  # type: ignore[arg-type]
+            self.assertFalse(path.exists())
+
 
 if __name__ == "__main__":
     unittest.main()
