@@ -625,6 +625,7 @@ class CapabilityGrant:
 
     def __post_init__(self) -> None:
         _require_non_empty_text(self.principal_id, "principal_id")
+        _require_route_like(self.route, "capability grant route")
         for field_name in (
             "metadata_read",
             "payload_open",
@@ -690,6 +691,10 @@ class EventRef:
     route_display: str
     seq_source: int
 
+    def __post_init__(self) -> None:
+        _require_non_empty_text(self.route_display, "event route_display")
+        _require_non_negative_integer(self.seq_source, "event seq_source")
+
     def display(self) -> str:
         return f"{self.route_display}@{self.seq_source}"
 
@@ -704,6 +709,23 @@ class LineageRecord:
     causality_id: str
     correlation_id: str | None = None
     parent_events: tuple[EventRef, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.event, EventRef):
+            raise ValueError("lineage event must be an EventRef")
+        _require_optional_non_empty_text(self.producer_id, "lineage producer_id")
+        _require_non_empty_text(self.trace_id, "lineage trace_id")
+        _require_non_empty_text(self.causality_id, "lineage causality_id")
+        _require_optional_non_empty_text(
+            self.correlation_id, "lineage correlation_id"
+        )
+        if not isinstance(self.parent_events, tuple):
+            raise ValueError("lineage parent_events must be a tuple of EventRef values")
+        for parent in self.parent_events:
+            if not isinstance(parent, EventRef):
+                raise ValueError(
+                    "lineage parent_events must be a tuple of EventRef values"
+                )
 
     def display(self) -> str:
         parents = ",".join(parent.display() for parent in self.parent_events)
@@ -743,6 +765,14 @@ class DebugEvent:
     detail: str
     route_display: str | None
     seq_source: int
+
+    def __post_init__(self) -> None:
+        _require_non_empty_text(self.event_type, "debug event_type")
+        _require_non_empty_text(self.detail, "debug detail")
+        _require_optional_non_empty_text(
+            self.route_display, "debug route_display"
+        )
+        _require_non_negative_integer(self.seq_source, "debug seq_source")
 
 
 @dataclass(frozen=True)

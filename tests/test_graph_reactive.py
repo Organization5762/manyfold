@@ -5434,6 +5434,8 @@ assert graph.latest(route) is None
             )
         with self.assertRaisesRegex(ValueError, "principal_id"):
             graph_module.CapabilityGrant(principal_id="", route=route)
+        with self.assertRaisesRegex(ValueError, "capability grant route"):
+            graph_module.CapabilityGrant(principal_id="dashboard", route=object())
         with self.assertRaisesRegex(ValueError, "payload_open must be a boolean"):
             graph_module.CapabilityGrant(
                 principal_id="dashboard",
@@ -5462,6 +5464,39 @@ assert graph.latest(route) is None
             graph_module.QueryServiceRoutes(request=object(), response=route.route_ref)
         with self.assertRaisesRegex(ValueError, "query service response"):
             graph_module.QueryServiceRoutes(request=route.route_ref, response=object())
+        event = graph_module.EventRef(route.display(), 1)
+        with self.assertRaisesRegex(ValueError, "event route_display"):
+            graph_module.EventRef("", 1)
+        with self.assertRaisesRegex(ValueError, "event seq_source"):
+            graph_module.EventRef(route.display(), -1)
+        with self.assertRaisesRegex(ValueError, "lineage event"):
+            graph_module.LineageRecord(
+                event=object(),
+                producer_id="python",
+                trace_id="trace-1",
+                causality_id="cause-1",
+            )
+        with self.assertRaisesRegex(ValueError, "lineage trace_id"):
+            graph_module.LineageRecord(
+                event=event,
+                producer_id="python",
+                trace_id=" ",
+                causality_id="cause-1",
+            )
+        with self.assertRaisesRegex(ValueError, "lineage parent_events"):
+            graph_module.LineageRecord(
+                event=event,
+                producer_id="python",
+                trace_id="trace-1",
+                causality_id="cause-1",
+                parent_events=(object(),),
+            )
+        with self.assertRaisesRegex(ValueError, "debug event_type"):
+            graph_module.DebugEvent("", "published", route.display(), 1)
+        with self.assertRaisesRegex(ValueError, "debug route_display"):
+            graph_module.DebugEvent("write", "published", " ", 1)
+        with self.assertRaisesRegex(ValueError, "debug seq_source"):
+            graph_module.DebugEvent("write", "published", route.display(), -1)
         graph = graph_module.Graph()
         with self.assertRaisesRegex(ValueError, "query service owner"):
             graph.query_service(" ")
