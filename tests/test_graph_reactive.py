@@ -1504,6 +1504,56 @@ assert graph.latest(route) is None
                         }
                     )
 
+    def test_join_plan_rejects_invalid_configuration(self) -> None:
+        graph_module = load_graph_module()
+        route_ref = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("planner"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("accel"),
+            variant=graph_module.Variant.Meta,
+            schema=graph_module.Schema.bytes(name="Accel"),
+        ).route_ref
+
+        valid_kwargs = {
+            "name": "sensor_join",
+            "join_class": "local_keyed",
+            "left": route_ref,
+            "right": route_ref,
+        }
+        for kwargs, message in (
+            ({"name": ""}, "join plan name must be a non-empty string"),
+            ({"join_class": " "}, "join plan class must be a non-empty string"),
+            ({"left": object()}, "left join route must be a RouteRef"),
+            ({"right": object()}, "right join route must be a RouteRef"),
+            ({"visible_nodes": [route_ref]}, "join visible_nodes must be a tuple"),
+            (
+                {"visible_nodes": (object(),)},
+                "join visible_nodes must be a RouteRef",
+            ),
+            ({"state_budget": ""}, "join state_budget must be a non-empty string"),
+            (
+                {"taint_implications": ["tainted"]},
+                "join taint_implications must be a tuple of strings",
+            ),
+            (
+                {"taint_implications": ("",)},
+                r"join taint_implications\[\] must be a non-empty string",
+            ),
+            (
+                {"largest_partition_size": -1},
+                "join largest_partition_size must be a non-negative integer",
+            ),
+            (
+                {"hot_key_frequency": True},
+                "join hot_key_frequency must be a non-negative integer",
+            ),
+        ):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    graph_module.JoinPlan(**{**valid_kwargs, **kwargs})
+
     def test_plan_join_rejects_invalid_setup_before_registering_routes(self) -> None:
         graph_module = load_graph_module()
         left = graph_module.route(

@@ -386,6 +386,31 @@ class JoinPlan:
     largest_partition_size: int = 0
     hot_key_frequency: int = 0
 
+    def __post_init__(self) -> None:
+        _require_non_empty_text(self.name, "join plan name")
+        _require_non_empty_text(self.join_class, "join plan class")
+        _require_route_ref(self.left, "left join route")
+        _require_route_ref(self.right, "right join route")
+        object.__setattr__(
+            self,
+            "visible_nodes",
+            _require_route_ref_tuple(self.visible_nodes, "join visible_nodes"),
+        )
+        _require_non_empty_text(self.state_budget, "join state_budget")
+        object.__setattr__(
+            self,
+            "taint_implications",
+            _require_text_tuple(self.taint_implications, "join taint_implications"),
+        )
+        _require_non_negative_integer(
+            self.largest_partition_size,
+            "join largest_partition_size",
+        )
+        _require_non_negative_integer(
+            self.hot_key_frequency,
+            "join hot_key_frequency",
+        )
+
 
 @dataclass(frozen=True)
 class Middleware:
@@ -6974,11 +6999,32 @@ def _require_route_like(value: object, field: str) -> None:
         raise ValueError(f"{field} must be a TypedRoute, RouteRef, Source, or Sink")
 
 
+def _require_route_ref(value: object, field: str) -> None:
+    if not isinstance(value, RouteRef):
+        raise ValueError(f"{field} must be a RouteRef")
+
+
 def _require_route_like_tuple(value: object, field: str) -> tuple[RouteLike, ...]:
     if not isinstance(value, tuple):
         raise ValueError(f"{field} must be a tuple of route-like values")
     for route_value in value:
         _require_route_like(route_value, field)
+    return value
+
+
+def _require_route_ref_tuple(value: object, field: str) -> tuple[RouteRef, ...]:
+    if not isinstance(value, tuple):
+        raise ValueError(f"{field} must be a tuple of RouteRef values")
+    for route_value in value:
+        _require_route_ref(route_value, field)
+    return value
+
+
+def _require_text_tuple(value: object, field: str) -> tuple[str, ...]:
+    if not isinstance(value, tuple):
+        raise ValueError(f"{field} must be a tuple of strings")
+    for item in value:
+        _require_non_empty_text(item, f"{field}[]")
     return value
 
 
