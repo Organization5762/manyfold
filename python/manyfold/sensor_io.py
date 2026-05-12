@@ -1376,6 +1376,12 @@ class SensorFrame(Generic[TFrame]):
     frame_id: Any
     samples: tuple[TFrame, ...]
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.samples, tuple):
+            raise ValueError("sensor frame samples must be a tuple")
+        if not self.samples:
+            raise ValueError("sensor frame samples must not be empty")
+
 
 @dataclass
 class DoubleBuffer(Generic[TFrame]):

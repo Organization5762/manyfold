@@ -2450,6 +2450,17 @@ class SensorIoTests(unittest.TestCase):
                         slot_id=kwargs.get("slot_id", lambda sample: sample[1]),
                     )
 
+    def test_sensor_frame_rejects_invalid_samples(self) -> None:
+        manyfold = load_manyfold_package()
+
+        for samples, message in (
+            ([], "sensor frame samples must be a tuple"),
+            ((), "sensor frame samples must not be empty"),
+        ):
+            with self.subTest(samples=samples):
+                with self.assertRaisesRegex(ValueError, message):
+                    manyfold.SensorFrame(frame_id=1, samples=samples)  # type: ignore[arg-type]
+
     def test_frame_assembler_orders_mixed_slot_ids_deterministically(self) -> None:
         manyfold = load_manyfold_package()
         assembler = manyfold.FrameAssembler[tuple[int, object, str]](
