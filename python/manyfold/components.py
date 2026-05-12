@@ -294,20 +294,25 @@ class EventLog(Generic[T]):
     def records(self) -> tuple[EventLogRecord[T], ...]:
         """Return all durable log records in index order."""
         records: list[EventLogRecord[T]] = []
-        for entry in self.keyspace.scan():
-            if len(entry.key) != 1:
-                continue
-            index = _parse_log_index(entry.key[0])
-            if index is None:
+        keys = (
+            (index, key)
+            for key in self.keyspace.keys()
+            if len(key) == 1
+            for index in (_parse_log_index(key[0]),)
+            if index is not None
+        )
+        for index, key in sorted(keys):
+            payload = self.keyspace.get(*key)
+            if payload is None:
                 continue
             records.append(
                 EventLogRecord(
                     index=index,
-                    value=self.schema.decode(entry.value),
+                    value=self.schema.decode(payload),
                 )
             )
-        # Keyspace scans are stable by decoded key, and canonical log indexes are
-        # fixed-width decimal strings, so lexical key order is numeric index order.
+        # Canonical log indexes are fixed-width decimal strings, so sorting parsed
+        # keys gives numeric index order before payload bytes are read.
         return tuple(records)
 
     def replay(self, graph: Graph) -> tuple[EventLogRecord[T], ...]:
