@@ -3889,6 +3889,17 @@ assert graph.latest(route) is None
         self.assertIn('["planner"]', diagram)
         self.assertNotIn("graph has no topology edges", diagram)
 
+    def test_diagram_escapes_registered_node_line_breaks(self) -> None:
+        graph_module = load_graph_module()
+        graph = graph_module.Graph()
+
+        graph.register_diagram_node("planner\nnode", group="control\rplane")
+
+        diagram = graph.render_diagram()
+
+        self.assertIn('subgraph g0["control plane"]', diagram)
+        self.assertIn('["planner node"]', diagram)
+
     def test_registered_diagram_node_metadata_is_key_sorted(self) -> None:
         graph_module = load_graph_module()
         graph = graph_module.Graph()
