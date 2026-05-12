@@ -108,6 +108,29 @@ class EmbeddedProfileTests(unittest.TestCase):
             sensor.validate(),
         )
 
+    def test_scalar_sensor_metadata_route_issues_keep_stable_order(self) -> None:
+        manyfold = load_manyfold_package()
+        sensor = manyfold.EmbeddedScalarSensor(
+            metadata_route=manyfold.route(
+                plane=manyfold.Plane.Write,
+                owner=manyfold.OwnerName("uart-temp"),
+                family=manyfold.StreamFamily("sensor"),
+                stream=manyfold.StreamName("temperature"),
+                layer=manyfold.Layer.Bulk,
+                variant=manyfold.Variant.Payload,
+                schema=manyfold.Schema.bytes(name="Temperature"),
+            ),
+        )
+
+        self.assertEqual(
+            sensor.validate(),
+            (
+                "embedded sensor metadata must flow in the read plane",
+                "embedded sensor metadata must not use Layer.Bulk",
+                "embedded sensor metadata must use Variant.Meta",
+            ),
+        )
+
     def test_bulk_sensor_rejects_unpaired_payload_identity(self) -> None:
         manyfold = load_manyfold_package()
         sensor = manyfold.EmbeddedBulkSensor(
