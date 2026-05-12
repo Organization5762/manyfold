@@ -585,6 +585,58 @@ class SensorIoTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, message):
                     manyfold.HealthStatus(**kwargs)
 
+    def test_sensor_debug_envelope_rejects_invalid_values(self) -> None:
+        manyfold = load_manyfold_package()
+        valid_kwargs = {
+            "stage": manyfold.SensorDebugStage.RAW,
+            "stream_name": "uart",
+            "source_id": "sensor-1",
+            "timestamp": 1.0,
+            "payload": b"abc",
+        }
+
+        for kwargs, message in (
+            ({"stage": "raw"}, "debug envelope stage must be a SensorDebugStage"),
+            ({"stream_name": " "}, "debug envelope stream_name must be a non-empty string"),
+            ({"source_id": 7}, "debug envelope source_id must be a string"),
+            ({"timestamp": math.nan}, "debug envelope timestamp must be a finite number"),
+            ({"upstream_ids": "sensor-0"}, "debug envelope upstream_ids must be an iterable of strings"),
+            ({"upstream_ids": ("sensor-0", " ")}, r"debug envelope upstream_ids\[\] must be a non-empty string"),
+        ):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    manyfold.SensorDebugEnvelope(**{**valid_kwargs, **kwargs})
+
+    def test_sensor_debug_tap_validates_clock_and_published_labels(self) -> None:
+        manyfold = load_manyfold_package()
+
+        with self.assertRaisesRegex(
+            ValueError, "sensor debug tap clock must provide now"
+        ):
+            manyfold.SensorDebugTap(clock=object())  # type: ignore[arg-type]
+
+        tap = manyfold.SensorDebugTap(clock=manyfold.ManualClock(3.0))
+        with self.assertRaisesRegex(
+            ValueError, "debug envelope stream_name must be a non-empty string"
+        ):
+            tap.publish(
+                stage=manyfold.SensorDebugStage.RAW,
+                stream_name=" ",
+                source_id="sensor-1",
+                payload=b"abc",
+            )
+
+        envelope = tap.publish(
+            stage=manyfold.SensorDebugStage.VIEW,
+            stream_name="uart",
+            source_id="sensor-1",
+            payload={"value": 1},
+            upstream_ids=["raw-0"],
+        )
+
+        self.assertEqual(envelope.timestamp, 3.0)
+        self.assertEqual(envelope.upstream_ids, ("raw-0",))
+
     def test_sensor_schemas_reject_non_object_payloads(self) -> None:
         manyfold = load_manyfold_package()
         sample_schema = manyfold.sensor_sample_schema(_int_schema(manyfold, "Temp"))

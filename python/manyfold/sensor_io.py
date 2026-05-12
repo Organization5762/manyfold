@@ -1077,6 +1077,33 @@ class SensorDebugEnvelope:
     payload: Any
     upstream_ids: tuple[str, ...] = ()
 
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "stage",
+            _require_sensor_debug_stage(self.stage, "debug envelope stage"),
+        )
+        object.__setattr__(
+            self,
+            "stream_name",
+            _require_non_empty_string(self.stream_name, "debug envelope stream_name"),
+        )
+        object.__setattr__(
+            self,
+            "source_id",
+            _require_non_empty_string(self.source_id, "debug envelope source_id"),
+        )
+        object.__setattr__(
+            self,
+            "timestamp",
+            _require_finite_number(self.timestamp, "debug envelope timestamp"),
+        )
+        object.__setattr__(
+            self,
+            "upstream_ids",
+            _require_string_tuple(self.upstream_ids, "debug envelope upstream_ids"),
+        )
+
 
 @dataclass
 class SensorDebugTap:
@@ -1089,6 +1116,7 @@ class SensorDebugTap:
     )
 
     def __post_init__(self) -> None:
+        _require_clock(self.clock, "sensor debug tap clock")
         self.history_size = _require_int(self.history_size, "history_size")
         if self.history_size <= 0:
             raise ValueError("history_size must be positive")
@@ -2039,6 +2067,18 @@ def _require_optional_string(value: Any, field: str) -> str | None:
     if value is None:
         return None
     return _require_string(value, field)
+
+
+def _require_string_tuple(value: Any, field: str) -> tuple[str, ...]:
+    if isinstance(value, str):
+        raise ValueError(f"{field} must be an iterable of strings")
+    try:
+        values = tuple(value)
+    except TypeError as exc:
+        raise ValueError(f"{field} must be an iterable of strings") from exc
+    for item in values:
+        _require_non_empty_string(item, f"{field}[]")
+    return values
 
 
 def _require_bool(value: Any, field: str) -> bool:

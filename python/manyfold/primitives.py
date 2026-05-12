@@ -322,7 +322,9 @@ class Schema(Generic[T]):
         schema_id: str | None = None,
         version: int = 1,
     ) -> Schema[TProto]:
-        if not isinstance(message_type, ProtobufMessageType):
+        if not isinstance(message_type, ProtobufMessageType) or not callable(
+            getattr(message_type, "FromString", None)
+        ):
             raise ValueError(
                 "protobuf schema message_type must provide __name__ and FromString"
             )
@@ -330,8 +332,8 @@ class Schema(Generic[T]):
         return cls(
             schema_id=schema_name,
             version=version,
-            encode=lambda value: value.SerializeToString(),
-            decode=lambda payload: message_type.FromString(payload),
+            encode=_encode_protobuf_message,
+            decode=lambda payload: _decode_protobuf_message(message_type, payload),
         )
 
 
@@ -582,6 +584,27 @@ def _coerce_bytes_payload(value: Any) -> bytes:
     if isinstance(value, (bytearray, memoryview)):
         return bytes(value)
     raise ValueError("bytes schema values must be bytes-like")
+
+
+def _encode_protobuf_message(value: Any) -> bytes:
+    serializer = getattr(value, "SerializeToString", None)
+    if not callable(serializer):
+        raise ValueError("protobuf schema values must provide SerializeToString")
+    return _coerce_protobuf_bytes(serializer())
+
+
+def _decode_protobuf_message(
+    message_type: ProtobufMessageType[TProto],
+    payload: bytes,
+) -> TProto:
+    return message_type.FromString(_coerce_protobuf_bytes(payload))
+
+
+def _coerce_protobuf_bytes(value: Any) -> bytes:
+    try:
+        return _coerce_bytes_payload(value)
+    except ValueError as exc:
+        raise ValueError("protobuf schema payloads must be bytes-like") from exc
 
 
 def _coerce_owner_name(owner: OwnerName | str) -> OwnerName:

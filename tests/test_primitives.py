@@ -368,6 +368,55 @@ for build, message in cases:
         ):
             manyfold.Schema.protobuf(object())  # type: ignore[arg-type]
 
+        class BadFromString:
+            __name__ = "BadFromString"
+            FromString = object()
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "protobuf schema message_type must provide __name__ and FromString",
+        ):
+            manyfold.Schema.protobuf(BadFromString)  # type: ignore[arg-type]
+
+    def test_protobuf_schema_rejects_invalid_codec_values_clearly(self) -> None:
+        manyfold = load_manyfold_package()
+
+        class ProtobufMessage:
+            @staticmethod
+            def FromString(payload: bytes) -> ProtobufMessage:
+                return ProtobufMessage(payload)
+
+            def __init__(self, payload: bytes = b"ok") -> None:
+                self.payload = payload
+
+            def SerializeToString(self) -> bytes:
+                return self.payload
+
+        schema = manyfold.Schema.protobuf(ProtobufMessage)
+
+        self.assertEqual(schema.encode(ProtobufMessage(b"payload")), b"payload")
+        self.assertEqual(schema.decode(bytearray(b"payload")).payload, b"payload")
+        with self.assertRaisesRegex(
+            ValueError,
+            "protobuf schema values must provide SerializeToString",
+        ):
+            schema.encode(object())  # type: ignore[arg-type]
+
+        class TextPayloadMessage:
+            def SerializeToString(self) -> str:
+                return "not-bytes"
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "protobuf schema payloads must be bytes-like",
+        ):
+            schema.encode(TextPayloadMessage())  # type: ignore[arg-type]
+        with self.assertRaisesRegex(
+            ValueError,
+            "protobuf schema payloads must be bytes-like",
+        ):
+            schema.decode("not-bytes")  # type: ignore[arg-type]
+
     def test_any_schema_rejects_unknown_process_local_tokens_clearly(self) -> None:
         manyfold = load_manyfold_package()
         schema = manyfold.Schema.any("RuntimeHandle")
