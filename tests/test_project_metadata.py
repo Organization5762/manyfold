@@ -5,6 +5,11 @@ import re
 import unittest
 from pathlib import Path
 
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CARGO_TOML_PATH = PROJECT_ROOT / "Cargo.toml"
 NATIVE_STUB_PATH = PROJECT_ROOT / "python" / "manyfold" / "_manyfold_rust" / "__init__.pyi"
@@ -28,42 +33,33 @@ class ProjectMetadataTests(unittest.TestCase):
         self.assertEqual(violations, ())
 
     def test_cargo_dependency_tables_stay_sorted(self) -> None:
-        lines = CARGO_TOML_PATH.read_text(encoding="utf-8").splitlines()
+        cargo = _toml_document(CARGO_TOML_PATH)
 
-        dependencies = _section_keys(lines, "dependencies", source_name="Cargo.toml")
-        dev_dependencies = _section_keys(
-            lines, "dev-dependencies", source_name="Cargo.toml"
-        )
+        dependencies = tuple(cargo["dependencies"])
+        dev_dependencies = tuple(cargo["dev-dependencies"])
 
         self.assertEqual(dependencies, tuple(sorted(dependencies)))
         self.assertEqual(dev_dependencies, tuple(sorted(dev_dependencies)))
 
     def test_cargo_feature_dependency_lists_stay_sorted(self) -> None:
-        lines = CARGO_TOML_PATH.read_text(encoding="utf-8").splitlines()
-        features = _inline_array_values_by_key(
-            lines,
-            "features",
-            source_name="Cargo.toml",
-        )
+        features = _toml_document(CARGO_TOML_PATH)["features"]
 
         for name, values in features.items():
             with self.subTest(feature=name):
+                values = tuple(values)
                 self.assertEqual(values, tuple(sorted(values)))
                 self.assertEqual(len(values), len(set(values)))
 
     def test_pyproject_metadata_lists_stay_sorted(self) -> None:
-        lines = PYPROJECT_PATH.read_text(encoding="utf-8").splitlines()
+        pyproject = _toml_document(PYPROJECT_PATH)
+        project = pyproject["project"]
 
-        keywords = _array_values(lines, "keywords")
-        classifiers = _array_values(lines, "classifiers")
-        dependencies = _array_values(lines, "dependencies")
-        dev_dependencies = _array_values(lines, "dev")
-        script_names = _section_keys(
-            lines, "project.scripts", source_name="pyproject.toml"
-        )
-        url_names = _section_keys(
-            lines, "project.urls", source_name="pyproject.toml"
-        )
+        keywords = tuple(project["keywords"])
+        classifiers = tuple(project["classifiers"])
+        dependencies = tuple(project["dependencies"])
+        dev_dependencies = tuple(pyproject["dependency-groups"]["dev"])
+        script_names = tuple(project["scripts"])
+        url_names = tuple(project["urls"])
 
         self.assertEqual(keywords, tuple(sorted(keywords)))
         self.assertEqual(classifiers, tuple(sorted(classifiers)))
@@ -99,31 +95,6 @@ class ProjectMetadataTests(unittest.TestCase):
 
         self.assertEqual(failures, [])
 
-    def test_toml_section_errors_name_source_file(self) -> None:
-        with self.assertRaisesRegex(
-            AssertionError, "Cargo.toml does not define section 'missing'"
-        ):
-            _section_keys(
-                ("[package]", 'name = "manyfold"'),
-                "missing",
-                source_name="Cargo.toml",
-            )
-
-
-def _array_values(lines: list[str], key: str) -> tuple[str, ...]:
-    values: list[str] = []
-    in_array = False
-    prefix = f"{key} = ["
-    for line in lines:
-        stripped = line.strip()
-        if not in_array:
-            in_array = stripped == prefix
-            continue
-        if stripped == "]":
-            return tuple(values)
-        values.append(stripped.rstrip(",").strip('"'))
-    raise AssertionError(f"pyproject.toml does not define array {key!r}")
-
 
 def _dependency_name(requirement: str) -> str:
     match = PACKAGE_NAME_RE.match(requirement)
@@ -132,49 +103,8 @@ def _dependency_name(requirement: str) -> str:
     return match.group(0).lower()
 
 
-def _section_keys(
-    lines: list[str] | tuple[str, ...], section: str, *, source_name: str
-) -> tuple[str, ...]:
-    keys: list[str] = []
-    in_section = False
-    header = f"[{section}]"
-    for line in lines:
-        stripped = line.strip()
-        if stripped == header:
-            in_section = True
-            continue
-        if in_section and stripped.startswith("["):
-            return tuple(keys)
-        if in_section and stripped and not stripped.startswith("#"):
-            keys.append(stripped.split("=", 1)[0].strip())
-    if not in_section:
-        raise AssertionError(f"{source_name} does not define section {section!r}")
-    return tuple(keys)
-
-
-def _inline_array_values_by_key(
-    lines: list[str] | tuple[str, ...], section: str, *, source_name: str
-) -> dict[str, tuple[str, ...]]:
-    values_by_key: dict[str, tuple[str, ...]] = {}
-    in_section = False
-    header = f"[{section}]"
-    for line in lines:
-        stripped = line.strip()
-        if stripped == header:
-            in_section = True
-            continue
-        if in_section and stripped.startswith("["):
-            return values_by_key
-        if not in_section or not stripped or stripped.startswith("#"):
-            continue
-        key, raw_value = stripped.split("=", 1)
-        raw_items = raw_value.strip().removeprefix("[").removesuffix("]")
-        values_by_key[key.strip()] = tuple(
-            item.strip().strip('"') for item in raw_items.split(",") if item.strip()
-        )
-    if not in_section:
-        raise AssertionError(f"{source_name} does not define section {section!r}")
-    return values_by_key
+def _toml_document(path: Path) -> dict[str, object]:
+    return tomllib.loads(path.read_text(encoding="utf-8"))
 
 
 def _module_all_assignment(path: Path) -> tuple[str, ...]:

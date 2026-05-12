@@ -71,4 +71,5 @@ combine-as-imports = true
 [dependency-groups]
 dev = [
     "ruff>=0.15.12",
+    "tomli>=2.0.0; python_version < '3.11'",
 ]
