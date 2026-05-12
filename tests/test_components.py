@@ -1067,6 +1067,27 @@ class ComponentTests(unittest.TestCase):
         assert latest is not None
         self.assertEqual(latest.value, 24)
 
+    def test_memory_chip_rejects_directory_path(self) -> None:
+        manyfold = load_manyfold_package()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.assertRaisesRegex(ValueError, "memory path must be a file path"):
+                manyfold.Memory(temp_dir)
+
+    def test_memory_chip_rejects_invalid_route_objects(self) -> None:
+        manyfold = load_manyfold_package()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            memory = manyfold.Memory(Path(temp_dir) / "memory.jsonl")
+            graph = manyfold.Graph()
+
+            with self.assertRaisesRegex(ValueError, "memory route must be a TypedRoute"):
+                memory.remember(graph, object())  # type: ignore[arg-type]
+            with self.assertRaisesRegex(ValueError, "memory route must be a TypedRoute"):
+                memory.records(object())  # type: ignore[arg-type]
+            with self.assertRaisesRegex(ValueError, "memory route must be a TypedRoute"):
+                memory.resume(graph, object())  # type: ignore[arg-type]
+
     def test_memory_chip_writes_compact_sorted_jsonl_records(self) -> None:
         manyfold = load_manyfold_package()
         route = manyfold.route(

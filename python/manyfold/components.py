@@ -426,7 +426,7 @@ class Memory:
     """Disk-backed route memory that can record and resume typed values."""
 
     def __init__(self, path: str | Path) -> None:
-        self.path = Path(path)
+        self.path = _normalize_memory_path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._append_lock = threading.Lock()
         self._resuming: set[tuple[str, str, int | None]] = set()
@@ -442,6 +442,7 @@ class Memory:
         replay_latest: bool = True,
     ) -> SubscriptionLike:
         """Append future values for ``route_ref`` to disk."""
+        route_ref = _require_typed_route(route_ref, "memory route")
 
         def on_next(envelope: TypedEnvelope[T]) -> None:
             closed = envelope.closed
@@ -483,12 +484,14 @@ class Memory:
 
     def records(self, route_ref: TypedRoute[T]) -> tuple[MemoryRecord[T], ...]:
         """Return decoded records for one typed route without publishing them."""
+        route_ref = _require_typed_route(route_ref, "memory route")
         return tuple(self._iter_records(route_ref))
 
     def resume(
         self, graph: Graph, route_ref: TypedRoute[T]
     ) -> tuple[MemoryRecord[T], ...]:
         """Publish remembered values for ``route_ref`` into ``graph``."""
+        route_ref = _require_typed_route(route_ref, "memory route")
         records = self.records(route_ref)
         for record in records:
             payload_b64 = base64.b64encode(
@@ -954,6 +957,22 @@ def _require_keyspace(value: object) -> None:
 def _require_schema(value: object) -> None:
     if not isinstance(value, Schema):
         raise ValueError("schema must be a Schema")
+
+
+def _require_typed_route(value: object, field: str) -> TypedRoute[Any]:
+    if not isinstance(value, TypedRoute):
+        raise ValueError(f"{field} must be a TypedRoute")
+    return value
+
+
+def _normalize_memory_path(value: object) -> Path:
+    try:
+        path = Path(value)
+    except TypeError as exc:
+        raise ValueError("memory path must be a filesystem path") from exc
+    if path.exists() and path.is_dir():
+        raise ValueError("memory path must be a file path")
+    return path
 
 
 def _normalize_key(parts: tuple[KeyPart, ...]) -> Key:
