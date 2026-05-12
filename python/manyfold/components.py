@@ -462,7 +462,7 @@ class Memory:
         self._append_lock = threading.Lock()
         self._resuming: set[tuple[str, str, int | None]] = set()
         self._seen: set[tuple[str, int, str, int | None]] = set(
-            self._event_key(record) for record in self._iter_raw_records()
+            self._event_key(record.record) for record in self._iter_raw_records()
         )
 
     def remember(
@@ -559,19 +559,19 @@ class Memory:
 
     def _iter_records(self, route_ref: TypedRoute[T]) -> Iterator[MemoryRecord[T]]:
         route_display = route_ref.display()
-        for record in self._iter_raw_records():
+        for raw_record in self._iter_raw_records():
+            record = raw_record.record
             if record.get("route") != route_display:
                 continue
             self._validate_record_schema(record, route_ref)
-            payload = base64.b64decode(record["payload_b64"])
             yield MemoryRecord(
                 route_display=route_display,
-                value=route_ref.schema.decode(payload),
+                value=route_ref.schema.decode(raw_record.payload),
                 seq_source=int(record["seq_source"]),
                 control_epoch=record.get("control_epoch"),
             )
 
-    def _iter_raw_records(self) -> Iterator[dict[str, Any]]:
+    def _iter_raw_records(self) -> Iterator[_ValidatedMemoryRecord]:
         if not self.path.exists():
             return
         with self.path.open("r", encoding="utf-8") as handle:
@@ -594,10 +594,10 @@ class Memory:
                         raise ValueError(
                             f"memory file {self.path} line {line_number} is missing {field}"
                         )
-                self._validate_raw_record(record, line_number)
-                yield record
+                payload = self._validate_raw_record(record, line_number)
+                yield _ValidatedMemoryRecord(record=record, payload=payload)
 
-    def _validate_raw_record(self, record: dict[str, Any], line_number: int) -> None:
+    def _validate_raw_record(self, record: dict[str, Any], line_number: int) -> bytes:
         for field in ("route", "schema_id", "payload_b64"):
             if not isinstance(record[field], str):
                 raise ValueError(
@@ -639,7 +639,7 @@ class Memory:
                 "must be non-negative"
             )
         try:
-            base64.b64decode(record["payload_b64"], validate=True)
+            return base64.b64decode(record["payload_b64"], validate=True)
         except binascii.Error as exc:
             raise ValueError(
                 f"memory file {self.path} line {line_number} field payload_b64 "
@@ -954,6 +954,14 @@ class Consensus:
     def _publish_confirmed_leader_state(self, state: LeaderState) -> None:
         if state[2]:
             self.graph.publish(self.routes.leader_state, state)
+
+
+@dataclass(frozen=True)
+class _ValidatedMemoryRecord:
+    """Raw memory JSON plus payload bytes already checked with strict base64."""
+
+    record: dict[str, Any]
+    payload: bytes
 
 
 def _component_route(
