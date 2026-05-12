@@ -1056,13 +1056,15 @@ def _dependency_closure_for(name: str) -> tuple[Lego, ...]:
     ordered: list[Lego] = []
     visited: set[str] = set()
     visiting: list[str] = []
+    visiting_names: set[str] = set()
 
     def collect(current_name: str) -> None:
-        if current_name in visiting:
+        if current_name in visiting_names:
             cycle = " -> ".join((*visiting, current_name))
             raise RuntimeError(f"lego catalog declares cyclic dependencies: {cycle}")
 
         visiting.append(current_name)
+        visiting_names.add(current_name)
         for requirement in _BY_NAME[current_name].requires:
             if requirement in visited:
                 continue
@@ -1070,6 +1072,7 @@ def _dependency_closure_for(name: str) -> tuple[Lego, ...]:
             visited.add(requirement)
             ordered.append(_BY_NAME[requirement])
         visiting.pop()
+        visiting_names.remove(current_name)
 
     collect(name)
     return tuple(ordered)

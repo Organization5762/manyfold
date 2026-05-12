@@ -199,6 +199,31 @@ class LegoCatalogTests(unittest.TestCase):
 
         self.assertEqual(manyfold.dependency_closure_of("Bytes"), ())
 
+    def test_dependency_closure_cycle_error_preserves_path(self) -> None:
+        manyfold = load_manyfold_package()
+        lego_catalog = sys.modules["manyfold.lego_catalog"]
+        original_by_name = lego_catalog._BY_NAME
+        try:
+            lego_catalog._BY_NAME = {
+                "Alpha": manyfold.Lego(
+                    "Alpha", "test", "local", "Starts a cycle.", ("Beta",)
+                ),
+                "Beta": manyfold.Lego(
+                    "Beta", "test", "local", "Continues a cycle.", ("Gamma",)
+                ),
+                "Gamma": manyfold.Lego(
+                    "Gamma", "test", "local", "Closes a cycle.", ("Alpha",)
+                ),
+            }
+
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "lego catalog declares cyclic dependencies: Alpha -> Beta -> Gamma -> Alpha",
+            ):
+                lego_catalog._dependency_closure_for("Alpha")
+        finally:
+            lego_catalog._BY_NAME = original_by_name
+
     def test_catalog_queries_reject_malformed_lookup_text(self) -> None:
         manyfold = load_manyfold_package()
 
