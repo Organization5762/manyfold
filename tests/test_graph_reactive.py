@@ -4028,6 +4028,100 @@ assert graph.latest(route) is None
                 ):
                     graph.register_diagram_node(name)
 
+    def test_diagram_node_records_reject_invalid_fields(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            owner="board",
+            family="sensor",
+            stream="reading",
+            schema=int_schema(graph_module, "BoardReading"),
+        )
+
+        cases = (
+            (
+                lambda: graph_module.DiagramNode(name=""),
+                "diagram node name must be a non-empty string",
+            ),
+            (
+                lambda: graph_module.DiagramNode(
+                    name="planner",
+                    input_routes=("valid", ""),
+                ),
+                "diagram node input_routes\\[\\] must be a non-empty string",
+            ),
+            (
+                lambda: graph_module.DiagramNode(
+                    name="planner",
+                    output_routes=["valid"],
+                ),
+                "diagram node output_routes must be a tuple of strings",
+            ),
+            (
+                lambda: graph_module.DiagramNode(
+                    name="planner",
+                    group=object(),
+                ),
+                "diagram node group must be a non-empty string",
+            ),
+            (
+                lambda: graph_module.DiagramNode(
+                    name="planner",
+                    metadata=(("ok", "value"), ("", "bad")),
+                ),
+                "diagram node metadata key must be a non-empty string",
+            ),
+            (
+                lambda: graph_module.DiagramNode(
+                    name="planner",
+                    metadata=(("ok", object()),),
+                ),
+                "diagram node metadata value must be a string",
+            ),
+            (
+                lambda: graph_module.DiagramNode(
+                    name="planner",
+                    thread_placement="main",
+                ),
+                "thread_placement must be a NodeThreadPlacement or None",
+            ),
+            (
+                lambda: graph_module.ManifestDiagramNode(
+                    name="planner",
+                    input_routes=("not-a-route",),
+                ),
+                "manifest diagram node input_routes must be a RouteRef",
+            ),
+            (
+                lambda: graph_module.ManifestDiagramNode(
+                    name="planner",
+                    output_routes=(route.route_ref,),
+                    metadata=(("ok", "value", "extra"),),
+                ),
+                "manifest diagram node metadata\\[\\] must be a string pair",
+            ),
+        )
+
+        for build, message in cases:
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(ValueError, message):
+                    build()
+
+    def test_register_diagram_node_rejects_invalid_optional_fields(self) -> None:
+        graph_module = load_graph_module()
+        graph = graph_module.Graph()
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "diagram node group must be a non-empty string",
+        ):
+            graph.register_diagram_node("planner", group=object())
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "thread_placement must be a NodeThreadPlacement or None",
+        ):
+            graph.register_diagram_node("planner", thread_placement="main")
+
     def test_context_rejects_blank_or_non_string_name(self) -> None:
         graph_module = load_graph_module()
         graph = graph_module.Graph()

@@ -453,6 +453,26 @@ class DiagramNode:
     metadata: tuple[tuple[str, str], ...] = ()
     thread_placement: NodeThreadPlacement | None = None
 
+    def __post_init__(self) -> None:
+        _require_non_empty_text(self.name, "diagram node name")
+        object.__setattr__(
+            self,
+            "input_routes",
+            _require_text_tuple(self.input_routes, "diagram node input_routes"),
+        )
+        object.__setattr__(
+            self,
+            "output_routes",
+            _require_text_tuple(self.output_routes, "diagram node output_routes"),
+        )
+        _require_optional_non_empty_text(self.group, "diagram node group")
+        object.__setattr__(
+            self,
+            "metadata",
+            _require_metadata_tuple(self.metadata, "diagram node metadata"),
+        )
+        _require_optional_thread_placement(self.thread_placement)
+
 
 @dataclass(frozen=True)
 class NodeThreadPlacement:
@@ -1263,6 +1283,32 @@ class ManifestDiagramNode:
     group: str | None = None
     metadata: tuple[tuple[str, str], ...] = ()
     thread_placement: NodeThreadPlacement | None = None
+
+    def __post_init__(self) -> None:
+        _require_non_empty_text(self.name, "manifest diagram node name")
+        object.__setattr__(
+            self,
+            "input_routes",
+            _require_route_ref_tuple(
+                self.input_routes,
+                "manifest diagram node input_routes",
+            ),
+        )
+        object.__setattr__(
+            self,
+            "output_routes",
+            _require_route_ref_tuple(
+                self.output_routes,
+                "manifest diagram node output_routes",
+            ),
+        )
+        _require_optional_non_empty_text(self.group, "manifest diagram node group")
+        object.__setattr__(
+            self,
+            "metadata",
+            _require_metadata_tuple(self.metadata, "manifest diagram node metadata"),
+        )
+        _require_optional_thread_placement(self.thread_placement)
 
 
 @dataclass(frozen=True)
@@ -7111,6 +7157,22 @@ def _require_text_tuple(value: object, field: str) -> tuple[str, ...]:
         raise ValueError(f"{field} must be a tuple of strings")
     for item in value:
         _require_non_empty_text(item, f"{field}[]")
+    return value
+
+
+def _require_metadata_tuple(
+    value: object,
+    field: str,
+) -> tuple[tuple[str, str], ...]:
+    if not isinstance(value, tuple):
+        raise ValueError(f"{field} must be a tuple of string pairs")
+    for item in value:
+        if not isinstance(item, tuple) or len(item) != 2:
+            raise ValueError(f"{field}[] must be a string pair")
+        key, metadata_value = item
+        _require_non_empty_text(key, f"{field} key")
+        if not isinstance(metadata_value, str):
+            raise ValueError(f"{field} value must be a string")
     return value
 
 
