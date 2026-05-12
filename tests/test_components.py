@@ -1067,6 +1067,16 @@ class ComponentTests(unittest.TestCase):
                 candidate_id="node-c",
             )
 
+    def test_consensus_component_rejects_invalid_graph_and_owner(self) -> None:
+        manyfold = load_manyfold_package()
+
+        with self.assertRaisesRegex(ValueError, "graph must be a Graph"):
+            manyfold.Consensus(object())  # type: ignore[arg-type]
+        with self.assertRaisesRegex(ValueError, "consensus owner"):
+            manyfold.Consensus(manyfold.Graph(), owner="   ")
+        with self.assertRaisesRegex(ValueError, "consensus owner"):
+            manyfold.Consensus(manyfold.Graph(), owner=7)  # type: ignore[arg-type]
+
     def test_consensus_component_requires_at_least_one_node(self) -> None:
         manyfold = load_manyfold_package()
 
@@ -1089,6 +1099,13 @@ class ComponentTests(unittest.TestCase):
 
     def test_consensus_component_rejects_non_string_node_ids(self) -> None:
         manyfold = load_manyfold_package()
+
+        with self.assertRaisesRegex(ValueError, "nodes must be a tuple"):
+            manyfold.Consensus(
+                manyfold.Graph(),
+                nodes=["node-a", "node-b"],  # type: ignore[arg-type]
+                candidate_id="node-a",
+            )
 
         for nodes in (("", "node-b"), ("node-a", "   "), ("node-a", 7)):
             with self.subTest(nodes=nodes):
@@ -1142,6 +1159,34 @@ class ComponentTests(unittest.TestCase):
                         manyfold.Graph(),
                         **{keyword: value},
                     )
+
+    def test_consensus_component_rejects_invalid_operations(self) -> None:
+        manyfold = load_manyfold_package()
+        consensus = manyfold.Consensus.install(manyfold.Graph())
+
+        for control_epoch in (-1, True):
+            with self.subTest(control_epoch=control_epoch):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "control_epoch must be a non-negative integer",
+                ):
+                    consensus.tick(control_epoch)  # type: ignore[arg-type]
+
+        for index in (-1, False):
+            with self.subTest(index=index):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "index must be a non-negative integer",
+                ):
+                    consensus.propose(index, "set mode=auto")  # type: ignore[arg-type]
+
+        for command in ("", "   ", 7):
+            with self.subTest(command=command):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "command must be a non-empty string",
+                ):
+                    consensus.propose(1, command)  # type: ignore[arg-type]
 
     def test_memory_chip_records_and_resumes_typed_route_values(self) -> None:
         manyfold = load_manyfold_package()

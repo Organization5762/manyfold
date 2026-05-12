@@ -690,6 +690,10 @@ class Consensus:
         term: int = 3,
         election_timeout_ticks: int = 2,
     ) -> None:
+        _require_graph(graph)
+        _require_component_name(owner, "consensus owner")
+        if not isinstance(nodes, tuple):
+            raise ValueError("nodes must be a tuple")
         if not nodes:
             raise ValueError("nodes must contain at least one node")
         if not all(isinstance(node, str) and node.strip() for node in nodes):
@@ -886,6 +890,7 @@ class Consensus:
 
     def tick(self, control_epoch: int) -> None:
         """Advance the election clock by publishing one tick."""
+        _require_non_negative_int(control_epoch, "control_epoch")
         self.graph.publish(
             self.routes.election_tick,
             f"tick-{control_epoch}".encode("ascii"),
@@ -905,6 +910,8 @@ class Consensus:
 
     def propose(self, index: int, command: str) -> None:
         """Publish a proposed append entry into the consensus log."""
+        _require_non_negative_int(index, "index")
+        _require_component_name(command, "command")
         self.graph.publish(self.routes.proposed_entries, (index, command))
 
     def latest_leader(self) -> LeaderState | None:
