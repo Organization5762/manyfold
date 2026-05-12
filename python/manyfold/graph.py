@@ -1255,6 +1255,40 @@ class ScheduledWrite:
     attempt_count: int = 0
     last_attempt_epoch: int | None = None
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.target, (TypedRoute, RouteRef, Source, Sink, WriteBinding)):
+            raise ValueError(
+                "scheduled write target must be a route-like value or WriteBinding"
+            )
+        _require_optional_epoch(self.not_before_epoch, "not_before_epoch")
+        if self.wait_for_ack is not None:
+            _require_route_like(self.wait_for_ack, "wait_for_ack")
+        _require_optional_epoch(self.expires_at_epoch, "expires_at_epoch")
+        if self.producer is not None and not isinstance(self.producer, ProducerRef):
+            raise ValueError("producer must be a ProducerRef or None")
+        _validate_control_epoch(self.control_epoch)
+        if self.retry_policy is not None and not isinstance(
+            self.retry_policy, RetryPolicy
+        ):
+            raise ValueError("retry_policy must be a RetryPolicy or None")
+        if self.ack_route is not None:
+            _require_route_like(self.ack_route, "ack_route")
+        if self.ack_route is None and self.retry_policy is not None:
+            raise ValueError("retry_policy requires an ack_route")
+        _require_integer(self.ack_baseline_seq, "ack_baseline_seq")
+        if self.ack_baseline_seq < -1:
+            raise ValueError("ack_baseline_seq must be at least -1")
+        _require_optional_non_empty_text(self.trace_id, "trace_id")
+        _require_optional_non_empty_text(self.causality_id, "causality_id")
+        _require_optional_non_empty_text(self.correlation_id, "correlation_id")
+        if not isinstance(self.parent_events, tuple):
+            raise ValueError("parent_events must be a tuple of EventRef values")
+        for parent in self.parent_events:
+            if not isinstance(parent, EventRef):
+                raise ValueError("parent_events must be a tuple of EventRef values")
+        _require_non_negative_integer(self.attempt_count, "attempt_count")
+        _require_optional_epoch(self.last_attempt_epoch, "last_attempt_epoch")
+
 
 @dataclass(frozen=True)
 class RetryPolicy:
@@ -6956,6 +6990,15 @@ def _require_optional_thread_placement(value: object) -> None:
 def _require_non_negative_integer(value: object, field: str) -> None:
     if not isinstance(value, int) or isinstance(value, bool) or value < 0:
         raise ValueError(f"{field} must be a non-negative integer")
+
+
+def _require_optional_epoch(value: object, field: str) -> None:
+    if value is None:
+        return
+    try:
+        _require_non_negative_integer(value, field)
+    except ValueError as exc:
+        raise ValueError(f"{field} must be a non-negative integer or None") from exc
 
 
 def _require_progress_value(value: object) -> int:

@@ -6622,6 +6622,114 @@ assert graph.latest(route) is None
                 retry_policy=graph_module.RetryPolicy.never(),
             )
 
+    def test_publish_guarded_rejects_invalid_schedule_fields_without_side_effect(
+        self,
+    ) -> None:
+        graph_module = load_graph_module()
+        request = graph_module.route(
+            plane=graph_module.Plane.Write,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heater"),
+            family=graph_module.StreamFamily("temperature"),
+            stream=graph_module.StreamName("target"),
+            variant=graph_module.Variant.Request,
+            schema=graph_module.Schema.bytes(name="TemperatureTarget"),
+        )
+        graph = graph_module.Graph()
+
+        cases = (
+            (
+                "target",
+                lambda: graph.publish_guarded(
+                    object(),  # type: ignore[arg-type]
+                    b"22",
+                ),
+                "scheduled write target",
+            ),
+            (
+                "not_before_epoch",
+                lambda: graph.publish_guarded(
+                    request,
+                    b"22",
+                    not_before_epoch=-1,
+                ),
+                "not_before_epoch",
+            ),
+            (
+                "wait_for_ack",
+                lambda: graph.publish_guarded(
+                    request,
+                    b"22",
+                    wait_for_ack=object(),  # type: ignore[arg-type]
+                ),
+                "wait_for_ack",
+            ),
+            (
+                "expires_at_epoch",
+                lambda: graph.publish_guarded(
+                    request,
+                    b"22",
+                    expires_at_epoch=True,  # type: ignore[arg-type]
+                ),
+                "expires_at_epoch",
+            ),
+            (
+                "trace_id",
+                lambda: graph.publish_guarded(
+                    request,
+                    b"22",
+                    trace_id=" ",
+                ),
+                "trace_id",
+            ),
+            (
+                "parent_events",
+                lambda: graph.publish_guarded(
+                    request,
+                    b"22",
+                    parent_events=(object(),),  # type: ignore[arg-type]
+                ),
+                "parent_events",
+            ),
+        )
+        for field, call, message in cases:
+            with self.subTest(field=field):
+                before = tuple(graph.scheduler_snapshot())
+                with self.assertRaisesRegex(ValueError, message):
+                    call()
+                self.assertEqual(tuple(graph.scheduler_snapshot()), before)
+
+    def test_scheduled_write_rejects_invalid_retry_state(self) -> None:
+        graph_module = load_graph_module()
+        request = graph_module.route(
+            plane=graph_module.Plane.Write,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heater"),
+            family=graph_module.StreamFamily("temperature"),
+            stream=graph_module.StreamName("direct_target"),
+            variant=graph_module.Variant.Request,
+            schema=graph_module.Schema.bytes(name="DirectTemperatureTarget"),
+        )
+
+        with self.assertRaisesRegex(ValueError, "ack_baseline_seq"):
+            graph_module.ScheduledWrite(
+                target=request,
+                payload=b"22",
+                ack_baseline_seq=-2,
+            )
+        with self.assertRaisesRegex(ValueError, "attempt_count"):
+            graph_module.ScheduledWrite(
+                target=request,
+                payload=b"22",
+                attempt_count=-1,
+            )
+        with self.assertRaisesRegex(ValueError, "last_attempt_epoch"):
+            graph_module.ScheduledWrite(
+                target=request,
+                payload=b"22",
+                last_attempt_epoch=False,  # type: ignore[arg-type]
+            )
+
     def test_retry_policy_rejects_non_positive_attempts_and_negative_backoff(
         self,
     ) -> None:
