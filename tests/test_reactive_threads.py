@@ -313,6 +313,17 @@ class ReactiveThreadsTests(unittest.TestCase):
 
         self.assertEqual(values, ["a", "b"])
 
+    def test_materialize_sequence_snapshots_one_shot_iterables(self) -> None:
+        observable = self.reactive_threads.materialize_sequence(iter(["a", "b"]))
+        first_values: list[str] = []
+        second_values: list[str] = []
+
+        observable.subscribe(first_values.append)
+        observable.subscribe(second_values.append)
+
+        self.assertEqual(first_values, ["a", "b"])
+        self.assertEqual(second_values, ["a", "b"])
+
     def test_background_threaded_observable_disposes_subscription_on_exit(self) -> None:
         subscribed = Event()
         disposable = RecordingDisposable()
