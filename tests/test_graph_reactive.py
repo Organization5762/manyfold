@@ -1459,6 +1459,91 @@ assert graph.latest(route) is None
         topology = list(graph.topology())
         self.assertEqual(len(topology), 2)
 
+    def test_join_input_rejects_invalid_configuration(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("left"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("accel"),
+            variant=graph_module.Variant.Meta,
+            schema=graph_module.Schema.bytes(name="Accel"),
+        )
+
+        for kwargs, message in (
+            ({"route": object()}, "join route must be"),
+            (
+                {"partition_key_semantics": ""},
+                "join partition_key_semantics must be a non-empty string",
+            ),
+            (
+                {"ordering_guarantee": " "},
+                "join ordering_guarantee must be a non-empty string",
+            ),
+            ({"watermark_semantics": 1}, "join watermark_semantics must be"),
+            ({"state_retention": ""}, "join state_retention must be"),
+            ({"clock_domain": ""}, "join clock_domain must be"),
+            ({"materialized_view": 1}, "join materialized_view must be a boolean"),
+            (
+                {"deterministic_rekey": "yes"},
+                "join deterministic_rekey must be a boolean",
+            ),
+            (
+                {"broadcast_mirror_eligible": None},
+                "join broadcast_mirror_eligible must be a boolean",
+            ),
+        ):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    graph_module.JoinInput(
+                        **{
+                            "route": route,
+                            "partition_key_semantics": "device_id",
+                            **kwargs,
+                        }
+                    )
+
+    def test_plan_join_rejects_invalid_setup_before_registering_routes(self) -> None:
+        graph_module = load_graph_module()
+        left = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("left"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("accel"),
+            variant=graph_module.Variant.Meta,
+            schema=graph_module.Schema.bytes(name="Accel"),
+        )
+        right = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("right"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("gyro"),
+            variant=graph_module.Variant.Meta,
+            schema=graph_module.Schema.bytes(name="Gyro"),
+        )
+        left_input = graph_module.JoinInput(left, partition_key_semantics="device_id")
+        right_input = graph_module.JoinInput(right, partition_key_semantics="device_id")
+
+        for args, message in (
+            (("", left_input, right_input), "join name must be a non-empty string"),
+            (
+                ("bad_left", object(), right_input),
+                "left join input must be a JoinInput",
+            ),
+            (
+                ("bad_right", left_input, object()),
+                "right join input must be a JoinInput",
+            ),
+        ):
+            with self.subTest(args=args):
+                graph = graph_module.Graph()
+                with self.assertRaisesRegex(ValueError, message):
+                    graph.plan_join(*args)
+                self.assertEqual(list(graph.catalog()), [])
+
     def test_topology_edges_are_reported_in_stable_display_order(self) -> None:
         graph_module = load_graph_module()
 

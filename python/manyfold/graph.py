@@ -355,6 +355,22 @@ class JoinInput:
     deterministic_rekey: bool = True
     broadcast_mirror_eligible: bool = False
 
+    def __post_init__(self) -> None:
+        _require_route_like(self.route, "join route")
+        _require_non_empty_text(
+            self.partition_key_semantics, "join partition_key_semantics"
+        )
+        _require_non_empty_text(self.ordering_guarantee, "join ordering_guarantee")
+        _require_non_empty_text(self.watermark_semantics, "join watermark_semantics")
+        _require_non_empty_text(self.state_retention, "join state_retention")
+        _require_non_empty_text(self.clock_domain, "join clock_domain")
+        _require_bool(self.materialized_view, "join materialized_view")
+        _require_bool(self.deterministic_rekey, "join deterministic_rekey")
+        _require_bool(
+            self.broadcast_mirror_eligible,
+            "join broadcast_mirror_eligible",
+        )
+
 
 @dataclass(frozen=True)
 class JoinPlan:
@@ -6444,6 +6460,11 @@ class Graph:
         The method makes repartition boundaries explicit by registering visible
         internal routes that also appear in topology and debug output.
         """
+        _require_non_empty_text(name, "join name")
+        if not isinstance(left, JoinInput):
+            raise ValueError("left join input must be a JoinInput")
+        if not isinstance(right, JoinInput):
+            raise ValueError("right join input must be a JoinInput")
         left_route = self.register_port(left.route)
         right_route = self.register_port(right.route)
         if left.clock_domain != right.clock_domain:
@@ -6858,6 +6879,11 @@ def _require_callable(value: object, field: str) -> None:
 def _require_optional_callable(value: object, field: str) -> None:
     if value is not None:
         _require_callable(value, field)
+
+
+def _require_route_like(value: object, field: str) -> None:
+    if not isinstance(value, (TypedRoute, RouteRef, Source, Sink)):
+        raise ValueError(f"{field} must be a TypedRoute, RouteRef, Source, or Sink")
 
 
 def _require_optional_thread_placement(value: object) -> None:
