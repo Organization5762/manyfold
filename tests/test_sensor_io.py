@@ -1179,6 +1179,17 @@ class SensorIoTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, message):
                     token.wait(timeout)  # type: ignore[arg-type]
 
+    def test_retry_policy_rejects_non_iterable_retry_types(self) -> None:
+        manyfold = load_manyfold_package()
+
+        for retry_on in (RuntimeError, None, object()):
+            with self.subTest(retry_on=retry_on):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "retry_on must be an iterable of exception types",
+                ):
+                    manyfold.SensorRetryPolicy(retry_on=retry_on)  # type: ignore[arg-type]
+
     def test_managed_run_loop_retries_until_stopped(self) -> None:
         manyfold = load_manyfold_package()
         attempts = 0
@@ -1807,6 +1818,86 @@ class SensorIoTests(unittest.TestCase):
         self.assertEqual([event.source_id for event in snapshot], ["two", "three"])
         self.assertEqual([event.timestamp for event in snapshot], [12.0, 13.0])
         self.assertEqual(snapshot[-1].upstream_ids, ("sensor", "three"))
+
+    def test_sensor_debug_envelope_rejects_invalid_fields(self) -> None:
+        manyfold = load_manyfold_package()
+
+        invalid_inputs = (
+            ({"stage": "raw"}, "debug envelope stage must be a SensorDebugStage"),
+            (
+                {"stream_name": " "},
+                "debug envelope stream_name must be a non-empty string",
+            ),
+            (
+                {"source_id": ""},
+                "debug envelope source_id must be a non-empty string",
+            ),
+            (
+                {"timestamp": float("inf")},
+                "debug envelope timestamp must be a finite number",
+            ),
+            (
+                {"upstream_ids": "sensor"},
+                "debug envelope upstream_ids must be an iterable of strings",
+            ),
+            (
+                {"upstream_ids": ("sensor", "")},
+                r"debug envelope upstream_ids\[\] must be a non-empty string",
+            ),
+        )
+
+        for kwargs, message in invalid_inputs:
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    manyfold.SensorDebugEnvelope(
+                        **{
+                            "stage": manyfold.SensorDebugStage.RAW,
+                            "stream_name": "temperature",
+                            "source_id": "probe",
+                            "timestamp": 10.0,
+                            "payload": {"value": 21},
+                            **kwargs,
+                        }
+                    )
+
+    def test_sensor_debug_tap_rejects_invalid_clock_and_publish_metadata(self) -> None:
+        manyfold = load_manyfold_package()
+
+        with self.assertRaisesRegex(
+            ValueError, r"sensor debug tap clock must provide now\(\)"
+        ):
+            manyfold.SensorDebugTap(clock=object())  # type: ignore[arg-type]
+
+        tap = manyfold.SensorDebugTap()
+
+        invalid_inputs = (
+            ({"stage": "raw"}, "debug envelope stage must be a SensorDebugStage"),
+            (
+                {"stream_name": ""},
+                "debug envelope stream_name must be a non-empty string",
+            ),
+            (
+                {"source_id": " "},
+                "debug envelope source_id must be a non-empty string",
+            ),
+            (
+                {"upstream_ids": ("sensor", object())},
+                r"debug envelope upstream_ids\[\] must be a string",
+            ),
+        )
+
+        for kwargs, message in invalid_inputs:
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    tap.publish(
+                        **{
+                            "stage": manyfold.SensorDebugStage.RAW,
+                            "stream_name": "temperature",
+                            "source_id": "probe",
+                            "payload": {"value": 21},
+                            **kwargs,
+                        }
+                    )
 
     def test_sensor_debug_tap_rejects_empty_history(self) -> None:
         manyfold = load_manyfold_package()

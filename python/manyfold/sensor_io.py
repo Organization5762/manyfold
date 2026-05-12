@@ -270,7 +270,11 @@ class RetryPolicy:
         )
         if self.max_attempts <= 0:
             raise ValueError("max_attempts must be positive")
-        object.__setattr__(self, "retry_on", tuple(self.retry_on))
+        try:
+            retry_on = tuple(self.retry_on)
+        except TypeError as exc:
+            raise ValueError("retry_on must be an iterable of exception types") from exc
+        object.__setattr__(self, "retry_on", retry_on)
         if not self.retry_on:
             raise ValueError("retry_on must contain at least one exception type")
         if not all(_is_exception_class(exception) for exception in self.retry_on):
