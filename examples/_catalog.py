@@ -44,6 +44,23 @@ _README_EXAMPLE_GROUPS = {
 }
 
 
+def _require_non_blank_text(value: object, message: str) -> None:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(message)
+
+
+def _require_positive_integer(
+    value: object,
+    *,
+    type_message: str,
+    value_message: str,
+) -> None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(type_message)
+    if value <= 0:
+        raise ValueError(value_message)
+
+
 @dataclass(frozen=True)
 class ExampleCatalogEntry:
     """Describe one example module and how it should surface in the repo."""
@@ -56,8 +73,10 @@ class ExampleCatalogEntry:
     reference_title: str | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.module_name, str) or not self.module_name.strip():
-            raise ValueError("example catalog module name must be a non-empty string")
+        _require_non_blank_text(
+            self.module_name,
+            "example catalog module name must be a non-empty string",
+        )
         if _MODULE_NAME_RE.fullmatch(self.module_name) is None:
             raise ValueError(
                 "example catalog module name must be a dotted Python module path"
@@ -71,11 +90,12 @@ class ExampleCatalogEntry:
             or not isinstance(self.readme_order, int)
         ):
             raise TypeError("example catalog readme_order must be an integer")
-        if self.reference_number is not None and (
-            isinstance(self.reference_number, bool)
-            or not isinstance(self.reference_number, int)
-        ):
-            raise TypeError("example catalog reference number must be an integer")
+        if self.reference_number is not None:
+            _require_positive_integer(
+                self.reference_number,
+                type_message="example catalog reference number must be an integer",
+                value_message="example catalog reference number must be positive",
+            )
         if self.reference_title is not None and (
             not isinstance(self.reference_title, str)
             or not self.reference_title.strip()
@@ -110,12 +130,11 @@ class ReferenceExampleGap:
     summary: str
 
     def __post_init__(self) -> None:
-        if isinstance(self.reference_number, bool) or not isinstance(
-            self.reference_number, int
-        ):
-            raise TypeError("reference example gap number must be an integer")
-        if self.reference_number <= 0:
-            raise ValueError("reference example gap number must be positive")
+        _require_positive_integer(
+            self.reference_number,
+            type_message="reference example gap number must be an integer",
+            value_message="reference example gap number must be positive",
+        )
         if not isinstance(self.reference_title, str) or not self.reference_title.strip():
             raise ValueError("reference example gap title must be a non-empty string")
         if not isinstance(self.summary, str) or not self.summary.strip():
@@ -334,6 +353,10 @@ REFERENCE_EXAMPLE_GAP_BY_NUMBER: dict[int, ReferenceExampleGap] = {
 def catalog_entry(module_name: str) -> ExampleCatalogEntry:
     """Return one catalog entry by module name."""
 
+    _require_non_blank_text(
+        module_name,
+        "example catalog module name must be a non-empty string",
+    )
     try:
         return EXAMPLE_CATALOG_BY_MODULE[module_name]
     except KeyError as error:
@@ -345,6 +368,11 @@ def reference_example_metadata(
 ) -> ExampleCatalogEntry | ReferenceExampleGap:
     """Return implemented or gap metadata for one RFC reference example number."""
 
+    _require_positive_integer(
+        number,
+        type_message="RFC reference example number must be an integer",
+        value_message="RFC reference example number must be positive",
+    )
     if entry := REFERENCE_EXAMPLE_ENTRY_BY_NUMBER.get(number):
         return entry
     if gap := REFERENCE_EXAMPLE_GAP_BY_NUMBER.get(number):

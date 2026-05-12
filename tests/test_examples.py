@@ -885,6 +885,15 @@ class ExampleTests(unittest.TestCase):
                 reference_title="Broken reference",
             )
 
+    def test_catalog_entry_rejects_non_positive_reference_number(self) -> None:
+        with self.assertRaisesRegex(ValueError, "reference number must be positive"):
+            ExampleCatalogEntry(
+                "simple_latest",
+                "Broken zero reference number.",
+                reference_number=0,
+                reference_title="Broken reference",
+            )
+
     def test_reference_example_gap_rejects_blank_metadata(self) -> None:
         with self.assertRaisesRegex(ValueError, "gap title must be a non-empty"):
             ReferenceExampleGap(1, " ", "Broken blank title.")
@@ -902,6 +911,20 @@ class ExampleTests(unittest.TestCase):
             catalog_entry("missing_example")
         with self.assertRaisesRegex(KeyError, "unknown RFC reference example"):
             reference_example_metadata(99)
+
+    def test_catalog_lookup_helpers_reject_malformed_keys(self) -> None:
+        for value in ("", " "):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "module name must be a non-empty"):
+                    catalog_entry(value)
+
+        for value in (True, 0, "1"):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(
+                    (TypeError, ValueError),
+                    "RFC reference example number",
+                ):
+                    reference_example_metadata(value)  # type: ignore[arg-type]
 
     def test_internal_entry_manifests_partition_catalog(self) -> None:
         self.assertEqual(
