@@ -2131,8 +2131,9 @@ def _require_mapping(value: Any, field: str) -> Mapping[Any, Any]:
     return value
 
 
-def _mapping_key_sort_key(key: Any) -> tuple[str, str]:
-    return (type(key).__qualname__, str(key))
+def _mapping_key_sort_key(key: Any) -> tuple[str, str, str]:
+    key_type = type(key)
+    return (key_type.__module__, key_type.__qualname__, str(key))
 
 
 def _compact_json_bytes(value: Mapping[str, Any]) -> bytes:
