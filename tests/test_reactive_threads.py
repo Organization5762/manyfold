@@ -193,6 +193,10 @@ class ReactiveThreadsTests(unittest.TestCase):
                 ):
                     self.reactive_threads.drain_frame_thread_queue(max_items=max_items)
 
+    def test_drain_frame_thread_queue_rejects_negative_limit(self) -> None:
+        with self.assertRaisesRegex(ValueError, "max_items must not be negative"):
+            self.reactive_threads.drain_frame_thread_queue(max_items=-1)
+
     def test_latency_snapshot_reports_percentiles_from_sorted_samples(self) -> None:
         recorder = self.reactive_threads._LatencyRecorder()
 
@@ -323,6 +327,12 @@ class ReactiveThreadsTests(unittest.TestCase):
 
         self.assertEqual(first_values, ["a", "b"])
         self.assertEqual(second_values, ["a", "b"])
+
+    def test_materialize_sequence_rejects_non_iterables(self) -> None:
+        for sequence in (None, 7, object()):
+            with self.subTest(sequence=sequence):
+                with self.assertRaisesRegex(ValueError, "sequence must be iterable"):
+                    self.reactive_threads.materialize_sequence(sequence)
 
     def test_background_threaded_observable_disposes_subscription_on_exit(self) -> None:
         subscribed = Event()

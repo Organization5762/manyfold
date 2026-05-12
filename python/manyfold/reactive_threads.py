@@ -247,7 +247,9 @@ def drain_frame_thread_queue(max_items: int | None = None) -> int:
     if max_items is not None:
         if isinstance(max_items, bool) or not isinstance(max_items, int):
             raise ValueError("max_items must be an integer or None")
-        if max_items <= 0:
+        if max_items < 0:
+            raise ValueError("max_items must not be negative")
+        if max_items == 0:
             return 0
 
     global _FRAME_THREAD_IDENT
@@ -433,6 +435,8 @@ def reset_reactive_threading_state_for_tests() -> None:
 def materialize_sequence(sequence: Iterable[T]) -> Observable[T]:
     """Return a materialized observable over an iterable sequence."""
 
+    if not isinstance(sequence, Iterable):
+        raise ValueError("sequence must be iterable")
     snapshot = tuple(sequence)
     return rx.from_iterable(snapshot)
 
