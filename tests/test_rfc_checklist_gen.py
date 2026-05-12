@@ -199,6 +199,21 @@ class RfcChecklistGenTests(unittest.TestCase):
             generator.CHECKLIST_STATUS = original_checklist_status
             generator.APPENDIX_STATUS = original_appendix_status
 
+    def test_coverage_issues_reports_duplicates_deterministically(self) -> None:
+        generator = load_generator()
+
+        self.assertEqual(
+            generator._coverage_issues(
+                expected={"6": object(), "7": object(), "8": object()},
+                actual=["8", "6", "8", "6"],
+                label="RFC section status",
+            ),
+            (
+                "missing RFC section status entries: 7",
+                "duplicate RFC section status entries: 6, 8",
+            ),
+        )
+
     def test_checklist_output_matches_repository(self) -> None:
         generator = load_generator()
         sections, appendix_items = generator.parse_rfc_sections()

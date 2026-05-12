@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Mapping, Protocol
@@ -319,7 +320,9 @@ def _coverage_issues(
 ) -> tuple[str, ...]:
     expected_keys = set(expected)
     actual_keys = set(actual)
-    duplicate_keys = tuple(key for key in actual_keys if actual.count(key) > 1)
+    duplicate_keys = tuple(
+        sorted(key for key, count in Counter(actual).items() if count > 1)
+    )
     issues: list[str] = []
     if missing_keys := tuple(sorted(expected_keys - actual_keys)):
         issues.append(f"missing {label} entries: {', '.join(missing_keys)}")
