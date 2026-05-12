@@ -12,7 +12,7 @@ import logging
 import math
 import os
 import time
-from collections import defaultdict, deque
+from collections import deque
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -90,9 +90,7 @@ class _LatencyRecorder:
         ):
             raise ValueError("history_size must be a positive integer")
         self._history_size = history_size
-        self._history: dict[str, deque[float]] = defaultdict(
-            lambda: deque(maxlen=self._history_size)
-        )
+        self._history: dict[str, deque[float]] = {}
         self._lock = Lock()
 
     def record(self, stream_name: str, delay_s: float) -> None:
@@ -101,7 +99,11 @@ class _LatencyRecorder:
         if not math.isfinite(delay_s):
             delay_s = 0.0
         with self._lock:
-            self._history[stream_name].append(max(delay_s, 0.0))
+            history = self._history.get(stream_name)
+            if history is None:
+                history = deque(maxlen=self._history_size)
+                self._history[stream_name] = history
+            history.append(max(delay_s, 0.0))
 
     def snapshot(self) -> dict[str, DeliveryLatencyStats]:
         with self._lock:
