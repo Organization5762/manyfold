@@ -15,6 +15,9 @@ class StatsTests(unittest.TestCase):
     def test_average_uses_latest_values_within_window(self) -> None:
         self.assertEqual(Average(window_size=3)([1.0, 2.0, 9.0, 10.0]), 7.0)
 
+    def test_average_uses_latest_value_directly_for_single_value_window(self) -> None:
+        self.assertEqual(Average(window_size=1)([1.0, 2.0, 9.0, 10.0]), 10.0)
+
     def test_average_uses_all_values_when_window_exceeds_input(self) -> None:
         self.assertEqual(Average(window_size=10)([1.0, 2.0, 9.0]), 4.0)
 
