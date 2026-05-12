@@ -821,6 +821,24 @@ class Capacitor:
     immediate: bool
     overflow: str
 
+    def __post_init__(self) -> None:
+        _require_non_empty_text(self.name, "capacitor name")
+        _require_route_like(self.source, "capacitor source")
+        _require_route_like(self.sink, "capacitor sink")
+        _require_integer(self.capacity, "capacitor capacity")
+        if self.capacity <= 0:
+            raise ValueError("capacitor capacity must be positive")
+        if self.demand is not None:
+            _require_route_like(self.demand, "capacitor demand")
+        _require_bool(self.immediate, "capacitor immediate")
+        _require_non_empty_text(self.overflow, "capacitor overflow")
+        if self.overflow not in {"latest", "drop_oldest", "reject"}:
+            raise ValueError(
+                "capacitor overflow must be one of 'latest', 'drop_oldest', or 'reject'"
+            )
+        if self.immediate and self.demand is not None:
+            raise ValueError("pass either immediate=True or demand, not both")
+
 
 @dataclass(frozen=True)
 class Resistor:
@@ -831,6 +849,14 @@ class Resistor:
     sink: RouteLike
     gate: Callable[[Any], bool] | None
     release: RouteLike | None
+
+    def __post_init__(self) -> None:
+        _require_non_empty_text(self.name, "resistor name")
+        _require_route_like(self.source, "resistor source")
+        _require_route_like(self.sink, "resistor sink")
+        _require_optional_callable(self.gate, "resistor gate")
+        if self.release is not None:
+            _require_route_like(self.release, "resistor release")
 
 
 @dataclass(frozen=True)
@@ -843,6 +869,15 @@ class Watchdog:
     after: int
     clock: RouteLike
     pulse: Any = b"timeout"
+
+    def __post_init__(self) -> None:
+        _require_non_empty_text(self.name, "watchdog name")
+        _require_route_like(self.reset_by, "watchdog reset_by")
+        _require_route_like(self.output, "watchdog output")
+        _require_integer(self.after, "watchdog timeout")
+        if self.after <= 0:
+            raise ValueError("watchdog timeout must be positive")
+        _require_route_like(self.clock, "watchdog clock")
 
 
 @dataclass(frozen=True)

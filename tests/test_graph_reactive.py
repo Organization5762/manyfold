@@ -3632,6 +3632,108 @@ assert graph.latest(route) is None
                 with self.assertRaisesRegex(ValueError, message):
                     graph.capacitor(source=source, sink=sampled, **kwargs)
 
+    def test_active_flow_records_validate_direct_construction(self) -> None:
+        graph_module = load_graph_module()
+
+        source = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("imu"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("active_flow_source"),
+            variant=graph_module.Variant.Meta,
+            schema=int_schema(graph_module, "ActiveFlowSource"),
+        )
+        sink = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("imu"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("active_flow_sink"),
+            variant=graph_module.Variant.Meta,
+            schema=int_schema(graph_module, "ActiveFlowSink"),
+        )
+
+        invalid_inputs = (
+            (
+                graph_module.Capacitor,
+                {
+                    "name": "",
+                    "source": source,
+                    "sink": sink,
+                    "capacity": 1,
+                    "demand": None,
+                    "immediate": False,
+                    "overflow": "latest",
+                },
+                "capacitor name",
+            ),
+            (
+                graph_module.Capacitor,
+                {
+                    "name": "bad-cap",
+                    "source": object(),
+                    "sink": sink,
+                    "capacity": 1,
+                    "demand": None,
+                    "immediate": False,
+                    "overflow": "latest",
+                },
+                "capacitor source",
+            ),
+            (
+                graph_module.Capacitor,
+                {
+                    "name": "bad-cap",
+                    "source": source,
+                    "sink": sink,
+                    "capacity": 0,
+                    "demand": None,
+                    "immediate": False,
+                    "overflow": "latest",
+                },
+                "capacitor capacity must be positive",
+            ),
+            (
+                graph_module.Resistor,
+                {
+                    "name": "bad-resistor",
+                    "source": source,
+                    "sink": sink,
+                    "gate": object(),
+                    "release": None,
+                },
+                "resistor gate must be callable",
+            ),
+            (
+                graph_module.Watchdog,
+                {
+                    "name": "bad-watchdog",
+                    "reset_by": source,
+                    "output": sink,
+                    "after": True,
+                    "clock": source,
+                },
+                "watchdog timeout must be an integer",
+            ),
+            (
+                graph_module.Watchdog,
+                {
+                    "name": "bad-watchdog",
+                    "reset_by": source,
+                    "output": object(),
+                    "after": 1,
+                    "clock": source,
+                },
+                "watchdog output",
+            ),
+        )
+
+        for record_type, kwargs, message in invalid_inputs:
+            with self.subTest(record_type=record_type.__name__, message=message):
+                with self.assertRaisesRegex(ValueError, message):
+                    record_type(**kwargs)
+
     def test_capacitor_disposes_source_when_demand_subscription_fails(self) -> None:
         graph_module = load_graph_module()
 
