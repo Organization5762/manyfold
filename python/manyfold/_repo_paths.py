@@ -56,6 +56,7 @@ def load_module_from_path(module_name: str, module_path: Path) -> ModuleType:
         raise ImportError(
             f"unable to load module {module_name!r} from {resolved_module_path}"
         )
+    # Leave import state unchanged when an explicit file load fails mid-exec.
     previous_module = sys.modules.get(module_name)
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
