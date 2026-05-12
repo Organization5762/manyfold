@@ -50,9 +50,12 @@ def load_module_from_path(module_name: str, module_path: Path) -> ModuleType:
     normal import-time introspection, such as dataclass type resolution, works.
     """
 
-    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    resolved_module_path = module_path.expanduser().resolve()
+    spec = importlib.util.spec_from_file_location(module_name, resolved_module_path)
     if spec is None or spec.loader is None:
-        raise ImportError(f"unable to load module {module_name!r} from {module_path}")
+        raise ImportError(
+            f"unable to load module {module_name!r} from {resolved_module_path}"
+        )
     previous_module = sys.modules.get(module_name)
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
