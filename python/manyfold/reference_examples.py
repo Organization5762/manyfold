@@ -87,6 +87,16 @@ class ReferenceExample:
             raise ValueError("reference example module name must be a non-empty string")
         if self.runner is not None and not callable(self.runner):
             raise TypeError("reference example runner must be callable")
+        if self.implemented and (self.module_name is None or self.runner is None):
+            raise ValueError(
+                "implemented reference examples must include module_name and runner"
+            )
+        if not self.implemented and (
+            self.module_name is not None or self.runner is not None
+        ):
+            raise ValueError(
+                "missing reference examples cannot include module_name or runner"
+            )
 
 
 def _example_runner(import_path: str) -> ExampleRunner:

@@ -377,6 +377,28 @@ class ReferenceExampleSuiteTests(unittest.TestCase):
                 runner="run",
             )
 
+        with self.assertRaisesRegex(ValueError, "implemented reference examples"):
+            manyfold.ReferenceExample(1, "Example", "Summary", True)
+
+        with self.assertRaisesRegex(ValueError, "implemented reference examples"):
+            manyfold.ReferenceExample(
+                1,
+                "Example",
+                "Summary",
+                True,
+                module_name="examples.simple_latest",
+            )
+
+        with self.assertRaisesRegex(ValueError, "missing reference examples"):
+            manyfold.ReferenceExample(
+                1,
+                "Example",
+                "Summary",
+                False,
+                module_name="examples.simple_latest",
+                runner=lambda: None,
+            )
+
     def test_reference_example_suite_uses_shared_example_catalog(self) -> None:
         manyfold = load_manyfold_package()
 
