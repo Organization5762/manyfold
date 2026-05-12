@@ -393,18 +393,20 @@ def _module_name_from_path(path: Path) -> str:
     return path.relative_to(_EXAMPLES_DIR).with_suffix("").as_posix().replace("/", ".")
 
 
+def _module_sort_key(module_name: str) -> tuple[bool, str]:
+    return (module_name.startswith("archived."), module_name)
+
+
 def _discover_manifestable_modules() -> tuple[str, ...]:
-    discovered: list[str] = []
-    for path in _EXAMPLES_DIR.rglob("*.py"):
-        if "__pycache__" in path.parts:
-            continue
-        if path.stem in _IGNORED_MODULE_NAMES:
-            continue
-        discovered.append(_module_name_from_path(path))
     return tuple(
         sorted(
-            discovered,
-            key=lambda module_name: (module_name.startswith("archived."), module_name),
+            (
+                _module_name_from_path(path)
+                for path in _EXAMPLES_DIR.rglob("*.py")
+                if "__pycache__" not in path.parts
+                and path.stem not in _IGNORED_MODULE_NAMES
+            ),
+            key=_module_sort_key,
         )
     )
 
@@ -537,11 +539,15 @@ def _validate_catalog() -> None:
 
     discovered_modules = set(_discover_manifestable_modules())
     manifest_modules = set(module_names)
-    missing_modules = tuple(sorted(discovered_modules - manifest_modules))
+    missing_modules = tuple(
+        sorted(discovered_modules - manifest_modules, key=_module_sort_key)
+    )
     if missing_modules:
         missing = ", ".join(missing_modules)
         raise ValueError(f"example files missing from catalog: {missing}")
-    extra_modules = tuple(sorted(manifest_modules - discovered_modules))
+    extra_modules = tuple(
+        sorted(manifest_modules - discovered_modules, key=_module_sort_key)
+    )
     if extra_modules:
         extra = ", ".join(extra_modules)
         raise ValueError(f"example catalog entries missing files: {extra}")

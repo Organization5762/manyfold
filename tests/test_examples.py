@@ -1211,6 +1211,26 @@ class ExampleTests(unittest.TestCase):
         finally:
             catalog_module._discover_manifestable_modules = original_discover
 
+    def test_catalog_validation_reports_missing_modules_in_manifest_order(
+        self,
+    ) -> None:
+        original_discover = catalog_module._discover_manifestable_modules
+        try:
+            catalog_module._discover_manifestable_modules = lambda: (
+                *SUPPORTED_EXAMPLE_MODULES,
+                *ARCHIVED_EXAMPLE_MODULES,
+                "archived.future_window",
+                "future_sensor",
+            )
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "example files missing from catalog: future_sensor, archived.future_window",
+            ):
+                catalog_module._validate_catalog()
+        finally:
+            catalog_module._discover_manifestable_modules = original_discover
+
     def test_catalog_validation_rejects_manifest_entries_missing_from_discovery(
         self,
     ) -> None:
@@ -1228,6 +1248,28 @@ class ExampleTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 ValueError,
                 "example catalog entries missing files: simple_latest",
+            ):
+                catalog_module._validate_catalog()
+        finally:
+            catalog_module._discover_manifestable_modules = original_discover
+
+    def test_catalog_validation_reports_extra_modules_in_manifest_order(
+        self,
+    ) -> None:
+        original_discover = catalog_module._discover_manifestable_modules
+        try:
+            catalog_module._discover_manifestable_modules = lambda: tuple(
+                module_name
+                for module_name in (
+                    *SUPPORTED_EXAMPLE_MODULES,
+                    *ARCHIVED_EXAMPLE_MODULES,
+                )
+                if module_name not in {"simple_latest", "archived.windowed_join"}
+            )
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "example catalog entries missing files: simple_latest, archived.windowed_join",
             ):
                 catalog_module._validate_catalog()
         finally:
