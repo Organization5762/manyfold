@@ -5393,7 +5393,13 @@ class Graph:
 
     @staticmethod
     def _diagram_escape(value: str) -> str:
-        return value.replace("\\", "\\\\").replace('"', '\\"')
+        return (
+            value.replace("\\", "\\\\")
+            .replace("\r\n", " ")
+            .replace("\n", " ")
+            .replace("\r", " ")
+            .replace('"', '\\"')
+        )
 
     def _diagram_node_line(self, node_id: str, metadata: dict[str, str]) -> str:
         label = self._diagram_escape(metadata["label"])
