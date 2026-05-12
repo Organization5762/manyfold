@@ -80,6 +80,12 @@ class RxFacadeTests(unittest.TestCase):
         )
         self.assertEqual(operators_module.zip_with_list, upstream_module.zip_with_list)
 
+    def test_private_operator_facade_does_not_leak_upstream_module(self) -> None:
+        load_manyfold_package()
+        operators_module = importlib.import_module("manyfold._rx.operators")
+
+        self.assertNotIn("_operators", operators_module.__dict__)
+
     def test_private_marble_facade_does_not_leak_runtime_imports(self) -> None:
         load_manyfold_package()
         marble_module = importlib.import_module("manyfold._rx.testing.marbles")
