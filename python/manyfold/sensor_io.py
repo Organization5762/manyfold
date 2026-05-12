@@ -1281,11 +1281,7 @@ class JsonEventDecoder:
             identity=self.identity,
             sequence_number=self.sequence.next(),
             raw=raw,
-            metadata={
-                key: value
-                for key, value in parsed.items()
-                if key not in {"event_type", "data"}
-            },
+            metadata=_json_event_metadata(parsed),
         )
 
 
@@ -2157,6 +2153,16 @@ def _compact_json_bytes(value: Mapping[str, Any]) -> bytes:
     return json.dumps(
         value, allow_nan=False, sort_keys=True, separators=(",", ":")
     ).encode("utf-8")
+
+
+def _json_event_metadata(value: Mapping[str, Any]) -> dict[str, Any]:
+    # Keep decoded metadata iteration stable without changing the user payload
+    # under "data"; JSON object keys are always strings after json.loads.
+    return {
+        key: value[key]
+        for key in sorted(value)
+        if key not in {"event_type", "data"}
+    }
 
 
 def _json_safe(value: Any) -> Any:

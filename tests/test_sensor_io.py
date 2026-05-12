@@ -346,6 +346,18 @@ class SensorIoTests(unittest.TestCase):
         self.assertEqual(event.identity.group, "ambient")
         self.assertEqual(event.metadata, {"quality": "ok"})
 
+    def test_json_event_decoder_orders_metadata_deterministically(self) -> None:
+        manyfold = load_manyfold_package()
+        decoder = manyfold.JsonEventDecoder()
+
+        event = decoder.decode(
+            b'{"z":1,"event_type":"sensor.event","data":{},"a":2}'
+        )
+
+        self.assertIsNotNone(event)
+        assert event is not None
+        self.assertEqual(tuple(event.metadata), ("a", "z"))
+
     def test_json_event_decoder_rejects_invalid_utf8(self) -> None:
         manyfold = load_manyfold_package()
         decoder = manyfold.JsonEventDecoder()
