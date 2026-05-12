@@ -14,6 +14,21 @@ import reactivex as rx
 from tests.test_support import load_manyfold_package
 
 
+class _StableMappingKey:
+    __module__ = "sensor.alpha"
+
+    def __str__(self) -> str:
+        return "slot"
+
+
+class _OtherStableMappingKey:
+    __module__ = "sensor.beta"
+    __qualname__ = "_StableMappingKey"
+
+    def __str__(self) -> str:
+        return "slot"
+
+
 class SensorIoTests(unittest.TestCase):
     def test_sensor_io_exports_are_tuple_shaped(self) -> None:
         load_manyfold_package()
@@ -439,6 +454,30 @@ class SensorIoTests(unittest.TestCase):
 
         self.assertEqual(first, second)
         self.assertEqual(schema.decode(first).data, {"2": "string"})
+
+    def test_sensor_event_schema_orders_same_named_key_types_deterministically(
+        self,
+    ) -> None:
+        manyfold = load_manyfold_package()
+        schema = manyfold.sensor_event_schema()
+        alpha = _StableMappingKey()
+        beta = _OtherStableMappingKey()
+        first_data: dict[object, str] = {}
+        second_data: dict[object, str] = {}
+        first_data[alpha] = "alpha"
+        first_data[beta] = "beta"
+        second_data[beta] = "beta"
+        second_data[alpha] = "alpha"
+
+        first = schema.encode(
+            manyfold.SensorEvent("radio.packet", first_data, observed_at=1.0)
+        )
+        second = schema.encode(
+            manyfold.SensorEvent("radio.packet", second_data, observed_at=1.0)
+        )
+
+        self.assertEqual(first, second)
+        self.assertEqual(schema.decode(first).data, {"slot": "beta"})
 
     def test_sensor_event_schema_restores_mapping_keys_deterministically(self) -> None:
         manyfold = load_manyfold_package()
