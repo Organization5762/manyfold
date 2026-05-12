@@ -71,6 +71,35 @@ class PrimitiveTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, message):
                     manyfold.route(**kwargs)
 
+    def test_route_rejects_invalid_namespace_and_identity_objects(self) -> None:
+        manyfold = load_manyfold_package()
+        schema = manyfold.Schema.float(name="Temperature")
+        namespace = manyfold.RouteNamespace(
+            plane=manyfold.Plane.Read,
+            layer=manyfold.Layer.Logical,
+        )
+        identity = manyfold.RouteIdentity.of(
+            owner="sensor",
+            family="events",
+            stream="temperature",
+            variant=manyfold.Variant.Meta,
+        )
+
+        cases = (
+            (
+                {"namespace": object(), "identity": identity},
+                "namespace must be a RouteNamespace",
+            ),
+            (
+                {"namespace": namespace, "identity": object()},
+                "identity must be a RouteIdentity",
+            ),
+        )
+        for kwargs, message in cases:
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(ValueError, message):
+                    manyfold.route(schema=schema, **kwargs)
+
     def test_route_value_objects_reject_invalid_native_enum_values(self) -> None:
         manyfold = load_manyfold_package()
 

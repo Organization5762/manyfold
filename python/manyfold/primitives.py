@@ -99,6 +99,8 @@ def route(
 ) -> TypedRoute[T]:
     """Construct a typed route without exposing native identity plumbing."""
     if namespace is not None:
+        if not isinstance(namespace, RouteNamespace):
+            raise ValueError("namespace must be a RouteNamespace")
         if plane is not None or layer is not None:
             raise ValueError("pass either namespace or plane/layer, not both")
         plane = namespace.plane
@@ -107,6 +109,8 @@ def route(
         plane = Plane.Read if plane is None else plane
         layer = Layer.Logical if layer is None else layer
     if identity is not None:
+        if not isinstance(identity, RouteIdentity):
+            raise ValueError("identity must be a RouteIdentity")
         if (
             owner is not None
             or family is not None
