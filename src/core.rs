@@ -459,6 +459,7 @@ impl PortDescriptorCore {
     pub fn for_route(route: &RouteRefCore) -> Self {
         let visibility = Self::default_visibility(route);
         let locality = Self::default_locality(route);
+        let route_display = route.display();
         Self {
             identity: IdentityBlockCore {
                 route_ref: route.clone(),
@@ -470,8 +471,8 @@ impl PortDescriptorCore {
                 owning_runtime_kind: "in_memory".to_string(),
                 stream_family: route.family.clone(),
                 stream_variant: route.variant,
-                aliases: vec![route.display()],
-                human_description: format!("Manyfold port for {}", route.display()),
+                aliases: vec![route_display.clone()],
+                human_description: format!("Manyfold port for {route_display}"),
             },
             schema: SchemaBlockCore {
                 schema_ref: route.schema.clone(),
@@ -936,7 +937,8 @@ impl GraphCore {
             .get(route)
             .map(|envelope| envelope.seq_source + 1)
             .unwrap_or(1);
-        let payload_id = format!("{}:{}", route.display(), seq_source);
+        let route_display = route.display();
+        let payload_id = format!("{route_display}:{seq_source}");
         let payload_len = payload.len() as u64;
         let now = Self::now_unix_ms();
         self.payloads.insert(payload_id.clone(), payload);
@@ -953,9 +955,9 @@ impl GraphCore {
             logical_time_unix_ms: now,
             logical_clock_domain: descriptor.time.clock_domain.clone(),
             partition_key: None,
-            causality_id: Some(format!("{}#{}", route.display(), seq_source)),
+            causality_id: Some(format!("{route_display}#{seq_source}")),
             correlation_id: control_epoch.map(|epoch| format!("control-epoch-{epoch}")),
-            trace_id: Some(format!("trace:{}:{}", route.display(), seq_source)),
+            trace_id: Some(format!("trace:{route_display}:{seq_source}")),
             control_epoch,
             taints: Self::event_taints(route, control_epoch),
             guards: Vec::new(),
