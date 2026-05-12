@@ -936,6 +936,23 @@ class ExampleTests(unittest.TestCase):
         with self.assertRaisesRegex(KeyError, "unknown RFC reference example"):
             reference_example_metadata(99)
 
+    def test_catalog_lookup_helpers_reject_malformed_keys(self) -> None:
+        for value in ("", " "):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "module name must be a non-empty",
+                ):
+                    catalog_entry(value)
+
+        for value in (True, 0, "1"):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(
+                    (TypeError, ValueError),
+                    "reference example number",
+                ):
+                    reference_example_metadata(value)  # type: ignore[arg-type]
+
     def test_internal_entry_manifests_partition_catalog(self) -> None:
         self.assertEqual(
             SUPPORTED_EXAMPLE_ENTRIES + ARCHIVED_EXAMPLE_ENTRIES, EXAMPLE_CATALOG
