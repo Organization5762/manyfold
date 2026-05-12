@@ -5827,6 +5827,99 @@ assert graph.latest(route) is None
             graph_module.DebugEvent("write", "published", " ", 1)
         with self.assertRaisesRegex(ValueError, "debug seq_source"):
             graph_module.DebugEvent("write", "published", route.display(), -1)
+        with self.assertRaisesRegex(ValueError, "route audit route_display"):
+            graph_module.RouteAuditSnapshot(
+                route_display="",
+                scope_routes=(),
+                recent_producers=(),
+                active_subscribers=(),
+                related_write_requests=(),
+                taint_upper_bounds=(),
+                repair_notes=(),
+                recent_debug_events=(),
+            )
+        with self.assertRaisesRegex(ValueError, "route audit scope_routes"):
+            graph_module.RouteAuditSnapshot(
+                route_display=route.display(),
+                scope_routes=(" ",),
+                recent_producers=(),
+                active_subscribers=(),
+                related_write_requests=(),
+                taint_upper_bounds=(),
+                repair_notes=(),
+                recent_debug_events=(),
+            )
+        with self.assertRaisesRegex(ValueError, "shadow pending_write"):
+            graph_module.ShadowSnapshot(
+                request=None,
+                desired=None,
+                reported=None,
+                effective=None,
+                ack=None,
+                pending_write="yes",
+                coherence_taints=(),
+            )
+        with self.assertRaisesRegex(ValueError, "flow available"):
+            graph_module.FlowSnapshot(
+                route_display=route.display(),
+                credit_class="default",
+                backpressure_policy="propagate",
+                available=-1,
+                blocked_senders=0,
+                dropped_messages=0,
+                largest_queue_depth=0,
+            )
+        with self.assertRaisesRegex(ValueError, "mailbox capacity"):
+            graph_module.MailboxSnapshot(
+                name="mailbox",
+                ingress_route=route.display(),
+                egress_route=route.display(),
+                capacity=0,
+                delivery_mode="mpsc_serial",
+                ordering_policy="fifo",
+                overflow_policy="block",
+                depth=0,
+                available_credit=0,
+                blocked_writes=0,
+                dropped_messages=0,
+                coalesced_messages=0,
+                delivered_messages=0,
+            )
+        with self.assertRaisesRegex(ValueError, "payload demand cache_hits"):
+            graph_module.PayloadDemandSnapshot(
+                route_display=route.display(),
+                metadata_events=0,
+                payload_open_requests=0,
+                lazy_source_opens=0,
+                materialized_payload_bytes=0,
+                cache_hits=True,
+                unopened_lazy_payloads=0,
+            )
+        with self.assertRaisesRegex(ValueError, "watermark latest_seq_source"):
+            graph_module.WatermarkSnapshot(
+                route_display=route.display(),
+                partition_spec="global",
+                clock_domain="logical",
+                event_time_policy="ingest",
+                watermark_policy="latest",
+                latest_seq_source=-1,
+                latest_control_epoch=None,
+                current_watermark=None,
+            )
+        with self.assertRaisesRegex(ValueError, "scheduled write ack_observed"):
+            graph_module.ScheduledWriteSnapshot(
+                route_display=route.display(),
+                scheduler_epoch=0,
+                not_before_epoch=None,
+                wait_for_ack_route=None,
+                expires_at_epoch=None,
+                ack_route=None,
+                ack_observed=1,
+                attempt_count=0,
+                last_attempt_epoch=None,
+                next_retry_epoch=None,
+                ready_now=True,
+            )
         graph = graph_module.Graph()
         with self.assertRaisesRegex(ValueError, "query service owner"):
             graph.query_service(" ")

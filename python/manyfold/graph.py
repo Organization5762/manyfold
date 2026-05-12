@@ -808,6 +808,28 @@ class RouteAuditSnapshot:
     repair_notes: tuple[str, ...]
     recent_debug_events: tuple[str, ...]
 
+    def __post_init__(self) -> None:
+        _require_non_empty_text(self.route_display, "route audit route_display")
+        _require_text_tuple(self.scope_routes, "route audit scope_routes")
+        _require_text_tuple(self.recent_producers, "route audit recent_producers")
+        _require_text_tuple(
+            self.active_subscribers,
+            "route audit active_subscribers",
+        )
+        _require_text_tuple(
+            self.related_write_requests,
+            "route audit related_write_requests",
+        )
+        _require_text_tuple(
+            self.taint_upper_bounds,
+            "route audit taint_upper_bounds",
+        )
+        _require_text_tuple(self.repair_notes, "route audit repair_notes")
+        _require_text_tuple(
+            self.recent_debug_events,
+            "route audit recent_debug_events",
+        )
+
 
 @dataclass(frozen=True)
 class LazyPayloadSource:
@@ -925,6 +947,19 @@ class LifecycleBinding:
     ack: RouteRef | None = None
     health: RouteRef | None = None
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.binding, WriteBinding):
+            raise ValueError("lifecycle binding must be a WriteBinding")
+        _require_route_ref(self.request, "lifecycle request")
+        _require_route_ref(self.desired, "lifecycle desired")
+        _require_route_ref(self.reported, "lifecycle reported")
+        _require_route_ref(self.effective, "lifecycle effective")
+        _require_route_ref(self.event, "lifecycle event")
+        if self.ack is not None:
+            _require_route_ref(self.ack, "lifecycle ack")
+        if self.health is not None:
+            _require_route_ref(self.health, "lifecycle health")
+
     def scope_routes(self) -> tuple[RouteRef, ...]:
         return tuple(
             route
@@ -956,6 +991,14 @@ class ShadowSnapshot:
     pending_write: bool
     coherence_taints: tuple[str, ...]
 
+    def __post_init__(self) -> None:
+        for field_name in ("request", "desired", "reported", "effective", "ack"):
+            value = getattr(self, field_name)
+            if value is not None and not isinstance(value, ClosedEnvelope):
+                raise ValueError(f"shadow {field_name} must be a ClosedEnvelope or None")
+        _require_bool(self.pending_write, "shadow pending_write")
+        _require_text_tuple(self.coherence_taints, "shadow coherence_taints")
+
 
 @dataclass(frozen=True)
 class FlowSnapshot:
@@ -968,6 +1011,21 @@ class FlowSnapshot:
     blocked_senders: int
     dropped_messages: int
     largest_queue_depth: int
+
+    def __post_init__(self) -> None:
+        _require_non_empty_text(self.route_display, "flow route_display")
+        _require_non_empty_text(self.credit_class, "flow credit_class")
+        _require_non_empty_text(
+            self.backpressure_policy,
+            "flow backpressure_policy",
+        )
+        _require_non_negative_integer(self.available, "flow available")
+        _require_non_negative_integer(self.blocked_senders, "flow blocked_senders")
+        _require_non_negative_integer(self.dropped_messages, "flow dropped_messages")
+        _require_non_negative_integer(
+            self.largest_queue_depth,
+            "flow largest_queue_depth",
+        )
 
 
 @dataclass(frozen=True)
@@ -1041,6 +1099,32 @@ class MailboxSnapshot:
     coalesced_messages: int
     delivered_messages: int
 
+    def __post_init__(self) -> None:
+        for field_name in (
+            "name",
+            "ingress_route",
+            "egress_route",
+            "delivery_mode",
+            "ordering_policy",
+            "overflow_policy",
+        ):
+            _require_non_empty_text(getattr(self, field_name), f"mailbox {field_name}")
+        for field_name in (
+            "capacity",
+            "depth",
+            "available_credit",
+            "blocked_writes",
+            "dropped_messages",
+            "coalesced_messages",
+            "delivered_messages",
+        ):
+            _require_non_negative_integer(
+                getattr(self, field_name),
+                f"mailbox {field_name}",
+            )
+        if self.capacity == 0:
+            raise ValueError("mailbox capacity must be positive")
+
 
 @dataclass(frozen=True)
 class PayloadDemandSnapshot:
@@ -1053,6 +1137,21 @@ class PayloadDemandSnapshot:
     materialized_payload_bytes: int
     cache_hits: int
     unopened_lazy_payloads: int
+
+    def __post_init__(self) -> None:
+        _require_non_empty_text(self.route_display, "payload demand route_display")
+        for field_name in (
+            "metadata_events",
+            "payload_open_requests",
+            "lazy_source_opens",
+            "materialized_payload_bytes",
+            "cache_hits",
+            "unopened_lazy_payloads",
+        ):
+            _require_non_negative_integer(
+                getattr(self, field_name),
+                f"payload demand {field_name}",
+            )
 
 
 @dataclass(frozen=True)
@@ -1067,6 +1166,22 @@ class WatermarkSnapshot:
     latest_seq_source: int | None
     latest_control_epoch: int | None
     current_watermark: int | None
+
+    def __post_init__(self) -> None:
+        _require_non_empty_text(self.route_display, "watermark route_display")
+        _require_non_empty_text(self.partition_spec, "watermark partition_spec")
+        _require_non_empty_text(self.clock_domain, "watermark clock_domain")
+        _require_non_empty_text(
+            self.event_time_policy,
+            "watermark event_time_policy",
+        )
+        _require_non_empty_text(self.watermark_policy, "watermark watermark_policy")
+        _require_optional_epoch(self.latest_seq_source, "watermark latest_seq_source")
+        _require_optional_epoch(
+            self.latest_control_epoch,
+            "watermark latest_control_epoch",
+        )
+        _require_optional_epoch(self.current_watermark, "watermark current_watermark")
 
 
 @dataclass(frozen=True)
@@ -1084,6 +1199,40 @@ class ScheduledWriteSnapshot:
     last_attempt_epoch: int | None
     next_retry_epoch: int | None
     ready_now: bool
+
+    def __post_init__(self) -> None:
+        _require_non_empty_text(self.route_display, "scheduled write route_display")
+        _require_non_negative_integer(
+            self.scheduler_epoch,
+            "scheduled write scheduler_epoch",
+        )
+        _require_optional_epoch(
+            self.not_before_epoch,
+            "scheduled write not_before_epoch",
+        )
+        _require_optional_non_empty_text(
+            self.wait_for_ack_route,
+            "scheduled write wait_for_ack_route",
+        )
+        _require_optional_epoch(
+            self.expires_at_epoch,
+            "scheduled write expires_at_epoch",
+        )
+        _require_optional_non_empty_text(self.ack_route, "scheduled write ack_route")
+        _require_bool(self.ack_observed, "scheduled write ack_observed")
+        _require_non_negative_integer(
+            self.attempt_count,
+            "scheduled write attempt_count",
+        )
+        _require_optional_epoch(
+            self.last_attempt_epoch,
+            "scheduled write last_attempt_epoch",
+        )
+        _require_optional_epoch(
+            self.next_retry_epoch,
+            "scheduled write next_retry_epoch",
+        )
+        _require_bool(self.ready_now, "scheduled write ready_now")
 
 
 @dataclass(frozen=True)
