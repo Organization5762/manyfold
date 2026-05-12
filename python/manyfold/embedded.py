@@ -139,12 +139,7 @@ class EmbeddedScalarSensor(Generic[T]):
     def validate(self) -> tuple[str, ...]:
         issues = list(self.firmware.required_issues())
         issues.extend(self.rules.required_issues())
-        if self.metadata_route.plane != Plane.Read:
-            issues.append("embedded sensor metadata must flow in the read plane")
-        if self.metadata_route.layer == Layer.Bulk:
-            issues.append("embedded sensor metadata must not use Layer.Bulk")
-        if self.metadata_route.variant != Variant.Meta:
-            issues.append("embedded sensor metadata must use Variant.Meta")
+        issues.extend(_metadata_route_issues(self.metadata_route, "embedded sensor"))
         return tuple(issues)
 
 
@@ -164,12 +159,7 @@ class EmbeddedBulkSensor(Generic[TMeta]):
     def validate(self) -> tuple[str, ...]:
         issues = list(self.firmware.required_issues())
         issues.extend(self.rules.bulk_issues())
-        if self.metadata_route.plane != Plane.Read:
-            issues.append("bulk sensor metadata must flow in the read plane")
-        if self.metadata_route.layer == Layer.Bulk:
-            issues.append("bulk sensor metadata must not use Layer.Bulk")
-        if self.metadata_route.variant != Variant.Meta:
-            issues.append("bulk sensor metadata must use Variant.Meta")
+        issues.extend(_metadata_route_issues(self.metadata_route, "bulk sensor"))
         if self.payload_route.plane != Plane.Read:
             issues.append("bulk sensor payload must flow in the read plane")
         if self.payload_route.layer != Layer.Bulk:
@@ -255,6 +245,17 @@ def _disabled_issue_messages(
     owner: object, checks: tuple[tuple[str, str], ...]
 ) -> tuple[str, ...]:
     return tuple(message for field, message in checks if not getattr(owner, field))
+
+
+def _metadata_route_issues(route_ref: TypedRoute[object], label: str) -> tuple[str, ...]:
+    issues: list[str] = []
+    if route_ref.plane != Plane.Read:
+        issues.append(f"{label} metadata must flow in the read plane")
+    if route_ref.layer == Layer.Bulk:
+        issues.append(f"{label} metadata must not use Layer.Bulk")
+    if route_ref.variant != Variant.Meta:
+        issues.append(f"{label} metadata must use Variant.Meta")
+    return tuple(issues)
 
 
 def _require_bool(value: object, field: str) -> None:
