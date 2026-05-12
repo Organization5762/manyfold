@@ -144,6 +144,8 @@ class CoalesceLatestNode(Generic[T]):
     stream_name: str | None = None
 
     def __post_init__(self) -> None:
+        _require_non_empty_text(self.name, "coalesce node name")
+        _require_optional_non_empty_text(self.stream_name, "coalesce stream_name")
         _require_integer(self.window_ms, "coalesce window_ms")
 
     def observable(self, source: ObservableLike[T]) -> Observable[T]:
@@ -252,6 +254,8 @@ class LoggingNode(Generic[T]):
     interval_ms: int
 
     def __post_init__(self) -> None:
+        _require_non_empty_text(self.name, "logging node name")
+        _require_non_empty_text(self.stream_name, "logging stream_name")
         _require_integer(self.interval_ms, "logging interval_ms")
 
     def observable(self, source: ObservableLike[T]) -> Observable[T]:

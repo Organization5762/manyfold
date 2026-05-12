@@ -1076,6 +1076,30 @@ assert graph.latest(route) is None
                         window_ms=window_ms,
                     )
 
+    def test_coalesce_latest_node_rejects_invalid_diagnostic_labels(self) -> None:
+        graph_module = load_graph_module()
+
+        cases = (
+            (
+                "name",
+                lambda: graph_module.CoalesceLatestNode(name="", window_ms=1),
+                "coalesce node name must be a non-empty string",
+            ),
+            (
+                "stream_name",
+                lambda: graph_module.CoalesceLatestNode(
+                    name="coalesce",
+                    window_ms=1,
+                    stream_name=" ",
+                ),
+                "coalesce stream_name must be a non-empty string",
+            ),
+        )
+        for label, factory, message in cases:
+            with self.subTest(label=label):
+                with self.assertRaisesRegex(ValueError, message):
+                    factory()
+
     def test_observe_pipeline_coalesces_latest_route_value(self) -> None:
         graph_module = load_graph_module()
         route = graph_module.route(
@@ -1227,6 +1251,34 @@ assert graph.latest(route) is None
                         "logging interval_ms must be an integer",
                     ):
                         factory(interval_ms)
+
+    def test_logging_node_rejects_invalid_direct_configuration(self) -> None:
+        graph_module = load_graph_module()
+
+        cases = (
+            (
+                "name",
+                lambda: graph_module.LoggingNode(
+                    name="",
+                    stream_name="numbers",
+                    interval_ms=1,
+                ),
+                "logging node name must be a non-empty string",
+            ),
+            (
+                "stream_name",
+                lambda: graph_module.LoggingNode(
+                    name="log",
+                    stream_name=" ",
+                    interval_ms=1,
+                ),
+                "logging stream_name must be a non-empty string",
+            ),
+        )
+        for label, factory, message in cases:
+            with self.subTest(label=label):
+                with self.assertRaisesRegex(ValueError, message):
+                    factory()
 
     def test_observe_pipeline_installs_logging_node(self) -> None:
         graph_module = load_graph_module()
