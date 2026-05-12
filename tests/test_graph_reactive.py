@@ -5342,6 +5342,46 @@ assert graph.latest(route) is None
                 link_class="TcpStreamLink",
                 capabilities=object(),
             )
+        with self.assertRaisesRegex(ValueError, "middleware name"):
+            graph_module.Middleware(
+                name=" ",
+                kind="validation",
+                attachment_scope="route",
+                target=route.display(),
+            )
+        with self.assertRaisesRegex(
+            ValueError, "middleware updates_taints must be a boolean"
+        ):
+            graph_module.Middleware(
+                name="validate_accel",
+                kind="validation",
+                attachment_scope="route",
+                target=route.display(),
+                updates_taints="yes",
+            )
+        with self.assertRaisesRegex(ValueError, "mesh primitive sources"):
+            graph_module.MeshPrimitive(
+                name="bridge_to_dashboard",
+                kind="bridge",
+                sources=[route],
+                destinations=(route,),
+            )
+        with self.assertRaisesRegex(ValueError, "mesh primitive threshold"):
+            graph_module.MeshPrimitive(
+                name="bridge_to_dashboard",
+                kind="bridge",
+                sources=(route,),
+                destinations=(route,),
+                threshold=-1,
+            )
+        with self.assertRaisesRegex(ValueError, "mesh primitive ack_policy"):
+            graph_module.MeshPrimitive(
+                name="bridge_to_dashboard",
+                kind="bridge",
+                sources=(route,),
+                destinations=(route,),
+                ack_policy=" ",
+            )
         with self.assertRaisesRegex(ValueError, "principal_id"):
             graph_module.CapabilityGrant(principal_id="", route=route)
         with self.assertRaisesRegex(ValueError, "payload_open must be a boolean"):

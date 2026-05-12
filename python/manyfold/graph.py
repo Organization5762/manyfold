@@ -400,6 +400,22 @@ class Middleware:
     updates_taints: bool = True
     updates_causality: bool = True
 
+    def __post_init__(self) -> None:
+        _require_non_empty_text(self.name, "middleware name")
+        _require_non_empty_text(self.kind, "middleware kind")
+        _require_non_empty_text(self.attachment_scope, "middleware attachment scope")
+        _require_non_empty_text(self.target, "middleware target")
+        _require_bool(
+            self.introduces_async_boundary,
+            "middleware introduces_async_boundary",
+        )
+        _require_bool(
+            self.preserves_envelope_identity,
+            "middleware preserves_envelope_identity",
+        )
+        _require_bool(self.updates_taints, "middleware updates_taints")
+        _require_bool(self.updates_causality, "middleware updates_causality")
+
 
 @dataclass(frozen=True)
 class DiagramNode:
@@ -529,6 +545,44 @@ class MeshPrimitive:
     state_budget: str | None = None
     threshold: int | None = None
     ack_policy: str | None = None
+
+    def __post_init__(self) -> None:
+        _require_non_empty_text(self.name, "mesh primitive name")
+        _require_non_empty_text(self.kind, "mesh primitive kind")
+        object.__setattr__(
+            self,
+            "sources",
+            _require_route_like_tuple(self.sources, "mesh primitive sources"),
+        )
+        object.__setattr__(
+            self,
+            "destinations",
+            _require_route_like_tuple(
+                self.destinations,
+                "mesh primitive destinations",
+            ),
+        )
+        _require_optional_non_empty_text(
+            self.link_name,
+            "mesh primitive link name",
+        )
+        _require_optional_non_empty_text(
+            self.ordering_policy,
+            "mesh primitive ordering_policy",
+        )
+        _require_optional_non_empty_text(
+            self.state_budget,
+            "mesh primitive state_budget",
+        )
+        if self.threshold is not None:
+            _require_non_negative_integer(
+                self.threshold,
+                "mesh primitive threshold",
+            )
+        _require_optional_non_empty_text(
+            self.ack_policy,
+            "mesh primitive ack_policy",
+        )
 
 
 @dataclass(frozen=True)
@@ -6884,6 +6938,14 @@ def _require_optional_callable(value: object, field: str) -> None:
 def _require_route_like(value: object, field: str) -> None:
     if not isinstance(value, (TypedRoute, RouteRef, Source, Sink)):
         raise ValueError(f"{field} must be a TypedRoute, RouteRef, Source, or Sink")
+
+
+def _require_route_like_tuple(value: object, field: str) -> tuple[RouteLike, ...]:
+    if not isinstance(value, tuple):
+        raise ValueError(f"{field} must be a tuple of route-like values")
+    for route_value in value:
+        _require_route_like(route_value, field)
+    return value
 
 
 def _require_optional_thread_placement(value: object) -> None:
