@@ -8,7 +8,7 @@ import json
 import os
 import tempfile
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from json import JSONDecodeError
 from pathlib import Path
 from typing import Any, Generic, Iterator, TypeVar
@@ -432,6 +432,13 @@ class ConsensusRoutes:
     quorum: TypedRoute[QuorumState]
     replicated_log: TypedRoute[ReplicatedLog]
     leader_state: TypedRoute[LeaderState]
+
+    def __post_init__(self) -> None:
+        for route_field in fields(self):
+            _require_typed_route(
+                getattr(self, route_field.name),
+                f"{route_field.name} route",
+            )
 
 
 @dataclass(frozen=True)
