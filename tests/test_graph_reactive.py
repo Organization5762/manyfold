@@ -7,7 +7,7 @@ import sys
 import threading
 import time
 import unittest
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from unittest import mock
 
 from tests.test_support import load_manyfold_graph_module, subprocess_test_env
@@ -6151,6 +6151,124 @@ assert graph.latest(route) is None
         self.assertEqual(
             descriptor.environment.transport_preferences, ("memory", "bulk_link")
         )
+
+    def test_descriptor_and_manifest_records_reject_invalid_fields(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("sensor"),
+            family=graph_module.StreamFamily("telemetry"),
+            stream=graph_module.StreamName("temperature"),
+            variant=graph_module.Variant.Meta,
+            schema=graph_module.Schema.bytes(name="Temperature"),
+        )
+        graph = graph_module.Graph()
+        descriptor = graph.describe_route(route)
+
+        cases = (
+            (
+                lambda: replace(descriptor.identity, route_ref=object()),
+                "descriptor identity route_ref must be a RouteRef",
+            ),
+            (
+                lambda: replace(descriptor.identity, namespace_ref=object()),
+                "descriptor identity namespace_ref must be a NamespaceRef",
+            ),
+            (
+                lambda: replace(descriptor.identity, producer_ref=object()),
+                "descriptor identity producer_ref must be a ProducerRef",
+            ),
+            (
+                lambda: replace(descriptor.identity, aliases=("valid", "")),
+                "descriptor identity aliases\\[\\] must be a non-empty string",
+            ),
+            (
+                lambda: replace(descriptor.schema, schema_ref=object()),
+                "descriptor schema schema_ref must be a SchemaRef",
+            ),
+            (
+                lambda: replace(descriptor.time, processing_time_allowed=1),
+                "descriptor time processing_time_allowed must be a boolean",
+            ),
+            (
+                lambda: replace(descriptor.ordering, dedupe_policy=""),
+                "descriptor ordering dedupe_policy must be a non-empty string",
+            ),
+            (
+                lambda: replace(descriptor.flow, overflow_policy=" "),
+                "descriptor flow overflow_policy must be a non-empty string",
+            ),
+            (
+                lambda: replace(descriptor.retention, payload_retention_policy=""),
+                "descriptor retention payload_retention_policy "
+                "must be a non-empty string",
+            ),
+            (
+                lambda: replace(descriptor.security, read_capabilities=("read", 1)),
+                "descriptor security read_capabilities\\[\\] "
+                "must be a non-empty string",
+            ),
+            (
+                lambda: replace(
+                    descriptor.visibility,
+                    third_party_subscription_allowed="yes",
+                ),
+                "descriptor visibility third_party_subscription_allowed "
+                "must be a boolean",
+            ),
+            (
+                lambda: replace(
+                    descriptor.environment,
+                    transport_preferences=["memory"],
+                ),
+                "descriptor environment transport_preferences "
+                "must be a tuple of strings",
+            ),
+            (
+                lambda: replace(descriptor.debug, audit_enabled=1),
+                "descriptor debug audit_enabled must be a boolean",
+            ),
+            (
+                lambda: replace(descriptor, identity=object()),
+                "route descriptor identity must be a DescriptorIdentityBlock",
+            ),
+            (
+                lambda: graph_module.ManifestRoute(
+                    route=object(),
+                    descriptor=descriptor,
+                ),
+                "manifest route route must be a RouteRef",
+            ),
+            (
+                lambda: graph_module.ManifestRoute(
+                    route=descriptor.identity.route_ref,
+                    descriptor=object(),
+                ),
+                "manifest route descriptor must be a RouteDescriptor",
+            ),
+            (
+                lambda: graph_module.ManifestEdge(
+                    source=descriptor.identity.route_ref,
+                    sink=object(),
+                    flow=descriptor.flow,
+                ),
+                "manifest edge sink must be a RouteRef",
+            ),
+            (
+                lambda: graph_module.ManifestEdge(
+                    source=descriptor.identity.route_ref,
+                    sink=descriptor.identity.route_ref,
+                    flow=object(),
+                ),
+                "manifest edge flow must be a DescriptorFlowBlock",
+            ),
+        )
+
+        for build, message in cases:
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(ValueError, message):
+                    build()
 
     def test_describe_edge_composes_flow_policies_in_rfc_order(self) -> None:
         graph_module = load_graph_module()

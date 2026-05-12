@@ -1097,6 +1097,35 @@ class DescriptorIdentityBlock:
     aliases: tuple[str, ...]
     human_description: str
 
+    def __post_init__(self) -> None:
+        _require_route_ref(self.route_ref, "descriptor identity route_ref")
+        _require_namespace_ref(
+            self.namespace_ref,
+            "descriptor identity namespace_ref",
+        )
+        _require_producer_ref(self.producer_ref, "descriptor identity producer_ref")
+        _require_non_empty_text(
+            self.owning_runtime_kind,
+            "descriptor identity owning_runtime_kind",
+        )
+        _require_non_empty_text(
+            self.stream_family,
+            "descriptor identity stream_family",
+        )
+        _require_non_empty_text(
+            self.stream_variant,
+            "descriptor identity stream_variant",
+        )
+        object.__setattr__(
+            self,
+            "aliases",
+            _require_text_tuple(self.aliases, "descriptor identity aliases"),
+        )
+        _require_non_empty_text(
+            self.human_description,
+            "descriptor identity human_description",
+        )
+
 
 @dataclass(frozen=True)
 class DescriptorSchemaBlock:
@@ -1105,6 +1134,19 @@ class DescriptorSchemaBlock:
     codec_ref: str
     structured_payload_type: str
     payload_open_policy: str
+
+    def __post_init__(self) -> None:
+        _require_schema_ref(self.schema_ref, "descriptor schema schema_ref")
+        _require_non_empty_text(self.payload_kind, "descriptor schema payload_kind")
+        _require_non_empty_text(self.codec_ref, "descriptor schema codec_ref")
+        _require_non_empty_text(
+            self.structured_payload_type,
+            "descriptor schema structured_payload_type",
+        )
+        _require_non_empty_text(
+            self.payload_open_policy,
+            "descriptor schema payload_open_policy",
+        )
 
 
 @dataclass(frozen=True)
@@ -1116,6 +1158,26 @@ class DescriptorTimeBlock:
     control_epoch_policy: str
     ttl_policy: str
 
+    def __post_init__(self) -> None:
+        _require_non_empty_text(self.clock_domain, "descriptor time clock_domain")
+        _require_non_empty_text(
+            self.event_time_policy,
+            "descriptor time event_time_policy",
+        )
+        _require_bool(
+            self.processing_time_allowed,
+            "descriptor time processing_time_allowed",
+        )
+        _require_non_empty_text(
+            self.watermark_policy,
+            "descriptor time watermark_policy",
+        )
+        _require_non_empty_text(
+            self.control_epoch_policy,
+            "descriptor time control_epoch_policy",
+        )
+        _require_non_empty_text(self.ttl_policy, "descriptor time ttl_policy")
+
 
 @dataclass(frozen=True)
 class DescriptorOrderingBlock:
@@ -1124,6 +1186,28 @@ class DescriptorOrderingBlock:
     resequence_policy: str
     dedupe_policy: str
     causality_policy: str
+
+    def __post_init__(self) -> None:
+        _require_non_empty_text(
+            self.partition_spec,
+            "descriptor ordering partition_spec",
+        )
+        _require_non_empty_text(
+            self.sequence_source_kind,
+            "descriptor ordering sequence_source_kind",
+        )
+        _require_non_empty_text(
+            self.resequence_policy,
+            "descriptor ordering resequence_policy",
+        )
+        _require_non_empty_text(
+            self.dedupe_policy,
+            "descriptor ordering dedupe_policy",
+        )
+        _require_non_empty_text(
+            self.causality_policy,
+            "descriptor ordering causality_policy",
+        )
 
 
 @dataclass(frozen=True)
@@ -1134,13 +1218,44 @@ class DescriptorFlowBlock:
     async_boundary_kind: str
     overflow_policy: str
 
+    def __post_init__(self) -> None:
+        _require_non_empty_text(
+            self.backpressure_policy,
+            "descriptor flow backpressure_policy",
+        )
+        _require_non_empty_text(self.credit_class, "descriptor flow credit_class")
+        _require_non_empty_text(self.mailbox_policy, "descriptor flow mailbox_policy")
+        _require_non_empty_text(
+            self.async_boundary_kind,
+            "descriptor flow async_boundary_kind",
+        )
+        _require_non_empty_text(self.overflow_policy, "descriptor flow overflow_policy")
+
 
 @dataclass(frozen=True)
 class DescriptorRetentionBlock:
     latest_replay_policy: str
     durability_class: str
     replay_window: str
-    payload_retention_policy: str
+    payload_retention_policy: str | None
+
+    def __post_init__(self) -> None:
+        _require_non_empty_text(
+            self.latest_replay_policy,
+            "descriptor retention latest_replay_policy",
+        )
+        _require_non_empty_text(
+            self.durability_class,
+            "descriptor retention durability_class",
+        )
+        _require_non_empty_text(
+            self.replay_window,
+            "descriptor retention replay_window",
+        )
+        _require_optional_non_empty_text(
+            self.payload_retention_policy,
+            "descriptor retention payload_retention_policy",
+        )
 
 
 @dataclass(frozen=True)
@@ -1195,6 +1310,40 @@ class DescriptorSecurityBlock:
     redaction_policy: str
     integrity_policy: str
 
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "read_capabilities",
+            _require_text_tuple(
+                self.read_capabilities,
+                "descriptor security read_capabilities",
+            ),
+        )
+        object.__setattr__(
+            self,
+            "write_capabilities",
+            _require_text_tuple(
+                self.write_capabilities,
+                "descriptor security write_capabilities",
+            ),
+        )
+        object.__setattr__(
+            self,
+            "payload_open_capabilities",
+            _require_text_tuple(
+                self.payload_open_capabilities,
+                "descriptor security payload_open_capabilities",
+            ),
+        )
+        _require_non_empty_text(
+            self.redaction_policy,
+            "descriptor security redaction_policy",
+        )
+        _require_non_empty_text(
+            self.integrity_policy,
+            "descriptor security integrity_policy",
+        )
+
 
 @dataclass(frozen=True)
 class DescriptorVisibilityBlock:
@@ -1202,6 +1351,24 @@ class DescriptorVisibilityBlock:
     third_party_subscription_allowed: bool
     query_plane_visibility: str
     debug_plane_visibility: str
+
+    def __post_init__(self) -> None:
+        _require_non_empty_text(
+            self.private_or_exported,
+            "descriptor visibility private_or_exported",
+        )
+        _require_bool(
+            self.third_party_subscription_allowed,
+            "descriptor visibility third_party_subscription_allowed",
+        )
+        _require_non_empty_text(
+            self.query_plane_visibility,
+            "descriptor visibility query_plane_visibility",
+        )
+        _require_non_empty_text(
+            self.debug_plane_visibility,
+            "descriptor visibility debug_plane_visibility",
+        )
 
 
 @dataclass(frozen=True)
@@ -1212,6 +1379,29 @@ class DescriptorEnvironmentBlock:
     resource_class: str
     ephemeral_scope: str | None
 
+    def __post_init__(self) -> None:
+        _require_non_empty_text(self.locality, "descriptor environment locality")
+        object.__setattr__(
+            self,
+            "transport_preferences",
+            _require_text_tuple(
+                self.transport_preferences,
+                "descriptor environment transport_preferences",
+            ),
+        )
+        _require_non_empty_text(
+            self.device_class,
+            "descriptor environment device_class",
+        )
+        _require_non_empty_text(
+            self.resource_class,
+            "descriptor environment resource_class",
+        )
+        _require_optional_non_empty_text(
+            self.ephemeral_scope,
+            "descriptor environment ephemeral_scope",
+        )
+
 
 @dataclass(frozen=True)
 class DescriptorDebugBlock:
@@ -1220,6 +1410,16 @@ class DescriptorDebugBlock:
     metrics_enabled: bool
     payload_peek_allowed: bool
     explain_enabled: bool
+
+    def __post_init__(self) -> None:
+        _require_bool(self.audit_enabled, "descriptor debug audit_enabled")
+        _require_bool(self.trace_enabled, "descriptor debug trace_enabled")
+        _require_bool(self.metrics_enabled, "descriptor debug metrics_enabled")
+        _require_bool(
+            self.payload_peek_allowed,
+            "descriptor debug payload_peek_allowed",
+        )
+        _require_bool(self.explain_enabled, "descriptor debug explain_enabled")
 
 
 @dataclass(frozen=True)
@@ -1234,6 +1434,40 @@ class RouteDescriptor:
     visibility: DescriptorVisibilityBlock
     environment: DescriptorEnvironmentBlock
     debug: DescriptorDebugBlock
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.identity, DescriptorIdentityBlock):
+            raise ValueError(
+                "route descriptor identity must be a DescriptorIdentityBlock"
+            )
+        if not isinstance(self.schema, DescriptorSchemaBlock):
+            raise ValueError("route descriptor schema must be a DescriptorSchemaBlock")
+        if not isinstance(self.time, DescriptorTimeBlock):
+            raise ValueError("route descriptor time must be a DescriptorTimeBlock")
+        if not isinstance(self.ordering, DescriptorOrderingBlock):
+            raise ValueError(
+                "route descriptor ordering must be a DescriptorOrderingBlock"
+            )
+        if not isinstance(self.flow, DescriptorFlowBlock):
+            raise ValueError("route descriptor flow must be a DescriptorFlowBlock")
+        if not isinstance(self.retention, DescriptorRetentionBlock):
+            raise ValueError(
+                "route descriptor retention must be a DescriptorRetentionBlock"
+            )
+        if not isinstance(self.security, DescriptorSecurityBlock):
+            raise ValueError(
+                "route descriptor security must be a DescriptorSecurityBlock"
+            )
+        if not isinstance(self.visibility, DescriptorVisibilityBlock):
+            raise ValueError(
+                "route descriptor visibility must be a DescriptorVisibilityBlock"
+            )
+        if not isinstance(self.environment, DescriptorEnvironmentBlock):
+            raise ValueError(
+                "route descriptor environment must be a DescriptorEnvironmentBlock"
+            )
+        if not isinstance(self.debug, DescriptorDebugBlock):
+            raise ValueError("route descriptor debug must be a DescriptorDebugBlock")
 
     @property
     def route_display(self) -> str:
@@ -1263,6 +1497,11 @@ class ManifestRoute:
     route: RouteRef
     descriptor: RouteDescriptor
 
+    def __post_init__(self) -> None:
+        _require_route_ref(self.route, "manifest route route")
+        if not isinstance(self.descriptor, RouteDescriptor):
+            raise ValueError("manifest route descriptor must be a RouteDescriptor")
+
 
 @dataclass(frozen=True)
 class ManifestEdge:
@@ -1271,6 +1510,12 @@ class ManifestEdge:
     source: RouteRef
     sink: RouteRef
     flow: DescriptorFlowBlock
+
+    def __post_init__(self) -> None:
+        _require_route_ref(self.source, "manifest edge source")
+        _require_route_ref(self.sink, "manifest edge sink")
+        if not isinstance(self.flow, DescriptorFlowBlock):
+            raise ValueError("manifest edge flow must be a DescriptorFlowBlock")
 
 
 @dataclass(frozen=True)
@@ -3394,6 +3639,9 @@ class Graph:
         debug_enabled = bool(getattr(native, "debug_enabled", True))
         visibility = self._route_visibility.get(route_display, "private")
         third_party_subscription_allowed = visibility == "exported"
+        human_description = getattr(native, "human_description", None)
+        if not isinstance(human_description, str) or not human_description.strip():
+            human_description = f"Manyfold port for {route_display}"
 
         if route_ref.namespace.plane in (Plane.Query, Plane.Debug):
             producer_kind = getattr(ProducerKind, "QueryService", "query_service")
@@ -3424,9 +3672,7 @@ class Graph:
                     route_ref.variant, "value", str(route_ref.variant)
                 ).lower(),
                 aliases=(route_display,),
-                human_description=getattr(
-                    native, "human_description", f"Manyfold port for {route_display}"
-                ),
+                human_description=human_description,
             ),
             schema=DescriptorSchemaBlock(
                 schema_ref=route_ref.schema,
@@ -3469,7 +3715,7 @@ class Graph:
                 latest_replay_policy=retention.latest_replay_policy,
                 durability_class=retention.durability_class,
                 replay_window=retention.replay_window,
-                payload_retention_policy=cast(str, retention.payload_retention_policy),
+                payload_retention_policy=retention.payload_retention_policy,
             ),
             security=DescriptorSecurityBlock(
                 read_capabilities=("read",),
@@ -7134,6 +7380,21 @@ def _require_route_like(value: object, field: str) -> None:
 def _require_route_ref(value: object, field: str) -> None:
     if not isinstance(value, RouteRef):
         raise ValueError(f"{field} must be a RouteRef")
+
+
+def _require_namespace_ref(value: object, field: str) -> None:
+    if not isinstance(value, NamespaceRef):
+        raise ValueError(f"{field} must be a NamespaceRef")
+
+
+def _require_producer_ref(value: object, field: str) -> None:
+    if not isinstance(value, ProducerRef):
+        raise ValueError(f"{field} must be a ProducerRef")
+
+
+def _require_schema_ref(value: object, field: str) -> None:
+    if not isinstance(value, SchemaRef):
+        raise ValueError(f"{field} must be a SchemaRef")
 
 
 def _require_route_like_tuple(value: object, field: str) -> tuple[RouteLike, ...]:
