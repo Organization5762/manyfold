@@ -988,6 +988,24 @@ class ComponentTests(unittest.TestCase):
                 ):
                     route_ref.schema.decode(payload)
 
+    def test_consensus_json_schemas_name_malformed_payloads(self) -> None:
+        manyfold = load_manyfold_package()
+        routes = manyfold.Consensus.default_routes()
+
+        cases = (
+            (routes.heartbeat, b"[", "heartbeat must be valid JSON"),
+            (
+                routes.replicated_log,
+                b"[[1,",
+                "replicated log must be valid JSON",
+            ),
+        )
+
+        for route_ref, payload, message in cases:
+            with self.subTest(route=route_ref.display()):
+                with self.assertRaisesRegex(ValueError, message):
+                    route_ref.schema.decode(payload)
+
     def test_consensus_json_schemas_reject_non_finite_encoded_values(self) -> None:
         manyfold = load_manyfold_package()
         routes = manyfold.Consensus.default_routes()
