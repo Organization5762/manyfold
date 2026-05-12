@@ -2759,6 +2759,11 @@ class Graph:
         return self._coerce_route_ref(route_ref).display()
 
     @staticmethod
+    def _manifest_mapping_key(key: Any) -> tuple[str, str, str]:
+        key_type = type(key)
+        return (str(key), key_type.__module__, key_type.__qualname__)
+
+    @staticmethod
     def _manifest_value(value: Any) -> Any:
         if value is None or isinstance(value, (bool, int, float, str)):
             return value
@@ -2769,7 +2774,7 @@ class Graph:
         if isinstance(value, dict):
             return {
                 str(key): Graph._manifest_value(value[key])
-                for key in sorted(value, key=str)
+                for key in sorted(value, key=Graph._manifest_mapping_key)
             }
         display = getattr(value, "display", None)
         if callable(display):
