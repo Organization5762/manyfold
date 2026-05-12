@@ -65,11 +65,15 @@ class ExampleCatalogEntry:
             or not isinstance(self.readme_order, int)
         ):
             raise TypeError("example catalog readme_order must be an integer")
+        if self.readme_order is not None and self.readme_order <= 0:
+            raise ValueError("example catalog readme_order must be positive")
         if self.reference_number is not None and (
             isinstance(self.reference_number, bool)
             or not isinstance(self.reference_number, int)
         ):
             raise TypeError("example catalog reference number must be an integer")
+        if self.reference_number is not None and self.reference_number <= 0:
+            raise ValueError("example catalog reference number must be positive")
         if self.reference_title is not None and (
             not isinstance(self.reference_title, str)
             or not self.reference_title.strip()
