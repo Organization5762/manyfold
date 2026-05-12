@@ -27,6 +27,8 @@ class Average:
             raise ValueError("average requires at least one value")
         start = max(0, value_count - self.window_size)
         window_count = value_count - start
+        if window_count == 1:
+            return _require_finite_number(values[start])
         # fsum keeps cancellation-heavy windows deterministic without copying
         # the sequence; callers may provide index-only buffers.
         return (
