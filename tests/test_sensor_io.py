@@ -2294,6 +2294,26 @@ class SensorIoTests(unittest.TestCase):
         self.assertEqual(frames[0].frame_id, 7)
         self.assertEqual(frames[0].samples, ((7, 0, "a"), (7, 1, "b")))
         self.assertEqual(manyfold.xor_checksum([0xAA, 0x0F, 0x01]), 0xA4)
+        self.assertEqual(manyfold.xor_checksum(memoryview(b"\xAA\x0F\x01")), 0xA4)
+
+    def test_xor_checksum_rejects_non_octet_inputs(self) -> None:
+        manyfold = load_manyfold_package()
+
+        for data in ("123", object()):
+            with self.subTest(data=data):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "checksum data must be bytes-like or an integer sequence",
+                ):
+                    manyfold.xor_checksum(data)  # type: ignore[arg-type]
+
+        for data in ([True], [1.5], [-1], [256]):
+            with self.subTest(data=data):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "checksum data values must be integers between 0 and 255",
+                ):
+                    manyfold.xor_checksum(data)  # type: ignore[arg-type]
 
     def test_sensor_batching_helpers_reject_non_integer_sizes(self) -> None:
         manyfold = load_manyfold_package()

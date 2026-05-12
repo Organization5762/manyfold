@@ -203,12 +203,12 @@ def health_status_schema(schema_id: str = "HealthStatus") -> Schema[HealthStatus
     return Schema(schema_id=schema_id, version=1, encode=encode, decode=decode)
 
 
-def xor_checksum(data: bytes | bytearray | Sequence[int]) -> int:
+def xor_checksum(data: bytes | bytearray | memoryview | Sequence[int]) -> int:
     """Return a small XOR checksum for packet/frame tests and adapters."""
 
     checksum = 0
-    for value in data:
-        checksum ^= int(value) & 0xFF
+    for value in _iter_octets(data, "checksum data"):
+        checksum ^= value
     return checksum
 
 
@@ -2105,6 +2105,17 @@ def _require_bytes_like(value: Any, field: str) -> bytes:
     if not isinstance(value, (bytes, bytearray, memoryview)):
         raise ValueError(f"{field} must be bytes-like")
     return bytes(value)
+
+
+def _iter_octets(value: Any, field: str) -> Iterator[int]:
+    if isinstance(value, str) or not isinstance(value, Iterable):
+        raise ValueError(f"{field} must be bytes-like or an integer sequence")
+    for item in value:
+        if isinstance(item, bool) or not isinstance(item, int):
+            raise ValueError(f"{field} values must be integers between 0 and 255")
+        if item < 0 or item > 0xFF:
+            raise ValueError(f"{field} values must be integers between 0 and 255")
+        yield item
 
 
 def _require_callable(value: Any, field: str) -> None:
