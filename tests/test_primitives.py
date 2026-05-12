@@ -506,11 +506,18 @@ for build, message in cases:
                 ):
                     schema.encode(value)
 
+    def test_float_schema_decodes_bytes_like_payloads(self) -> None:
+        manyfold = load_manyfold_package()
+        schema = manyfold.Schema.float(name="Temperature")
+
+        self.assertEqual(schema.decode(bytearray(b"72.5")), 72.5)
+        self.assertEqual(schema.decode(memoryview(b"72.5")), 72.5)
+
     def test_float_schema_rejects_non_finite_payloads(self) -> None:
         manyfold = load_manyfold_package()
         schema = manyfold.Schema.float(name="Temperature")
 
-        for payload in (b"nan", b"inf", b"-inf", b"not-a-number", b"\xff"):
+        for payload in (b"nan", b"inf", b"-inf", b"not-a-number", b"\xff", "1.0"):
             with self.subTest(payload=payload):
                 with self.assertRaisesRegex(
                     ValueError,

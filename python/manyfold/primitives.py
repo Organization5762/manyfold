@@ -574,7 +574,8 @@ def _encode_finite_float(value: Any) -> bytes:
 
 def _decode_finite_float(payload: bytes) -> float:
     try:
-        number = float(payload.decode("ascii"))
+        raw_payload = _coerce_bytes_payload(payload)
+        number = float(raw_payload.decode("ascii"))
     except (UnicodeDecodeError, ValueError) as exc:
         raise ValueError("float schema values must be finite numbers") from exc
     if not math.isfinite(number):
