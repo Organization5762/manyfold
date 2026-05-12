@@ -134,6 +134,40 @@ class PrimitiveTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, message):
                     manyfold.TypedRoute(**invalid_kwargs)
 
+    def test_typed_envelope_rejects_invalid_direct_construction(self) -> None:
+        manyfold = load_manyfold_package()
+        typed_route = manyfold.route(
+            owner="sensor",
+            family="events",
+            stream="temperature",
+            schema=manyfold.Schema.float(name="Temperature"),
+        )
+        closed = manyfold.ClosedEnvelope(
+            route=typed_route.route_ref,
+            payload_ref=manyfold.PayloadRef(
+                payload_id="temperature:1",
+                logical_length_bytes=3,
+                inline_bytes=b"1.0",
+            ),
+            seq_source=1,
+        )
+        kwargs = {
+            "route": typed_route,
+            "closed": closed,
+            "value": 1.0,
+        }
+
+        cases = (
+            ("route", typed_route.route_ref, "envelope route must be a TypedRoute"),
+            ("closed", object(), "envelope closed value must be a ClosedEnvelope"),
+        )
+        for field, value, message in cases:
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(ValueError, message):
+                    manyfold.TypedEnvelope(**{**kwargs, field: value})
+
+        self.assertIs(manyfold.TypedEnvelope(**kwargs).close(), closed)
+
     def test_source_and_sink_reject_invalid_direct_construction(self) -> None:
         manyfold = load_manyfold_package()
         typed_route = manyfold.route(

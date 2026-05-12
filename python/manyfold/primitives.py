@@ -451,6 +451,12 @@ class TypedEnvelope(Generic[T]):
     closed: ClosedEnvelope
     value: T
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.route, TypedRoute):
+            raise ValueError("envelope route must be a TypedRoute")
+        if not isinstance(self.closed, ClosedEnvelope):
+            raise ValueError("envelope closed value must be a ClosedEnvelope")
+
     def close(self) -> ClosedEnvelope:
         """Return the immutable closed envelope carried by this decoded view."""
         return self.closed
