@@ -399,6 +399,23 @@ class ReferenceExampleSuiteTests(unittest.TestCase):
                 runner=lambda: None,
             )
 
+    def test_implemented_reference_metadata_requires_reference_fields(self) -> None:
+        load_manyfold_package()
+        reference_examples = sys.modules["manyfold.reference_examples"]
+        metadata = types.SimpleNamespace(
+            reference_number=None,
+            reference_title="Synthetic example",
+            summary="Summary",
+            module_name="synthetic_example",
+            import_path="examples.synthetic_example",
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "reference_number and reference_title",
+        ):
+            reference_examples._implemented_reference_example(metadata)
+
     def test_reference_example_suite_uses_shared_example_catalog(self) -> None:
         manyfold = load_manyfold_package()
 

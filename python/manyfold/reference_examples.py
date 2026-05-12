@@ -107,8 +107,11 @@ def _example_runner(import_path: str) -> ExampleRunner:
 
 
 def _implemented_reference_example(metadata: ExampleCatalogEntry) -> ReferenceExample:
-    assert metadata.reference_number is not None
-    assert metadata.reference_title is not None
+    if metadata.reference_number is None or metadata.reference_title is None:
+        raise ValueError(
+            "implemented reference example metadata must include "
+            "reference_number and reference_title"
+        )
     return ReferenceExample(
         number=metadata.reference_number,
         title=metadata.reference_title,
