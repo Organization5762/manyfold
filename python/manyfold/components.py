@@ -438,6 +438,19 @@ class ConsensusRoutes:
     replicated_log: TypedRoute[ReplicatedLog]
     leader_state: TypedRoute[LeaderState]
 
+    def __post_init__(self) -> None:
+        _require_typed_route(self.election_tick, "election_tick route")
+        _require_typed_route(self.election_timeout, "election_timeout route")
+        _require_typed_route(self.request_vote, "request_vote route")
+        _require_typed_route(self.heartbeat, "heartbeat route")
+        _require_typed_route(self.heartbeat_seen, "heartbeat_seen route")
+        _require_typed_route(self.vote_response, "vote_response route")
+        _require_typed_route(self.proposed_entries, "proposed_entries route")
+        _require_typed_route(self.append_entries, "append_entries route")
+        _require_typed_route(self.quorum, "quorum route")
+        _require_typed_route(self.replicated_log, "replicated_log route")
+        _require_typed_route(self.leader_state, "leader_state route")
+
 
 @dataclass(frozen=True)
 class MemoryRecord(Generic[T]):

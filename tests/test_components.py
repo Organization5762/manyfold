@@ -139,6 +139,21 @@ class ComponentTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "latest route"):
             manyfold.SnapshotStoreRoutes(write=append, latest=object())
 
+    def test_consensus_routes_validate_direct_construction(self) -> None:
+        manyfold = load_manyfold_package()
+        routes = manyfold.Consensus.default_routes()
+
+        self.assertEqual(
+            manyfold.ConsensusRoutes(**routes.__dict__).leader_state,
+            routes.leader_state,
+        )
+
+        for field in routes.__dict__:
+            kwargs = {**routes.__dict__, field: object()}
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(ValueError, f"{field} route"):
+                    manyfold.ConsensusRoutes(**kwargs)
+
     def test_file_store_addresses_bytes_by_nested_keyspace_prefix(self) -> None:
         manyfold = load_manyfold_package()
 
