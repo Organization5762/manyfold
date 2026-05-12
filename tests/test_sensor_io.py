@@ -20,6 +20,7 @@ class SensorIoTests(unittest.TestCase):
         sensor_io = sys.modules["manyfold.sensor_io"]
 
         self.assertIsInstance(sensor_io.__all__, tuple)
+        self.assertEqual(sensor_io.__all__, tuple(sorted(sensor_io.__all__)))
         for name in sensor_io.__all__:
             with self.subTest(name=name):
                 self.assertTrue(hasattr(sensor_io, name))
