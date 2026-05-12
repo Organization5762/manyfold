@@ -594,6 +594,17 @@ class QueryResponse:
     correlation_id: str
     items: tuple[str, ...]
 
+    def __post_init__(self) -> None:
+        _require_non_empty_text(self.command, "query response command")
+        _require_non_empty_text(
+            self.correlation_id, "query response correlation_id"
+        )
+        object.__setattr__(
+            self,
+            "items",
+            _normalize_text_sequence(self.items, "query response items"),
+        )
+
 
 @dataclass(frozen=True)
 class EventRef:
@@ -6879,6 +6890,14 @@ def _require_callable(value: object, field: str) -> None:
 def _require_optional_callable(value: object, field: str) -> None:
     if value is not None:
         _require_callable(value, field)
+
+
+def _normalize_text_sequence(value: object, field: str) -> tuple[str, ...]:
+    if isinstance(value, str) or not isinstance(value, Sequence):
+        raise ValueError(f"{field} must be a sequence of strings")
+    if not all(isinstance(item, str) for item in value):
+        raise ValueError(f"{field} must contain only strings")
+    return tuple(value)
 
 
 def _require_route_like(value: object, field: str) -> None:

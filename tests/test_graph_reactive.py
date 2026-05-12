@@ -5354,6 +5354,26 @@ assert graph.latest(route) is None
             graph_module.QueryRequest(command="")
         with self.assertRaisesRegex(ValueError, "query principal_id"):
             graph_module.QueryRequest(command="manifest", principal_id=" ")
+        response = graph_module.QueryResponse(
+            command="manifest",
+            correlation_id="request-1",
+            items=["routes", "topology"],
+        )
+        self.assertEqual(response.items, ("routes", "topology"))
+        with self.assertRaisesRegex(ValueError, "query response command"):
+            graph_module.QueryResponse(
+                command="",
+                correlation_id="request-1",
+                items=(),
+            )
+        with self.assertRaisesRegex(ValueError, "query response correlation_id"):
+            graph_module.QueryResponse(command="manifest", correlation_id="", items=())
+        with self.assertRaisesRegex(ValueError, "query response items"):
+            graph_module.QueryResponse(
+                command="manifest",
+                correlation_id="request-1",
+                items=("routes", 1),
+            )
         graph = graph_module.Graph()
         with self.assertRaisesRegex(ValueError, "query service owner"):
             graph.query_service(" ")
