@@ -858,6 +858,18 @@ class ExampleTests(unittest.TestCase):
                 reference_title=" ",
             )
 
+    def test_catalog_entry_rejects_non_importable_module_names(self) -> None:
+        for module_name in ("../scratch", "bad-name", ".hidden", "archived."):
+            with self.subTest(module_name=module_name):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "module name must be a dotted Python module path",
+                ):
+                    ExampleCatalogEntry(
+                        module_name,
+                        "Broken module name that cannot be imported.",
+                    )
+
     def test_catalog_entry_rejects_boolean_numeric_metadata(self) -> None:
         with self.assertRaisesRegex(TypeError, "readme_order must be an integer"):
             ExampleCatalogEntry(

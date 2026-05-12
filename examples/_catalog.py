@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 from collections.abc import Hashable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,6 +15,7 @@ T = TypeVar("T", bound=Hashable)
 
 __all__ = (*CATALOG_EXPORTS,)
 
+_MODULE_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*\Z")
 _README_INTRO_LINES = (
     "The `examples/` directory is organized as a short path through the mental",
     "model. Start with a route, derive values, add explicit demand, then move",
@@ -56,6 +58,10 @@ class ExampleCatalogEntry:
     def __post_init__(self) -> None:
         if not isinstance(self.module_name, str) or not self.module_name.strip():
             raise ValueError("example catalog module name must be a non-empty string")
+        if _MODULE_NAME_RE.fullmatch(self.module_name) is None:
+            raise ValueError(
+                "example catalog module name must be a dotted Python module path"
+            )
         if not isinstance(self.summary, str) or not self.summary.strip():
             raise ValueError("example catalog summary must be a non-empty string")
         if not isinstance(self.archived, bool):
