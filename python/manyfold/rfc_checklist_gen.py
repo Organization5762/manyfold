@@ -319,9 +319,10 @@ def _coverage_issues(
     *, expected: Mapping[str, object], actual: list[str], label: str
 ) -> tuple[str, ...]:
     expected_keys = set(expected)
-    actual_keys = set(actual)
+    actual_counts = Counter(actual)
+    actual_keys = set(actual_counts)
     duplicate_keys = tuple(
-        sorted(key for key, count in Counter(actual).items() if count > 1)
+        key for key, count in sorted(actual_counts.items()) if count > 1
     )
     issues: list[str] = []
     if missing_keys := tuple(sorted(expected_keys - actual_keys)):
@@ -329,7 +330,7 @@ def _coverage_issues(
     if extra_keys := tuple(sorted(actual_keys - expected_keys)):
         issues.append(f"unknown {label} entries: {', '.join(extra_keys)}")
     if duplicate_keys:
-        issues.append(f"duplicate {label} entries: {', '.join(sorted(duplicate_keys))}")
+        issues.append(f"duplicate {label} entries: {', '.join(duplicate_keys)}")
     return tuple(issues)
 
 
