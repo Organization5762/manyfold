@@ -146,7 +146,7 @@ class CoalesceLatestNode(Generic[T]):
     def __post_init__(self) -> None:
         _require_non_empty_text(self.name, "coalesce node name")
         _require_optional_non_empty_text(self.stream_name, "coalesce stream_name")
-        _require_integer(self.window_ms, "coalesce window_ms")
+        _require_non_negative_integer(self.window_ms, "coalesce window_ms")
 
     def observable(self, source: ObservableLike[T]) -> Observable[T]:
         if self.window_ms <= 0:
@@ -256,7 +256,7 @@ class LoggingNode(Generic[T]):
     def __post_init__(self) -> None:
         _require_non_empty_text(self.name, "logging node name")
         _require_non_empty_text(self.stream_name, "logging stream_name")
-        _require_integer(self.interval_ms, "logging interval_ms")
+        _require_non_negative_integer(self.interval_ms, "logging interval_ms")
 
     def observable(self, source: ObservableLike[T]) -> Observable[T]:
         if self.interval_ms <= 0:
@@ -2510,7 +2510,7 @@ class PipelineLoggingNode(_ThreadPlaceableNode, Generic[T]):
     def __post_init__(self) -> None:
         _require_non_empty_text(self.name, "logging node name")
         _require_non_empty_text(self.stream_name, "logging stream_name")
-        _require_integer(self.interval_ms, "logging interval_ms")
+        _require_non_negative_integer(self.interval_ms, "logging interval_ms")
         _require_optional_thread_placement(self.thread_placement)
 
     def observable(self, source: ObservableLike[T]) -> Observable[T]:

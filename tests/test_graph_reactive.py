@@ -1080,11 +1080,11 @@ assert graph.latest(route) is None
     def test_coalesce_latest_node_rejects_non_integer_windows(self) -> None:
         graph_module = load_graph_module()
 
-        for window_ms in (True, 100.5, "100"):
+        for window_ms in (True, 100.5, "100", -1):
             with self.subTest(window_ms=window_ms):
                 with self.assertRaisesRegex(
                     ValueError,
-                    "coalesce window_ms must be an integer",
+                    "coalesce window_ms must be a non-negative integer",
                 ):
                     graph_module.CoalesceLatestNode(
                         name="coalesce",
@@ -1259,11 +1259,11 @@ assert graph.latest(route) is None
             ),
         )
         for label, factory in cases:
-            for interval_ms in (False, 1.5, "1"):
+            for interval_ms in (False, 1.5, "1", -1):
                 with self.subTest(label=label, interval_ms=interval_ms):
                     with self.assertRaisesRegex(
                         ValueError,
-                        "logging interval_ms must be an integer",
+                        "logging interval_ms must be a non-negative integer",
                     ):
                         factory(interval_ms)
 
