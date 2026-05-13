@@ -11,6 +11,7 @@ REPO_ROOT = MODULE_PATH.parent
 PYTHON_DIR = REPO_ROOT / "python"
 IMPL_PATH = PYTHON_DIR / "manyfold_example_catalog.py"
 _IMPL_MODULE_NAME = "_manyfold_example_catalog_impl"
+_MISSING_MODULE = object()
 
 _SPEC = importlib.util.spec_from_file_location(
     _IMPL_MODULE_NAME,
@@ -18,12 +19,12 @@ _SPEC = importlib.util.spec_from_file_location(
 )
 assert _SPEC is not None and _SPEC.loader is not None
 _MODULE = importlib.util.module_from_spec(_SPEC)
-_PREVIOUS_MODULE = sys.modules.get(_IMPL_MODULE_NAME)
+_PREVIOUS_MODULE = sys.modules.get(_IMPL_MODULE_NAME, _MISSING_MODULE)
 sys.modules[_IMPL_MODULE_NAME] = _MODULE
 try:
     _SPEC.loader.exec_module(_MODULE)
 except BaseException:
-    if _PREVIOUS_MODULE is None:
+    if _PREVIOUS_MODULE is _MISSING_MODULE:
         sys.modules.pop(_IMPL_MODULE_NAME, None)
     else:
         sys.modules[_IMPL_MODULE_NAME] = _PREVIOUS_MODULE

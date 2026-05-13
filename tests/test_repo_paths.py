@@ -56,6 +56,19 @@ class RepoPathTests(unittest.TestCase):
 
                 self.assertIs(sys.modules[module_name], previous_module)
 
+    def test_load_module_from_path_restores_none_marker_after_failure(self) -> None:
+        module_name = "manyfold_failed_repo_path_none_test"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module_path = Path(temp_dir) / "loaded_module.py"
+            module_path.write_text("raise RuntimeError('boom')\n", encoding="utf-8")
+
+            with mock.patch.dict(sys.modules, {module_name: None}):
+                with self.assertRaisesRegex(RuntimeError, "boom"):
+                    _repo_paths.load_module_from_path(module_name, module_path)
+
+                self.assertIn(module_name, sys.modules)
+                self.assertIsNone(sys.modules[module_name])
+
 
 if __name__ == "__main__":
     unittest.main()

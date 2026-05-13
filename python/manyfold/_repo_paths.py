@@ -10,6 +10,7 @@ from types import ModuleType
 PACKAGE_DIR = Path(__file__).resolve().parent
 PYTHON_DIR = PACKAGE_DIR.parent
 REPO_ROOT = PYTHON_DIR.parent
+_MISSING_MODULE = object()
 
 
 def ensure_path_on_sys_path(path: Path) -> None:
@@ -57,13 +58,13 @@ def load_module_from_path(module_name: str, module_path: Path) -> ModuleType:
             f"unable to load module {module_name!r} from {resolved_module_path}"
         )
     # Leave import state unchanged when an explicit file load fails mid-exec.
-    previous_module = sys.modules.get(module_name)
+    previous_module = sys.modules.get(module_name, _MISSING_MODULE)
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
     try:
         spec.loader.exec_module(module)
     except BaseException:
-        if previous_module is None:
+        if previous_module is _MISSING_MODULE:
             sys.modules.pop(module_name, None)
         else:
             sys.modules[module_name] = previous_module
