@@ -18,6 +18,9 @@ package entrypoints and then report that they are missing from `PATH`; the
 project's Python tools live in the `uv` environment and the test suite uses
 `unittest`.
 
+If `uv` is not on `PATH`, use `/Users/lampe/.local/bin/uv` before changing tests
+or scripts to work around the shell environment.
+
 After editing `src/` Rust extension code, or after pulling/rebasing onto new
 `src/` changes, run `uv sync --reinstall-package manyfold` before Python tests
 that exercise the native module.
