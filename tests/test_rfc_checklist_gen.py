@@ -6,6 +6,8 @@ import sys
 import tempfile
 import types
 import unittest
+from contextlib import redirect_stderr
+from io import StringIO
 from pathlib import Path
 from unittest import mock
 
@@ -234,12 +236,21 @@ class RfcChecklistGenTests(unittest.TestCase):
             try:
                 generator.CHECKLIST_PATH = checklist_path
 
-                self.assertEqual(generator.main(["--check"]), 1)
+                stderr = StringIO()
+                with redirect_stderr(stderr):
+                    self.assertEqual(generator.main(["--check"]), 1)
+                self.assertIn(
+                    f"{checklist_path} is out of date; run manyfold-rfc-checklist",
+                    stderr.getvalue(),
+                )
 
                 self.assertEqual(generator.main([]), 0)
                 self.assertEqual(checklist_path.read_text(), rendered)
 
-                self.assertEqual(generator.main(["--check"]), 0)
+                stderr = StringIO()
+                with redirect_stderr(stderr):
+                    self.assertEqual(generator.main(["--check"]), 0)
+                self.assertEqual(stderr.getvalue(), "")
             finally:
                 generator.CHECKLIST_PATH = original_path
 

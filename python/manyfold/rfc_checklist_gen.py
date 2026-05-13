@@ -236,7 +236,13 @@ def main(argv: list[str] | None = None) -> int:
             if CHECKLIST_PATH.exists()
             else ""
         )
-        return 0 if current_checklist == checklist_content else 1
+        if current_checklist == checklist_content:
+            return 0
+        print(
+            f"{CHECKLIST_PATH} is out of date; run manyfold-rfc-checklist",
+            file=sys.stderr,
+        )
+        return 1
 
     _write_if_changed(CHECKLIST_PATH, checklist_content)
     return 0
