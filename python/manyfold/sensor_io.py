@@ -1311,15 +1311,18 @@ class JsonEventDecoder:
         else:
             return None
         data = parsed.get("data", {})
-        return SensorEvent(
+        sequence_number = _peek_next_sequence(self.sequence)
+        event = SensorEvent(
             event_type=event_type,
             data=data,
             observed_at=self.clock.now(),
             identity=self.identity,
-            sequence_number=self.sequence.next(),
+            sequence_number=sequence_number,
             raw=raw,
             metadata=_json_event_metadata(parsed),
         )
+        self.sequence.next()
+        return event
 
 
 @dataclass
@@ -2168,6 +2171,10 @@ def _require_sequence_counter(value: Any, field: str) -> SequenceCounter:
     if not isinstance(value, SequenceCounter):
         raise ValueError(f"{field} must be a SequenceCounter")
     return value
+
+
+def _peek_next_sequence(sequence: SequenceCounter) -> int:
+    return sequence.peek() + sequence.step
 
 
 def _require_sensor_identity(value: Any, field: str) -> SensorIdentity:

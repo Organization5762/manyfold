@@ -29,6 +29,11 @@ class _OtherStableMappingKey:
         return "slot"
 
 
+class _NonFiniteClock:
+    def now(self) -> float:
+        return math.nan
+
+
 class SensorIoTests(unittest.TestCase):
     def test_sensor_io_exports_are_tuple_shaped(self) -> None:
         load_manyfold_package()
@@ -366,6 +371,18 @@ class SensorIoTests(unittest.TestCase):
 
         self.assertIsNone(event)
         self.assertEqual(decoder.sequence.peek(), 0)
+
+    def test_json_event_decoder_does_not_advance_sequence_for_invalid_event(
+        self,
+    ) -> None:
+        manyfold = load_manyfold_package()
+        sequence = manyfold.SequenceCounter()
+        decoder = manyfold.JsonEventDecoder(clock=_NonFiniteClock(), sequence=sequence)
+
+        with self.assertRaisesRegex(ValueError, "observed_at must be a finite number"):
+            decoder.decode(b'{"event_type":"sensor.note","data":"ok"}')
+
+        self.assertEqual(sequence.peek(), 0)
 
     def test_json_event_decoder_uses_default_for_missing_event_type(self) -> None:
         manyfold = load_manyfold_package()
