@@ -242,6 +242,10 @@ class SensorIoTests(unittest.TestCase):
             ({"ordering": 7}, "ordering must be a string"),
             ({"ordering": "lifo"}, "only fifo ordering is currently supported"),
             ({"group": object()}, "group must be a string"),
+            ({"dropped": True}, "dropped must be an integer"),
+            ({"dropped": -1}, "dropped must be non-negative"),
+            ({"rejected": 1.5}, "rejected must be an integer"),
+            ({"rejected": -1}, "rejected must be non-negative"),
         ):
             with self.subTest(kwargs=kwargs):
                 with self.assertRaisesRegex(ValueError, message):
@@ -1414,6 +1418,16 @@ class SensorIoTests(unittest.TestCase):
                 start_immediately=False,
             )
 
+    def test_managed_graph_node_rejects_invalid_graph_on_install(self) -> None:
+        manyfold = load_manyfold_package()
+
+        with self.assertRaisesRegex(ValueError, "graph must be a Graph"):
+            manyfold.ManagedGraphNode(
+                name="invalid-graph-node",
+                body=lambda stop, _graph: stop.set(),
+                start_immediately=False,
+            ).install(object())
+
     def test_managed_graph_node_appears_in_diagram(self) -> None:
         manyfold = load_manyfold_package()
         graph = manyfold.Graph()
@@ -1521,6 +1535,35 @@ class SensorIoTests(unittest.TestCase):
                             **kwargs,
                         }
                     )
+
+    def test_detection_node_rejects_invalid_graph_on_install(self) -> None:
+        manyfold = load_manyfold_package()
+        detected = _route(
+            manyfold,
+            "invalid_detection_graph_items",
+            _int_schema(manyfold, "Detected"),
+        )
+
+        with self.assertRaisesRegex(ValueError, "graph must be a Graph"):
+            manyfold.DetectionNode(
+                name="invalid-detection-graph",
+                detector=lambda: iter(()),
+                output_route=detected,
+                start_immediately=False,
+            ).install(object())
+
+    def test_graph_access_node_validates_direct_construction(self) -> None:
+        manyfold = load_manyfold_package()
+        graph = manyfold.Graph()
+
+        with self.assertRaisesRegex(ValueError, "graph must be a Graph"):
+            manyfold.GraphAccessNode(graph=object())
+        with self.assertRaisesRegex(ValueError, "owned_handles must be a list"):
+            manyfold.GraphAccessNode(graph=graph, owned_handles=())
+
+        access = manyfold.GraphAccessNode(graph=graph)
+        with self.assertRaisesRegex(ValueError, r"target must provide install\(\)"):
+            access.install(object())
 
     def test_detection_node_can_spawn_downstream_sources(self) -> None:
         manyfold = load_manyfold_package()

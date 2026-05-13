@@ -511,11 +511,19 @@ class GraphAccessNode:
     graph: Graph
     owned_handles: list[Any] = field(default_factory=list)
 
+    def __post_init__(self) -> None:
+        self.graph = _require_graph(self.graph, "graph access node graph")
+        if not isinstance(self.owned_handles, list):
+            raise ValueError("graph access node owned_handles must be a list")
+
     def publish(self, route: TypedRoute[Any], payload: Any) -> Any:
         return self.graph.publish(route, payload)
 
     def install(self, node: Any) -> Any:
-        handle = node.install(self.graph)
+        installer = getattr(node, "install", None)
+        if not callable(installer):
+            raise ValueError("graph access node install target must provide install()")
+        handle = installer(self.graph)
         self.owned_handles.extend(_flatten_handles(handle))
         return handle
 
@@ -618,6 +626,7 @@ class ManagedGraphNode:
             raise ValueError("on_control is required when control_route is provided")
 
     def install(self, graph: Graph) -> ManagedGraphNodeHandle:
+        graph = _require_graph(graph, "managed graph node graph")
         diagram_outputs = tuple(self.output_routes) + (
             (self.error_route,) if self.error_route is not None else ()
         )
@@ -716,6 +725,7 @@ class DetectionNode:
         self.daemon = _require_bool(self.daemon, "detection node daemon")
 
     def install(self, graph: Graph) -> "DetectionNodeHandle":
+        graph = _require_graph(graph, "detection node graph")
         graph_access = GraphAccessNode(graph=graph)
 
         def body(stop: StopToken, graph: Graph) -> None:
@@ -814,6 +824,12 @@ class BoundedRingBuffer(Generic[T]):
         if self.ordering != "fifo":
             raise ValueError("only fifo ordering is currently supported")
         self.group = _require_optional_string(self.group, "group")
+        self.dropped = _require_int(self.dropped, "dropped")
+        if self.dropped < 0:
+            raise ValueError("dropped must be non-negative")
+        self.rejected = _require_int(self.rejected, "rejected")
+        if self.rejected < 0:
+            raise ValueError("rejected must be non-negative")
 
     def push(self, item: T) -> bool:
         if len(self._items) < self.capacity:
@@ -1531,6 +1547,7 @@ class LocalSensorSource(Generic[T]):
         _adopt_group(self.clock, self.group)
 
     def install(self, graph: Graph, *, read_now: bool = True) -> SensorSourceHandle[T]:
+        graph = _require_graph(graph, "local sensor source graph")
         handle = SensorSourceHandle(source=self, graph=graph)
         if read_now:
             handle.poll()
@@ -1625,6 +1642,8 @@ class ReactiveSensorSource:
         _adopt_group(self.sequence, self.group)
 
     def install(self, graph: Graph) -> ReactiveSensorHandle:
+        graph = _require_graph(graph, "reactive sensor source graph")
+
         def on_next(item: Any) -> None:
             value = self.mapper(item)
             now = self.clock.now()
@@ -1736,6 +1755,8 @@ class PeripheralAdapter:
         _adopt_group(self.sequence, self.group)
 
     def install(self, graph: Graph) -> PeripheralAdapterHandle:
+        graph = _require_graph(graph, "peripheral adapter graph")
+
         def on_next(item: Any) -> None:
             identity = self.identity or _identity_from_peripheral_item(item, self.group)
             payload, sequence_advances = self._payload_for_item(item, identity)
@@ -1847,6 +1868,7 @@ class RateMatchedSensor:
         _adopt_group(self.clock, self.group)
 
     def install(self, graph: Graph) -> Any:
+        graph = _require_graph(graph, "rate matched sensor graph")
         if self.mode == "latest":
             # Keep one latest value no matter what capacity was requested.
             capacity = 1
@@ -1937,6 +1959,7 @@ class SensorHealthWatchdog:
         _adopt_group(self.clock, self.group)
 
     def install(self, graph: Graph) -> SensorHealthHandle:
+        graph = _require_graph(graph, "sensor health graph")
         handle = SensorHealthHandle(
             watchdog=self,
             graph=graph,
@@ -1973,6 +1996,7 @@ class LocalDurableSpool(Generic[T]):
         return EventLog(self.name, self.keyspace, self.schema)
 
     def install(self, graph: Graph, source: TypedRoute[T]) -> SubscriptionLike:
+        graph = _require_graph(graph, "local durable spool graph")
         if not isinstance(source, TypedRoute):
             raise ValueError("local durable spool source must be a TypedRoute")
         log = self.event_log()
@@ -2165,6 +2189,12 @@ def _require_peripheral(value: Any, field: str) -> None:
 def _require_clock(value: Any, field: str) -> None:
     if not callable(getattr(value, "now", None)):
         raise ValueError(f"{field} must provide now()")
+
+
+def _require_graph(value: Any, field: str) -> Graph:
+    if not isinstance(value, Graph):
+        raise ValueError(f"{field} must be a Graph")
+    return value
 
 
 def _require_retry_policy(value: Any, field: str) -> RetryPolicy:
