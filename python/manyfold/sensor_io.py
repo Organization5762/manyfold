@@ -1553,8 +1553,8 @@ class LocalSensorSource(Generic[T]):
             quality=self.quality,
             status=self.status,
         )
-        self.sequence.next()
         graph.publish(self.route, sample)
+        self.sequence.next()
         return sample
 
 
@@ -1638,8 +1638,6 @@ class ReactiveSensorSource:
                 if self.wrap_sample
                 else value
             )
-            if self.wrap_sample:
-                self.sequence.next()
             if self.debug_tap is not None:
                 self.debug_tap.publish(
                     stage=self.debug_stage,
@@ -1651,6 +1649,8 @@ class ReactiveSensorSource:
                     payload=payload,
                 )
             graph.publish(self.route, payload)
+            if self.wrap_sample:
+                self.sequence.next()
 
         subscription = self.observable.subscribe(on_next)
         return ReactiveSensorHandle(source=self, graph=graph, subscription=subscription)
@@ -1738,7 +1738,7 @@ class PeripheralAdapter:
     def install(self, graph: Graph) -> PeripheralAdapterHandle:
         def on_next(item: Any) -> None:
             identity = self.identity or _identity_from_peripheral_item(item, self.group)
-            payload = self._payload_for_item(item, identity)
+            payload, sequence_advances = self._payload_for_item(item, identity)
             if self.debug_tap is not None:
                 self.debug_tap.publish(
                     stage=SensorDebugStage.RAW,
@@ -1747,6 +1747,8 @@ class PeripheralAdapter:
                     payload=payload,
                 )
             graph.publish(self.route, payload)
+            for _ in range(sequence_advances):
+                self.sequence.next()
 
         subscription = self.peripheral.observe.subscribe(on_next)
         control_subscription = None
@@ -1777,7 +1779,7 @@ class PeripheralAdapter:
             control_subscription=control_subscription,
         )
 
-    def _payload_for_item(self, item: Any, identity: SensorIdentity) -> Any:
+    def _payload_for_item(self, item: Any, identity: SensorIdentity) -> tuple[Any, int]:
         sequence_advances = 0
         if self.mapper is not None:
             payload = self.mapper(item)
@@ -1805,9 +1807,7 @@ class PeripheralAdapter:
                 sequence_number=sequence_number,
             )
             sequence_advances += 1
-        for _ in range(sequence_advances):
-            self.sequence.next()
-        return payload
+        return payload, sequence_advances
 
 
 @dataclass

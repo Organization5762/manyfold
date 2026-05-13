@@ -1747,6 +1747,30 @@ class SensorIoTests(unittest.TestCase):
         self.assertEqual(sequence.peek(), 10)
         self.assertIsNone(graph.latest(route))
 
+    def test_local_sensor_source_does_not_advance_sequence_when_publish_fails(
+        self,
+    ) -> None:
+        manyfold = load_manyfold_package()
+        graph = manyfold.Graph()
+        sequence = manyfold.SequenceCounter(current=10)
+        route = _route(
+            manyfold,
+            "unpublished_local_sample",
+            manyfold.sensor_sample_schema(_failing_schema(manyfold, "Temp")),
+        )
+        source = manyfold.LocalSensorSource(
+            route=route,
+            read=lambda: 25,
+            clock=manyfold.ManualClock(1.0),
+            sequence=sequence,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "encode failed"):
+            source.install(graph, read_now=False).poll()
+
+        self.assertEqual(sequence.peek(), 10)
+        self.assertIsNone(graph.latest(route))
+
     def test_local_sensor_source_rejects_invalid_configuration(self) -> None:
         manyfold = load_manyfold_package()
         sample_schema = manyfold.sensor_sample_schema(_int_schema(manyfold, "Temp"))
@@ -1823,6 +1847,30 @@ class SensorIoTests(unittest.TestCase):
                 observable=rx.from_iterable([1]),
                 wrap_sample=True,
                 clock=_NonFiniteClock(),
+                sequence=sequence,
+            ).install(graph)
+
+        self.assertEqual(sequence.peek(), 20)
+        self.assertIsNone(graph.latest(route))
+
+    def test_reactive_sensor_source_does_not_advance_sequence_when_publish_fails(
+        self,
+    ) -> None:
+        manyfold = load_manyfold_package()
+        graph = manyfold.Graph()
+        sequence = manyfold.SequenceCounter(current=20)
+        route = _route(
+            manyfold,
+            "unpublished_reactive_sample",
+            manyfold.sensor_sample_schema(_failing_schema(manyfold, "Accel")),
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "encode failed"):
+            manyfold.ReactiveSensorSource(
+                route=route,
+                observable=rx.from_iterable([1]),
+                wrap_sample=True,
+                clock=manyfold.ManualClock(2.0),
                 sequence=sequence,
             ).install(graph)
 
@@ -2099,6 +2147,35 @@ class SensorIoTests(unittest.TestCase):
                 route=route,
                 event_type="peripheral.temperature",
                 clock=_NonFiniteClock(),
+                sequence=sequence,
+            ).install(graph)
+
+        self.assertEqual(sequence.peek(), 30)
+        self.assertIsNone(graph.latest(route))
+
+    def test_peripheral_adapter_does_not_advance_sequence_when_publish_fails(
+        self,
+    ) -> None:
+        manyfold = load_manyfold_package()
+
+        class FakePeripheral:
+            def __init__(self) -> None:
+                self.observe = rx.from_iterable([{"temperature": 21}])
+
+        graph = manyfold.Graph()
+        sequence = manyfold.SequenceCounter(current=30)
+        route = _route(
+            manyfold,
+            "unpublished_peripheral_event",
+            _failing_schema(manyfold, "PeripheralEvent"),
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "encode failed"):
+            manyfold.PeripheralAdapter(
+                peripheral=FakePeripheral(),
+                route=route,
+                event_type="peripheral.temperature",
+                clock=manyfold.ManualClock(3.0),
                 sequence=sequence,
             ).install(graph)
 
@@ -2767,6 +2844,16 @@ def _exception_schema(manyfold, schema_id: str = "Exception"):
 
     def decode(payload: bytes) -> BaseException:
         return RuntimeError(payload.decode("utf-8"))
+
+    return manyfold.Schema(schema_id=schema_id, version=1, encode=encode, decode=decode)
+
+
+def _failing_schema(manyfold, schema_id: str = "Failing"):
+    def encode(value) -> bytes:
+        raise RuntimeError("encode failed")
+
+    def decode(payload: bytes):
+        raise RuntimeError("decode failed")
 
     return manyfold.Schema(schema_id=schema_id, version=1, encode=encode, decode=decode)
 
