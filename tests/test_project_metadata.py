@@ -112,16 +112,14 @@ def _module_all_assignment(path: Path) -> tuple[str, ...]:
     for node in tree.body:
         if not isinstance(node, ast.Assign):
             continue
-        if not any(isinstance(target, ast.Name) and target.id == "__all__" for target in node.targets):
+        if not _assigns_name(node, "__all__"):
             continue
         if not isinstance(node.value, ast.List | ast.Tuple):
             raise AssertionError(f"{path} __all__ must be a literal list or tuple")
-        exports: list[str] = []
-        for item in node.value.elts:
-            if not isinstance(item, ast.Constant) or not isinstance(item.value, str):
-                raise AssertionError(f"{path} __all__ must contain only string literals")
-            exports.append(item.value)
-        return tuple(exports)
+        exports = _literal_string_sequence(node.value)
+        if exports is None:
+            raise AssertionError(f"{path} __all__ must contain only string literals")
+        return exports
     raise AssertionError(f"{path} does not define __all__")
 
 
@@ -130,20 +128,25 @@ def _literal_module_all_assignment(path: Path) -> tuple[str, ...] | None:
     for node in tree.body:
         if not isinstance(node, ast.Assign):
             continue
-        if not any(
-            isinstance(target, ast.Name) and target.id == "__all__"
-            for target in node.targets
-        ):
+        if not _assigns_name(node, "__all__"):
             continue
-        if not isinstance(node.value, ast.List | ast.Tuple):
-            return None
-        exports: list[str] = []
-        for item in node.value.elts:
-            if not isinstance(item, ast.Constant) or not isinstance(item.value, str):
-                return None
-            exports.append(item.value)
-        return tuple(exports)
+        return _literal_string_sequence(node.value)
     return None
+
+
+def _assigns_name(node: ast.Assign, name: str) -> bool:
+    return any(isinstance(target, ast.Name) and target.id == name for target in node.targets)
+
+
+def _literal_string_sequence(node: ast.expr) -> tuple[str, ...] | None:
+    if not isinstance(node, ast.List | ast.Tuple):
+        return None
+    values: list[str] = []
+    for item in node.elts:
+        if not isinstance(item, ast.Constant) or not isinstance(item.value, str):
+            return None
+        values.append(item.value)
+    return tuple(values)
 
 
 def _python_source_paths() -> tuple[Path, ...]:
