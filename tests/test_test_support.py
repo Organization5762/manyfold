@@ -123,6 +123,18 @@ class TestSupportTests(unittest.TestCase):
 
                 self.assertIs(sys.modules[module_name], previous_module)
 
+    def test_load_module_restores_existing_none_sentinel_after_failure(self) -> None:
+        module_name = "manyfold_test_support_none_failed_load"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module_path = Path(temp_dir) / "loaded_module.py"
+            module_path.write_text("raise RuntimeError('boom')\n", encoding="utf-8")
+
+            with mock.patch.dict(sys.modules, {module_name: None}):
+                with self.assertRaisesRegex(RuntimeError, "boom"):
+                    test_support._load_module(module_name, module_path)
+
+                self.assertIsNone(sys.modules[module_name])
+
     def test_load_module_removes_new_module_after_failure(self) -> None:
         module_name = "manyfold_test_support_new_failed_load"
         with tempfile.TemporaryDirectory() as temp_dir:
