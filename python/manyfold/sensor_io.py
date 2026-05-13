@@ -1449,9 +1449,12 @@ class FrameAssembler(Generic[TFrame]):
         _require_callable(self.slot_id, "slot_id")
 
     def add(self, sample: TFrame) -> tuple[SensorFrame[TFrame], ...]:
-        resolved_frame_id = self.frame_id(sample)
+        resolved_frame_id = _require_hashable_key(
+            self.frame_id(sample), "frame_id result"
+        )
+        resolved_slot_id = _require_hashable_key(self.slot_id(sample), "slot_id result")
         bucket = self._pending.setdefault(resolved_frame_id, {})
-        bucket[self.slot_id(sample)] = sample
+        bucket[resolved_slot_id] = sample
         if len(bucket) < self.expected_count:
             return ()
         samples = tuple(
@@ -2220,6 +2223,14 @@ def _require_mapping(value: Any, field: str) -> Mapping[Any, Any]:
 def _mapping_key_sort_key(key: Any) -> tuple[str, str, str]:
     key_type = type(key)
     return (key_type.__module__, key_type.__qualname__, str(key))
+
+
+def _require_hashable_key(value: Any, field: str) -> Any:
+    try:
+        hash(value)
+    except TypeError as exc:
+        raise ValueError(f"{field} must be hashable") from exc
+    return value
 
 
 def _compact_json_bytes(value: Mapping[str, Any]) -> bytes:

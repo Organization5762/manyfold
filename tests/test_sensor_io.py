@@ -2450,6 +2450,33 @@ class SensorIoTests(unittest.TestCase):
                         slot_id=kwargs.get("slot_id", lambda sample: sample[1]),
                     )
 
+    def test_frame_assembler_rejects_unhashable_selector_results(self) -> None:
+        manyfold = load_manyfold_package()
+
+        cases = (
+            (
+                manyfold.FrameAssembler(
+                    expected_count=2,
+                    frame_id=lambda sample: [sample[0]],
+                    slot_id=lambda sample: sample[1],
+                ),
+                "frame_id result must be hashable",
+            ),
+            (
+                manyfold.FrameAssembler(
+                    expected_count=2,
+                    frame_id=lambda sample: sample[0],
+                    slot_id=lambda sample: [sample[1]],
+                ),
+                "slot_id result must be hashable",
+            ),
+        )
+        for assembler, message in cases:
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(ValueError, message):
+                    assembler.add((7, 1, "sample"))
+                self.assertEqual(assembler._pending, {})
+
     def test_sensor_frame_rejects_invalid_samples(self) -> None:
         manyfold = load_manyfold_package()
 
