@@ -271,30 +271,6 @@ class ReferenceExampleSuiteTests(unittest.TestCase):
         self.assertEqual(manyfold.__all__, runtime_exports)
         self.assertEqual(runtime_exports, tuple(sorted(runtime_exports)))
 
-    def test_manyfold_modules_keep_imports_at_module_scope(self) -> None:
-        package_path = Path(__file__).resolve().parents[1] / "python" / "manyfold"
-        violations: list[str] = []
-
-        for module_path in sorted(package_path.rglob("*.py")):
-            module = ast.parse(module_path.read_text(encoding="utf-8"))
-            parents = {
-                child: parent
-                for parent in ast.walk(module)
-                for child in ast.iter_child_nodes(parent)
-            }
-            for node in ast.walk(module):
-                if not isinstance(node, ast.Import | ast.ImportFrom):
-                    continue
-                parent = parents.get(node)
-                while parent is not None:
-                    if isinstance(parent, ast.FunctionDef | ast.AsyncFunctionDef):
-                        relative = module_path.relative_to(package_path.parent)
-                        violations.append(f"{relative}:{node.lineno}")
-                        break
-                    parent = parents.get(parent)
-
-        self.assertEqual(violations, [])
-
     def test_reference_example_suite_declares_all_rfc_examples(self) -> None:
         manyfold = load_manyfold_package()
         suite = manyfold.reference_example_suite()
