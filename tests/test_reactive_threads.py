@@ -240,6 +240,29 @@ class ReactiveThreadsTests(unittest.TestCase):
 
         self.assertEqual(list(recorder.snapshot()), ["a-stream", "z-stream"])
 
+    def test_delivery_latency_stats_rejects_invalid_direct_construction(self) -> None:
+        valid = {
+            "count": 3,
+            "p50_ms": 1.0,
+            "p95_ms": 2.0,
+            "p99_ms": 3.0,
+            "max_ms": 4.0,
+        }
+        cases = (
+            ({**valid, "count": True}, "count must be an integer"),
+            ({**valid, "count": 0}, "count must be positive"),
+            ({**valid, "p50_ms": False}, "p50_ms must be a number"),
+            ({**valid, "p95_ms": float("nan")}, "p95_ms must be finite"),
+            ({**valid, "p99_ms": -1.0}, "p99_ms must not be negative"),
+            ({**valid, "p95_ms": 0.5}, "latency percentiles must be ordered"),
+            ({**valid, "max_ms": 2.5}, "latency percentiles must be ordered"),
+        )
+
+        for kwargs, message in cases:
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    self.reactive_threads.DeliveryLatencyStats(**kwargs)
+
     def test_latency_recorder_rejects_invalid_record_values(self) -> None:
         recorder = self.reactive_threads._LatencyRecorder()
 

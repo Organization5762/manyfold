@@ -52,6 +52,20 @@ class DeliveryLatencyStats:
     p99_ms: float
     max_ms: float
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.count, int) or isinstance(self.count, bool):
+            raise ValueError("count must be an integer")
+        if self.count <= 0:
+            raise ValueError("count must be positive")
+        values = (
+            _require_finite_non_negative_number(self.p50_ms, "p50_ms"),
+            _require_finite_non_negative_number(self.p95_ms, "p95_ms"),
+            _require_finite_non_negative_number(self.p99_ms, "p99_ms"),
+            _require_finite_non_negative_number(self.max_ms, "max_ms"),
+        )
+        if values != tuple(sorted(values)):
+            raise ValueError("latency percentiles must be ordered")
+
 
 @dataclass
 class _SchedulerState:
@@ -458,6 +472,15 @@ def _require_number(value: Any, field: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{field} must be a number")
     return float(value)
+
+
+def _require_finite_non_negative_number(value: Any, field: str) -> float:
+    value = _require_number(value, field)
+    if not math.isfinite(value):
+        raise ValueError(f"{field} must be finite")
+    if value < 0.0:
+        raise ValueError(f"{field} must not be negative")
+    return value
 
 
 def _require_positive_timedelta(value: Any) -> timedelta:
