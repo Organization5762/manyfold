@@ -239,6 +239,31 @@ class LegoCatalogTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, message):
                     lookup(value)
 
+    def test_catalog_queries_trim_lookup_text(self) -> None:
+        manyfold = load_manyfold_package()
+
+        self.assertIs(manyfold.get_lego(" RetryLoop "), manyfold.get_lego("RetryLoop"))
+        self.assertEqual(
+            manyfold.dependencies_of("\tRetryLoop\n"),
+            manyfold.dependencies_of("RetryLoop"),
+        )
+        self.assertEqual(
+            manyfold.dependency_closure_of(" Workflow "),
+            manyfold.dependency_closure_of("Workflow"),
+        )
+        self.assertEqual(
+            manyfold.dependents_of(" EventLog "),
+            manyfold.dependents_of("EventLog"),
+        )
+        self.assertEqual(
+            manyfold.legos_by_role(" persistence "),
+            manyfold.legos_by_role("persistence"),
+        )
+        self.assertEqual(
+            manyfold.legos_by_layer("\tdurable\n"),
+            manyfold.legos_by_layer("durable"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

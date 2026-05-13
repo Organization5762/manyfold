@@ -19,7 +19,7 @@ def all_legos() -> tuple[Lego, ...]:
 
 def get_lego(name: str) -> Lego:
     """Return one lego by exact name."""
-    _require_non_blank_text(name, "name")
+    name = _require_non_blank_text(name, "name")
     try:
         return _BY_NAME[name]
     except KeyError as exc:
@@ -28,31 +28,31 @@ def get_lego(name: str) -> Lego:
 
 def dependencies_of(name: str) -> tuple[Lego, ...]:
     """Return direct dependencies for one lego in declared order."""
-    get_lego(name)
-    return _DEPENDENCIES_BY_NAME[name]
+    lego = get_lego(name)
+    return _DEPENDENCIES_BY_NAME[lego.name]
 
 
 def dependency_closure_of(name: str) -> tuple[Lego, ...]:
     """Return transitive dependencies in dependency-first order."""
-    get_lego(name)
-    return _DEPENDENCY_CLOSURE_BY_NAME[name]
+    lego = get_lego(name)
+    return _DEPENDENCY_CLOSURE_BY_NAME[lego.name]
 
 
 def dependents_of(name: str) -> tuple[Lego, ...]:
     """Return legos that directly depend on ``name`` sorted by name."""
-    get_lego(name)
-    return _DEPENDENTS_BY_NAME[name]
+    lego = get_lego(name)
+    return _DEPENDENTS_BY_NAME[lego.name]
 
 
 def legos_by_role(role: str) -> tuple[Lego, ...]:
     """Return legos with the requested primary role sorted by name."""
-    _require_non_blank_text(role, "role")
+    role = _require_non_blank_text(role, "role")
     return _LEGOS_BY_ROLE.get(role, ())
 
 
 def legos_by_layer(layer: str) -> tuple[Lego, ...]:
     """Return legos in the requested dependency layer sorted by name."""
-    _require_non_blank_text(layer, "layer")
+    layer = _require_non_blank_text(layer, "layer")
     return _LEGOS_BY_LAYER.get(layer, ())
 
 
@@ -78,9 +78,10 @@ class Lego:
 _LEGO_NAME_KEY = attrgetter("name")
 
 
-def _require_non_blank_text(value: object, field_name: str) -> None:
+def _require_non_blank_text(value: object, field_name: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"lego {field_name} must be a non-empty string")
+    return value.strip()
 
 
 def _require_text_tuple(value: object, field_name: str) -> None:
