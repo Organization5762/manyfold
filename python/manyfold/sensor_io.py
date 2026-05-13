@@ -1544,14 +1544,16 @@ class LocalSensorSource(Generic[T]):
             self.error_count += 1
             raise
         now = self.clock.now()
+        sequence_number = _next_sequence_number(self.sequence)
         sample = SensorSample(
             value=value,
             source_timestamp=now,
             ingest_timestamp=now,
-            sequence_number=self.sequence.next(),
+            sequence_number=sequence_number,
             quality=self.quality,
             status=self.status,
         )
+        self.sequence.next()
         graph.publish(self.route, sample)
         return sample
 
@@ -1631,11 +1633,13 @@ class ReactiveSensorSource:
                     value=value,
                     source_timestamp=now,
                     ingest_timestamp=now,
-                    sequence_number=self.sequence.next(),
+                    sequence_number=_next_sequence_number(self.sequence),
                 )
                 if self.wrap_sample
                 else value
             )
+            if self.wrap_sample:
+                self.sequence.next()
             if self.debug_tap is not None:
                 self.debug_tap.publish(
                     stage=self.debug_stage,
@@ -1774,6 +1778,7 @@ class PeripheralAdapter:
         )
 
     def _payload_for_item(self, item: Any, identity: SensorIdentity) -> Any:
+        sequence_advances = 0
         if self.mapper is not None:
             payload = self.mapper(item)
         elif self.event_type is not None:
@@ -1782,20 +1787,27 @@ class PeripheralAdapter:
                 data=_unwrap_peripheral_data(item),
                 observed_at=self.clock.now(),
                 identity=identity,
-                sequence_number=self.sequence.next(),
+                sequence_number=_next_sequence_number(self.sequence),
             )
+            sequence_advances = 1
         else:
             payload = _unwrap_peripheral_data(item)
 
-        if not self.wrap_sample:
-            return payload
-        now = self.clock.now()
-        return SensorSample(
-            value=payload,
-            source_timestamp=now,
-            ingest_timestamp=now,
-            sequence_number=self.sequence.next(),
-        )
+        if self.wrap_sample:
+            now = self.clock.now()
+            sequence_number = _sequence_number_after(
+                self.sequence, sequence_advances + 1
+            )
+            payload = SensorSample(
+                value=payload,
+                source_timestamp=now,
+                ingest_timestamp=now,
+                sequence_number=sequence_number,
+            )
+            sequence_advances += 1
+        for _ in range(sequence_advances):
+            self.sequence.next()
+        return payload
 
 
 @dataclass
@@ -2445,6 +2457,14 @@ def _unwrap_peripheral_data(item: Any) -> Any:
 
 def _event_value(item: Any) -> Any:
     return getattr(item, "value", item)
+
+
+def _next_sequence_number(sequence: SequenceCounter) -> int:
+    return _sequence_number_after(sequence, 1)
+
+
+def _sequence_number_after(sequence: SequenceCounter, advances: int) -> int:
+    return sequence.peek() + (sequence.step * advances)
 
 
 def _call_if_present(target: Any, name: str, *args: Any) -> Any:

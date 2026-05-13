@@ -1723,6 +1723,30 @@ class SensorIoTests(unittest.TestCase):
         self.assertEqual(source.clock.group, "ambient")
         self.assertEqual(handle.group, "ambient")
 
+    def test_local_sensor_source_does_not_advance_sequence_for_invalid_sample(
+        self,
+    ) -> None:
+        manyfold = load_manyfold_package()
+        graph = manyfold.Graph()
+        sequence = manyfold.SequenceCounter(current=10)
+        route = _route(
+            manyfold,
+            "invalid_local_sample",
+            manyfold.sensor_sample_schema(_int_schema(manyfold, "Temp")),
+        )
+        source = manyfold.LocalSensorSource(
+            route=route,
+            read=lambda: 25,
+            clock=_NonFiniteClock(),
+            sequence=sequence,
+        )
+
+        with self.assertRaisesRegex(ValueError, "source_timestamp must be a finite number"):
+            source.install(graph, read_now=False).poll()
+
+        self.assertEqual(sequence.peek(), 10)
+        self.assertIsNone(graph.latest(route))
+
     def test_local_sensor_source_rejects_invalid_configuration(self) -> None:
         manyfold = load_manyfold_package()
         sample_schema = manyfold.sensor_sample_schema(_int_schema(manyfold, "Temp"))
@@ -1780,6 +1804,30 @@ class SensorIoTests(unittest.TestCase):
         self.assertEqual(latest.value.sequence_number, 2)
         self.assertEqual(handle.group, "imu")
         self.assertEqual([event.source_id for event in tap.snapshot()], ["imu", "imu"])
+
+    def test_reactive_sensor_source_does_not_advance_sequence_for_invalid_sample(
+        self,
+    ) -> None:
+        manyfold = load_manyfold_package()
+        graph = manyfold.Graph()
+        sequence = manyfold.SequenceCounter(current=20)
+        route = _route(
+            manyfold,
+            "invalid_reactive_sample",
+            manyfold.sensor_sample_schema(_int_schema(manyfold, "Accel")),
+        )
+
+        with self.assertRaisesRegex(ValueError, "source_timestamp must be a finite number"):
+            manyfold.ReactiveSensorSource(
+                route=route,
+                observable=rx.from_iterable([1]),
+                wrap_sample=True,
+                clock=_NonFiniteClock(),
+                sequence=sequence,
+            ).install(graph)
+
+        self.assertEqual(sequence.peek(), 20)
+        self.assertIsNone(graph.latest(route))
 
     def test_reactive_sensor_source_rejects_invalid_configuration(self) -> None:
         manyfold = load_manyfold_package()
@@ -2027,6 +2075,35 @@ class SensorIoTests(unittest.TestCase):
         self.assertIsNotNone(latest)
         assert latest is not None
         self.assertEqual(latest.value.data, {"temperature": 21})
+
+    def test_peripheral_adapter_does_not_advance_sequence_for_invalid_event(
+        self,
+    ) -> None:
+        manyfold = load_manyfold_package()
+
+        class FakePeripheral:
+            def __init__(self) -> None:
+                self.observe = rx.from_iterable([{"temperature": 21}])
+
+        graph = manyfold.Graph()
+        sequence = manyfold.SequenceCounter(current=30)
+        route = _route(
+            manyfold,
+            "invalid_peripheral_event",
+            manyfold.sensor_event_schema(),
+        )
+
+        with self.assertRaisesRegex(ValueError, "observed_at must be a finite number"):
+            manyfold.PeripheralAdapter(
+                peripheral=FakePeripheral(),
+                route=route,
+                event_type="peripheral.temperature",
+                clock=_NonFiniteClock(),
+                sequence=sequence,
+            ).install(graph)
+
+        self.assertEqual(sequence.peek(), 30)
+        self.assertIsNone(graph.latest(route))
 
     def test_duplex_sensor_peripheral_forwards_control_route(self) -> None:
         manyfold = load_manyfold_package()
