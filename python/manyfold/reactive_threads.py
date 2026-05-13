@@ -225,7 +225,7 @@ def interval_in_background(
 
     period = _require_positive_timedelta(period)
     thread_name = None if name is None else _require_thread_name(name)
-    resolved_scheduler = scheduler or (
+    resolved_scheduler = scheduler if scheduler is not None else (
         EventLoopScheduler(thread_factory=partial(_run_on_thread, name=thread_name))
         if thread_name is not None
         else interval_scheduler()

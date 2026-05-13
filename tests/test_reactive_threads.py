@@ -138,6 +138,29 @@ class ReactiveThreadsTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, message):
                     self.reactive_threads.interval_in_background(period)
 
+    def test_interval_in_background_keeps_explicit_falsy_scheduler(self) -> None:
+        class FalsyScheduler:
+            def __bool__(self) -> bool:
+                return False
+
+        scheduler = FalsyScheduler()
+        seen_scheduler: object | None = None
+
+        def interval(period: object, *, scheduler: object) -> object:
+            nonlocal seen_scheduler
+            seen_scheduler = scheduler
+            return self.rx.from_iterable([1])
+
+        values: list[int] = []
+        with patch.object(self.reactive_threads.rx, "interval", side_effect=interval):
+            self.reactive_threads.interval_in_background(
+                self.reactive_threads.timedelta(milliseconds=1),
+                scheduler=scheduler,  # type: ignore[arg-type]
+            ).subscribe(values.append)
+
+        self.assertIs(seen_scheduler, scheduler)
+        self.assertEqual(values, [1])
+
     def test_legacy_scheduler_env_minimum_errors_name_legacy_variable(self) -> None:
         with patch.dict(
             os.environ,
