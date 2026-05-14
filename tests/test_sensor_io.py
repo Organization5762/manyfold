@@ -1070,6 +1070,7 @@ class SensorIoTests(unittest.TestCase):
         for kwargs, message in (
             ({"current": 1.5}, "current must be an integer"),
             ({"current": True}, "current must be an integer"),
+            ({"current": -1}, "current must be non-negative"),
             ({"step": 1.5}, "step must be an integer"),
             ({"step": True}, "step must be an integer"),
             ({"group": 7}, "group must be a string"),
@@ -1086,6 +1087,9 @@ class SensorIoTests(unittest.TestCase):
             with self.subTest(value=value):
                 with self.assertRaisesRegex(ValueError, "current must be an integer"):
                     sequence.reset(value)  # type: ignore[arg-type]
+
+        with self.assertRaisesRegex(ValueError, "current must be non-negative"):
+            sequence.reset(-1)
 
     def test_retry_loop_retries_transient_failures(self) -> None:
         manyfold = load_manyfold_package()

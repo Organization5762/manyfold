@@ -877,6 +877,8 @@ class SequenceCounter:
 
     def __post_init__(self) -> None:
         self.current = _require_int(self.current, "current")
+        if self.current < 0:
+            raise ValueError("current must be non-negative")
         self.step = _require_int(self.step, "step")
         if self.step <= 0:
             raise ValueError("step must be positive")
@@ -890,7 +892,10 @@ class SequenceCounter:
         return self.current
 
     def reset(self, value: int = 0) -> None:
-        self.current = _require_int(value, "current")
+        current = _require_int(value, "current")
+        if current < 0:
+            raise ValueError("current must be non-negative")
+        self.current = current
 
 
 @dataclass(frozen=True)
