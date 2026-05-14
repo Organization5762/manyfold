@@ -261,6 +261,19 @@ class ComponentTests(unittest.TestCase):
                     ):
                         keyspace.put(part, value=b"nope")
 
+    def test_file_store_rejects_file_root_clearly(self) -> None:
+        manyfold = load_manyfold_package()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir) / "store"
+            root.write_bytes(b"not a directory")
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "file store root must be a directory path",
+            ):
+                manyfold.FileStore(root)
+
     def test_file_store_rejects_non_bytes_values(self) -> None:
         manyfold = load_manyfold_package()
 
