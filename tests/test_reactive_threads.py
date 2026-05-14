@@ -128,6 +128,15 @@ class ReactiveThreadsTests(unittest.TestCase):
                     ):
                         pass
 
+    def test_thread_name_validation_trims_outer_whitespace(self) -> None:
+        thread_factory = self.reactive_threads.create_default_thread_factory(
+            " worker-stream "
+        )
+
+        thread = thread_factory(lambda: None)
+
+        self.assertEqual(thread.name, "worker-stream")
+
     def test_interval_in_background_rejects_invalid_periods(self) -> None:
         for period, message in (
             (0.001, "period must be a timedelta"),
