@@ -412,9 +412,9 @@ def scheduler_diagnostics() -> dict[str, int | None]:
 
 
 def reset_reactive_threading_state_for_tests() -> None:
-    """Reset module-level schedulers, queues, and latency state."""
+    """Reset module-level schedulers, queues, shutdown, and latency state."""
 
-    global _FRAME_THREAD_IDENT
+    global _FRAME_THREAD_IDENT, shutdown
     for state in (
         _BACKGROUND_SCHEDULER,
         _BLOCKING_IO_SCHEDULER,
@@ -430,6 +430,7 @@ def reset_reactive_threading_state_for_tests() -> None:
         _FRAME_THREAD_QUEUE.clear()
     _FRAME_THREAD_IDENT = None
     _LATENCY_RECORDER.clear()
+    shutdown = Subject()
 
 
 def materialize_sequence(sequence: Iterable[T]) -> Observable[T]:

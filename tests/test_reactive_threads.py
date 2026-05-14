@@ -253,6 +253,19 @@ class ReactiveThreadsTests(unittest.TestCase):
                 ):
                     self.reactive_threads._LatencyRecorder(history_size=history_size)
 
+    def test_reset_reactive_threading_state_replaces_shutdown_subject(self) -> None:
+        previous_shutdown = self.reactive_threads.shutdown
+        previous_shutdown.on_completed()
+
+        self.reactive_threads.reset_reactive_threading_state_for_tests()
+
+        self.assertIsNot(self.reactive_threads.shutdown, previous_shutdown)
+        values: list[int] = []
+        self.reactive_threads.materialize_sequence([1]).pipe(
+            self.ops.take_until(self.reactive_threads.shutdown)
+        ).subscribe(values.append)
+        self.assertEqual(values, [1])
+
     def test_disposed_frame_thread_delivery_drops_queued_callbacks(self) -> None:
         source = self.rx.Subject()
         values: list[int] = []
