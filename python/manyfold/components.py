@@ -107,7 +107,7 @@ class FileStore:
     """Filesystem-backed byte store addressed by structured key prefixes."""
 
     def __init__(self, root: str | Path) -> None:
-        self.root = Path(root)
+        self.root = _normalize_store_root(root)
         self.root.mkdir(parents=True, exist_ok=True)
 
     def prefix(self, *parts: KeyPart) -> Keyspace:
@@ -1048,6 +1048,16 @@ def _normalize_memory_path(value: object) -> Path:
         raise ValueError("memory path must be a filesystem path") from exc
     if path.exists() and path.is_dir():
         raise ValueError("memory path must be a file path")
+    return path
+
+
+def _normalize_store_root(value: object) -> Path:
+    try:
+        path = Path(value)
+    except TypeError as exc:
+        raise ValueError("file store root must be a filesystem path") from exc
+    if path.exists() and not path.is_dir():
+        raise ValueError("file store root must be a directory path")
     return path
 
 
