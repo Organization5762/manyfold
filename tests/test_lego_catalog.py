@@ -171,6 +171,31 @@ class LegoCatalogTests(unittest.TestCase):
             sorted(lego.name for lego in durable),
         )
 
+    def test_catalog_queries_trim_lookup_text(self) -> None:
+        manyfold = load_manyfold_package()
+
+        self.assertIs(manyfold.get_lego(" Bytes "), manyfold.get_lego("Bytes"))
+        self.assertEqual(
+            manyfold.dependencies_of("\tRetryLoop\n"),
+            manyfold.dependencies_of("RetryLoop"),
+        )
+        self.assertEqual(
+            manyfold.dependency_closure_of(" Workflow "),
+            manyfold.dependency_closure_of("Workflow"),
+        )
+        self.assertEqual(
+            manyfold.dependents_of(" EventLog "),
+            manyfold.dependents_of("EventLog"),
+        )
+        self.assertEqual(
+            manyfold.legos_by_role("\tpersistence "),
+            manyfold.legos_by_role("persistence"),
+        )
+        self.assertEqual(
+            manyfold.legos_by_layer(" durable\n"),
+            manyfold.legos_by_layer("durable"),
+        )
+
     def test_dependents_report_direct_users(self) -> None:
         manyfold = load_manyfold_package()
 
