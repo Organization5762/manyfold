@@ -117,6 +117,17 @@ class SensorIoTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, message):
                     manyfold.SensorTag(**kwargs)
 
+    def test_sensor_tag_metadata_is_key_sorted(self) -> None:
+        manyfold = load_manyfold_package()
+
+        tag = manyfold.SensorTag(
+            "input",
+            "radio",
+            metadata={"zeta": "last", "alpha": "first"},
+        )
+
+        self.assertEqual(tuple(tag.metadata), ("alpha", "zeta"))
+
     def test_sensor_identity_rejects_invalid_values(self) -> None:
         manyfold = load_manyfold_package()
 

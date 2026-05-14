@@ -922,7 +922,9 @@ class SensorTag:
                     value,
                     "tag.metadata value",
                 )
-                for key, value in metadata.items()
+                for key, value in sorted(
+                    metadata.items(), key=lambda item: _mapping_key_sort_key(item[0])
+                )
             },
         )
 
