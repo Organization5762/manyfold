@@ -65,6 +65,7 @@ MODULES_TO_RESET = (
     "reactivex.typing",
     "reactivex.operators",
 )
+_MISSING_MODULE = object()
 
 
 def subprocess_test_env() -> dict[str, str]:
@@ -1244,14 +1245,15 @@ def _unique_nonempty_paths(paths: Iterable[str]) -> tuple[str, ...]:
 
 def _load_module(name: str, path: Path):
     spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
+    if spec is None or spec.loader is None:
+        raise ValueError(f"could not load module spec for {name} from {path}")
     module = importlib.util.module_from_spec(spec)
-    previous_module = sys.modules.get(name)
+    previous_module = sys.modules.get(name, _MISSING_MODULE)
     sys.modules[name] = module
     try:
         spec.loader.exec_module(module)
     except BaseException:
-        if previous_module is None:
+        if previous_module is _MISSING_MODULE:
             sys.modules.pop(name, None)
         else:
             sys.modules[name] = previous_module
