@@ -446,7 +446,7 @@ def _require_non_empty_string(value: Any, field: str) -> str:
         raise ValueError(f"{field} must be a string")
     if not value.strip():
         raise ValueError(f"{field} must be a non-empty string")
-    return value
+    return value.strip()
 
 
 def _require_thread_name(value: Any) -> str:
