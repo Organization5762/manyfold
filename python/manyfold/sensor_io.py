@@ -335,6 +335,8 @@ class BackoffPolicy:
             raise ValueError("attempt_index must be positive")
         if attempt_index <= 1:
             return 0.0
+        if self.initial_delay == 0:
+            return 0.0
         try:
             delay = self.initial_delay * (self.multiplier ** (attempt_index - 2))
         except OverflowError:

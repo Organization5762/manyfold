@@ -1166,6 +1166,12 @@ class SensorIoTests(unittest.TestCase):
 
         self.assertEqual(policy.delay_for_attempt(4), 5.0)
 
+    def test_backoff_policy_zero_delay_avoids_overflowing_multiplier(self) -> None:
+        manyfold = load_manyfold_package()
+        policy = manyfold.SensorBackoffPolicy(initial_delay=0.0, multiplier=1e308)
+
+        self.assertEqual(policy.delay_for_attempt(10_000), 0.0)
+
     def test_retry_policy_normalizes_retryable_exception_classes(self) -> None:
         manyfold = load_manyfold_package()
 
