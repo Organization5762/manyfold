@@ -6454,6 +6454,7 @@ class Graph:
         self, epoch: int | None = None
     ) -> tuple[TypedEnvelope[Any] | ClosedEnvelope, ...]:
         """Advance scheduler state and release any writes whose guards are satisfied."""
+        _require_optional_epoch(epoch, "scheduler epoch")
         self._scheduler_epoch = self._scheduler_epoch + 1 if epoch is None else epoch
         ready: list[ScheduledWrite] = []
         pending: list[ScheduledWrite] = []

@@ -7255,6 +7255,32 @@ assert graph.latest(route) is None
             [alpha.request.display(), zeta.request.display()],
         )
 
+    def test_run_scheduler_rejects_invalid_epoch_without_side_effect(self) -> None:
+        graph_module = load_graph_module()
+        binding = graph_module.WriteBindings.logical(
+            graph_module.OwnerName("pump"),
+            graph_module.StreamFamily("flow"),
+            graph_module.StreamName("target"),
+            graph_module.Schema.bytes(name="PumpFlow"),
+        )
+        graph = graph_module.Graph()
+
+        graph.publish_guarded(binding, b"12", not_before_epoch=2)
+
+        for epoch in (-1, True, "2"):
+            with self.subTest(epoch=epoch):
+                before = tuple(graph.scheduler_snapshot(binding.request))
+                with self.assertRaisesRegex(ValueError, "scheduler epoch"):
+                    graph.run_scheduler(epoch=epoch)  # type: ignore[arg-type]
+                self.assertEqual(tuple(graph.scheduler_snapshot(binding.request)), before)
+                self.assertIsNone(graph.latest(binding.request))
+
+        self.assertEqual(len(graph.run_scheduler(epoch=2)), 1)
+        latest = graph.latest(binding.request)
+        self.assertIsNotNone(latest)
+        assert latest is not None
+        self.assertEqual(latest.payload_ref.inline_bytes, b"12")
+
     def test_publish_guarded_retry_policy_requires_ack_route(self) -> None:
         graph_module = load_graph_module()
         request = graph_module.route(
