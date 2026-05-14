@@ -745,10 +745,10 @@ pub struct GraphCore {
     pub payloads: HashMap<String, Vec<u8>>,
     pub route_audit: HashMap<RouteRefCore, Vec<AuditEventCore>>,
     pub edges: Vec<(RouteRefCore, RouteRefCore)>,
-    pub bindings: HashMap<String, WriteBindingCore>,
+    pub bindings: BTreeMap<String, WriteBindingCore>,
     pub request_bindings: HashMap<RouteRefCore, WriteBindingCore>,
     pub mailboxes: BTreeMap<String, MailboxCore>,
-    pub loops: HashMap<String, ControlLoopCore>,
+    pub loops: BTreeMap<String, ControlLoopCore>,
 }
 
 impl GraphCore {
