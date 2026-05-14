@@ -134,6 +134,27 @@ class TestSupportTests(unittest.TestCase):
 
             self.assertNotIn(module_name, sys.modules)
 
+    def test_load_module_restores_existing_none_sentinel_after_failure(self) -> None:
+        module_name = "manyfold_test_support_sentinel_failed_load"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module_path = Path(temp_dir) / "loaded_module.py"
+            module_path.write_text("raise RuntimeError('boom')\n", encoding="utf-8")
+
+            with mock.patch.dict(sys.modules, {module_name: None}):
+                with self.assertRaisesRegex(RuntimeError, "boom"):
+                    test_support._load_module(module_name, module_path)
+
+                self.assertIsNone(sys.modules[module_name])
+
+    def test_load_module_rejects_missing_loader_without_asserts(self) -> None:
+        module_name = "manyfold_test_support_missing_loader"
+        module_path = Path("missing_loader.py")
+        spec = types.SimpleNamespace(loader=None)
+
+        with mock.patch("importlib.util.spec_from_file_location", return_value=spec):
+            with self.assertRaisesRegex(ValueError, "could not load module spec"):
+                test_support._load_module(module_name, module_path)
+
 
 if __name__ == "__main__":
     unittest.main()
