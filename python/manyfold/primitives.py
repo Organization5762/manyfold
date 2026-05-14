@@ -283,7 +283,12 @@ class Schema(Generic[T]):
             return key.encode("ascii")
 
         def decode(payload: bytes) -> Any:
-            key = payload.decode("ascii")
+            try:
+                key = _coerce_bytes_payload(payload).decode("ascii")
+            except (UnicodeDecodeError, ValueError) as exc:
+                raise ValueError(
+                    f"unknown process-local object token for schema {schema_id!r}"
+                ) from exc
             with _ANY_SCHEMA_LOCK:
                 try:
                     return _ANY_SCHEMA_VALUES[(schema_id, version, key)]

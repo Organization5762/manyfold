@@ -456,6 +456,28 @@ for build, message in cases:
         ):
             schema.decode(b"missing")
 
+    def test_any_schema_decodes_bytes_like_tokens(self) -> None:
+        manyfold = load_manyfold_package()
+        schema = manyfold.Schema.any("RuntimeHandle")
+        handle = object()
+
+        token = schema.encode(handle)
+
+        self.assertIs(schema.decode(bytearray(token)), handle)
+        self.assertIs(schema.decode(memoryview(token)), handle)
+
+    def test_any_schema_rejects_malformed_tokens_clearly(self) -> None:
+        manyfold = load_manyfold_package()
+        schema = manyfold.Schema.any("RuntimeHandle")
+
+        for payload in (b"\xff", "missing"):
+            with self.subTest(payload=payload):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "unknown process-local object token for schema 'RuntimeHandle'",
+                ):
+                    schema.decode(payload)  # type: ignore[arg-type]
+
     def test_any_schema_tokens_are_scoped_by_schema_id(self) -> None:
         manyfold = load_manyfold_package()
         runtime_handles = manyfold.Schema.any("RuntimeHandle")
