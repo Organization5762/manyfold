@@ -196,6 +196,21 @@ class RxFacadeTests(unittest.TestCase):
         )
         self.assertNotIn("annotations", rx_module.__all__)
 
+    def test_private_rx_facade_submodules_are_stable_on_first_import(self) -> None:
+        load_manyfold_package()
+        rx_module = importlib.import_module("manyfold._rx")
+
+        self.assertEqual(rx_module.operators.__name__, "manyfold._rx.operators")
+        self.assertEqual(rx_module.typing.__name__, "manyfold._rx.typing")
+        self.assertIs(
+            rx_module.operators,
+            importlib.import_module("manyfold._rx.operators"),
+        )
+        self.assertIs(
+            rx_module.typing,
+            importlib.import_module("manyfold._rx.typing"),
+        )
+
     def test_private_facade_modules_publish_stable_exports(self) -> None:
         load_manyfold_package()
         expected_exports = {

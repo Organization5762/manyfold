@@ -37,7 +37,6 @@ from reactivex import (
     never as never,
     of as of,
     on_error_resume_next as on_error_resume_next,
-    operators as operators,
     pipe as pipe,
     range as range,
     repeat_value as repeat_value,
@@ -47,13 +46,12 @@ from reactivex import (
     throw as throw,
     timer as timer,
     to_async as to_async,
-    typing as typing,
     using as using,
     with_latest_from as with_latest_from,
     zip as zip,
 )
 
-from . import abc as abc
+from . import abc as abc, operators as operators, typing as typing
 from .subject import Subject as Subject
 
 __all__ = (
