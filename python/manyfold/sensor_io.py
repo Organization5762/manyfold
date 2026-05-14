@@ -914,16 +914,17 @@ class SensorTag:
             _require_string(self.variant, "tag.variant"),
         )
         metadata = _require_mapping(self.metadata, "tag.metadata")
+        items = tuple(
+            (
+                _require_string(key, "tag.metadata key"),
+                _require_string(value, "tag.metadata value"),
+            )
+            for key, value in metadata.items()
+        )
         object.__setattr__(
             self,
             "metadata",
-            {
-                _require_string(key, "tag.metadata key"): _require_string(
-                    value,
-                    "tag.metadata value",
-                )
-                for key, value in metadata.items()
-            },
+            {key: value for key, value in sorted(items)},
         )
 
 
