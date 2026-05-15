@@ -157,6 +157,12 @@ class ExampleTests(unittest.TestCase):
         for name in shared.__all__:
             self.assertTrue(callable(getattr(shared, name)))
 
+    def test_shared_int_schema_decodes_bytes_like_payloads(self) -> None:
+        schema = shared.int_schema("ExampleInt")
+
+        self.assertEqual(schema.decode(bytearray(b"42")), 42)  # type: ignore[arg-type]
+        self.assertEqual(schema.decode(memoryview(b"-7")), -7)  # type: ignore[arg-type]
+
     def test_catalog_exports_manifest_matches_examples_package_and_catalog_module(
         self,
     ) -> None:

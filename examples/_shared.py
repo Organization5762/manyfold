@@ -24,8 +24,8 @@ def int_schema(schema_id: str, version: int = 1) -> "Schema[int]":
     return Schema(
         schema_id=schema_id,
         version=version,
-        encode=lambda value: str(value).encode("ascii"),
-        decode=lambda payload: int(payload.decode("ascii")),
+        encode=_encode_ascii_int,
+        decode=_decode_ascii_int,
     )
 
 
@@ -72,3 +72,11 @@ def sibling_route(
         variant=base.variant if variant is None else variant,
         schema=base.schema if schema is None else schema,
     )
+
+
+def _encode_ascii_int(value: int) -> bytes:
+    return str(value).encode("ascii")
+
+
+def _decode_ascii_int(payload: bytes) -> int:
+    return int(bytes(payload).decode("ascii"))
