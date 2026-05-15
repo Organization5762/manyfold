@@ -537,13 +537,14 @@ def _require_positive_int(value: int, field: str) -> None:
 
 
 def _require_enum_member(value: object, enum_type: type[Any], field: str) -> None:
-    if type(value) is str:
-        raise ValueError(f"{field} must be a {enum_type.__name__}")
-    value_token = getattr(value, "value", value)
     if not any(
         value is member
-        or value == member
-        or value_token == getattr(member, "value", member)
+        or (isinstance(value, enum_type) and value == member)
+        or (
+            type(value) is not str
+            and isinstance(value, str)
+            and str(value) == getattr(member, "value", member)
+        )
         for member in _enum_members(enum_type)
     ):
         raise ValueError(f"{field} must be a {enum_type.__name__}")

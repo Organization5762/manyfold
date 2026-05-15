@@ -54,10 +54,17 @@ class PrimitiveTests(unittest.TestCase):
     def test_route_rejects_invalid_native_enum_values_early(self) -> None:
         manyfold = load_manyfold_package()
 
+        class FakeEnumLike:
+            def __init__(self, value: str) -> None:
+                self.value = value
+
         cases = (
             ("plane", "read", "plane must be a Plane"),
+            ("plane", FakeEnumLike("read"), "plane must be a Plane"),
             ("layer", "logical", "layer must be a Layer"),
+            ("layer", FakeEnumLike("logical"), "layer must be a Layer"),
             ("variant", "meta", "variant must be a Variant"),
+            ("variant", FakeEnumLike("meta"), "variant must be a Variant"),
         )
         for field, value, message in cases:
             with self.subTest(field=field):
