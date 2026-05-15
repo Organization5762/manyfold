@@ -1103,9 +1103,13 @@ class SensorIoTests(unittest.TestCase):
         sequence.current = 2
         sequence.step = 0
         with self.assertRaisesRegex(ValueError, "step must be positive"):
+            sequence.peek()
+        with self.assertRaisesRegex(ValueError, "step must be positive"):
             sequence.next()
 
         sequence.step = True  # type: ignore[assignment]
+        with self.assertRaisesRegex(ValueError, "step must be an integer"):
+            sequence.peek()
         with self.assertRaisesRegex(ValueError, "step must be an integer"):
             sequence.next()
 

@@ -885,6 +885,7 @@ class SequenceCounter:
         return self.current
 
     def peek(self) -> int:
+        self._validated_step()
         return self._validated_current()
 
     def reset(self, value: int = 0) -> None:
