@@ -1174,7 +1174,7 @@ def _encode_heartbeat(value: Heartbeat) -> bytes:
 
 
 def _decode_heartbeat(payload: bytes) -> Heartbeat:
-    text = payload.decode("utf-8")
+    text = _decode_text_payload(payload)
     if _is_json_tuple_payload(text):
         term, leader = _decode_json_tuple(text, 2, "heartbeat")
         return (_decode_json_int(term), _decode_json_string(leader, "leader"))
@@ -1208,7 +1208,7 @@ def _encode_request_vote(value: RequestVote) -> bytes:
 
 
 def _decode_request_vote(payload: bytes) -> RequestVote:
-    text = payload.decode("utf-8")
+    text = _decode_text_payload(payload)
     if _is_json_tuple_payload(text):
         term, candidate, last_log_index, last_log_term = _decode_json_tuple(
             text,
@@ -1247,7 +1247,7 @@ def _encode_vote(value: Vote) -> bytes:
 
 
 def _decode_vote(payload: bytes) -> Vote:
-    text = payload.decode("utf-8")
+    text = _decode_text_payload(payload)
     if _is_json_tuple_payload(text):
         term, candidate, voter, granted = _decode_json_tuple(text, 4, "vote")
         return (
@@ -1282,7 +1282,7 @@ def _encode_quorum(value: QuorumState) -> bytes:
 
 
 def _decode_quorum(payload: bytes) -> QuorumState:
-    text = payload.decode("utf-8")
+    text = _decode_text_payload(payload)
     if _is_json_tuple_payload(text):
         term, candidate, voters, granted = _decode_json_tuple(text, 4, "quorum")
         return (
@@ -1310,7 +1310,7 @@ def _encode_append_entry(value: AppendEntry) -> bytes:
 
 
 def _decode_append_entry(payload: bytes) -> AppendEntry:
-    text = payload.decode("utf-8")
+    text = _decode_text_payload(payload)
     if _is_json_tuple_payload(text):
         index, command = _decode_json_tuple(text, 2, "append entry")
         return (_decode_json_int(index), _decode_json_string(command, "command"))
@@ -1335,7 +1335,7 @@ def _encode_replicated_log(value: ReplicatedLog) -> bytes:
 
 
 def _decode_replicated_log(payload: bytes) -> ReplicatedLog:
-    text = payload.decode("utf-8")
+    text = _decode_text_payload(payload)
     if not text:
         return ()
     if _is_json_tuple_payload(text):
@@ -1367,7 +1367,7 @@ def _encode_leader_state(value: LeaderState) -> bytes:
 
 
 def _decode_leader_state(payload: bytes) -> LeaderState:
-    text = payload.decode("utf-8")
+    text = _decode_text_payload(payload)
     if _is_json_tuple_payload(text):
         leader, term, committed = _decode_json_tuple(text, 3, "leader state")
         return (
@@ -1391,6 +1391,14 @@ def _decode_legacy_bool(value: str) -> bool:
     if value == "0":
         return False
     raise ValueError("legacy boolean field must be 0 or 1")
+
+
+def _decode_text_payload(payload: bytes) -> str:
+    if isinstance(payload, bytes):
+        return payload.decode("utf-8")
+    if isinstance(payload, bytearray | memoryview):
+        return bytes(payload).decode("utf-8")
+    raise ValueError("schema payload must be bytes-like")
 
 
 def _decode_json_int(value: Any) -> int:

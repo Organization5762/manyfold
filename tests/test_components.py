@@ -909,6 +909,30 @@ class ComponentTests(unittest.TestCase):
             ("node-a", 3, True),
         )
 
+    def test_consensus_schemas_decode_bytes_like_payloads(self) -> None:
+        manyfold = load_manyfold_package()
+        routes = manyfold.Consensus.default_routes()
+        heartbeat_payload = bytearray(b' \n[3,"node-a"]')
+        replicated_log_payload = memoryview(
+            b'[[1,"set mode=auto"],[2,"set temp=21"]]'
+        )
+
+        self.assertEqual(
+            routes.heartbeat.schema.decode(heartbeat_payload),  # type: ignore[arg-type]
+            (3, "node-a"),
+        )
+        self.assertEqual(
+            routes.replicated_log.schema.decode(replicated_log_payload),  # type: ignore[arg-type]
+            ((1, "set mode=auto"), (2, "set temp=21")),
+        )
+
+    def test_consensus_schemas_reject_non_bytes_like_payloads(self) -> None:
+        manyfold = load_manyfold_package()
+        route_ref = manyfold.Consensus.default_routes().heartbeat
+
+        with self.assertRaisesRegex(ValueError, "schema payload must be bytes-like"):
+            route_ref.schema.decode("[3, \"node-a\"]")  # type: ignore[arg-type]
+
     def test_consensus_legacy_schemas_reject_invalid_boolean_tokens(self) -> None:
         manyfold = load_manyfold_package()
         routes = manyfold.Consensus.default_routes()
