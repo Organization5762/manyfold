@@ -112,17 +112,22 @@ def sensor_sample_schema(
         data = _decode_json_mapping(
             json.loads(payload.decode("utf-8")), "sensor sample"
         )
-        value = value_schema.decode(_decode_base64_field(data["value"], "value"))
+        value = value_schema.decode(
+            _decode_base64_field(_decode_required_json_field(data, "value"), "value")
+        )
         return SensorSample(
             value=value,
             source_timestamp=_decode_json_number(
-                data["source_timestamp"], "source_timestamp"
+                _decode_required_json_field(data, "source_timestamp"),
+                "source_timestamp",
             ),
             ingest_timestamp=_decode_json_number(
-                data["ingest_timestamp"], "ingest_timestamp"
+                _decode_required_json_field(data, "ingest_timestamp"),
+                "ingest_timestamp",
             ),
             sequence_number=_decode_json_int(
-                data["sequence_number"], "sequence_number"
+                _decode_required_json_field(data, "sequence_number"),
+                "sequence_number",
             ),
             quality=_decode_optional_json_string(data.get("quality"), "quality"),
             status=_decode_optional_json_string(data.get("status"), "status"),
@@ -160,9 +165,13 @@ def sensor_event_schema(schema_id: str = "SensorEvent") -> Schema[SensorEvent]:
         raw = data.get("raw")
         metadata = _decode_json_mapping(data.get("metadata", {}), "metadata")
         return SensorEvent(
-            event_type=_decode_json_string(data["event_type"], "event_type"),
+            event_type=_decode_json_string(
+                _decode_required_json_field(data, "event_type"), "event_type"
+            ),
             data=_json_restore(data.get("data")),
-            observed_at=_decode_json_number(data["observed_at"], "observed_at"),
+            observed_at=_decode_json_number(
+                _decode_required_json_field(data, "observed_at"), "observed_at"
+            ),
             identity=_sensor_identity_from_json(data.get("identity")),
             sequence_number=None
             if data.get("sequence_number") is None
@@ -193,8 +202,12 @@ def health_status_schema(schema_id: str = "HealthStatus") -> Schema[HealthStatus
             json.loads(payload.decode("utf-8")), "health status"
         )
         return HealthStatus(
-            status=_decode_health_status(data["status"]),
-            observed_at=_decode_json_number(data["observed_at"], "observed_at"),
+            status=_decode_health_status(
+                _decode_required_json_field(data, "status")
+            ),
+            observed_at=_decode_json_number(
+                _decode_required_json_field(data, "observed_at"), "observed_at"
+            ),
             message=_decode_json_string(data.get("message", ""), "message"),
             stale=_decode_json_bool(data.get("stale", False), "stale"),
             error_count=_decode_json_int(data.get("error_count", 0), "error_count"),
@@ -2386,6 +2399,12 @@ def _decode_json_mapping(value: Any, field: str) -> Mapping[Any, Any]:
     if isinstance(value, Mapping):
         return value
     raise ValueError(f"{field} must be a JSON object")
+
+
+def _decode_required_json_field(value: Mapping[Any, Any], field: str) -> Any:
+    if field not in value:
+        raise ValueError(f"{field} is required")
+    return value[field]
 
 
 def _decode_optional_json_string(value: Any, field: str) -> str | None:

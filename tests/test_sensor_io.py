@@ -702,6 +702,48 @@ class SensorIoTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, message):
                     schema.decode(payload)
 
+    def test_sensor_schemas_reject_missing_required_fields(self) -> None:
+        manyfold = load_manyfold_package()
+        sample_schema = manyfold.sensor_sample_schema(_int_schema(manyfold, "Temp"))
+        event_schema = manyfold.sensor_event_schema()
+        health_schema = manyfold.health_status_schema()
+
+        cases = (
+            (sample_schema, b"{}", "value is required"),
+            (
+                sample_schema,
+                b'{"value":"MjE=","ingest_timestamp":1.5,"sequence_number":1}',
+                "source_timestamp is required",
+            ),
+            (
+                sample_schema,
+                b'{"value":"MjE=","source_timestamp":1.0,"sequence_number":1}',
+                "ingest_timestamp is required",
+            ),
+            (
+                sample_schema,
+                b'{"value":"MjE=","source_timestamp":1.0,"ingest_timestamp":1.5}',
+                "sequence_number is required",
+            ),
+            (event_schema, b"{}", "event_type is required"),
+            (
+                event_schema,
+                b'{"event_type":"radio.packet"}',
+                "observed_at is required",
+            ),
+            (health_schema, b"{}", "status is required"),
+            (
+                health_schema,
+                b'{"status":"ok"}',
+                "observed_at is required",
+            ),
+        )
+
+        for schema, payload, message in cases:
+            with self.subTest(schema=schema.schema_id, message=message):
+                with self.assertRaisesRegex(ValueError, message):
+                    schema.decode(payload)
+
     def test_sensor_sample_schema_rejects_invalid_value_schema(self) -> None:
         manyfold = load_manyfold_package()
 
