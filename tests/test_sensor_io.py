@@ -2119,6 +2119,24 @@ class SensorIoTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "history_size must be an integer"):
             manyfold.SensorDebugTap(history_size=2.5)  # type: ignore[arg-type]
 
+    def test_sensor_debug_tap_revalidates_mutated_history_size(self) -> None:
+        manyfold = load_manyfold_package()
+
+        for history_size in (True, 1.0):
+            with self.subTest(history_size=history_size):
+                tap = manyfold.SensorDebugTap(history_size=1)
+                tap.history_size = history_size  # type: ignore[assignment]
+
+                with self.assertRaisesRegex(
+                    ValueError, "history_size must be an integer"
+                ):
+                    tap.publish(
+                        stage=manyfold.SensorDebugStage.RAW,
+                        stream_name="temperature",
+                        source_id="probe",
+                        payload={"value": 21},
+                    )
+
     def test_retry_policy_rejects_non_integer_max_attempts(self) -> None:
         manyfold = load_manyfold_package()
 

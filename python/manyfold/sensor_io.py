@@ -1182,10 +1182,10 @@ class SensorDebugTap:
             payload=payload,
             upstream_ids=tuple(upstream_ids),
         )
+        self.history_size = _require_int(self.history_size, "history_size")
+        if self.history_size <= 0:
+            raise ValueError("history_size must be positive")
         if self._history.maxlen != self.history_size:
-            self.history_size = _require_int(self.history_size, "history_size")
-            if self.history_size <= 0:
-                raise ValueError("history_size must be positive")
             self._history = deque(self._history, maxlen=self.history_size)
         self._history.append(envelope)
         return envelope
