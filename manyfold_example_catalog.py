@@ -17,7 +17,8 @@ _SPEC = importlib.util.spec_from_file_location(
     _IMPL_MODULE_NAME,
     IMPL_PATH,
 )
-assert _SPEC is not None and _SPEC.loader is not None
+if _SPEC is None or _SPEC.loader is None:
+    raise ImportError(f"unable to load {_IMPL_MODULE_NAME!r} from {IMPL_PATH}")
 _MODULE = importlib.util.module_from_spec(_SPEC)
 _PREVIOUS_MODULE = sys.modules.get(_IMPL_MODULE_NAME, _MISSING_MODULE)
 sys.modules[_IMPL_MODULE_NAME] = _MODULE

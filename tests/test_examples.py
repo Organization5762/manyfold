@@ -488,6 +488,40 @@ class ExampleTests(unittest.TestCase):
 
         self.assertNotIn("_manyfold_example_catalog_impl", sys.modules)
 
+    def test_repo_root_manyfold_example_catalog_wrapper_rejects_missing_spec(
+        self,
+    ) -> None:
+        module_path = (
+            Path(__file__).resolve().parents[1] / "manyfold_example_catalog.py"
+        )
+        spec = importlib.util.spec_from_file_location(
+            "repo_root_manyfold_example_catalog_missing_spec_test",
+            module_path,
+        )
+        module = importlib.util.module_from_spec(spec)
+        assert spec is not None and spec.loader is not None
+        sys.modules[spec.name] = module
+
+        original_spec_from_file_location = importlib.util.spec_from_file_location
+
+        def fake_spec_from_file_location(name: str, location, *args, **kwargs):
+            if name == "_manyfold_example_catalog_impl":
+                return None
+            return original_spec_from_file_location(name, location, *args, **kwargs)
+
+        sys.modules.pop("_manyfold_example_catalog_impl", None)
+        with mock.patch(
+            "importlib.util.spec_from_file_location",
+            side_effect=fake_spec_from_file_location,
+        ):
+            with self.assertRaisesRegex(
+                ImportError,
+                "unable to load '_manyfold_example_catalog_impl'",
+            ):
+                spec.loader.exec_module(module)
+
+        self.assertNotIn("_manyfold_example_catalog_impl", sys.modules)
+
     def test_repo_root_manyfold_example_catalog_wrapper_restores_none_marker(
         self,
     ) -> None:

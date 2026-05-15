@@ -515,7 +515,8 @@ def _build_scheduler(
             if state.scheduler is None:
                 state.scheduler = constructor()
                 state.max_workers = max_workers
-    assert state.scheduler is not None
+    if state.scheduler is None:
+        raise RuntimeError("scheduler initialization failed")
     return state.scheduler
 
 

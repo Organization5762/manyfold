@@ -6483,7 +6483,8 @@ class Graph:
                         else self._coerce_route_ref(scheduled.target),
                     )
                     continue
-                assert scheduled.retry_policy is not None
+                if scheduled.retry_policy is None:
+                    raise RuntimeError("scheduled retry is missing its retry policy")
                 if scheduled.attempt_count >= scheduled.retry_policy.max_attempts:
                     self._emit_debug_event(
                         "scheduler",
@@ -6843,7 +6844,8 @@ class Graph:
 
             def on_watermark(item: TypedEnvelope[Any] | ClosedEnvelope) -> None:
                 nonlocal latest_watermark
-                assert watermark is not None
+                if watermark is None:
+                    raise RuntimeError("watermark callback is missing its route")
                 progress = self._progress_value(
                     watermark,
                     self._coerce_route_ref(watermark),

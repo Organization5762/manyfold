@@ -380,7 +380,8 @@ class RetryLoop:
                 last_error = exc
                 if attempt >= self.retry.max_attempts:
                     raise
-        assert last_error is not None
+        if last_error is None:
+            raise RuntimeError("retry loop exhausted without a retryable error")
         raise last_error
 
 
