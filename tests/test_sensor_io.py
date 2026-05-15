@@ -78,6 +78,22 @@ class SensorIoTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "clock delta must be a finite number"):
             clock.advance(False)  # type: ignore[arg-type]
 
+    def test_manual_clock_revalidates_mutable_state_at_use_time(self) -> None:
+        manyfold = load_manyfold_package()
+        clock = manyfold.ManualClock(10.0)
+
+        clock.current = math.nan
+        with self.assertRaisesRegex(ValueError, "clock value must be a finite number"):
+            clock.now()
+        with self.assertRaisesRegex(ValueError, "clock value must be a finite number"):
+            clock.advance(1.0)
+
+        clock.current = "10.0"  # type: ignore[assignment]
+        with self.assertRaisesRegex(ValueError, "clock value must be a finite number"):
+            clock.now()
+        with self.assertRaisesRegex(ValueError, "clock value must be a finite number"):
+            clock.advance(1.0)
+
     def test_sensor_location_rejects_invalid_coordinates(self) -> None:
         manyfold = load_manyfold_package()
 

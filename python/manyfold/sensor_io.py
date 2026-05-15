@@ -239,6 +239,7 @@ class ManualClock:
         self.current = _require_finite_number(self.current, "clock value")
 
     def now(self) -> float:
+        self.current = _require_finite_number(self.current, "clock value")
         return self.current
 
     def set(self, value: float) -> None:
@@ -248,8 +249,9 @@ class ManualClock:
         resolved_delta = _require_finite_number(delta, "clock delta")
         if resolved_delta < 0:
             raise ValueError("delta must be non-negative")
+        current = _require_finite_number(self.current, "clock value")
         self.current = _require_finite_number(
-            self.current + resolved_delta,
+            current + resolved_delta,
             "clock value",
         )
         return self.current
