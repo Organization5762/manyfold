@@ -14,6 +14,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CARGO_TOML_PATH = PROJECT_ROOT / "Cargo.toml"
 NATIVE_STUB_PATH = PROJECT_ROOT / "python" / "manyfold" / "_manyfold_rust" / "__init__.pyi"
 PYPROJECT_PATH = PROJECT_ROOT / "pyproject.toml"
+TOP_LEVEL_INIT_PATH = PROJECT_ROOT / "python" / "manyfold" / "__init__.py"
+TOP_LEVEL_STUB_PATH = PROJECT_ROOT / "python" / "manyfold" / "__init__.pyi"
 PYTHON_SOURCE_ROOTS = (
     PROJECT_ROOT / "examples",
     PROJECT_ROOT / "python",
@@ -94,6 +96,12 @@ class ProjectMetadataTests(unittest.TestCase):
                 )
 
         self.assertEqual(failures, [])
+
+    def test_top_level_stub_exports_match_runtime_exports(self) -> None:
+        runtime_exports = _module_all_assignment(TOP_LEVEL_INIT_PATH)
+        stub_exports = _module_all_assignment(TOP_LEVEL_STUB_PATH)
+
+        self.assertEqual(stub_exports, runtime_exports)
 
 
 def _dependency_name(requirement: str) -> str:
