@@ -876,26 +876,34 @@ class SequenceCounter:
     group: str | None = None
 
     def __post_init__(self) -> None:
-        self.current = _require_int(self.current, "current")
-        if self.current < 0:
-            raise ValueError("current must be non-negative")
-        self.step = _require_int(self.step, "step")
-        if self.step <= 0:
-            raise ValueError("step must be positive")
+        self.current = self._validated_current()
+        self.step = self._validated_step()
         self.group = _require_optional_string(self.group, "group")
 
     def next(self) -> int:
-        self.current += self.step
+        self.current = self._validated_current() + self._validated_step()
         return self.current
 
     def peek(self) -> int:
-        return self.current
+        return self._validated_current()
 
     def reset(self, value: int = 0) -> None:
         current = _require_int(value, "current")
         if current < 0:
             raise ValueError("current must be non-negative")
         self.current = current
+
+    def _validated_current(self) -> int:
+        current = _require_int(self.current, "current")
+        if current < 0:
+            raise ValueError("current must be non-negative")
+        return current
+
+    def _validated_step(self) -> int:
+        step = _require_int(self.step, "step")
+        if step <= 0:
+            raise ValueError("step must be positive")
+        return step
 
 
 @dataclass(frozen=True)

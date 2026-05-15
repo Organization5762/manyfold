@@ -1090,6 +1090,25 @@ class SensorIoTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, message):
                     manyfold.SequenceCounter(**kwargs)
 
+    def test_sequence_counter_revalidates_mutable_state_at_use_time(self) -> None:
+        manyfold = load_manyfold_package()
+        sequence = manyfold.SequenceCounter(current=2, step=3)
+
+        sequence.current = -1
+        with self.assertRaisesRegex(ValueError, "current must be non-negative"):
+            sequence.peek()
+        with self.assertRaisesRegex(ValueError, "current must be non-negative"):
+            sequence.next()
+
+        sequence.current = 2
+        sequence.step = 0
+        with self.assertRaisesRegex(ValueError, "step must be positive"):
+            sequence.next()
+
+        sequence.step = True  # type: ignore[assignment]
+        with self.assertRaisesRegex(ValueError, "step must be an integer"):
+            sequence.next()
+
     def test_sequence_counter_reset_rejects_non_integer_state(self) -> None:
         manyfold = load_manyfold_package()
         sequence = manyfold.SequenceCounter()
