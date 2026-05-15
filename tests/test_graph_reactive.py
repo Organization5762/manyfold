@@ -5790,6 +5790,12 @@ assert graph.latest(route) is None
                 correlation_id="abc",
                 items=("ok", 1),
             )
+        with self.assertRaisesRegex(ValueError, "query response items"):
+            graph_module.QueryResponse(
+                command="manifest",
+                correlation_id="abc",
+                items=("ok", " "),
+            )
         with self.assertRaisesRegex(ValueError, "query service request"):
             graph_module.QueryServiceRoutes(request=object(), response=route.route_ref)
         with self.assertRaisesRegex(ValueError, "query service response"):

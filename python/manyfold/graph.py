@@ -701,7 +701,7 @@ class QueryResponse:
         _require_non_empty_text(
             self.correlation_id, "query response correlation_id"
         )
-        _require_string_tuple(self.items, "query response items")
+        _require_text_tuple(self.items, "query response items")
 
 
 @dataclass(frozen=True)
