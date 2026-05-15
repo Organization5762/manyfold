@@ -438,6 +438,10 @@ def _manifest_for_list_mode(mode: str) -> tuple[str, ...]:
 def _require_module_name(module_name: object) -> None:
     if not isinstance(module_name, str) or not module_name.strip():
         raise ValueError("example catalog module name must be a non-empty string")
+    if _MODULE_NAME_RE.fullmatch(module_name) is None:
+        raise ValueError(
+            "example catalog module name must be a dotted Python module path"
+        )
 
 
 def _require_reference_number(number: object) -> None:

@@ -205,6 +205,14 @@ class ExampleTests(unittest.TestCase):
                 ):
                     catalog_entry(value)  # type: ignore[arg-type]
 
+        for value in ("../simple_latest", "simple latest", "1simple_latest"):
+            with self.subTest(lookup="catalog_entry", value=value):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "example catalog module name must be a dotted Python module path",
+                ):
+                    catalog_entry(value)
+
         for value, error_type, message in (
             (True, TypeError, "reference example number must be an integer"),
             ("1", TypeError, "reference example number must be an integer"),
