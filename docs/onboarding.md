@@ -51,10 +51,11 @@ Use the smallest check that covers your change:
 ```sh
 uv run python -m unittest tests.test_examples
 uv run python -m unittest tests.test_graph_reactive
+uv run python -m examples.catalog --check-manifest
 uv run python -m examples.catalog --check-readme
 uv run manyfold-example-catalog --check
+uv run manyfold-example-catalog --list reference
 uv run python -m manyfold.rfc_checklist_gen --check
 cargo test
 uv run ruff check
 ```
-
