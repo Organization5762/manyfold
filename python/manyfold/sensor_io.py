@@ -2367,6 +2367,8 @@ def _json_restore(value: Any) -> Any:
         }
     if isinstance(value, list):
         return [_json_restore(item) for item in value]
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError("JSON values must be finite")
     return value
 
 

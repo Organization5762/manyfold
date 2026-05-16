@@ -912,6 +912,24 @@ class SensorIoTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "raw must be valid base64"):
             schema.decode(json.dumps(payload).encode("utf-8"))
 
+    def test_sensor_event_schema_rejects_non_finite_data_values(self) -> None:
+        manyfold = load_manyfold_package()
+        schema = manyfold.sensor_event_schema()
+
+        for payload in (
+            b'{"event_type":"radio.packet","data":1e999,"observed_at":1.5,'
+            b'"identity":{},"sequence_number":7,"raw":null,"metadata":{}}',
+            b'{"event_type":"radio.packet","data":{"quality":1e999},'
+            b'"observed_at":1.5,"identity":{},"sequence_number":7,'
+            b'"raw":null,"metadata":{}}',
+            b'{"event_type":"radio.packet","data":{},"observed_at":1.5,'
+            b'"identity":{},"sequence_number":7,"raw":null,'
+            b'"metadata":{"quality":-1e999}}',
+        ):
+            with self.subTest(payload=payload):
+                with self.assertRaisesRegex(ValueError, "JSON values must be finite"):
+                    schema.decode(payload)
+
     def test_sensor_event_schema_rejects_non_string_event_type(self) -> None:
         manyfold = load_manyfold_package()
         schema = manyfold.sensor_event_schema()
