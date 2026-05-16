@@ -169,6 +169,37 @@ class EmbeddedProfileTests(unittest.TestCase):
             ),
         )
 
+    def test_bulk_sensor_payload_route_issues_keep_stable_order(self) -> None:
+        manyfold = load_manyfold_package()
+        sensor = manyfold.EmbeddedBulkSensor(
+            metadata_route=manyfold.route(
+                owner=manyfold.OwnerName("lidar"),
+                family=manyfold.StreamFamily("scan"),
+                stream=manyfold.StreamName("meta"),
+                layer=manyfold.Layer.Logical,
+                variant=manyfold.Variant.Meta,
+                schema=manyfold.Schema.bytes(name="LidarMeta"),
+            ),
+            payload_route=manyfold.route(
+                plane=manyfold.Plane.Write,
+                owner=manyfold.OwnerName("lidar"),
+                family=manyfold.StreamFamily("scan"),
+                stream=manyfold.StreamName("payload"),
+                layer=manyfold.Layer.Logical,
+                variant=manyfold.Variant.Meta,
+                schema=manyfold.Schema.bytes(name="LidarPayload"),
+            ),
+        )
+
+        self.assertEqual(
+            tuple(issue for issue in sensor.validate() if "payload must" in issue),
+            (
+                "bulk sensor payload must flow in the read plane",
+                "bulk sensor payload must use Layer.Bulk",
+                "bulk sensor payload must use Variant.Payload",
+            ),
+        )
+
     def test_firmware_profile_reports_disabled_local_processing(self) -> None:
         manyfold = load_manyfold_package()
         profile = manyfold.FirmwareAgentProfile(

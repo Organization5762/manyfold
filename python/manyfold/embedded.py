@@ -12,6 +12,16 @@ T = TypeVar("T")
 TMeta = TypeVar("TMeta")
 
 _BULK_CREDIT_POLICY = "bytes"
+_LAYER_LABELS = {
+    Layer.Bulk: "Layer.Bulk",
+}
+_PLANE_LABELS = {
+    Plane.Read: "read",
+}
+_VARIANT_LABELS = {
+    Variant.Meta: "Variant.Meta",
+    Variant.Payload: "Variant.Payload",
+}
 
 # Validation issue order is part of the ergonomics: callers can show the tuple
 # directly and get stable, high-priority setup fixes before softer advice.
@@ -164,12 +174,15 @@ class EmbeddedBulkSensor(Generic[TMeta]):
         issues = list(self.firmware.required_issues())
         issues.extend(self.rules.bulk_issues())
         issues.extend(_metadata_route_issues(self.metadata_route, "bulk sensor"))
-        if self.payload_route.plane != Plane.Read:
-            issues.append("bulk sensor payload must flow in the read plane")
-        if self.payload_route.layer != Layer.Bulk:
-            issues.append("bulk sensor payload must use Layer.Bulk")
-        if self.payload_route.variant != Variant.Payload:
-            issues.append("bulk sensor payload must use Variant.Payload")
+        issues.extend(
+            _route_shape_issues(
+                self.payload_route,
+                label="bulk sensor payload",
+                expected_plane=Plane.Read,
+                expected_layer=Layer.Bulk,
+                expected_variant=Variant.Payload,
+            )
+        )
         if self.metadata_route.owner != self.payload_route.owner:
             issues.append("bulk sensor metadata and payload owners must match")
         if self.metadata_route.family != self.payload_route.family:
@@ -252,13 +265,33 @@ def _disabled_issue_messages(
 
 
 def _metadata_route_issues(route_ref: TypedRoute[object], label: str) -> tuple[str, ...]:
+    return _route_shape_issues(
+        route_ref,
+        label=f"{label} metadata",
+        expected_plane=Plane.Read,
+        excluded_layer=Layer.Bulk,
+        expected_variant=Variant.Meta,
+    )
+
+
+def _route_shape_issues(
+    route_ref: TypedRoute[object],
+    *,
+    label: str,
+    expected_plane: Plane | None = None,
+    expected_layer: Layer | None = None,
+    excluded_layer: Layer | None = None,
+    expected_variant: Variant | None = None,
+) -> tuple[str, ...]:
     issues: list[str] = []
-    if route_ref.plane != Plane.Read:
-        issues.append(f"{label} metadata must flow in the read plane")
-    if route_ref.layer == Layer.Bulk:
-        issues.append(f"{label} metadata must not use Layer.Bulk")
-    if route_ref.variant != Variant.Meta:
-        issues.append(f"{label} metadata must use Variant.Meta")
+    if expected_plane is not None and route_ref.plane != expected_plane:
+        issues.append(f"{label} must flow in the {_PLANE_LABELS[expected_plane]} plane")
+    if expected_layer is not None and route_ref.layer != expected_layer:
+        issues.append(f"{label} must use {_LAYER_LABELS[expected_layer]}")
+    if excluded_layer is not None and route_ref.layer == excluded_layer:
+        issues.append(f"{label} must not use {_LAYER_LABELS[excluded_layer]}")
+    if expected_variant is not None and route_ref.variant != expected_variant:
+        issues.append(f"{label} must use {_VARIANT_LABELS[expected_variant]}")
     return tuple(issues)
 
 
