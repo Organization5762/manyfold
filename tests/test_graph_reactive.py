@@ -1402,6 +1402,29 @@ assert graph.latest(route) is None
                 transform=object(),
             )
 
+    def test_read_then_write_next_epoch_step_revalidates_connection_result(self) -> None:
+        graph_module = load_graph_module()
+        read = graph_module.rx.from_iterable([b"one"])
+        write_request = graph_module.route(
+            plane=graph_module.Plane.Write,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("motor"),
+            family=graph_module.StreamFamily("speed"),
+            stream=graph_module.StreamName("pid"),
+            variant=graph_module.Variant.Request,
+            schema=graph_module.Schema.bytes(name="SpeedPid"),
+        )
+        step = graph_module.ReadThenWriteNextEpochStep(
+            name="Step",
+            read=read,
+            output=write_request,
+            write=read.pipe(graph_module.ops.publish()),
+            _connect=lambda: object(),
+        )
+
+        with self.assertRaisesRegex(ValueError, "connection must provide dispose"):
+            step.start()
+
     def test_install_rejects_duplicate_native_control_loop_names(self) -> None:
         graph_module = load_graph_module()
         read_state = graph_module.route(

@@ -523,6 +523,7 @@ class ReadThenWriteNextEpochStep(Generic[TRead, TWrite]):
         """Connect the shared write stream once and return the live subscription."""
         if self._connection is None:
             self._connection = self._connect()
+            _require_subscription(self._connection, "connection")
         return self._connection
 
 
