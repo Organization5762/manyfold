@@ -721,6 +721,49 @@ class SensorIoTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, message):
                     schema.decode(payload)
 
+    def test_sensor_schemas_decode_bytes_like_json_payloads(self) -> None:
+        manyfold = load_manyfold_package()
+        sample_schema = manyfold.sensor_sample_schema(_int_schema(manyfold, "Temp"))
+        event_schema = manyfold.sensor_event_schema()
+        health_schema = manyfold.health_status_schema()
+
+        sample_payload = (
+            b'{"ingest_timestamp":2.0,"quality":null,"sequence_number":3,'
+            b'"source_timestamp":1.0,"status":"ok","value":"MjE="}'
+        )
+        event_payload = (
+            b'{"data":{"reading":21},"event_type":"sensor.temp",'
+            b'"observed_at":2.0}'
+        )
+        health_payload = (
+            b'{"error_count":0,"message":"ready","observed_at":2.0,'
+            b'"stale":false,"status":"ok"}'
+        )
+
+        self.assertEqual(sample_schema.decode(memoryview(sample_payload)).value, 21)
+        self.assertEqual(
+            event_schema.decode(bytearray(event_payload)).data,
+            {"reading": 21},
+        )
+        self.assertEqual(health_schema.decode(memoryview(health_payload)).status, "ok")
+
+    def test_sensor_schemas_reject_invalid_json_bytes_clearly(self) -> None:
+        manyfold = load_manyfold_package()
+        sample_schema = manyfold.sensor_sample_schema(_int_schema(manyfold, "Temp"))
+        event_schema = manyfold.sensor_event_schema()
+        health_schema = manyfold.health_status_schema()
+
+        cases = (
+            (sample_schema, b"\xff", "JSON payload must be valid UTF-8"),
+            (event_schema, b"{", "JSON payload must be valid JSON"),
+            (health_schema, "{}", "JSON payload must be bytes-like"),
+        )
+
+        for schema, payload, message in cases:
+            with self.subTest(schema=schema.schema_id):
+                with self.assertRaisesRegex(ValueError, message):
+                    schema.decode(payload)  # type: ignore[arg-type]
+
     def test_sensor_schemas_reject_missing_required_fields(self) -> None:
         manyfold = load_manyfold_package()
         sample_schema = manyfold.sensor_sample_schema(_int_schema(manyfold, "Temp"))

@@ -2322,8 +2322,15 @@ def _compact_json_bytes(value: Mapping[str, Any]) -> bytes:
     ).encode("utf-8")
 
 
-def _decode_json_payload(payload: bytes) -> Any:
-    return json.loads(payload.decode("utf-8"), parse_constant=_reject_json_constant)
+def _decode_json_payload(payload: bytes | bytearray | memoryview) -> Any:
+    try:
+        text = _require_bytes_like(payload, "JSON payload").decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError("JSON payload must be valid UTF-8") from exc
+    try:
+        return json.loads(text, parse_constant=_reject_json_constant)
+    except json.JSONDecodeError as exc:
+        raise ValueError("JSON payload must be valid JSON") from exc
 
 
 def _json_event_metadata(value: Mapping[str, Any]) -> dict[str, Any]:
