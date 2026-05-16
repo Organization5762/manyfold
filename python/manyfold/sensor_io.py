@@ -1442,7 +1442,7 @@ class DoubleBuffer(Generic[TFrame]):
     _buffers: list[list[TFrame]] = field(
         default_factory=lambda: [[], []], init=False, repr=False
     )
-    _active: int = 0
+    _active: int = field(default=0, init=False, repr=False)
     _ready: deque[tuple[int, tuple[TFrame, ...]]] = field(
         default_factory=deque, init=False, repr=False
     )

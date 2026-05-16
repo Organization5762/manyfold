@@ -2752,6 +2752,9 @@ class SensorIoTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "group must be a string"):
             manyfold.DoubleBuffer(buffer_size=1, group=7)  # type: ignore[arg-type]
 
+        with self.assertRaisesRegex(TypeError, "_active"):
+            manyfold.DoubleBuffer(buffer_size=1, _active=2)  # type: ignore[call-arg]
+
         for expected_count in (False, 2.5):
             with self.subTest(expected_count=expected_count):
                 with self.assertRaisesRegex(
