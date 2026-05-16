@@ -334,6 +334,21 @@ class ReferenceExampleSuiteTests(unittest.TestCase):
                 with self.assertRaises((TypeError, ValueError)):
                     manyfold.ReferenceExample(**kwargs)
 
+    def test_reference_example_trims_text_metadata(self) -> None:
+        manyfold = load_manyfold_package()
+        example = manyfold.ReferenceExample(
+            1,
+            " Example ",
+            "\tSummary\n",
+            True,
+            module_name=" examples.simple_latest ",
+            runner=lambda: None,
+        )
+
+        self.assertEqual(example.title, "Example")
+        self.assertEqual(example.summary, "Summary")
+        self.assertEqual(example.module_name, "examples.simple_latest")
+
     def test_reference_example_rejects_invalid_runner_metadata(self) -> None:
         manyfold = load_manyfold_package()
 
