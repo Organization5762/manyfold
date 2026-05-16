@@ -285,15 +285,18 @@ class RetryPolicy:
         )
         if self.max_attempts <= 0:
             raise ValueError("max_attempts must be positive")
+        raw_retry_on = self.retry_on
         try:
-            retry_on = tuple(self.retry_on)
+            retry_on = tuple(raw_retry_on)
         except TypeError as exc:
             raise ValueError("retry_on must be an iterable of exception types") from exc
-        object.__setattr__(self, "retry_on", retry_on)
-        if not self.retry_on:
+        if not retry_on:
             raise ValueError("retry_on must contain at least one exception type")
-        if not all(_is_exception_class(exception) for exception in self.retry_on):
+        if not all(_is_exception_class(exception) for exception in retry_on):
             raise ValueError("retry_on must contain only exception types")
+        if isinstance(raw_retry_on, (set, frozenset)):
+            retry_on = tuple(sorted(retry_on, key=_exception_sort_key))
+        object.__setattr__(self, "retry_on", retry_on)
 
     @classmethod
     def never(cls) -> RetryPolicy:
@@ -2139,6 +2142,10 @@ def _require_optional_timeout(value: Any, field: str) -> float | None:
 
 def _is_exception_class(value: object) -> bool:
     return isinstance(value, type) and issubclass(value, BaseException)
+
+
+def _exception_sort_key(value: type[BaseException]) -> tuple[str, str]:
+    return (value.__module__, value.__qualname__)
 
 
 def _require_int(value: int, field: str) -> int:
