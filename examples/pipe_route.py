@@ -15,6 +15,8 @@ from manyfold import (
     route,
 )
 
+from examples._shared import require_latest
+
 
 def run_example() -> PipeRouteExampleResult:
     """Pipe an Rx stream into a writable route and inspect the latest value."""
@@ -46,10 +48,9 @@ def run_example() -> PipeRouteExampleResult:
     )
     graph.pipe(rx.from_iterable([b"slow", b"fast"]), staged_route)
 
-    latest = graph.latest(command_route)
-    assert latest is not None
-    assert latest.value == b"fast"
-    assert latest.closed.seq_source == 2
+    latest = require_latest(graph, command_route, "pipe_route command route")
+    if latest.value != b"fast" or latest.closed.seq_source != 2:
+        raise RuntimeError("pipe_route did not publish the expected latest command")
 
     return {
         "latest_payload": latest.value,

@@ -42,7 +42,7 @@ from examples._catalog import (
     sync_readme_featured_examples,
 )
 from examples._exports import CATALOG_EXPORTS
-from examples._shared import example_route, int_schema, sibling_route
+from examples._shared import example_route, int_schema, require_latest, sibling_route
 from tests.test_support import (
     load_example_module,
     load_manyfold_package,
@@ -152,7 +152,7 @@ class ExampleTests(unittest.TestCase):
     def test_shared_example_helpers_keep_explicit_exports(self) -> None:
         self.assertEqual(
             shared.__all__,
-            ("example_route", "int_schema", "sibling_route"),
+            ("example_route", "int_schema", "require_latest", "sibling_route"),
         )
         for name in shared.__all__:
             self.assertTrue(callable(getattr(shared, name)))
@@ -1531,8 +1531,23 @@ class ExampleTests(unittest.TestCase):
     def test_shared_example_helpers_publish_stable_exports(self) -> None:
         self.assertEqual(
             shared.__all__,
-            ("example_route", "int_schema", "sibling_route"),
+            ("example_route", "int_schema", "require_latest", "sibling_route"),
         )
+
+    def test_shared_require_latest_reports_missing_example_state(self) -> None:
+        manyfold = load_manyfold_package()
+        graph = manyfold.Graph()
+        temperature = manyfold.route(
+            owner="sensor",
+            family="environment",
+            stream="temperature",
+            schema=manyfold.Schema.bytes(name="Temperature"),
+        )
+
+        with self.assertRaisesRegex(
+            RuntimeError, "temperature example did not publish a latest value"
+        ):
+            require_latest(graph, temperature, "temperature example")
 
     def test_shared_int_schema_round_trips_ascii_values_and_version(self) -> None:
         schema = int_schema("Temperature", version=3)

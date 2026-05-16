@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from manyfold import Graph, OwnerName, Schema, StreamFamily, StreamName, WriteBindings
 
+from examples._shared import require_latest
+
 
 def run_example() -> dict[str, bytes]:
     """Publish a write request and inspect the desired shadow route."""
@@ -15,9 +17,8 @@ def run_example() -> dict[str, bytes]:
     )
 
     graph.publish(binding, b"42")
-    desired = graph.latest(binding.desired)
+    desired = require_latest(graph, binding.desired, "write_binding desired route")
 
-    assert desired is not None
     return {
         "request_payload": b"42",
         "desired_payload": bytes(desired.payload_ref.inline_bytes),

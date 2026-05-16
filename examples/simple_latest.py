@@ -4,6 +4,8 @@ from typing import TypedDict
 
 from manyfold import Graph, Schema, route
 
+from examples._shared import require_latest
+
 
 def run_example() -> SimpleLatestExampleResult:
     """Publish changing state, then read back the current value."""
@@ -17,8 +19,7 @@ def run_example() -> SimpleLatestExampleResult:
 
     graph.publish(temperature, b"72.4F")
     graph.publish(temperature, b"72.9F")
-    latest = graph.latest(temperature)
-    assert latest is not None
+    latest = require_latest(graph, temperature, "simple_latest")
 
     return {
         "latest_payload": latest.value,

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from manyfold import (
+    Graph,
     Layer,
     OwnerName,
     Plane,
@@ -14,7 +15,7 @@ from manyfold import (
     route,
 )
 
-__all__ = ("example_route", "int_schema", "sibling_route")
+__all__ = ("example_route", "int_schema", "require_latest", "sibling_route")
 
 T = TypeVar("T")
 
@@ -27,6 +28,14 @@ def int_schema(schema_id: str, version: int = 1) -> "Schema[int]":
         encode=lambda value: str(value).encode("ascii"),
         decode=lambda payload: int(payload.decode("ascii")),
     )
+
+
+def require_latest(graph: "Graph", route_ref: "TypedRoute[T]", label: str) -> Any:
+    """Return the current route value or fail with an example-oriented message."""
+    latest = graph.latest(route_ref)
+    if latest is None:
+        raise RuntimeError(f"{label} did not publish a latest value")
+    return latest
 
 
 def example_route(
