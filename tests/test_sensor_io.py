@@ -2869,6 +2869,13 @@ class SensorIoTests(unittest.TestCase):
             keyspace = manyfold.FileStore(temp_dir).prefix("sensor", "spool")
             with self.assertRaisesRegex(ValueError, "spool name"):
                 manyfold.LocalDurableSpool("", keyspace, sample_schema)
+            with self.assertRaisesRegex(ValueError, "spool group"):
+                manyfold.LocalDurableSpool(
+                    "sensor_spool",
+                    keyspace,
+                    sample_schema,
+                    group=object(),  # type: ignore[arg-type]
+                )
             with self.assertRaisesRegex(ValueError, "keyspace must be a Keyspace"):
                 manyfold.LocalDurableSpool(
                     "sensor_spool",
@@ -2881,6 +2888,16 @@ class SensorIoTests(unittest.TestCase):
                     keyspace,
                     object(),  # type: ignore[arg-type]
                 )
+
+    def test_local_durable_spool_trims_name(self) -> None:
+        manyfold = load_manyfold_package()
+        sample_schema = manyfold.sensor_sample_schema(_int_schema(manyfold, "Temp"))
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            keyspace = manyfold.FileStore(temp_dir).prefix("sensor", "spool")
+            spool = manyfold.LocalDurableSpool(" sensor_spool ", keyspace, sample_schema)
+
+        self.assertEqual(spool.name, "sensor_spool")
 
     def test_local_durable_spool_rejects_invalid_source_before_installing_log(
         self,

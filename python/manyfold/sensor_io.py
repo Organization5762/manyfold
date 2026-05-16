@@ -2016,12 +2016,14 @@ class LocalDurableSpool(Generic[T]):
     group: str | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.name, str) or not self.name.strip():
-            raise ValueError("local durable spool name must be a non-empty string")
+        self.name = _require_non_empty_string(
+            self.name, "local durable spool name"
+        ).strip()
         if not isinstance(self.keyspace, Keyspace):
             raise ValueError("local durable spool keyspace must be a Keyspace")
         if not isinstance(self.schema, Schema):
             raise ValueError("local durable spool schema must be a Schema")
+        self.group = _require_optional_string(self.group, "local durable spool group")
 
     def event_log(self) -> EventLog[T]:
         return EventLog(self.name, self.keyspace, self.schema)
