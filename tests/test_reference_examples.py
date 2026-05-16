@@ -375,6 +375,22 @@ class ReferenceExampleSuiteTests(unittest.TestCase):
                 runner=lambda: None,
             )
 
+    def test_reference_example_trims_accepted_text_metadata(self) -> None:
+        manyfold = load_manyfold_package()
+
+        example = manyfold.ReferenceExample(
+            1,
+            " Example ",
+            "\tSummary\n",
+            True,
+            module_name=" examples.simple_latest ",
+            runner=lambda: None,
+        )
+
+        self.assertEqual(example.title, "Example")
+        self.assertEqual(example.summary, "Summary")
+        self.assertEqual(example.module_name, "examples.simple_latest")
+
     def test_implemented_reference_metadata_requires_reference_fields(self) -> None:
         load_manyfold_package()
         reference_examples = sys.modules["manyfold.reference_examples"]

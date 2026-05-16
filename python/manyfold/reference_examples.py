@@ -59,6 +59,12 @@ def _is_blank(value: str) -> bool:
     return not value.strip()
 
 
+def _require_non_blank_text(value: object, field: str) -> str:
+    if not isinstance(value, str) or _is_blank(value):
+        raise ValueError(f"reference example {field} must be a non-empty string")
+    return value.strip()
+
+
 @dataclass(frozen=True)
 class ReferenceExample:
     """Declarative metadata for one RFC reference example."""
@@ -75,16 +81,20 @@ class ReferenceExample:
             raise TypeError("reference example number must be an integer")
         if self.number <= 0:
             raise ValueError("reference example number must be positive")
-        if not isinstance(self.title, str) or _is_blank(self.title):
-            raise ValueError("reference example title must be a non-empty string")
-        if not isinstance(self.summary, str) or _is_blank(self.summary):
-            raise ValueError("reference example summary must be a non-empty string")
+        object.__setattr__(
+            self, "title", _require_non_blank_text(self.title, "title")
+        )
+        object.__setattr__(
+            self, "summary", _require_non_blank_text(self.summary, "summary")
+        )
         if not isinstance(self.implemented, bool):
             raise TypeError("reference example implemented flag must be a boolean")
-        if self.module_name is not None and (
-            not isinstance(self.module_name, str) or _is_blank(self.module_name)
-        ):
-            raise ValueError("reference example module name must be a non-empty string")
+        if self.module_name is not None:
+            object.__setattr__(
+                self,
+                "module_name",
+                _require_non_blank_text(self.module_name, "module name"),
+            )
         if self.runner is not None and not callable(self.runner):
             raise TypeError("reference example runner must be callable")
         if self.implemented and (self.module_name is None or self.runner is None):
