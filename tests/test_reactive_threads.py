@@ -128,6 +128,34 @@ class ReactiveThreadsTests(unittest.TestCase):
                     ):
                         pass
 
+    def test_thread_helpers_reject_invalid_observables(self) -> None:
+        source = object()
+        cases = (
+            lambda: self.reactive_threads.deliver_on_frame_thread(source),
+            lambda: self.reactive_threads.pipe_in_background(source),
+            lambda: self.reactive_threads.pipe_in_main_thread(source),
+            lambda: self.reactive_threads.pipe_to_background_event_loop(
+                source,
+                "worker-stream",
+            ),
+            lambda: self.reactive_threads.pipe_to_background_thread(
+                source,
+                "worker-stream",
+            ),
+        )
+
+        for build in cases:
+            with self.subTest(build=build):
+                with self.assertRaisesRegex(ValueError, "source must be an Observable"):
+                    build()
+
+        with self.assertRaisesRegex(ValueError, "observable must be an Observable"):
+            with self.reactive_threads.background_threaded_observable(
+                source,
+                name="worker-stream",
+            ):
+                pass
+
     def test_thread_name_validation_trims_outer_whitespace(self) -> None:
         thread_factory = self.reactive_threads.create_default_thread_factory(
             " worker-stream "

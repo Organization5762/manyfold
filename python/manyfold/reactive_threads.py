@@ -293,6 +293,7 @@ def on_frame_thread() -> bool:
 
 def deliver_on_frame_thread(source: Observable[T]) -> Observable[T]:
     """Queue source emissions until ``drain_frame_thread_queue`` is called."""
+    _require_observable(source, "source")
 
     def _subscribe(
         observer: Any,
@@ -345,6 +346,7 @@ def pipe_in_background(
 ) -> Observable[Any]:
     """Apply operators to a source and share the resulting observable."""
 
+    _require_observable(source, "source")
     logger.debug("Building background pipeline.")
     resolved_operators = operators
     if not isinstance(starting_value, _NoStartingValue):
@@ -355,6 +357,7 @@ def pipe_in_background(
 def pipe_in_main_thread(source: Observable[T], *operators: Any) -> Observable[Any]:
     """Deliver source emissions on the frame thread, apply operators, and share."""
 
+    _require_observable(source, "source")
     logger.debug("Building frame-thread pipeline.")
     return pipe(deliver_on_frame_thread(source), *operators, ops.share())
 
@@ -366,6 +369,7 @@ def pipe_to_background_event_loop(
 ) -> Observable[Any]:
     """Pipe a stream through an event loop running on a background thread."""
 
+    _require_observable(source, "source")
     scheduler = EventLoopScheduler(
         thread_factory=partial(_run_on_thread, name=_require_thread_name(name))
     )
@@ -379,6 +383,7 @@ def pipe_to_background_thread(
 ) -> Observable[Any]:
     """Pipe a stream through a dedicated background thread executor."""
 
+    _require_observable(source, "source")
     scheduler = NewThreadScheduler(
         thread_factory=partial(_run_on_thread, name=_require_thread_name(name))
     )
@@ -392,6 +397,7 @@ def background_threaded_observable(
 ) -> Iterator[Observable[T]]:
     """Subscribe to an observable on a daemon thread and yield its subject."""
 
+    _require_observable(observable, "observable")
     thread_name = _require_thread_name(name)
     logger.debug("Starting background stream thread %s", thread_name)
     subject: Subject[T] = Subject()
@@ -466,6 +472,11 @@ def _require_non_empty_string(value: Any, field: str) -> str:
 
 def _require_thread_name(value: Any) -> str:
     return _require_non_empty_string(value, "thread name")
+
+
+def _require_observable(value: Any, field: str) -> None:
+    if not isinstance(value, Observable):
+        raise ValueError(f"{field} must be an Observable")
 
 
 def _require_number(value: Any, field: str) -> float:
