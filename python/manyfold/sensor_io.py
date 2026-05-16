@@ -1076,10 +1076,14 @@ class SensorEvent:
             if not isinstance(self.raw, bytes | bytearray | memoryview):
                 raise ValueError("raw must be bytes-like")
             object.__setattr__(self, "raw", bytes(self.raw))
+        metadata = _require_mapping(self.metadata, "metadata")
         object.__setattr__(
             self,
             "metadata",
-            _require_mapping(self.metadata, "metadata"),
+            {
+                key: metadata[key]
+                for key in sorted(metadata, key=_mapping_key_sort_key)
+            },
         )
 
 

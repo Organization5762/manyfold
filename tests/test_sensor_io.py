@@ -227,6 +227,18 @@ class SensorIoTests(unittest.TestCase):
 
         self.assertEqual(event.raw, b"abc")
 
+    def test_sensor_event_metadata_is_key_sorted(self) -> None:
+        manyfold = load_manyfold_package()
+
+        event = manyfold.SensorEvent(
+            event_type="radio.packet",
+            data={},
+            observed_at=1.5,
+            metadata={"zeta": "last", "alpha": "first"},
+        )
+
+        self.assertEqual(tuple(event.metadata), ("alpha", "zeta"))
+
     def test_bounded_ring_buffer_enforces_overflow_policy(self) -> None:
         manyfold = load_manyfold_package()
         buffer = manyfold.BoundedRingBuffer[int](capacity=2, overflow="drop_oldest")
