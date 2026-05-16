@@ -420,13 +420,8 @@ impl PortDescriptorCore {
         }
     }
 
-    fn default_visibility(
-        route: &RouteRefCore,
-    ) -> (&'static str, bool, &'static str, &'static str) {
-        match route.namespace.layer {
-            Layer::Ephemeral | Layer::Internal => ("private", false, "owner", "owner"),
-            _ => ("private", false, "owner", "owner"),
-        }
+    fn default_visibility() -> (&'static str, bool, &'static str, &'static str) {
+        ("private", false, "owner", "owner")
     }
 
     fn default_locality(route: &RouteRefCore) -> (&'static str, Vec<String>, Option<String>) {
@@ -457,7 +452,7 @@ impl PortDescriptorCore {
     }
 
     pub fn for_route(route: &RouteRefCore) -> Self {
-        let visibility = Self::default_visibility(route);
+        let visibility = Self::default_visibility();
         let locality = Self::default_locality(route);
         let route_display = route.display();
         Self {
