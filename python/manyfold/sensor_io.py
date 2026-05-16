@@ -1221,8 +1221,6 @@ class DelimitedMessageBuffer:
         repr=False,
     )
     _text_delimiter: str = field(default="", init=False, repr=False)
-    _delimiter_len: int = field(default=0, init=False, repr=False)
-    _text_delimiter_len: int = field(default=0, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.delimiter = _require_bytes_like(self.delimiter, "delimiter")
@@ -1230,13 +1228,11 @@ class DelimitedMessageBuffer:
             raise ValueError("delimiter must not be empty")
         if self.mode not in ("bytes", "text"):
             raise ValueError("mode must be 'bytes' or 'text'")
-        self._delimiter_len = len(self.delimiter)
         if self.mode == "text":
             try:
                 self._text_delimiter = self.delimiter.decode("utf-8")
             except UnicodeDecodeError as exc:
                 raise ValueError("text delimiter must be valid UTF-8") from exc
-            self._text_delimiter_len = len(self._text_delimiter)
 
     @property
     def buffer_size(self) -> int:
@@ -1273,22 +1269,18 @@ class DelimitedMessageBuffer:
         self._text_decoder.reset()
 
     def _drain_bytes(self) -> list[bytes]:
-        messages: list[bytes] = []
-        while True:
-            index = self._bytes_buffer.find(self.delimiter)
-            if index < 0:
-                return messages
-            messages.append(bytes(self._bytes_buffer[:index]))
-            del self._bytes_buffer[: index + self._delimiter_len]
+        if self._bytes_buffer.find(self.delimiter) < 0:
+            return []
+        messages = bytes(self._bytes_buffer).split(self.delimiter)
+        self._bytes_buffer = bytearray(messages.pop())
+        return messages
 
     def _drain_text(self) -> list[str]:
-        messages: list[str] = []
-        while True:
-            index = self._text_buffer.find(self._text_delimiter)
-            if index < 0:
-                return messages
-            messages.append(self._text_buffer[:index])
-            self._text_buffer = self._text_buffer[index + self._text_delimiter_len :]
+        if self._text_delimiter not in self._text_buffer:
+            return []
+        messages = self._text_buffer.split(self._text_delimiter)
+        self._text_buffer = messages.pop()
+        return messages
 
 
 @dataclass
