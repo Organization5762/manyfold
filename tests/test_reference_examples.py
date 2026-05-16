@@ -334,6 +334,22 @@ class ReferenceExampleSuiteTests(unittest.TestCase):
                 with self.assertRaises((TypeError, ValueError)):
                     manyfold.ReferenceExample(**kwargs)
 
+    def test_reference_example_trims_text_fields_at_validation_boundary(self) -> None:
+        manyfold = load_manyfold_package()
+
+        example = manyfold.ReferenceExample(
+            number=1,
+            title="  A graph in motion  ",
+            summary="  Publish and inspect changing state.  ",
+            implemented=True,
+            module_name="  examples.simple_latest  ",
+            runner=lambda: None,
+        )
+
+        self.assertEqual(example.title, "A graph in motion")
+        self.assertEqual(example.summary, "Publish and inspect changing state.")
+        self.assertEqual(example.module_name, "examples.simple_latest")
+
     def test_reference_example_rejects_invalid_runner_metadata(self) -> None:
         manyfold = load_manyfold_package()
 
