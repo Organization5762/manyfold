@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest import mock
 
 import manyfold.stats as stats
 from manyfold.stats import Average
@@ -44,6 +45,12 @@ class StatsTests(unittest.TestCase):
                 return 10.0
 
         self.assertEqual(Average(window_size=1)(LatestOnlyValues()), 10.0)  # type: ignore[arg-type]
+
+    def test_average_single_available_value_avoids_window_summation(self) -> None:
+        with mock.patch.object(stats.math, "fsum") as fsum:
+            self.assertEqual(Average(window_size=3)([10.0]), 10.0)
+
+        fsum.assert_not_called()
 
     def test_average_rejects_empty_values(self) -> None:
         with self.assertRaisesRegex(ValueError, "at least one value"):
