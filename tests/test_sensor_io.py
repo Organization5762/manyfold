@@ -1269,6 +1269,13 @@ class SensorIoTests(unittest.TestCase):
 
         self.assertEqual(policy.retry_on, (RuntimeError,))
 
+    def test_retry_policy_sorts_unordered_retryable_exception_classes(self) -> None:
+        manyfold = load_manyfold_package()
+
+        policy = manyfold.SensorRetryPolicy(retry_on={ValueError, RuntimeError})
+
+        self.assertEqual(policy.retry_on, (RuntimeError, ValueError))
+
     def test_retry_policy_rejects_non_exception_retry_types(self) -> None:
         manyfold = load_manyfold_package()
 
