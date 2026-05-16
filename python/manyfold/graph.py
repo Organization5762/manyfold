@@ -78,6 +78,15 @@ TIn = TypeVar("TIn")
 TOut = TypeVar("TOut")
 U = TypeVar("U")
 AnyTypedRoute = TypedRoute[Any]
+TAINT_DOMAINS = (
+    TaintDomain.Coherence,
+    TaintDomain.Delivery,
+    TaintDomain.Determinism,
+    TaintDomain.Order,
+    TaintDomain.Scheduling,
+    TaintDomain.Time,
+    TaintDomain.Trust,
+)
 AnySource = Source[Any]
 AnySink = Sink[Any]
 RouteLike = Union[AnyTypedRoute, RouteRef, AnySource, AnySink]
@@ -769,6 +778,22 @@ class TaintRepair:
     proof: str = ""
 
     def __post_init__(self) -> None:
+        if not _is_taint_domain_value(self.domain):
+            raise ValueError("taint repair domain must be a TaintDomain")
+        object.__setattr__(
+            self,
+            "cleared",
+            _require_text_tuple(self.cleared, "taint repair cleared"),
+        )
+        if not isinstance(self.added, tuple):
+            raise ValueError("taint repair added must be a tuple of TaintMark values")
+        for mark in self.added:
+            if not _is_taint_mark_value(mark):
+                raise ValueError(
+                    "taint repair added must contain only TaintMark values"
+                )
+        if not isinstance(self.proof, str):
+            raise ValueError("taint repair proof must be a string")
         if self.cleared and not self.proof.strip():
             raise ValueError("taint repairs that clear marks require a proof")
 
@@ -7506,6 +7531,8 @@ class Graph:
             raise ValueError("query request must be a QueryRequest")
         _require_non_empty_text(requester_id, "requester_id")
         _require_non_empty_text(service_owner, "query service owner")
+        if request.principal_id is not None and request.principal_id != requester_id:
+            raise PermissionError("query principal_id must match requester_id")
         service = self.query_service(service_owner)
         correlation_id = request.correlation_id or self._correlation_id()
         request_payload = json.dumps(
@@ -7723,6 +7750,21 @@ def _require_text_tuple(value: object, field: str) -> tuple[str, ...]:
     for item in value:
         _require_non_empty_text(item, f"{field}[]")
     return value
+
+
+def _is_taint_domain_value(value: Any) -> bool:
+    return any(
+        type(value) is type(domain) and value == domain for domain in TAINT_DOMAINS
+    )
+
+
+def _is_taint_mark_value(value: Any) -> bool:
+    return (
+        isinstance(value, TaintMark)
+        and _is_taint_domain_value(getattr(value, "domain", None))
+        and isinstance(getattr(value, "value_id", None), str)
+        and isinstance(getattr(value, "origin_id", None), str)
+    )
 
 
 def _require_metadata_tuple(

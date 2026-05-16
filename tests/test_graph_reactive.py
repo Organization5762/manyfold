@@ -4955,6 +4955,82 @@ assert graph.latest(route) is None
                 cleared=("TIME_UNKNOWN",),
             )
 
+    def test_taint_repair_validates_direct_construction(self) -> None:
+        graph_module = load_graph_module()
+
+        valid_mark = graph_module.TaintMark(
+            graph_module.TaintDomain.Time,
+            "TIME_REPAIRED",
+            "clock_repair:model=v1",
+        )
+        fake_domain = type("FakeDomain", (), {"value": "time"})()
+        fake_mark = type(
+            "FakeMark",
+            (),
+            {
+                "domain": fake_domain,
+                "value_id": "TIME_REPAIRED",
+                "origin_id": "clock_repair:model=v1",
+            },
+        )()
+        self.assertEqual(
+            graph_module.TaintRepair(
+                domain=graph_module.TaintDomain.Time,
+                added=(valid_mark,),
+            ).added,
+            (valid_mark,),
+        )
+
+        cases = (
+            (
+                {"domain": fake_domain},
+                "taint repair domain must be a TaintDomain",
+            ),
+            (
+                {
+                    "domain": graph_module.TaintDomain.Time,
+                    "cleared": ["TIME_UNKNOWN"],
+                    "proof": "clock repaired",
+                },
+                "taint repair cleared must be a tuple of strings",
+            ),
+            (
+                {
+                    "domain": graph_module.TaintDomain.Time,
+                    "cleared": ("",),
+                    "proof": "clock repaired",
+                },
+                r"taint repair cleared\[\] must be a non-empty string",
+            ),
+            (
+                {
+                    "domain": graph_module.TaintDomain.Time,
+                    "added": [valid_mark],
+                },
+                "taint repair added must be a tuple of TaintMark values",
+            ),
+            (
+                {
+                    "domain": graph_module.TaintDomain.Time,
+                    "added": (fake_mark,),
+                },
+                "taint repair added must contain only TaintMark values",
+            ),
+            (
+                {
+                    "domain": graph_module.TaintDomain.Time,
+                    "cleared": ("TIME_UNKNOWN",),
+                    "proof": object(),
+                },
+                "taint repair proof must be a string",
+            ),
+        )
+
+        for kwargs, message in cases:
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    graph_module.TaintRepair(**kwargs)  # type: ignore[arg-type]
+
     def test_query_taints_reports_stream_bounds_and_event_marks(self) -> None:
         graph_module = load_graph_module()
 
@@ -5409,6 +5485,18 @@ assert graph.latest(route) is None
         with self.assertRaises(PermissionError):
             graph.query(
                 graph_module.QueryRequest(command="open_payload", route=route),
+                requester_id="dashboard",
+            )
+        with self.assertRaisesRegex(
+            PermissionError,
+            "query principal_id must match requester_id",
+        ):
+            graph.query(
+                graph_module.QueryRequest(
+                    command="open_payload",
+                    route=route,
+                    principal_id="internal",
+                ),
                 requester_id="dashboard",
             )
 
