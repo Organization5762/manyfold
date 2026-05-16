@@ -1224,14 +1224,17 @@ impl MailboxDescriptor {
         ordering_policy: String,
         overflow_policy: String,
     ) -> PyResult<Self> {
-        let delivery_mode = match delivery_mode.as_str() {
+        let delivery_mode = delivery_mode.trim();
+        let ordering_policy = ordering_policy.trim();
+        let overflow_policy = overflow_policy.trim();
+        let delivery_mode = match delivery_mode {
             "mpsc_serial" => DeliveryMode::MpscSerial,
             "mpmc_unique" => DeliveryMode::MpmcUnique,
             "mpmc_replicated" => DeliveryMode::MpmcReplicated,
             "key_affine" => DeliveryMode::KeyAffine,
             value => return Err(unsupported_choice("delivery_mode", value, DELIVERY_MODES)),
         };
-        let ordering_policy = match ordering_policy.as_str() {
+        let ordering_policy = match ordering_policy {
             "fifo" => OrderingPolicy::Fifo,
             "priority_stable" => OrderingPolicy::PriorityStable,
             "weighted_fair" => OrderingPolicy::WeightedFair,
@@ -1247,7 +1250,7 @@ impl MailboxDescriptor {
                 ));
             }
         };
-        let overflow_policy = match overflow_policy.as_str() {
+        let overflow_policy = match overflow_policy {
             "block" => OverflowPolicy::Block,
             "drop_oldest" => OverflowPolicy::DropOldest,
             "drop_newest" => OverflowPolicy::DropNewest,

@@ -103,6 +103,23 @@ for capacity in (False, True):
 
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_mailbox_descriptor_trims_option_tokens(self) -> None:
+        script = """
+import manyfold
+
+descriptor = manyfold.MailboxDescriptor(
+    delivery_mode=" mpmc_unique ",
+    ordering_policy=" latest_only ",
+    overflow_policy=" coalesce_latest ",
+)
+assert descriptor.delivery_mode == "mpmc_unique"
+assert descriptor.ordering_policy == "latest_only"
+assert descriptor.overflow_policy == "coalesce_latest"
+"""
+        result = run_manyfold_script(script)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_graph_mailbox_rejects_blank_and_duplicate_names(self) -> None:
         script = """
 import manyfold
