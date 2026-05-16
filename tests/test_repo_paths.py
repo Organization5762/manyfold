@@ -28,6 +28,22 @@ class RepoPathTests(unittest.TestCase):
 
             self.assertEqual(sys.path, [expected, "/tmp/example"])
 
+    def test_ensure_path_on_sys_path_skips_resolving_exact_matches(self) -> None:
+        expected = str(Path("python").resolve())
+
+        with (
+            mock.patch.object(sys, "path", [expected, expected]),
+            mock.patch.object(
+                _repo_paths,
+                "_canonical_path_str",
+                wraps=_repo_paths._canonical_path_str,
+            ) as canonical_path_str,
+        ):
+            _repo_paths.ensure_path_on_sys_path(Path("python"))
+
+            self.assertEqual(sys.path, [expected])
+            canonical_path_str.assert_called_once_with(Path("python"))
+
     def test_load_module_from_path_resolves_relative_module_file(self) -> None:
         module_name = "manyfold_relative_repo_path_test"
         with tempfile.TemporaryDirectory() as temp_dir:

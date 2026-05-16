@@ -20,7 +20,7 @@ def ensure_path_on_sys_path(path: Path) -> None:
     sys.path[:] = [
         existing_path
         for existing_path in sys.path
-        if _canonical_path_str(Path(existing_path)) != path_str
+        if not _path_matches_canonical(existing_path, path_str)
     ]
     sys.path.insert(0, path_str)
 
@@ -74,3 +74,9 @@ def load_module_from_path(module_name: str, module_path: Path) -> ModuleType:
 
 def _canonical_path_str(path: Path) -> str:
     return str(path.expanduser().resolve())
+
+
+def _path_matches_canonical(existing_path: str, canonical_path: str) -> bool:
+    if existing_path == canonical_path:
+        return True
+    return _canonical_path_str(Path(existing_path)) == canonical_path
