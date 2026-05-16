@@ -747,7 +747,7 @@ class SensorIoTests(unittest.TestCase):
             (event_schema, b"{}", "event_type is required"),
             (
                 event_schema,
-                b'{"event_type":"radio.packet"}',
+                b'{"event_type":"radio.packet","data":{}}',
                 "observed_at is required",
             ),
             (health_schema, b"{}", "status is required"),
