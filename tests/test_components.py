@@ -92,11 +92,18 @@ class ComponentTests(unittest.TestCase):
                 seq_source=True,
                 control_epoch=None,
             )
-        with self.assertRaisesRegex(ValueError, "memory record control_epoch"):
+        with self.assertRaisesRegex(ValueError, "memory record seq_source"):
             manyfold.MemoryRecord(
                 route_display="route",
                 value=b"bad",
                 seq_source=0,
+                control_epoch=None,
+            )
+        with self.assertRaisesRegex(ValueError, "memory record control_epoch"):
+            manyfold.MemoryRecord(
+                route_display="route",
+                value=b"bad",
+                seq_source=1,
                 control_epoch=-1,
             )
 
@@ -920,6 +927,68 @@ class ComponentTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "legacy boolean"):
             routes.leader_state.schema.decode(b"node-a|3|")
 
+    def test_consensus_legacy_schemas_reject_malformed_payloads(self) -> None:
+        manyfold = load_manyfold_package()
+        routes = manyfold.Consensus.default_routes()
+
+        cases = (
+            (
+                routes.heartbeat,
+                b"3",
+                "heartbeat legacy payload must contain 2 fields",
+            ),
+            (
+                routes.request_vote,
+                b"3|node-a|0",
+                "request vote legacy payload must contain 4 fields",
+            ),
+            (
+                routes.vote_response,
+                b"3|node-a|node-b",
+                "vote legacy payload must contain 4 fields",
+            ),
+            (
+                routes.append_entries,
+                b"7",
+                "append entry legacy payload must contain 2 fields",
+            ),
+            (
+                routes.quorum,
+                b"3|node-a|node-a,node-b",
+                "quorum legacy payload must contain 4 fields",
+            ),
+            (
+                routes.leader_state,
+                b"node-a|3",
+                "leader state legacy payload must contain 3 fields",
+            ),
+        )
+
+        for route, payload, message in cases:
+            with self.subTest(schema=route.schema.schema_id):
+                with self.assertRaisesRegex(ValueError, message):
+                    route.schema.decode(payload)
+
+    def test_consensus_legacy_schemas_reject_non_integer_fields(self) -> None:
+        manyfold = load_manyfold_package()
+        routes = manyfold.Consensus.default_routes()
+
+        cases = (
+            (routes.heartbeat, b"latest|node-a", "term legacy field"),
+            (routes.request_vote, b"3|node-a|latest|0", "last_log_index legacy field"),
+            (routes.vote_response, b"latest|node-a|node-b|1", "term legacy field"),
+            (routes.append_entries, b"latest|set pipe=a", "index legacy field"),
+            (routes.quorum, b"latest|node-a|node-a,node-b|1", "term legacy field"),
+            (routes.leader_state, b"node-a|latest|1", "term legacy field"),
+        )
+
+        for route, payload, message in cases:
+            with self.subTest(schema=route.schema.schema_id):
+                with self.assertRaisesRegex(
+                    ValueError, f"{message} must be an integer"
+                ):
+                    route.schema.decode(payload)
+
     def test_consensus_json_schemas_reject_string_booleans(self) -> None:
         manyfold = load_manyfold_package()
         routes = manyfold.Consensus.default_routes()
@@ -1284,11 +1353,17 @@ class ComponentTests(unittest.TestCase):
             memory = manyfold.Memory(Path(temp_dir) / "memory.jsonl")
             graph = manyfold.Graph()
 
-            with self.assertRaisesRegex(ValueError, "memory route must be a TypedRoute"):
+            with self.assertRaisesRegex(
+                ValueError, "memory route must be a TypedRoute"
+            ):
                 memory.remember(graph, object())  # type: ignore[arg-type]
-            with self.assertRaisesRegex(ValueError, "memory route must be a TypedRoute"):
+            with self.assertRaisesRegex(
+                ValueError, "memory route must be a TypedRoute"
+            ):
                 memory.records(object())  # type: ignore[arg-type]
-            with self.assertRaisesRegex(ValueError, "memory route must be a TypedRoute"):
+            with self.assertRaisesRegex(
+                ValueError, "memory route must be a TypedRoute"
+            ):
                 memory.resume(graph, object())  # type: ignore[arg-type]
 
     def test_memory_chip_writes_compact_sorted_jsonl_records(self) -> None:

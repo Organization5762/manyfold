@@ -463,7 +463,7 @@ class MemoryRecord(Generic[T]):
 
     def __post_init__(self) -> None:
         _require_component_name(self.route_display, "memory record route")
-        _require_non_negative_int(self.seq_source, "memory record seq_source")
+        _require_positive_int(self.seq_source, "memory record seq_source")
         if self.control_epoch is not None:
             _require_non_negative_int(
                 self.control_epoch,
@@ -1041,6 +1041,11 @@ def _require_non_negative_int(value: object, field: str) -> None:
         raise ValueError(f"{field} must be a non-negative integer")
 
 
+def _require_positive_int(value: object, field: str) -> None:
+    if not _is_plain_int(value) or value <= 0:
+        raise ValueError(f"{field} must be a positive integer")
+
+
 def _normalize_memory_path(value: object) -> Path:
     try:
         path = Path(value)
@@ -1178,8 +1183,8 @@ def _decode_heartbeat(payload: bytes) -> Heartbeat:
     if _is_json_tuple_payload(text):
         term, leader = _decode_json_tuple(text, 2, "heartbeat")
         return (_decode_json_int(term), _decode_json_string(leader, "leader"))
-    term_text, leader = text.split("|", 1)
-    return (int(term_text), leader)
+    term_text, leader = _decode_legacy_fields(text, 2, "heartbeat")
+    return (_decode_legacy_int(term_text, "term"), leader)
 
 
 def _request_vote_schema() -> Schema[RequestVote]:
@@ -1221,8 +1226,17 @@ def _decode_request_vote(payload: bytes) -> RequestVote:
             _decode_json_int(last_log_index),
             _decode_json_int(last_log_term),
         )
-    term_text, candidate, index_text, term_at_index_text = text.split("|", 3)
-    return (int(term_text), candidate, int(index_text), int(term_at_index_text))
+    term_text, candidate, index_text, term_at_index_text = _decode_legacy_fields(
+        text,
+        4,
+        "request vote",
+    )
+    return (
+        _decode_legacy_int(term_text, "term"),
+        candidate,
+        _decode_legacy_int(index_text, "last_log_index"),
+        _decode_legacy_int(term_at_index_text, "last_log_term"),
+    )
 
 
 def _vote_schema() -> Schema[Vote]:
@@ -1256,8 +1270,17 @@ def _decode_vote(payload: bytes) -> Vote:
             _decode_json_string(voter, "voter"),
             _decode_json_bool(granted),
         )
-    term_text, candidate, voter, granted_text = text.split("|", 3)
-    return (int(term_text), candidate, voter, _decode_legacy_bool(granted_text))
+    term_text, candidate, voter, granted_text = _decode_legacy_fields(
+        text,
+        4,
+        "vote",
+    )
+    return (
+        _decode_legacy_int(term_text, "term"),
+        candidate,
+        voter,
+        _decode_legacy_bool(granted_text),
+    )
 
 
 def _quorum_schema() -> Schema[QuorumState]:
@@ -1291,9 +1314,18 @@ def _decode_quorum(payload: bytes) -> QuorumState:
             _decode_json_string_array(voters, "quorum voters"),
             _decode_json_bool(granted),
         )
-    term_text, candidate, voters_text, granted_text = text.split("|", 3)
+    term_text, candidate, voters_text, granted_text = _decode_legacy_fields(
+        text,
+        4,
+        "quorum",
+    )
     voters = tuple(voter for voter in voters_text.split(",") if voter)
-    return (int(term_text), candidate, voters, _decode_legacy_bool(granted_text))
+    return (
+        _decode_legacy_int(term_text, "term"),
+        candidate,
+        voters,
+        _decode_legacy_bool(granted_text),
+    )
 
 
 def _append_entry_schema() -> Schema[AppendEntry]:
@@ -1314,8 +1346,8 @@ def _decode_append_entry(payload: bytes) -> AppendEntry:
     if _is_json_tuple_payload(text):
         index, command = _decode_json_tuple(text, 2, "append entry")
         return (_decode_json_int(index), _decode_json_string(command, "command"))
-    index_text, command = text.split("|", 1)
-    return (int(index_text), command)
+    index_text, command = _decode_legacy_fields(text, 2, "append entry")
+    return (_decode_legacy_int(index_text, "index"), command)
 
 
 def _replicated_log_schema() -> Schema[ReplicatedLog]:
@@ -1375,8 +1407,16 @@ def _decode_leader_state(payload: bytes) -> LeaderState:
             _decode_json_int(term),
             _decode_json_bool(committed),
         )
-    leader, term_text, committed_text = text.split("|", 2)
-    return (leader, int(term_text), _decode_legacy_bool(committed_text))
+    leader, term_text, committed_text = _decode_legacy_fields(
+        text,
+        3,
+        "leader state",
+    )
+    return (
+        leader,
+        _decode_legacy_int(term_text, "term"),
+        _decode_legacy_bool(committed_text),
+    )
 
 
 def _decode_json_bool(value: Any) -> bool:
@@ -1391,6 +1431,26 @@ def _decode_legacy_bool(value: str) -> bool:
     if value == "0":
         return False
     raise ValueError("legacy boolean field must be 0 or 1")
+
+
+def _decode_legacy_fields(
+    text: str,
+    expected_length: int,
+    field: str,
+) -> tuple[str, ...]:
+    parts = tuple(text.split("|", expected_length - 1))
+    if len(parts) != expected_length:
+        raise ValueError(
+            f"{field} legacy payload must contain {expected_length} fields"
+        )
+    return parts
+
+
+def _decode_legacy_int(value: str, field: str) -> int:
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise ValueError(f"{field} legacy field must be an integer") from exc
 
 
 def _decode_json_int(value: Any) -> int:
