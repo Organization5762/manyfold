@@ -386,9 +386,7 @@ class SensorIoTests(unittest.TestCase):
         manyfold = load_manyfold_package()
         decoder = manyfold.JsonEventDecoder()
 
-        event = decoder.decode(
-            b'{"z":1,"event_type":"sensor.event","data":{},"a":2}'
-        )
+        event = decoder.decode(b'{"z":1,"event_type":"sensor.event","data":{},"a":2}')
 
         self.assertIsNotNone(event)
         assert event is not None
@@ -465,9 +463,18 @@ class SensorIoTests(unittest.TestCase):
 
         for kwargs, message in (
             ({"clock": object()}, "json event decoder clock must provide now"),
-            ({"identity": object()}, "json event decoder identity must be a SensorIdentity"),
-            ({"sequence": object()}, "json event decoder sequence must be a SequenceCounter"),
-            ({"default_event_type": " "}, "default_event_type must be a non-empty string"),
+            (
+                {"identity": object()},
+                "json event decoder identity must be a SensorIdentity",
+            ),
+            (
+                {"sequence": object()},
+                "json event decoder sequence must be a SequenceCounter",
+            ),
+            (
+                {"default_event_type": " "},
+                "default_event_type must be a non-empty string",
+            ),
             ({"group": 7}, "group must be a string"),
         ):
             with self.subTest(kwargs=kwargs):
@@ -645,11 +652,23 @@ class SensorIoTests(unittest.TestCase):
 
         for kwargs, message in (
             ({"stage": "raw"}, "debug envelope stage must be a SensorDebugStage"),
-            ({"stream_name": " "}, "debug envelope stream_name must be a non-empty string"),
+            (
+                {"stream_name": " "},
+                "debug envelope stream_name must be a non-empty string",
+            ),
             ({"source_id": 7}, "debug envelope source_id must be a string"),
-            ({"timestamp": math.nan}, "debug envelope timestamp must be a finite number"),
-            ({"upstream_ids": "sensor-0"}, "debug envelope upstream_ids must be an iterable of strings"),
-            ({"upstream_ids": ("sensor-0", " ")}, r"debug envelope upstream_ids\[\] must be a non-empty string"),
+            (
+                {"timestamp": math.nan},
+                "debug envelope timestamp must be a finite number",
+            ),
+            (
+                {"upstream_ids": "sensor-0"},
+                "debug envelope upstream_ids must be an iterable of strings",
+            ),
+            (
+                {"upstream_ids": ("sensor-0", " ")},
+                r"debug envelope upstream_ids\[\] must be a non-empty string",
+            ),
         ):
             with self.subTest(kwargs=kwargs):
                 with self.assertRaisesRegex(ValueError, message):
@@ -845,9 +864,7 @@ class SensorIoTests(unittest.TestCase):
         manyfold = load_manyfold_package()
         schema = manyfold.sensor_sample_schema(_int_schema(manyfold, "Temp"))
 
-        with self.assertRaisesRegex(
-            ValueError, r"source_timestamp must be a JSON number \(finite\)"
-        ):
+        with self.assertRaisesRegex(ValueError, "invalid JSON constant: NaN"):
             schema.decode(
                 b'{"ingest_timestamp":1.5,"quality":null,"sequence_number":1,'
                 b'"source_timestamp":NaN,"status":null,"value":"MjE="}'
@@ -910,6 +927,32 @@ class SensorIoTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "event_type must be a JSON string"):
             schema.decode(json.dumps(payload).encode("utf-8"))
+
+    def test_sensor_event_schema_rejects_missing_data(self) -> None:
+        manyfold = load_manyfold_package()
+        schema = manyfold.sensor_event_schema()
+        payload = {
+            "event_type": "radio.packet",
+            "observed_at": 1.5,
+            "identity": {},
+            "sequence_number": 7,
+            "raw": None,
+            "metadata": {},
+        }
+
+        with self.assertRaisesRegex(ValueError, "data is required"):
+            schema.decode(json.dumps(payload).encode("utf-8"))
+
+    def test_sensor_event_schema_rejects_non_standard_json_constant(self) -> None:
+        manyfold = load_manyfold_package()
+        schema = manyfold.sensor_event_schema()
+
+        with self.assertRaisesRegex(ValueError, "invalid JSON constant: NaN"):
+            schema.decode(
+                b'{"data":{"reading":NaN},"event_type":"radio.packet",'
+                b'"identity":{},"metadata":{},"observed_at":1.5,"raw":null,'
+                b'"sequence_number":7}'
+            )
 
     def test_sensor_event_schema_rejects_non_string_identity_tag(self) -> None:
         manyfold = load_manyfold_package()
@@ -1049,9 +1092,7 @@ class SensorIoTests(unittest.TestCase):
         manyfold = load_manyfold_package()
         schema = manyfold.sensor_event_schema()
 
-        with self.assertRaisesRegex(
-            ValueError, r"identity.location.x must be a JSON number \(finite\)"
-        ):
+        with self.assertRaisesRegex(ValueError, "invalid JSON constant: Infinity"):
             schema.decode(
                 b'{"data":{},"event_type":"radio.packet",'
                 b'"identity":{"location":{"x":Infinity,"y":0.0,"z":0.0}},'
@@ -1111,9 +1152,7 @@ class SensorIoTests(unittest.TestCase):
         manyfold = load_manyfold_package()
         health_schema = manyfold.health_status_schema()
 
-        with self.assertRaisesRegex(
-            ValueError, r"observed_at must be a JSON number \(finite\)"
-        ):
+        with self.assertRaisesRegex(ValueError, "invalid JSON constant: Infinity"):
             health_schema.decode(
                 b'{"error_count":0,"message":"ready","observed_at":Infinity,'
                 b'"stale":false,"status":"ok"}'
@@ -1880,7 +1919,9 @@ class SensorIoTests(unittest.TestCase):
             sequence=sequence,
         )
 
-        with self.assertRaisesRegex(ValueError, "source_timestamp must be a finite number"):
+        with self.assertRaisesRegex(
+            ValueError, "source_timestamp must be a finite number"
+        ):
             source.install(graph, read_now=False).poll()
 
         self.assertEqual(sequence.peek(), 10)
@@ -1980,7 +2021,9 @@ class SensorIoTests(unittest.TestCase):
             manyfold.sensor_sample_schema(_int_schema(manyfold, "Accel")),
         )
 
-        with self.assertRaisesRegex(ValueError, "source_timestamp must be a finite number"):
+        with self.assertRaisesRegex(
+            ValueError, "source_timestamp must be a finite number"
+        ):
             manyfold.ReactiveSensorSource(
                 route=route,
                 observable=rx.from_iterable([1]),
@@ -2535,7 +2578,9 @@ class SensorIoTests(unittest.TestCase):
 
     def test_rate_matched_sensor_rejects_invalid_configuration(self) -> None:
         manyfold = load_manyfold_package()
-        source = _route(manyfold, "invalid_rate_config_raw", _int_schema(manyfold, "Raw"))
+        source = _route(
+            manyfold, "invalid_rate_config_raw", _int_schema(manyfold, "Raw")
+        )
         sink = _route(
             manyfold,
             "invalid_rate_config_sampled",
@@ -2713,7 +2758,7 @@ class SensorIoTests(unittest.TestCase):
         self.assertEqual(frames[0].frame_id, 7)
         self.assertEqual(frames[0].samples, ((7, 0, "a"), (7, 1, "b")))
         self.assertEqual(manyfold.xor_checksum([0xAA, 0x0F, 0x01]), 0xA4)
-        self.assertEqual(manyfold.xor_checksum(memoryview(b"\xAA\x0F\x01")), 0xA4)
+        self.assertEqual(manyfold.xor_checksum(memoryview(b"\xaa\x0f\x01")), 0xA4)
 
     def test_xor_checksum_rejects_non_octet_inputs(self) -> None:
         manyfold = load_manyfold_package()

@@ -89,6 +89,8 @@ uv run python -m unittest tests.test_components.ComponentTests.test_file_store_a
   them at import time. Keep files under about 1000 lines of code.
 - Avoid stubs unless absolutely necessary. Prefer runners that exercise actual
   code paths instead of replacing behavior.
+- Do not use `assert` for runtime invariants in `python/manyfold`; raise
+  explicit exceptions so optimized Python keeps the checks.
 - Keep code condensed, typed, and documented. Use docstrings for public surface
   area and add short comments around key logic when they make the surrounding
   code easier to interpret.

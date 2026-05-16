@@ -109,9 +109,7 @@ def sensor_sample_schema(
         )
 
     def decode(payload: bytes) -> SensorSample[T]:
-        data = _decode_json_mapping(
-            json.loads(payload.decode("utf-8")), "sensor sample"
-        )
+        data = _decode_json_mapping(_decode_json_payload(payload), "sensor sample")
         value = value_schema.decode(
             _decode_base64_field(_decode_required_json_field(data, "value"), "value")
         )
@@ -161,17 +159,20 @@ def sensor_event_schema(schema_id: str = "SensorEvent") -> Schema[SensorEvent]:
         )
 
     def decode(payload: bytes) -> SensorEvent:
-        data = _decode_json_mapping(json.loads(payload.decode("utf-8")), "sensor event")
+        data = _decode_json_mapping(_decode_json_payload(payload), "sensor event")
         raw = data.get("raw")
         metadata = _decode_json_mapping(data.get("metadata", {}), "metadata")
+        event_type = _decode_json_string(
+            _decode_required_json_field(data, "event_type"), "event_type"
+        )
+        observed_at = _decode_json_number(
+            _decode_required_json_field(data, "observed_at"), "observed_at"
+        )
+        event_data = _json_restore(_decode_required_json_field(data, "data"))
         return SensorEvent(
-            event_type=_decode_json_string(
-                _decode_required_json_field(data, "event_type"), "event_type"
-            ),
-            data=_json_restore(data.get("data")),
-            observed_at=_decode_json_number(
-                _decode_required_json_field(data, "observed_at"), "observed_at"
-            ),
+            event_type=event_type,
+            data=event_data,
+            observed_at=observed_at,
             identity=_sensor_identity_from_json(data.get("identity")),
             sequence_number=None
             if data.get("sequence_number") is None
@@ -198,13 +199,9 @@ def health_status_schema(schema_id: str = "HealthStatus") -> Schema[HealthStatus
         )
 
     def decode(payload: bytes) -> HealthStatus:
-        data = _decode_json_mapping(
-            json.loads(payload.decode("utf-8")), "health status"
-        )
+        data = _decode_json_mapping(_decode_json_payload(payload), "health status")
         return HealthStatus(
-            status=_decode_health_status(
-                _decode_required_json_field(data, "status")
-            ),
+            status=_decode_health_status(_decode_required_json_field(data, "status")),
             observed_at=_decode_json_number(
                 _decode_required_json_field(data, "observed_at"), "observed_at"
             ),
@@ -393,7 +390,8 @@ class RetryLoop:
                 last_error = exc
                 if attempt >= self.retry.max_attempts:
                     raise
-        assert last_error is not None
+        if last_error is None:
+            raise RuntimeError("retry loop exited without a captured retry error")
         raise last_error
 
 
@@ -416,7 +414,9 @@ class StopToken:
         self._event.set()
 
     def wait(self, timeout: float | None = None) -> bool:
-        return self._event.wait(_require_optional_timeout(timeout, "stop token timeout"))
+        return self._event.wait(
+            _require_optional_timeout(timeout, "stop token timeout")
+        )
 
 
 @dataclass
@@ -1348,9 +1348,8 @@ class JsonEventDecoder:
         if not isinstance(parsed, Mapping):
             return None
         event_type_value = parsed.get("event_type", self.default_event_type)
-        if (
-            event_type_value is None
-            or (isinstance(event_type_value, str) and not event_type_value.strip())
+        if event_type_value is None or (
+            isinstance(event_type_value, str) and not event_type_value.strip()
         ):
             event_type = self.default_event_type
         elif isinstance(event_type_value, str):
@@ -1656,7 +1655,9 @@ class ReactiveSensorSource:
         self.identity = _require_sensor_identity(
             self.identity, "reactive sensor source identity"
         )
-        self.group = _require_optional_string(self.group, "reactive sensor source group")
+        self.group = _require_optional_string(
+            self.group, "reactive sensor source group"
+        )
         self.debug_tap = _require_optional_debug_tap(
             self.debug_tap, "reactive sensor source debug_tap"
         )
@@ -2321,13 +2322,15 @@ def _compact_json_bytes(value: Mapping[str, Any]) -> bytes:
     ).encode("utf-8")
 
 
+def _decode_json_payload(payload: bytes) -> Any:
+    return json.loads(payload.decode("utf-8"), parse_constant=_reject_json_constant)
+
+
 def _json_event_metadata(value: Mapping[str, Any]) -> dict[str, Any]:
     # Keep decoded metadata iteration stable without changing the user payload
     # under "data"; JSON object keys are always strings after json.loads.
     return {
-        key: value[key]
-        for key in sorted(value)
-        if key not in {"event_type", "data"}
+        key: value[key] for key in sorted(value) if key not in {"event_type", "data"}
     }
 
 

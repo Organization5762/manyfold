@@ -18,7 +18,10 @@ except ImportError:
         "_manyfold_repo_paths",
         REPO_PATHS_MODULE_PATH,
     )
-    assert spec is not None and spec.loader is not None
+    if spec is None or spec.loader is None:
+        raise ImportError(
+            f"cannot load repository path helpers from {REPO_PATHS_MODULE_PATH}"
+        )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     ensure_repo_import_paths = module.ensure_repo_import_paths

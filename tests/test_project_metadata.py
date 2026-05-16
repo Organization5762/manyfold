@@ -12,12 +12,18 @@ except ModuleNotFoundError:
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CARGO_TOML_PATH = PROJECT_ROOT / "Cargo.toml"
-NATIVE_STUB_PATH = PROJECT_ROOT / "python" / "manyfold" / "_manyfold_rust" / "__init__.pyi"
+NATIVE_STUB_PATH = (
+    PROJECT_ROOT / "python" / "manyfold" / "_manyfold_rust" / "__init__.pyi"
+)
 PYPROJECT_PATH = PROJECT_ROOT / "pyproject.toml"
 PYTHON_SOURCE_ROOTS = (
     PROJECT_ROOT / "examples",
     PROJECT_ROOT / "python",
     PROJECT_ROOT / "tests",
+)
+RUNTIME_ASSERT_ROOTS = (
+    PROJECT_ROOT / "python" / "manyfold",
+    PROJECT_ROOT / "python" / "manyfold_example_catalog.py",
 )
 PACKAGE_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+")
 
@@ -28,6 +34,15 @@ class ProjectMetadataTests(unittest.TestCase):
             violation
             for path in _python_source_paths()
             for violation in _function_local_imports(path)
+        )
+
+        self.assertEqual(violations, ())
+
+    def test_manyfold_runtime_uses_explicit_invariant_errors(self) -> None:
+        violations = tuple(
+            violation
+            for path in _runtime_python_source_paths()
+            for violation in _assert_statements(path)
         )
 
         self.assertEqual(violations, ())
@@ -135,7 +150,9 @@ def _literal_module_all_assignment(path: Path) -> tuple[str, ...] | None:
 
 
 def _assigns_name(node: ast.Assign, name: str) -> bool:
-    return any(isinstance(target, ast.Name) and target.id == name for target in node.targets)
+    return any(
+        isinstance(target, ast.Name) and target.id == name for target in node.targets
+    )
 
 
 def _literal_string_sequence(node: ast.expr) -> tuple[str, ...] | None:
@@ -152,6 +169,25 @@ def _literal_string_sequence(node: ast.expr) -> tuple[str, ...] | None:
 def _python_source_paths() -> tuple[Path, ...]:
     return tuple(
         sorted(path for root in PYTHON_SOURCE_ROOTS for path in root.rglob("*.py"))
+    )
+
+
+def _runtime_python_source_paths() -> tuple[Path, ...]:
+    paths: list[Path] = []
+    for root in RUNTIME_ASSERT_ROOTS:
+        if root.is_file():
+            paths.append(root)
+        else:
+            paths.extend(root.rglob("*.py"))
+    return tuple(sorted(paths))
+
+
+def _assert_statements(path: Path) -> tuple[str, ...]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    return tuple(
+        f"{path.relative_to(PROJECT_ROOT)}:{node.lineno}"
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assert)
     )
 
 

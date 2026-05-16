@@ -698,9 +698,7 @@ class QueryResponse:
 
     def __post_init__(self) -> None:
         _require_non_empty_text(self.command, "query response command")
-        _require_non_empty_text(
-            self.correlation_id, "query response correlation_id"
-        )
+        _require_non_empty_text(self.correlation_id, "query response correlation_id")
         _require_text_tuple(self.items, "query response items")
 
 
@@ -736,9 +734,7 @@ class LineageRecord:
         _require_optional_non_empty_text(self.producer_id, "lineage producer_id")
         _require_non_empty_text(self.trace_id, "lineage trace_id")
         _require_non_empty_text(self.causality_id, "lineage causality_id")
-        _require_optional_non_empty_text(
-            self.correlation_id, "lineage correlation_id"
-        )
+        _require_optional_non_empty_text(self.correlation_id, "lineage correlation_id")
         if not isinstance(self.parent_events, tuple):
             raise ValueError("lineage parent_events must be a tuple of EventRef values")
         for parent in self.parent_events:
@@ -789,9 +785,7 @@ class DebugEvent:
     def __post_init__(self) -> None:
         _require_non_empty_text(self.event_type, "debug event_type")
         _require_non_empty_text(self.detail, "debug detail")
-        _require_optional_non_empty_text(
-            self.route_display, "debug route_display"
-        )
+        _require_optional_non_empty_text(self.route_display, "debug route_display")
         _require_non_negative_integer(self.seq_source, "debug seq_source")
 
 
@@ -995,7 +989,9 @@ class ShadowSnapshot:
         for field_name in ("request", "desired", "reported", "effective", "ack"):
             value = getattr(self, field_name)
             if value is not None and not isinstance(value, ClosedEnvelope):
-                raise ValueError(f"shadow {field_name} must be a ClosedEnvelope or None")
+                raise ValueError(
+                    f"shadow {field_name} must be a ClosedEnvelope or None"
+                )
         _require_bool(self.pending_write, "shadow pending_write")
         _require_text_tuple(self.coherence_taints, "shadow coherence_taints")
 
@@ -1941,7 +1937,9 @@ class ScheduledWrite:
     last_attempt_epoch: int | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.target, (TypedRoute, RouteRef, Source, Sink, WriteBinding)):
+        if not isinstance(
+            self.target, (TypedRoute, RouteRef, Source, Sink, WriteBinding)
+        ):
             raise ValueError(
                 "scheduled write target must be a route-like value or WriteBinding"
             )
@@ -6484,7 +6482,15 @@ class Graph:
                         else self._coerce_route_ref(scheduled.target),
                     )
                     continue
-                assert scheduled.retry_policy is not None
+                if scheduled.retry_policy is None:
+                    self._emit_debug_event(
+                        "scheduler",
+                        f"retired guarded write for {self._route_key(scheduled.target.request if isinstance(scheduled.target, WriteBinding) else scheduled.target)} without retry policy after {scheduled.attempt_count} attempts",
+                        scheduled.target.request
+                        if isinstance(scheduled.target, WriteBinding)
+                        else self._coerce_route_ref(scheduled.target),
+                    )
+                    continue
                 if scheduled.attempt_count >= scheduled.retry_policy.max_attempts:
                     self._emit_debug_event(
                         "scheduler",
@@ -6844,7 +6850,8 @@ class Graph:
 
             def on_watermark(item: TypedEnvelope[Any] | ClosedEnvelope) -> None:
                 nonlocal latest_watermark
-                assert watermark is not None
+                if watermark is None:
+                    raise RuntimeError("watermark callback requires a watermark route")
                 progress = self._progress_value(
                     watermark,
                     self._coerce_route_ref(watermark),

@@ -538,8 +538,10 @@ def _build_scheduler(
             if state.scheduler is None:
                 state.scheduler = constructor()
                 state.max_workers = max_workers
-    assert state.scheduler is not None
-    return state.scheduler
+    scheduler = state.scheduler
+    if scheduler is None:
+        raise RuntimeError("scheduler construction did not produce a scheduler")
+    return scheduler
 
 
 def _dispose_scheduler(scheduler: SchedulerBase | None) -> None:
