@@ -141,10 +141,11 @@ class EmbeddedScalarSensor(Generic[T]):
         _require_runtime_rules(self.rules, "rules")
 
     def validate(self) -> tuple[str, ...]:
-        issues = list(self.firmware.required_issues())
-        issues.extend(self.rules.required_issues())
-        issues.extend(_metadata_route_issues(self.metadata_route, "embedded sensor"))
-        return tuple(issues)
+        return (
+            self.firmware.required_issues()
+            + self.rules.required_issues()
+            + _metadata_route_issues(self.metadata_route, "embedded sensor")
+        )
 
 
 @dataclass(frozen=True)
@@ -161,20 +162,13 @@ class EmbeddedBulkSensor(Generic[TMeta]):
         _require_runtime_rules(self.rules, "rules")
 
     def validate(self) -> tuple[str, ...]:
-        issues = list(self.firmware.required_issues())
-        issues.extend(self.rules.bulk_issues())
-        issues.extend(_metadata_route_issues(self.metadata_route, "bulk sensor"))
-        if self.payload_route.plane != Plane.Read:
-            issues.append("bulk sensor payload must flow in the read plane")
-        if self.payload_route.layer != Layer.Bulk:
-            issues.append("bulk sensor payload must use Layer.Bulk")
-        if self.payload_route.variant != Variant.Payload:
-            issues.append("bulk sensor payload must use Variant.Payload")
-        if self.metadata_route.owner != self.payload_route.owner:
-            issues.append("bulk sensor metadata and payload owners must match")
-        if self.metadata_route.family != self.payload_route.family:
-            issues.append("bulk sensor metadata and payload families must match")
-        return tuple(issues)
+        return (
+            self.firmware.required_issues()
+            + self.rules.bulk_issues()
+            + _metadata_route_issues(self.metadata_route, "bulk sensor")
+            + _payload_route_issues(self.payload_route)
+            + _bulk_route_pairing_issues(self.metadata_route, self.payload_route)
+        )
 
 
 @dataclass(frozen=True)
@@ -259,6 +253,28 @@ def _metadata_route_issues(route_ref: TypedRoute[object], label: str) -> tuple[s
         issues.append(f"{label} metadata must not use Layer.Bulk")
     if route_ref.variant != Variant.Meta:
         issues.append(f"{label} metadata must use Variant.Meta")
+    return tuple(issues)
+
+
+def _payload_route_issues(route_ref: TypedRoute[object]) -> tuple[str, ...]:
+    issues: list[str] = []
+    if route_ref.plane != Plane.Read:
+        issues.append("bulk sensor payload must flow in the read plane")
+    if route_ref.layer != Layer.Bulk:
+        issues.append("bulk sensor payload must use Layer.Bulk")
+    if route_ref.variant != Variant.Payload:
+        issues.append("bulk sensor payload must use Variant.Payload")
+    return tuple(issues)
+
+
+def _bulk_route_pairing_issues(
+    metadata_route: TypedRoute[object], payload_route: TypedRoute[object]
+) -> tuple[str, ...]:
+    issues: list[str] = []
+    if metadata_route.owner != payload_route.owner:
+        issues.append("bulk sensor metadata and payload owners must match")
+    if metadata_route.family != payload_route.family:
+        issues.append("bulk sensor metadata and payload families must match")
     return tuple(issues)
 
 
