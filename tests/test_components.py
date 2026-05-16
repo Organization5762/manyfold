@@ -1019,6 +1019,15 @@ class ComponentTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "JSON integer"):
             routes.leader_state.schema.decode(b'["node-a","3",true]')
 
+    def test_consensus_json_schemas_reject_non_standard_constants(self) -> None:
+        manyfold = load_manyfold_package()
+        routes = manyfold.Consensus.default_routes()
+
+        with self.assertRaisesRegex(ValueError, "invalid JSON constant: NaN"):
+            routes.heartbeat.schema.decode(b'[NaN,"node-a"]')
+        with self.assertRaisesRegex(ValueError, "invalid JSON constant: Infinity"):
+            routes.replicated_log.schema.decode(b'[[Infinity,"set pipe=a"]]')
+
     def test_consensus_quorum_json_schema_rejects_non_array_voters(self) -> None:
         manyfold = load_manyfold_package()
         routes = manyfold.Consensus.default_routes()
@@ -1622,6 +1631,27 @@ class ComponentTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 ValueError,
                 r"memory file .*memory\.jsonl line 2 is not valid JSON",
+            ):
+                manyfold.Memory(path)
+
+    def test_memory_chip_rejects_non_standard_json_constants(self) -> None:
+        manyfold = load_manyfold_package()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "memory.jsonl"
+            path.write_text(
+                (
+                    '{"route":"read/logical/demo/memory/bytes/meta@MemoryBytes.v1",'
+                    '"seq_source":NaN,"control_epoch":null,'
+                    '"schema_id":"MemoryBytes","schema_version":1,'
+                    '"payload_b64":""}\n'
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(
+                ValueError,
+                r"memory file .*memory\.jsonl line 1 invalid JSON constant: NaN",
             ):
                 manyfold.Memory(path)
 

@@ -598,10 +598,17 @@ class Memory:
                 if not stripped:
                     continue
                 try:
-                    record = json.loads(stripped)
+                    record = json.loads(
+                        stripped,
+                        parse_constant=_reject_json_constant,
+                    )
                 except JSONDecodeError as exc:
                     raise ValueError(
                         f"memory file {self.path} line {line_number} is not valid JSON"
+                    ) from exc
+                except ValueError as exc:
+                    raise ValueError(
+                        f"memory file {self.path} line {line_number} {exc}"
                     ) from exc
                 if not isinstance(record, dict):
                     raise ValueError(
@@ -1528,12 +1535,16 @@ def _decode_json_tuple(text: str, expected_length: int, field: str) -> list[Any]
 
 def _decode_json_array(text: str, field: str) -> list[Any]:
     try:
-        value = json.loads(text.lstrip())
+        value = json.loads(text.lstrip(), parse_constant=_reject_json_constant)
     except JSONDecodeError as exc:
         raise ValueError(f"{field} must be valid JSON") from exc
     if not isinstance(value, list):
         raise ValueError(f"{field} must be a JSON array")
     return value
+
+
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"invalid JSON constant: {value}")
 
 
 def _is_json_tuple_payload(text: str) -> bool:
