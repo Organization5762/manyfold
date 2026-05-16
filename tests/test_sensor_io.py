@@ -260,6 +260,20 @@ class SensorIoTests(unittest.TestCase):
         self.assertEqual(tuple(buffer), (4,))
         self.assertEqual(buffer.dropped, 3)
 
+    def test_bounded_ring_buffer_push_revalidates_mutable_configuration(self) -> None:
+        manyfold = load_manyfold_package()
+        buffer = manyfold.BoundedRingBuffer[int](capacity=1, overflow="reject")
+        buffer.push(1)
+
+        buffer.overflow = "spill"  # type: ignore[assignment]
+        with self.assertRaisesRegex(ValueError, "overflow must be one of"):
+            buffer.push(2)
+
+        buffer.overflow = "reject"
+        buffer.capacity = 0
+        with self.assertRaisesRegex(ValueError, "capacity must be positive"):
+            buffer.push(2)
+
     def test_bounded_ring_buffer_rejects_invalid_configuration(self) -> None:
         manyfold = load_manyfold_package()
 

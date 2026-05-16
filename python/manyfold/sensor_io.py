@@ -35,6 +35,7 @@ TFrame = TypeVar("TFrame")
 OverflowMode = Literal["drop_oldest", "drop_newest", "reject", "latest"]
 SensorBufferMode = Literal["latest", "fifo"]
 MessageBufferMode = Literal["bytes", "text"]
+_OVERFLOW_MODES = frozenset(("drop_newest", "drop_oldest", "latest", "reject"))
 __all__ = (
     "BackoffPolicy",
     "BoundedRingBuffer",
@@ -827,14 +828,8 @@ class BoundedRingBuffer(Generic[T]):
     rejected: int = 0
 
     def __post_init__(self) -> None:
-        self.capacity = _require_int(self.capacity, "capacity")
-        if self.capacity <= 0:
-            raise ValueError("capacity must be positive")
-        self.overflow = _require_string(self.overflow, "overflow")
-        if self.overflow not in {"drop_oldest", "drop_newest", "reject", "latest"}:
-            raise ValueError(
-                "overflow must be one of 'drop_oldest', 'drop_newest', 'reject', or 'latest'"
-            )
+        self.capacity = self._validated_capacity()
+        self.overflow = self._validated_overflow()
         self.ordering = _require_string(self.ordering, "ordering")
         if self.ordering != "fifo":
             raise ValueError("only fifo ordering is currently supported")
@@ -847,16 +842,18 @@ class BoundedRingBuffer(Generic[T]):
             raise ValueError("rejected must be non-negative")
 
     def push(self, item: T) -> bool:
-        if len(self._items) < self.capacity:
+        capacity = self._validated_capacity()
+        overflow = self._validated_overflow()
+        if len(self._items) < capacity:
             self._items.append(item)
             return True
-        if self.overflow == "reject":
+        if overflow == "reject":
             self.rejected += 1
             return False
-        if self.overflow == "drop_newest":
+        if overflow == "drop_newest":
             self.dropped += 1
             return False
-        if self.overflow == "latest":
+        if overflow == "latest":
             self.dropped += len(self._items)
             self._items.clear()
         else:
@@ -880,6 +877,20 @@ class BoundedRingBuffer(Generic[T]):
 
     def __iter__(self) -> Iterator[T]:
         return iter(tuple(self._items))
+
+    def _validated_capacity(self) -> int:
+        capacity = _require_int(self.capacity, "capacity")
+        if capacity <= 0:
+            raise ValueError("capacity must be positive")
+        return capacity
+
+    def _validated_overflow(self) -> OverflowMode:
+        overflow = _require_string(self.overflow, "overflow")
+        if overflow in _OVERFLOW_MODES:
+            return overflow
+        raise ValueError(
+            "overflow must be one of 'drop_oldest', 'drop_newest', 'reject', or 'latest'"
+        )
 
 
 @dataclass
