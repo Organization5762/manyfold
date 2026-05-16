@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from manyfold import (
     Layer,
@@ -25,7 +25,7 @@ def int_schema(schema_id: str, version: int = 1) -> "Schema[int]":
         schema_id=schema_id,
         version=version,
         encode=lambda value: str(value).encode("ascii"),
-        decode=lambda payload: int(payload.decode("ascii")),
+        decode=_decode_ascii_int,
     )
 
 
@@ -72,3 +72,19 @@ def sibling_route(
         variant=base.variant if variant is None else variant,
         schema=base.schema if schema is None else schema,
     )
+
+
+def _decode_ascii_int(payload: Any) -> int:
+    try:
+        raw_payload = _coerce_bytes_like(payload)
+        return int(raw_payload.decode("ascii"))
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise ValueError("integer schema payloads must be ASCII integers") from exc
+
+
+def _coerce_bytes_like(payload: Any) -> bytes:
+    if isinstance(payload, bytes):
+        return payload
+    if isinstance(payload, (bytearray, memoryview)):
+        return bytes(payload)
+    raise ValueError("integer schema payloads must be bytes-like")

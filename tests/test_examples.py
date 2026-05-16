@@ -1542,6 +1542,23 @@ class ExampleTests(unittest.TestCase):
         self.assertEqual(schema.encode(42), b"42")
         self.assertEqual(schema.decode(b"42"), 42)
 
+    def test_shared_int_schema_decodes_bytes_like_payloads(self) -> None:
+        schema = int_schema("Temperature")
+
+        self.assertEqual(schema.decode(bytearray(b"41")), 41)
+        self.assertEqual(schema.decode(memoryview(b"42")), 42)
+
+    def test_shared_int_schema_rejects_malformed_payloads_consistently(self) -> None:
+        schema = int_schema("Temperature")
+
+        for payload in (b"not-an-int", "42"):
+            with self.subTest(payload=payload):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "integer schema payloads must be",
+                ):
+                    schema.decode(payload)  # type: ignore[arg-type]
+
     def test_shared_example_helpers_keep_dependencies_at_module_scope(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
 
