@@ -96,6 +96,35 @@ class ProjectMetadataTests(unittest.TestCase):
         self.assertEqual(failures, [])
 
 
+class _FunctionLocalImportVisitor(ast.NodeVisitor):
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.violations: list[str] = []
+        self._function_depth = 0
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._visit_function(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self._visit_function(node)
+
+    def visit_Import(self, node: ast.Import) -> None:
+        self._record_import(node)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        self._record_import(node)
+
+    def _visit_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+        self._function_depth += 1
+        self.generic_visit(node)
+        self._function_depth -= 1
+
+    def _record_import(self, node: ast.Import | ast.ImportFrom) -> None:
+        if self._function_depth:
+            relative_path = self.path.relative_to(PROJECT_ROOT)
+            self.violations.append(f"{relative_path}:{node.lineno}")
+
+
 def _dependency_name(requirement: str) -> str:
     match = PACKAGE_NAME_RE.match(requirement)
     if match is None:
@@ -157,20 +186,6 @@ def _python_source_paths() -> tuple[Path, ...]:
 
 def _function_local_imports(path: Path) -> tuple[str, ...]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    parents: dict[ast.AST, ast.AST] = {}
-    for parent in ast.walk(tree):
-        for child in ast.iter_child_nodes(parent):
-            parents[child] = parent
-
-    violations: list[str] = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Import | ast.ImportFrom):
-            continue
-        parent = parents.get(node)
-        while parent is not None:
-            if isinstance(parent, ast.FunctionDef | ast.AsyncFunctionDef):
-                relative_path = path.relative_to(PROJECT_ROOT)
-                violations.append(f"{relative_path}:{node.lineno}")
-                break
-            parent = parents.get(parent)
-    return tuple(violations)
+    visitor = _FunctionLocalImportVisitor(path)
+    visitor.visit(tree)
+    return tuple(visitor.violations)
