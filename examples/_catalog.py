@@ -231,13 +231,10 @@ EXAMPLE_CATALOG: tuple[ExampleCatalogEntry, ...] = (
 def _catalog_entries(
     *,
     archived: bool | None = None,
-    reference_only: bool = False,
 ) -> tuple[ExampleCatalogEntry, ...]:
     entries = EXAMPLE_CATALOG
     if archived is not None:
         entries = tuple(entry for entry in entries if entry.archived is archived)
-    if reference_only:
-        entries = tuple(entry for entry in entries if entry.is_reference_example)
     return entries
 
 
@@ -257,9 +254,7 @@ def _sorted_readme_entries(
     return tuple(
         sorted(
             (entry for entry in entries if entry.readme_order is not None),
-            key=lambda entry: (
-                entry.readme_order if entry.readme_order is not None else -1
-            ),
+            key=lambda entry: entry.readme_order,
         )
     )
 
@@ -277,10 +272,7 @@ SUPPORTED_EXAMPLE_MODULES: tuple[str, ...] = _entry_modules(SUPPORTED_EXAMPLE_EN
 ARCHIVED_EXAMPLE_MODULES: tuple[str, ...] = _entry_modules(ARCHIVED_EXAMPLE_ENTRIES)
 
 REFERENCE_EXAMPLE_ENTRIES: tuple[ExampleCatalogEntry, ...] = _reference_entries(
-    _catalog_entries(
-        archived=False,
-        reference_only=True,
-    )
+    SUPPORTED_EXAMPLE_ENTRIES
 )
 
 README_EXAMPLE_ENTRIES: tuple[ExampleCatalogEntry, ...] = _sorted_readme_entries(
