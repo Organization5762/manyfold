@@ -78,6 +78,15 @@ TIn = TypeVar("TIn")
 TOut = TypeVar("TOut")
 U = TypeVar("U")
 AnyTypedRoute = TypedRoute[Any]
+AnySource = Source[Any]
+AnySink = Sink[Any]
+RouteLike = Union[AnyTypedRoute, RouteRef, AnySource, AnySink]
+ConnectableTarget = Union[RouteLike, NativeMailbox]
+InspectableRoute = Union[RouteLike, NativeReadablePort, NativeWritablePort]
+EnvelopeIterator = Iterator[ClosedEnvelope]
+StateT = TypeVar("StateT")
+TRight = TypeVar("TRight")
+
 TAINT_DOMAINS = (
     TaintDomain.Coherence,
     TaintDomain.Delivery,
@@ -87,14 +96,6 @@ TAINT_DOMAINS = (
     TaintDomain.Time,
     TaintDomain.Trust,
 )
-AnySource = Source[Any]
-AnySink = Sink[Any]
-RouteLike = Union[AnyTypedRoute, RouteRef, AnySource, AnySink]
-ConnectableTarget = Union[RouteLike, NativeMailbox]
-InspectableRoute = Union[RouteLike, NativeReadablePort, NativeWritablePort]
-EnvelopeIterator = Iterator[ClosedEnvelope]
-StateT = TypeVar("StateT")
-TRight = TypeVar("TRight")
 DIAGRAM_GROUP_FIELDS = frozenset(
     ("plane", "layer", "owner", "family", "stream", "variant", "thread")
 )
@@ -2897,298 +2898,6 @@ class Graph:
             "map": MapNode,
         }
 
-    def _coerce_route_ref(self, route_ref: RouteLike) -> RouteRef:
-        if isinstance(route_ref, (Source, Sink)):
-            return self._coerce_route_ref(route_ref.route)
-        if isinstance(route_ref, TypedRoute):
-            return route_ref.route_ref
-        if isinstance(route_ref, RouteRef):
-            return route_ref
-        raise ValueError("route must be a TypedRoute, RouteRef, Source, or Sink")
-
-    @staticmethod
-    def _typed_route(route_ref: RouteLike) -> TypedRoute[Any] | None:
-        if isinstance(route_ref, (Source, Sink)):
-            route_ref = route_ref.route
-        if isinstance(route_ref, TypedRoute):
-            return route_ref
-        return None
-
-    @staticmethod
-    def _source_replay_latest(route_ref: RouteLike) -> bool:
-        if isinstance(route_ref, Source):
-            return route_ref.replay_latest
-        return True
-
-    def _connectable_key(self, target: ConnectableTarget, *, edge_role: str) -> str:
-        if isinstance(target, NativeMailbox):
-            if edge_role == "source":
-                return target.egress.describe().route_display
-            return target.ingress.describe().route_display
-        return self._route_key(target)
-
-    def _route_key(self, route_ref: RouteLike) -> str:
-        return self._coerce_route_ref(route_ref).display()
-
-    @staticmethod
-    def _manifest_mapping_key(key: Any) -> tuple[str, str, str]:
-        key_type = type(key)
-        return (str(key), key_type.__module__, key_type.__qualname__)
-
-    @staticmethod
-    def _manifest_value(value: Any) -> Any:
-        if value is None or isinstance(value, (bool, int, float, str)):
-            return value
-        if isinstance(value, bytes):
-            return value.decode("utf-8", errors="replace")
-        if isinstance(value, tuple | list):
-            return tuple(Graph._manifest_value(item) for item in value)
-        if isinstance(value, dict):
-            return {
-                str(key): Graph._manifest_value(value[key])
-                for key in sorted(value, key=Graph._manifest_mapping_key)
-            }
-        display = getattr(value, "display", None)
-        if callable(display):
-            return display()
-        as_str = getattr(value, "as_str", None)
-        if callable(as_str):
-            return as_str()
-        enum_value = getattr(value, "value", None)
-        if enum_value is not None:
-            return enum_value
-        if isinstance(value, NamespaceRef):
-            return {
-                "plane": Graph._manifest_value(value.plane),
-                "layer": Graph._manifest_value(value.layer),
-                "owner": value.owner,
-            }
-        if isinstance(value, SchemaRef):
-            return {
-                "schema_id": value.schema_id,
-                "version": value.version,
-            }
-        if isinstance(value, ProducerRef):
-            return {
-                "producer_id": value.producer_id,
-                "kind": Graph._manifest_value(value.kind),
-            }
-        if isinstance(value, ManifestRoute):
-            descriptor = value.descriptor
-            return {
-                "route": value.route.display(),
-                "identity": Graph._manifest_block(descriptor.identity),
-                "schema": Graph._manifest_block(descriptor.schema),
-                "time": Graph._manifest_block(descriptor.time),
-                "ordering": Graph._manifest_block(descriptor.ordering),
-                "flow": Graph._manifest_block(descriptor.flow),
-                "retention": Graph._manifest_block(descriptor.retention),
-                "security": Graph._manifest_block(descriptor.security),
-                "visibility": Graph._manifest_block(descriptor.visibility),
-                "environment": Graph._manifest_block(descriptor.environment),
-                "debug": Graph._manifest_block(descriptor.debug),
-            }
-        if isinstance(value, ManifestEdge):
-            return {
-                "source": value.source.display(),
-                "sink": value.sink.display(),
-                "flow": Graph._manifest_block(value.flow),
-            }
-        if isinstance(value, ManifestDiagramNode):
-            return {
-                "name": value.name,
-                "input_routes": tuple(route.display() for route in value.input_routes),
-                "output_routes": tuple(
-                    route.display() for route in value.output_routes
-                ),
-                "group": value.group,
-                "metadata": tuple(
-                    {"name": name, "value": metadata_value}
-                    for name, metadata_value in sorted(value.metadata)
-                ),
-                "thread_placement": None
-                if value.thread_placement is None
-                else Graph._manifest_block(value.thread_placement),
-            }
-        if is_dataclass(value):
-            return Graph._manifest_block(value)
-        return str(value)
-
-    @staticmethod
-    def _manifest_block(value: Any) -> dict[str, Any]:
-        return {
-            field.name: Graph._manifest_value(getattr(value, field.name))
-            for field in fields(value)
-        }
-
-    def _manifest_route(self, route_ref: RouteRef) -> ManifestRoute:
-        return ManifestRoute(
-            route=route_ref,
-            descriptor=self.describe_route(route_ref),
-        )
-
-    def _manifest_edge(
-        self,
-        source: str,
-        sink: str,
-        route_refs: dict[str, RouteRef],
-    ) -> ManifestEdge:
-        try:
-            source_ref = route_refs[source]
-            sink_ref = route_refs[sink]
-        except KeyError as exc:
-            raise RuntimeError(
-                "topology edge references a route outside the graph catalog"
-            ) from exc
-        return ManifestEdge(
-            source=source_ref,
-            sink=sink_ref,
-            flow=self.describe_edge(source=source_ref, sink=sink_ref),
-        )
-
-    def _manifest_diagram_node(
-        self,
-        node: DiagramNode,
-        route_refs: dict[str, RouteRef],
-    ) -> ManifestDiagramNode:
-        return ManifestDiagramNode(
-            name=node.name,
-            input_routes=tuple(route_refs[route] for route in node.input_routes),
-            output_routes=tuple(route_refs[route] for route in node.output_routes),
-            group=node.group,
-            metadata=tuple(sorted(node.metadata)),
-            thread_placement=node.thread_placement,
-        )
-
-    def _manifest_link(self, link: Link) -> ManifestLink:
-        return ManifestLink(
-            name=link.name,
-            link_class=link.link_class,
-            capabilities=link.capabilities,
-        )
-
-    def _manifest_mesh_primitive(
-        self,
-        primitive: MeshPrimitive,
-    ) -> ManifestMeshPrimitive:
-        return ManifestMeshPrimitive(
-            name=primitive.name,
-            kind=primitive.kind,
-            sources=primitive.sources,
-            destinations=primitive.destinations,
-            link_name=primitive.link_name,
-            ordering_policy=primitive.ordering_policy,
-            state_budget=primitive.state_budget,
-            threshold=primitive.threshold,
-            ack_policy=primitive.ack_policy,
-        )
-
-    def _manifest_write_binding(
-        self,
-        name: str,
-        binding: WriteBinding,
-    ) -> ManifestWriteBinding:
-        return ManifestWriteBinding(
-            name=name,
-            request=binding.request,
-            desired=binding.desired,
-            reported=binding.reported,
-            effective=binding.effective,
-            ack=binding.ack,
-        )
-
-    @staticmethod
-    def _context_route_role(route_ref: RouteRef) -> str | None:
-        if route_ref.namespace.plane == Plane.Debug:
-            return None
-        if (
-            route_ref.namespace.plane == Plane.Write
-            or route_ref.variant == Variant.Request
-        ):
-            return "input"
-        return "output"
-
-    @staticmethod
-    def _append_unique(items: tuple[str, ...], item: str) -> tuple[str, ...]:
-        if item in items:
-            return items
-        return (*items, item)
-
-    def _remember_active_context_key(self, route_key: str, role: str) -> None:
-        if not self._context_stack:
-            return
-        if role not in {"input", "output"}:
-            raise ValueError(f"unknown context route role: {role}")
-        for context in self._context_stack:
-            node = self._diagram_nodes.get(context.name)
-            if node is None:
-                continue
-            if role == "input":
-                self._diagram_nodes[context.name] = replace(
-                    node,
-                    input_routes=self._append_unique(node.input_routes, route_key),
-                )
-            else:
-                self._diagram_nodes[context.name] = replace(
-                    node,
-                    output_routes=self._append_unique(node.output_routes, route_key),
-                )
-
-    def _remember_active_context_route(
-        self,
-        route_ref: RouteLike,
-        role: str | None = None,
-    ) -> None:
-        if not self._context_stack:
-            return
-        native_route = self._coerce_route_ref(route_ref)
-        resolved_role = self._context_route_role(native_route) if role is None else role
-        if resolved_role is None:
-            return
-        self._diagram_routes[native_route.display()] = native_route
-        self._remember_active_context_key(native_route.display(), resolved_role)
-
-    def _remember_active_context_routes(
-        self,
-        *,
-        input_routes: Sequence[RouteLike] = (),
-        output_routes: Sequence[RouteLike] = (),
-    ) -> None:
-        for route_ref in input_routes:
-            self._remember_active_context_route(route_ref, "input")
-        for route_ref in output_routes:
-            self._remember_active_context_route(route_ref, "output")
-
-    def _remember_active_context_node(self, name: str) -> None:
-        if not self._context_stack:
-            return
-        parent = self._context_stack[-1]
-        if parent.name == name:
-            return
-        self._context_edges.add((parent.name, name))
-
-    def _enter_context(self, context: GraphContext) -> None:
-        parent = self._context_stack[-1] if self._context_stack else None
-        context_metadata = dict(context.metadata)
-        context_metadata.setdefault("context", "true")
-        context_metadata["context_path"] = "/".join(
-            (*tuple(active.name for active in self._context_stack), context.name)
-        )
-        if parent is not None:
-            context_metadata["context_parent"] = parent.name
-            self._context_edges.add((parent.name, context.name))
-        self.register_diagram_node(
-            context.name,
-            group=context.group or "context",
-            metadata=context_metadata,
-        )
-        self._context_stack.append(context)
-
-    def _exit_context(self, context: GraphContext) -> None:
-        if not self._context_stack or self._context_stack[-1] is not context:
-            raise RuntimeError(f"context {context.name!r} exited out of order")
-        self._context_stack.pop()
-
     def context(
         self,
         *,
@@ -3204,1274 +2913,6 @@ class Graph:
         expose their routes through each active parent context as well.
         """
         return GraphContext(self, name=name, group=group, metadata=metadata)
-
-    def _next_pipeline_node_name(self, kind: str) -> str:
-        self._pipeline_node_sequence += 1
-        return f"{kind}-{self._pipeline_node_sequence}"
-
-    def _auto_node_name(
-        self,
-        kind: str,
-        source: RouteLike,
-        sink: RouteLike,
-        *policy_parts: str,
-    ) -> str:
-        policy = ":".join(part for part in policy_parts if part)
-        base = f"{kind}:{self._route_key(source)}->{self._route_key(sink)}"
-        return f"{base}:{policy}" if policy else base
-
-    @staticmethod
-    def _closed_item(item: TypedEnvelope[Any] | ClosedEnvelope) -> ClosedEnvelope:
-        return item.closed if isinstance(item, TypedEnvelope) else item
-
-    def _event_ref(self, envelope: ClosedEnvelope) -> EventRef:
-        return EventRef(
-            route_display=envelope.route.display(),
-            seq_source=envelope.seq_source,
-        )
-
-    @staticmethod
-    def _event_index_key(event: EventRef) -> tuple[str, int]:
-        return (event.route_display, event.seq_source)
-
-    def _next_subscriber_id(self) -> str:
-        self._subscriber_sequence += 1
-        return f"subscriber-{self._subscriber_sequence}"
-
-    @staticmethod
-    def _mailbox_value(mailbox: NativeMailbox, name: str) -> Any:
-        value = getattr(mailbox, name)
-        return value() if callable(value) else value
-
-    def _subject_for(self, route_ref: RouteLike) -> Subject[ClosedEnvelope]:
-        key = self._route_key(route_ref)
-        if key not in self._subjects:
-            self._subjects[key] = Subject()
-        return self._subjects[key]
-
-    def _payload_stats(self, route_ref: RouteLike) -> dict[str, int]:
-        key = self._route_key(route_ref)
-        return self._payload_demand_stats.setdefault(
-            key,
-            {
-                "metadata_events": 0,
-                "payload_open_requests": 0,
-                "lazy_source_opens": 0,
-                "materialized_payload_bytes": 0,
-                "cache_hits": 0,
-            },
-        )
-
-    def _default_flow_policy_for_route(
-        self,
-        route_ref: RouteRef,
-        native: PortDescriptor | None = None,
-    ) -> FlowPolicy:
-        return FlowPolicy(
-            backpressure_policy=getattr(native, "backpressure_policy", None)
-            or "propagate",
-            credit_class=(
-                "bulk_payload"
-                if route_ref.namespace.layer == Layer.Bulk
-                else "control"
-                if route_ref.namespace.plane == Plane.Write
-                else "default"
-            ),
-            mailbox_policy="none",
-            async_boundary_kind="inline",
-            overflow_policy="reject_write",
-        )
-
-    def _resolved_route_flow_policy(
-        self,
-        route_ref: RouteRef,
-        native: PortDescriptor | None = None,
-    ) -> DescriptorFlowBlock:
-        key = self._route_key(route_ref)
-        policy = self._default_flow_policy_for_route(route_ref, native)
-        policy = policy.merged(self._graph_flow_defaults)
-        policy = policy.merged(self._mailbox_flow_policies.get(key))
-        policy = policy.merged(self._source_flow_defaults.get(key))
-        policy = policy.merged(self._sink_flow_requirements.get(key))
-        return policy.resolve()
-
-    def _resolved_edge_flow_policy(
-        self,
-        source: ConnectableTarget,
-        sink: ConnectableTarget,
-    ) -> DescriptorFlowBlock:
-        source_key = self._connectable_key(source, edge_role="source")
-        sink_key = self._connectable_key(sink, edge_role="sink")
-        source_route = (
-            None
-            if isinstance(source, NativeMailbox)
-            else self._coerce_route_ref(source)
-        )
-        policy = (
-            self._default_flow_policy_for_route(source_route)
-            if source_route is not None
-            else FlowPolicy()
-        )
-        policy = policy.merged(self._graph_flow_defaults)
-        policy = policy.merged(self._mailbox_flow_policies.get(source_key))
-        policy = policy.merged(self._mailbox_flow_policies.get(sink_key))
-        policy = policy.merged(self._source_flow_defaults.get(source_key))
-        policy = policy.merged(self._sink_flow_requirements.get(sink_key))
-        policy = policy.merged(self._edge_flow_overrides.get((source_key, sink_key)))
-        return policy.resolve()
-
-    def _default_retention_policy(self, route_ref: RouteRef) -> RouteRetentionPolicy:
-        if route_ref.namespace.layer == Layer.Ephemeral:
-            return RouteRetentionPolicy(
-                latest_replay_policy="none",
-                replay_window="none",
-                payload_retention_policy="non_replayable",
-                history_limit=1,
-            )
-        if route_ref.namespace.layer == Layer.Internal:
-            return RouteRetentionPolicy(
-                latest_replay_policy="latest_only",
-                replay_window="latest",
-                payload_retention_policy="separate_store",
-                history_limit=1,
-            )
-        return RouteRetentionPolicy(
-            latest_replay_policy="bounded_history",
-            replay_window="memory",
-            payload_retention_policy=(
-                "external_store"
-                if route_ref.namespace.layer == Layer.Bulk
-                else "separate_store"
-            ),
-        )
-
-    def _retention_policy_for(self, route_ref: RouteLike) -> RouteRetentionPolicy:
-        native_route = self._coerce_route_ref(route_ref)
-        key = native_route.display()
-        return self._retention_policies.get(
-            key, self._default_retention_policy(native_route)
-        )
-
-    def _payload_retention_policy_for(self, route_ref: RouteLike) -> str:
-        return cast(
-            str,
-            self._retention_policy_for(route_ref).payload_retention_policy,
-        )
-
-    def _purge_payload_ref(self, payload_id: str) -> None:
-        self._lazy_payload_sources.pop(payload_id, None)
-        self._materialized_payloads.pop(payload_id, None)
-        self._empty_inline_payload_ids.discard(payload_id)
-        self._payload_route_by_id.pop(payload_id, None)
-        self._opened_payload_ids.discard(payload_id)
-
-    def _enforce_payload_retention(self, route_ref: RouteLike) -> None:
-        key = self._route_key(route_ref)
-        retained_payload_ids = {
-            envelope.payload_ref.payload_id for envelope in self._history.get(key, ())
-        }
-        payload_policy = self._payload_retention_policy_for(route_ref)
-        if payload_policy == "non_replayable" and retained_payload_ids:
-            latest_payload_id = self._history[key][-1].payload_ref.payload_id
-            retained_payload_ids = {latest_payload_id}
-        for payload_id, payload_route in tuple(self._payload_route_by_id.items()):
-            if payload_route != key:
-                continue
-            if payload_id not in retained_payload_ids:
-                self._purge_payload_ref(payload_id)
-        if payload_policy in {"external_store", "non_replayable"}:
-            for payload_id in tuple(self._materialized_payloads):
-                if self._payload_route_by_id.get(payload_id) == key:
-                    del self._materialized_payloads[payload_id]
-
-    def _record_envelope(
-        self,
-        route_ref: RouteLike,
-        envelope: ClosedEnvelope,
-        *,
-        producer_id: str | None = None,
-        trace_id: str | None = None,
-        causality_id: str | None = None,
-        correlation_id: str | None = None,
-        parent_events: Sequence[EventRef] = (),
-    ) -> ClosedEnvelope:
-        """Persist envelope-derived bookkeeping before notifying observers."""
-        key = self._route_key(route_ref)
-        history = self._history.setdefault(key, [])
-        history.append(envelope)
-        retention = self._retention_policy_for(route_ref)
-        if (
-            retention.history_limit is not None
-            and len(history) > retention.history_limit
-        ):
-            del history[: len(history) - retention.history_limit]
-        self._payload_route_by_id[envelope.payload_ref.payload_id] = key
-        inline_payload = bytes(envelope.payload_ref.inline_bytes)
-        if (
-            not inline_payload
-            and envelope.payload_ref.payload_id not in self._lazy_payload_sources
-        ):
-            self._empty_inline_payload_ids.add(envelope.payload_ref.payload_id)
-        self._payload_stats(route_ref)["metadata_events"] += 1
-        self._enforce_payload_retention(route_ref)
-        self._remember_stream_taints(route_ref, envelope)
-        if producer_id is not None:
-            self._writers.setdefault(key, set()).add(producer_id)
-        event = self._event_ref(envelope)
-        resolved_trace_id = trace_id or event.display()
-        resolved_causality_id = causality_id or event.display()
-        record = LineageRecord(
-            event=event,
-            producer_id=producer_id,
-            trace_id=resolved_trace_id,
-            causality_id=resolved_causality_id,
-            correlation_id=correlation_id,
-            parent_events=tuple(parent_events),
-        )
-        self._lineage_by_event[self._event_index_key(event)] = record
-        self._lineage_events_by_trace.setdefault(resolved_trace_id, []).append(
-            self._event_index_key(event)
-        )
-        self._lineage_events_by_causality.setdefault(resolved_causality_id, []).append(
-            self._event_index_key(event)
-        )
-        if correlation_id is not None:
-            self._lineage_events_by_correlation.setdefault(correlation_id, []).append(
-                self._event_index_key(event)
-            )
-        self._publish(route_ref, envelope)
-        return envelope
-
-    def _publish(
-        self, route_ref: RouteLike, envelope: ClosedEnvelope
-    ) -> ClosedEnvelope:
-        self._subject_for(route_ref).on_next(envelope)
-        return envelope
-
-    @staticmethod
-    def _normalize_payload_chunks(
-        payload: bytes
-        | bytearray
-        | memoryview
-        | Sequence[bytes | bytearray | memoryview],
-    ) -> bytes:
-        if isinstance(payload, (bytes, bytearray, memoryview)):
-            return bytes(payload)
-        return b"".join(bytes(chunk) for chunk in payload)
-
-    def _known_payload_bytes(
-        self,
-        route_ref: RouteLike,
-        envelope: ClosedEnvelope,
-        *,
-        record_open: bool,
-    ) -> bytes | None:
-        payload_id = envelope.payload_ref.payload_id
-        stats = self._payload_stats(route_ref)
-        if record_open:
-            stats["payload_open_requests"] += 1
-        if payload_id in self._materialized_payloads:
-            payload = self._materialized_payloads[payload_id]
-            if record_open:
-                stats["cache_hits"] += 1
-        elif payload_id in self._empty_inline_payload_ids:
-            payload = b""
-        elif payload_id in self._lazy_payload_sources:
-            payload = self._normalize_payload_chunks(
-                self._lazy_payload_sources[payload_id].open()
-            )
-            if self._payload_retention_policy_for(route_ref) in {
-                "inline",
-                "separate_store",
-            }:
-                self._materialized_payloads[payload_id] = payload
-            stats["lazy_source_opens"] += 1
-            stats["materialized_payload_bytes"] += len(payload)
-        else:
-            inline_payload = bytes(envelope.payload_ref.inline_bytes)
-            if inline_payload:
-                payload = inline_payload
-            else:
-                payload = None
-        if record_open:
-            if payload is not None:
-                self._opened_payload_ids.add(payload_id)
-            self._emit_debug_event(
-                "payload_open",
-                f"opened payload {payload_id}",
-                route_ref,
-            )
-        return payload
-
-    def _resolve_payload_bytes(
-        self,
-        route_ref: RouteLike,
-        envelope: ClosedEnvelope,
-        *,
-        record_open: bool,
-    ) -> bytes:
-        payload = self._known_payload_bytes(
-            route_ref, envelope, record_open=record_open
-        )
-        if payload is not None:
-            return payload
-        opened = tuple(self._read_port(route_ref).open())
-        if not opened:
-            return b""
-        return bytes(opened[-1].payload)
-
-    def _decode_envelope(
-        self, route_ref: TypedRoute[T], envelope: ClosedEnvelope
-    ) -> TypedEnvelope[T]:
-        payload = self._payload_bytes(route_ref, envelope)
-        return TypedEnvelope(
-            route=route_ref, closed=envelope, value=route_ref.schema.decode(payload)
-        )
-
-    def _payload_bytes(
-        self, route_ref: TypedRoute[T], envelope: ClosedEnvelope
-    ) -> bytes:
-        return self._resolve_payload_bytes(route_ref, envelope, record_open=False)
-
-    def _operator_value(
-        self,
-        route_ref: RouteLike,
-        native_route: RouteRef,
-        item: TypedEnvelope[T] | ClosedEnvelope,
-    ) -> T | bytes:
-        if isinstance(item, TypedEnvelope):
-            return item.value
-        payload = self._resolve_payload_bytes(native_route, item, record_open=False)
-        typed_route = self._typed_route(route_ref)
-        if typed_route is not None:
-            return typed_route.schema.decode(payload)
-        return payload
-
-    def _progress_value(
-        self,
-        route_ref: RouteLike,
-        native_route: RouteRef,
-        item: TypedEnvelope[T] | ClosedEnvelope,
-        *,
-        extractor: Callable[[T | bytes], int] | None = None,
-    ) -> int:
-        """Resolve event-time or watermark progress for one observed item."""
-        value = self._operator_value(route_ref, native_route, item)
-        if extractor is not None:
-            return _require_progress_value(extractor(value))
-        closed = item.closed if isinstance(item, TypedEnvelope) else item
-        if closed.control_epoch is not None:
-            return _require_progress_value(closed.control_epoch)
-        return _require_progress_value(closed.seq_source)
-
-    @staticmethod
-    def _taint_key(taint: Any) -> tuple[Any, Any]:
-        domain = getattr(taint, "domain", None)
-        if hasattr(domain, "as_str"):
-            domain_key = domain.as_str()
-        elif hasattr(domain, "value"):
-            domain_key = domain.value
-        else:
-            domain_key = str(domain)
-        return (
-            domain_key,
-            getattr(taint, "value_id", None),
-        )
-
-    @staticmethod
-    def _taint_domain_name(domain: Any) -> str:
-        if hasattr(domain, "as_str"):
-            return cast(str, domain.as_str())
-        if hasattr(domain, "value"):
-            return cast(str, domain.value)
-        return str(domain)
-
-    def _item_taints(
-        self, item: TypedEnvelope[Any] | ClosedEnvelope
-    ) -> tuple[Any, ...]:
-        closed = item.closed if isinstance(item, TypedEnvelope) else item
-        return tuple(getattr(closed, "taints", ()))
-
-    def _lineage_for_item(
-        self,
-        item: TypedEnvelope[Any] | ClosedEnvelope,
-    ) -> LineageRecord:
-        closed = item.closed if isinstance(item, TypedEnvelope) else item
-        event = self._event_ref(closed)
-        record = self._lineage_by_event.get(self._event_index_key(event))
-        if record is not None:
-            return record
-        return LineageRecord(
-            event=event,
-            producer_id=getattr(getattr(closed, "producer", None), "producer_id", None),
-            trace_id=event.display(),
-            causality_id=event.display(),
-        )
-
-    def _remember_stream_taints(
-        self,
-        route_ref: RouteLike,
-        envelope: ClosedEnvelope,
-    ) -> None:
-        key = self._route_key(route_ref)
-        remembered = self._stream_taint_upper_bounds.setdefault(key, {})
-        for taint in getattr(envelope, "taints", ()):
-            domain_name = self._taint_domain_name(getattr(taint, "domain", None))
-            value_id = getattr(taint, "value_id", None)
-            if value_id is None:
-                continue
-            remembered.setdefault((domain_name, value_id), taint)
-
-    def _closed_with_taints(
-        self,
-        envelope: ClosedEnvelope,
-        taints: Sequence[Any],
-    ) -> ClosedEnvelope:
-        if hasattr(envelope, "with_taints"):
-            return cast(Any, envelope).with_taints(tuple(taints))
-        try:
-            envelope.taints = tuple(taints)
-        except AttributeError:
-            return envelope
-        return envelope
-
-    @staticmethod
-    def _replace_item_closed(
-        item: TypedEnvelope[Any] | ClosedEnvelope,
-        closed: ClosedEnvelope,
-    ) -> TypedEnvelope[Any] | ClosedEnvelope:
-        if isinstance(item, TypedEnvelope):
-            return replace(item, closed=closed)
-        return closed
-
-    def _replace_recorded_envelope(self, envelope: ClosedEnvelope) -> None:
-        key = envelope.route.display()
-        history = self._history.get(key)
-        if history is None:
-            return
-        for index in range(len(history) - 1, -1, -1):
-            candidate = history[index]
-            if (
-                candidate.seq_source == envelope.seq_source
-                and candidate.payload_ref.payload_id == envelope.payload_ref.payload_id
-            ):
-                history[index] = envelope
-                break
-
-    def _recorded_envelope_for(self, envelope: ClosedEnvelope) -> ClosedEnvelope:
-        history = self._history.get(envelope.route.display())
-        if history is None:
-            return envelope
-        for candidate in reversed(history):
-            if (
-                candidate.seq_source == envelope.seq_source
-                and candidate.payload_ref.payload_id == envelope.payload_ref.payload_id
-            ):
-                return candidate
-        return envelope
-
-    @staticmethod
-    def _taint_domain_matches(taint: Any, domain_name: str) -> bool:
-        domain = getattr(taint, "domain", None)
-        if domain == domain_name:
-            return True
-        if hasattr(domain, "as_str"):
-            return cast(str, domain.as_str()) == domain_name
-        if hasattr(domain, "value"):
-            return cast(str, domain.value) == domain_name
-        return False
-
-    def _set_domain_taints(
-        self,
-        envelope: ClosedEnvelope | None,
-        *,
-        domain_name: str,
-        values: Sequence[str],
-    ) -> ClosedEnvelope | None:
-        if envelope is None:
-            return None
-        retained = [
-            taint
-            for taint in getattr(envelope, "taints", ())
-            if not self._taint_domain_matches(taint, domain_name)
-        ]
-        retained.extend(
-            TaintMark(TaintDomain.Coherence, value, envelope.route.display())
-            for value in values
-        )
-        updated = self._closed_with_taints(envelope, retained)
-        self._replace_recorded_envelope(updated)
-        return updated
-
-    def _envelope_payload_bytes(self, envelope: ClosedEnvelope | None) -> bytes | None:
-        if envelope is None:
-            return None
-        return self._resolve_payload_bytes(envelope.route, envelope, record_open=False)
-
-    def _coherence_taints_for_binding(self, binding: WriteBinding) -> tuple[str, ...]:
-        desired = self._graph.latest(binding.desired)
-        reported = self._graph.latest(binding.reported)
-        effective = self._graph.latest(binding.effective)
-
-        desired_payload = self._envelope_payload_bytes(desired)
-        reported_payload = self._envelope_payload_bytes(reported)
-        effective_payload = self._envelope_payload_bytes(effective)
-
-        taints: list[str] = []
-        if desired_payload is None:
-            if effective_payload is not None:
-                taints.append("COHERENCE_STABLE")
-        else:
-            if effective_payload != desired_payload:
-                taints.append("COHERENCE_WRITE_PENDING")
-            if reported_payload is not None and reported_payload != desired_payload:
-                taints.append("COHERENCE_STALE_REPORTED")
-            if (
-                effective_payload is not None
-                and reported_payload is not None
-                and effective_payload != reported_payload
-            ):
-                taints.append("COHERENCE_ECHO_UNMATCHED")
-            if not taints:
-                taints.append("COHERENCE_STABLE")
-        return tuple(taints)
-
-    def _refresh_binding_coherence(self, binding: WriteBinding) -> tuple[str, ...]:
-        taints = self._coherence_taints_for_binding(binding)
-        for binding_route in (
-            binding.request,
-            binding.desired,
-            binding.reported,
-            binding.effective,
-        ):
-            latest = self._set_domain_taints(
-                self._graph.latest(binding_route),
-                domain_name="coherence",
-                values=taints,
-            )
-            if latest is not None:
-                self._remember_stream_taints(binding_route, latest)
-        return taints
-
-    def _resolve_write_binding(
-        self, binding_or_request: WriteBinding | LifecycleBinding | RouteLike
-    ) -> WriteBinding:
-        if isinstance(binding_or_request, LifecycleBinding):
-            self._write_bindings[binding_or_request.request.display()] = (
-                binding_or_request.binding
-            )
-            self._lifecycle_bindings[binding_or_request.request.display()] = (
-                binding_or_request
-            )
-            return binding_or_request.binding
-        if isinstance(binding_or_request, WriteBinding):
-            self._write_bindings[binding_or_request.request.display()] = (
-                binding_or_request
-            )
-            return binding_or_request
-        request = self._coerce_route_ref(binding_or_request)
-        if request.display() not in self._write_bindings:
-            raise KeyError(f"no write binding registered for {request.display()}")
-        return self._write_bindings[request.display()]
-
-    def _binding_for_route(self, route_ref: RouteLike) -> WriteBinding | None:
-        route_display = self._route_key(route_ref)
-        for lifecycle in self._lifecycle_bindings.values():
-            if any(
-                route.display() == route_display for route in lifecycle.scope_routes()
-            ):
-                return lifecycle.binding
-        for binding in self._write_bindings.values():
-            for candidate in (
-                binding.request,
-                binding.desired,
-                binding.reported,
-                binding.effective,
-                binding.ack,
-            ):
-                if candidate is not None and candidate.display() == route_display:
-                    return binding
-        return None
-
-    def _lifecycle_binding_for_request(
-        self, binding_or_request: WriteBinding | LifecycleBinding | RouteLike
-    ) -> LifecycleBinding | None:
-        if isinstance(binding_or_request, LifecycleBinding):
-            self._lifecycle_bindings[binding_or_request.request.display()] = (
-                binding_or_request
-            )
-            return binding_or_request
-        if isinstance(binding_or_request, WriteBinding):
-            return self._lifecycle_bindings.get(binding_or_request.request.display())
-        native_route = self._coerce_route_ref(binding_or_request)
-        if native_route.variant != Variant.Request:
-            binding = self._binding_for_route(native_route)
-            if binding is None:
-                return None
-            native_route = binding.request
-        return self._lifecycle_bindings.get(native_route.display())
-
-    def _audit_scope_routes(self, route_ref: RouteLike) -> tuple[RouteRef, ...]:
-        binding = self._binding_for_route(route_ref)
-        if binding is None:
-            return (self._coerce_route_ref(route_ref),)
-        lifecycle = self._lifecycle_binding_for_request(binding)
-        if lifecycle is not None:
-            return lifecycle.scope_routes()
-        return tuple(
-            route
-            for route in (
-                binding.request,
-                binding.desired,
-                binding.reported,
-                binding.effective,
-                binding.ack,
-            )
-            if route is not None
-        )
-
-    def _extend_taints(
-        self,
-        emitted: TypedEnvelope[Any] | ClosedEnvelope,
-        source_taints: Sequence[Any],
-    ) -> TypedEnvelope[Any] | ClosedEnvelope:
-        if not source_taints:
-            return emitted
-        closed = emitted.closed if isinstance(emitted, TypedEnvelope) else emitted
-        existing = list(getattr(closed, "taints", ()))
-        existing_keys = {self._taint_key(taint) for taint in existing}
-        for taint in source_taints:
-            key = self._taint_key(taint)
-            if key in existing_keys:
-                continue
-            existing.append(taint)
-            existing_keys.add(key)
-        updated = self._closed_with_taints(closed, existing)
-        self._replace_recorded_envelope(updated)
-        self._remember_stream_taints(updated.route, updated)
-        return self._replace_item_closed(emitted, updated)
-
-    def _apply_taint_repair(
-        self,
-        emitted: TypedEnvelope[Any] | ClosedEnvelope,
-        source_taints: Sequence[Any],
-        *,
-        repair: TaintRepair | None = None,
-    ) -> TypedEnvelope[Any] | ClosedEnvelope:
-        emitted = self._extend_taints(emitted, source_taints)
-        if repair is None:
-            return emitted
-        closed = emitted.closed if isinstance(emitted, TypedEnvelope) else emitted
-        domain_name = self._taint_domain_name(repair.domain)
-        cleared = set(repair.cleared)
-        if cleared:
-            absorbing = {
-                "determinism": {"DET_NONREPLAYABLE"},
-            }
-            for taint in getattr(closed, "taints", ()):
-                if (
-                    self._taint_domain_name(getattr(taint, "domain", None))
-                    != domain_name
-                ):
-                    continue
-                if getattr(taint, "value_id", None) not in cleared:
-                    continue
-                if getattr(taint, "value_id", None) in absorbing.get(
-                    domain_name, set()
-                ):
-                    raise ValueError(
-                        f"cannot clear absorbing taint {getattr(taint, 'value_id', None)}"
-                    )
-            repaired_taints = [
-                taint
-                for taint in getattr(closed, "taints", ())
-                if not (
-                    self._taint_domain_name(getattr(taint, "domain", None))
-                    == domain_name
-                    and getattr(taint, "value_id", None) in cleared
-                )
-            ]
-            closed = self._closed_with_taints(closed, repaired_taints)
-            emitted = self._replace_item_closed(emitted, closed)
-        existing = list(getattr(closed, "taints", ()))
-        existing_keys = {self._taint_key(taint) for taint in existing}
-        for taint in repair.added:
-            key = self._taint_key(taint)
-            if key in existing_keys:
-                continue
-            existing.append(taint)
-            existing_keys.add(key)
-        updated = self._closed_with_taints(closed, existing)
-        self._replace_recorded_envelope(updated)
-        self._remember_stream_taints(updated.route, updated)
-        return self._replace_item_closed(emitted, updated)
-
-    def _taint_query_items(self, route_ref: RouteLike) -> tuple[str, ...]:
-        key = self._route_key(route_ref)
-        upper_bound = self._stream_taint_upper_bounds.get(key, {})
-        stream_items = tuple(
-            f"stream:{domain}:{value_id}:{getattr(taint, 'origin_id', '')}"
-            for (domain, value_id), taint in sorted(upper_bound.items())
-        )
-
-        event_items: list[str] = []
-        for envelope in self._history.get(key, ()):
-            for taint in getattr(envelope, "taints", ()):
-                event_items.append(
-                    ":".join(
-                        (
-                            "event",
-                            str(envelope.seq_source),
-                            self._taint_domain_name(taint.domain),
-                            taint.value_id,
-                            taint.origin_id,
-                        )
-                    )
-                )
-
-        repair_items = tuple(
-            f"repair:{note}" for note in self._route_repair_notes.get(key, ())
-        )
-        return (*stream_items, *tuple(event_items), *repair_items)
-
-    def _replay_latest_value(
-        self,
-        route_ref: RouteLike,
-        on_next: Callable[[TypedEnvelope[T] | ClosedEnvelope], None],
-    ) -> None:
-        latest = self.latest(route_ref)
-        if latest is not None:
-            on_next(latest)
-
-    def _descriptor_defaults(
-        self, route_ref: RouteRef, native: PortDescriptor | None = None
-    ) -> RouteDescriptor:
-        route_display = route_ref.display()
-        retention = self._retention_policy_for(route_ref)
-        payload_open_policy = (
-            "lazy_external"
-            if route_ref.namespace.layer == Layer.Bulk
-            else "owner_only"
-            if route_ref.namespace.layer == Layer.Internal
-            else getattr(native, "payload_open_policy", None) or "lazy"
-        )
-        debug_enabled = bool(getattr(native, "debug_enabled", True))
-        visibility = self._route_visibility.get(route_display, "private")
-        third_party_subscription_allowed = visibility == "exported"
-        human_description = getattr(native, "human_description", None)
-        if not isinstance(human_description, str) or not human_description.strip():
-            human_description = f"Manyfold port for {route_display}"
-
-        if route_ref.namespace.plane in (Plane.Query, Plane.Debug):
-            producer_kind = getattr(ProducerKind, "QueryService", "query_service")
-        elif (
-            route_ref.namespace.plane == Plane.Write
-            and route_ref.namespace.layer == Layer.Shadow
-        ):
-            producer_kind = getattr(ProducerKind, "Reconciler", "reconciler")
-        elif (
-            route_ref.namespace.plane == Plane.Read
-            and route_ref.namespace.layer == Layer.Raw
-        ):
-            producer_kind = getattr(ProducerKind, "Device", "device")
-        else:
-            producer_kind = getattr(ProducerKind, "Application", "application")
-
-        return RouteDescriptor(
-            identity=DescriptorIdentityBlock(
-                route_ref=route_ref,
-                namespace_ref=route_ref.namespace,
-                producer_ref=ProducerRef(
-                    producer_id=route_ref.namespace.owner,
-                    kind=producer_kind,
-                ),
-                owning_runtime_kind="in_memory",
-                stream_family=route_ref.family,
-                stream_variant=getattr(
-                    route_ref.variant, "value", str(route_ref.variant)
-                ).lower(),
-                aliases=(route_display,),
-                human_description=human_description,
-            ),
-            schema=DescriptorSchemaBlock(
-                schema_ref=route_ref.schema,
-                payload_kind="structured",
-                codec_ref="identity",
-                structured_payload_type=route_ref.schema.schema_id,
-                payload_open_policy=payload_open_policy,
-            ),
-            time=DescriptorTimeBlock(
-                clock_domain=(
-                    "ephemeral"
-                    if route_ref.namespace.layer == Layer.Ephemeral
-                    else "control_epoch"
-                    if route_ref.namespace.plane == Plane.Write
-                    else "monotonic"
-                ),
-                event_time_policy="control_epoch_or_ingest"
-                if route_ref.namespace.plane == Plane.Write
-                else "ingest",
-                processing_time_allowed=True,
-                watermark_policy="recommended"
-                if route_ref.namespace.layer == Layer.Bulk
-                else "none",
-                control_epoch_policy="allowed"
-                if route_ref.namespace.plane == Plane.Write
-                else "optional",
-                ttl_policy="ttl_required"
-                if route_ref.namespace.layer == Layer.Ephemeral
-                else "retain_latest",
-            ),
-            ordering=DescriptorOrderingBlock(
-                partition_spec="unpartitioned",
-                sequence_source_kind="route_local",
-                resequence_policy="none",
-                dedupe_policy="none",
-                causality_policy="opaque",
-            ),
-            flow=self._resolved_route_flow_policy(route_ref, native),
-            retention=DescriptorRetentionBlock(
-                latest_replay_policy=retention.latest_replay_policy,
-                durability_class=retention.durability_class,
-                replay_window=retention.replay_window,
-                payload_retention_policy=retention.payload_retention_policy,
-            ),
-            security=DescriptorSecurityBlock(
-                read_capabilities=("read",),
-                write_capabilities=("write",),
-                payload_open_capabilities=("payload_open",),
-                redaction_policy="none",
-                integrity_policy="best_effort",
-            ),
-            visibility=DescriptorVisibilityBlock(
-                private_or_exported=visibility,
-                third_party_subscription_allowed=third_party_subscription_allowed,
-                query_plane_visibility="exported"
-                if third_party_subscription_allowed
-                else "owner",
-                debug_plane_visibility="exported"
-                if third_party_subscription_allowed
-                else "owner",
-            ),
-            environment=DescriptorEnvironmentBlock(
-                locality="process",
-                transport_preferences=(
-                    ("memory", "bulk_link")
-                    if route_ref.namespace.layer == Layer.Bulk
-                    else ("memory",)
-                ),
-                device_class="generic",
-                resource_class="standard",
-                ephemeral_scope=route_ref.namespace.owner
-                if route_ref.namespace.layer == Layer.Ephemeral
-                else None,
-            ),
-            debug=DescriptorDebugBlock(
-                audit_enabled=debug_enabled,
-                trace_enabled=debug_enabled,
-                metrics_enabled=True,
-                payload_peek_allowed=route_ref.namespace.layer != Layer.Bulk,
-                explain_enabled=True,
-            ),
-        )
-
-    def _watermark_snapshot_for_route(self, route_ref: RouteRef) -> WatermarkSnapshot:
-        descriptor = self.describe_route(route_ref)
-        latest = self._graph.latest(route_ref)
-        latest_seq_source = None if latest is None else latest.seq_source
-        latest_control_epoch = None if latest is None else latest.control_epoch
-        current_watermark = latest_control_epoch
-        if current_watermark is None and descriptor.time.watermark_policy != "none":
-            current_watermark = latest_seq_source
-        return WatermarkSnapshot(
-            route_display=route_ref.display(),
-            partition_spec=descriptor.ordering.partition_spec,
-            clock_domain=descriptor.time.clock_domain,
-            event_time_policy=descriptor.time.event_time_policy,
-            watermark_policy=descriptor.time.watermark_policy,
-            latest_seq_source=latest_seq_source,
-            latest_control_epoch=latest_control_epoch,
-            current_watermark=current_watermark,
-        )
-
-    def _scheduled_target_route(self, scheduled: ScheduledWrite) -> RouteRef:
-        if isinstance(scheduled.target, WriteBinding):
-            return scheduled.target.request
-        return self._coerce_route_ref(scheduled.target)
-
-    def _latest_closed(self, route_ref: RouteLike) -> ClosedEnvelope | None:
-        latest = self.latest(route_ref)
-        if isinstance(latest, TypedEnvelope):
-            return latest.closed
-        return latest
-
-    def _ack_observed_after(self, ack_route: RouteLike, baseline_seq: int) -> bool:
-        latest = self._latest_closed(ack_route)
-        return latest is not None and latest.seq_source > baseline_seq
-
-    def _scheduled_write_snapshot(
-        self,
-        scheduled: ScheduledWrite,
-    ) -> ScheduledWriteSnapshot | None:
-        target_route = self._scheduled_target_route(scheduled)
-        if (
-            scheduled.expires_at_epoch is not None
-            and self._scheduler_epoch > scheduled.expires_at_epoch
-        ):
-            return None
-        ack_observed = False
-        next_retry_epoch = None
-        if scheduled.attempt_count > 0 and scheduled.ack_route is not None:
-            ack_observed = self._ack_observed_after(
-                scheduled.ack_route,
-                scheduled.ack_baseline_seq,
-            )
-            if scheduled.retry_policy is not None:
-                next_retry_epoch = (
-                    self._scheduler_epoch
-                    if scheduled.last_attempt_epoch is None
-                    else scheduled.last_attempt_epoch
-                    + scheduled.retry_policy.backoff_epochs
-                    + 1
-                )
-        else:
-            ack_observed = (
-                scheduled.wait_for_ack is None
-                or self.latest(scheduled.wait_for_ack) is not None
-            )
-        epoch_ready = (
-            scheduled.not_before_epoch is None
-            or self._scheduler_epoch >= scheduled.not_before_epoch
-        )
-        retry_ready = (
-            next_retry_epoch is None or self._scheduler_epoch >= next_retry_epoch
-        )
-        ready_now = epoch_ready and ack_observed and retry_ready
-        return ScheduledWriteSnapshot(
-            route_display=target_route.display(),
-            scheduler_epoch=self._scheduler_epoch,
-            not_before_epoch=scheduled.not_before_epoch,
-            wait_for_ack_route=None
-            if scheduled.wait_for_ack is None
-            else self._route_key(scheduled.wait_for_ack),
-            expires_at_epoch=scheduled.expires_at_epoch,
-            ack_route=None
-            if scheduled.ack_route is None
-            else self._route_key(scheduled.ack_route),
-            ack_observed=ack_observed,
-            attempt_count=scheduled.attempt_count,
-            last_attempt_epoch=scheduled.last_attempt_epoch,
-            next_retry_epoch=next_retry_epoch,
-            ready_now=ready_now,
-        )
-
-    def _make_internal_route(
-        self,
-        *,
-        plane: Plane,
-        layer: Layer,
-        owner: str,
-        family: str,
-        stream: str,
-        variant: Variant,
-        schema_id: str,
-    ) -> RouteRef:
-        """Construct graph-owned internal routes for query/debug/state plumbing."""
-        return RouteRef(
-            namespace=NamespaceRef(plane=plane, layer=layer, owner=owner),
-            family=family,
-            stream=stream,
-            variant=variant,
-            schema=SchemaRef(schema_id=schema_id, version=1),
-        )
-
-    def _debug_route(self, event_type: str) -> RouteRef:
-        """Return the well-known route backing one debug event stream."""
-        if event_type not in self._debug_routes:
-            self._debug_routes[event_type] = self.register_port(
-                self._make_internal_route(
-                    plane=Plane.Debug,
-                    layer=Layer.Internal,
-                    owner="manyfold",
-                    family="debug",
-                    stream=event_type,
-                    variant=Variant.Event,
-                    schema_id="DebugEvent",
-                )
-            )
-        return self._debug_routes[event_type]
-
-    def _emit_debug_event(
-        self, event_type: str, detail: str, route_ref: RouteLike | None = None
-    ) -> DebugEvent:
-        """Emit a debug event on both the in-memory audit log and a debug route."""
-        debug_route = self._debug_route(event_type)
-        payload = json.dumps(
-            {
-                "event_type": event_type,
-                "detail": detail,
-                "route_display": None
-                if route_ref is None
-                else self._route_key(route_ref),
-            },
-            sort_keys=True,
-        ).encode()
-        envelope = self._graph.writable_port(debug_route).write(payload)
-        self._record_envelope(debug_route, envelope, producer_id="debug")
-        event = DebugEvent(
-            event_type=event_type,
-            detail=detail,
-            route_display=None if route_ref is None else self._route_key(route_ref),
-            seq_source=envelope.seq_source,
-        )
-        self._audit_events.append(event)
-        return event
-
-    def _correlation_id(self) -> str:
-        self._query_sequence += 1
-        return f"query-{self._query_sequence}"
-
-    def _authorize(
-        self, principal_id: str | None, route_ref: RouteLike | None, capability: str
-    ) -> None:
-        """Enforce per-route capability checks for third-party access."""
-        if principal_id in (None, "", "python", "internal"):
-            return
-        if capability == "graph_validation":
-            for grant in self._capability_grants.values():
-                if grant.principal_id == principal_id and grant.graph_validation:
-                    return
-            raise PermissionError(f"{principal_id} lacks graph validation capability")
-        if route_ref is None:
-            raise PermissionError(f"{principal_id} lacks {capability} capability")
-        key = (principal_id, self._route_key(route_ref))
-        grant = self._capability_grants.get(key)
-        if grant is None:
-            if (
-                capability == "metadata_read"
-                and self._route_visibility.get(key[1]) == "exported"
-            ):
-                return
-            raise PermissionError(
-                f"{principal_id} lacks {capability} capability for {key[1]}"
-            )
-        if not getattr(grant, capability):
-            raise PermissionError(
-                f"{principal_id} lacks {capability} capability for {key[1]}"
-            )
-
-    def _execute_query(self, request: QueryRequest) -> tuple[str, ...]:
-        """Resolve query commands against the current in-memory graph state."""
-        command = request.command.lower()
-        route_ref = (
-            None if request.route is None else self._coerce_route_ref(request.route)
-        )
-        if command == "catalog":
-            return tuple(route.display() for route in self.catalog())
-        if command == "describe_route":
-            if route_ref is None:
-                raise ValueError("describe_route requires a route")
-            self._authorize(request.principal_id, route_ref, "metadata_read")
-            descriptor = self.describe_route(route_ref)
-            return (
-                descriptor.route_display,
-                descriptor.human_description,
-                descriptor.payload_open_policy,
-                descriptor.backpressure_policy,
-            )
-        if command == "latest":
-            if route_ref is None:
-                raise ValueError("latest requires a route")
-            self._authorize(request.principal_id, route_ref, "metadata_read")
-            latest = self.latest(route_ref)
-            if latest is None:
-                return ()
-            return (
-                latest.route.display(),
-                str(latest.seq_source),
-                latest.payload_ref.payload_id,
-            )
-        if command == "topology":
-            return tuple(f"{left}->{right}" for left, right in self.topology())
-        if command == "replay":
-            if route_ref is None:
-                raise ValueError("replay requires a route")
-            self._authorize(request.principal_id, route_ref, "replay_read")
-            return tuple(
-                str(envelope.seq_source) for envelope in self.replay(route_ref)
-            )
-        if command == "subscribers":
-            if route_ref is None:
-                raise ValueError("subscribers requires a route")
-            self._authorize(request.principal_id, route_ref, "metadata_read")
-            return (str(self.subscribers(route_ref)),)
-        if command == "writers":
-            if route_ref is None:
-                raise ValueError("writers requires a route")
-            self._authorize(request.principal_id, route_ref, "metadata_read")
-            return tuple(sorted(self.writers(route_ref)))
-        if command == "validate_graph":
-            self._authorize(request.principal_id, None, "graph_validation")
-            return tuple(self.validate_graph())
-        if command == "explain_join":
-            if request.join_name is None:
-                raise ValueError("explain_join requires a join_name")
-            plan = self.explain_join(request.join_name)
-            return (
-                plan.name,
-                plan.join_class,
-                *(node.display() for node in plan.visible_nodes),
-                *plan.taint_implications,
-            )
-        if command == "open_payload":
-            if route_ref is None:
-                raise ValueError("open_payload requires a route")
-            self._authorize(request.principal_id, route_ref, "payload_open")
-            payload = self.open_payload(route_ref)
-            if payload is None:
-                return ()
-            return (payload.decode("utf-8", errors="replace"),)
-        if command == "payload_demand":
-            if route_ref is None:
-                raise ValueError("payload_demand requires a route")
-            self._authorize(request.principal_id, route_ref, "metadata_read")
-            snapshot = self.payload_demand_snapshot(route_ref)
-            return (
-                snapshot.route_display,
-                str(snapshot.metadata_events),
-                str(snapshot.payload_open_requests),
-                str(snapshot.lazy_source_opens),
-                str(snapshot.materialized_payload_bytes),
-                str(snapshot.cache_hits),
-                str(snapshot.unopened_lazy_payloads),
-            )
-        if command == "watermark":
-            if route_ref is None:
-                return tuple(
-                    f"{snapshot.route_display}|{snapshot.current_watermark}|{snapshot.latest_seq_source}|{snapshot.latest_control_epoch}"
-                    for snapshot in self.watermark_snapshot()
-                )
-            self._authorize(request.principal_id, route_ref, "metadata_read")
-            snapshot = self.watermark_snapshot(route_ref)
-            return (
-                snapshot.route_display,
-                snapshot.partition_spec,
-                snapshot.clock_domain,
-                snapshot.event_time_policy,
-                snapshot.watermark_policy,
-                str(snapshot.latest_seq_source),
-                str(snapshot.latest_control_epoch),
-                str(snapshot.current_watermark),
-            )
-        if command == "audit":
-            self._authorize(request.principal_id, route_ref, "debug_read")
-            return tuple(
-                f"{event.event_type}:{event.detail}" for event in self.audit(route_ref)
-            )
-        if command == "route_audit":
-            if route_ref is None:
-                raise ValueError("route_audit requires a route")
-            self._authorize(request.principal_id, route_ref, "debug_read")
-            snapshot = self.route_audit(route_ref)
-            return (
-                snapshot.route_display,
-                f"scope={','.join(snapshot.scope_routes)}",
-                f"producers={','.join(snapshot.recent_producers)}",
-                f"subscribers={','.join(snapshot.active_subscribers)}",
-                f"writes={','.join(snapshot.related_write_requests)}",
-                f"taints={','.join(snapshot.taint_upper_bounds)}",
-                f"repairs={','.join(snapshot.repair_notes)}",
-                f"events={','.join(snapshot.recent_debug_events)}",
-            )
-        if command in {"lineage", "trace"}:
-            if route_ref is not None:
-                self._authorize(request.principal_id, route_ref, "debug_read")
-            else:
-                self._authorize(request.principal_id, None, "graph_validation")
-            return tuple(
-                record.display()
-                for record in self.lineage(
-                    route_ref,
-                    trace_id=request.lineage_trace_id,
-                    causality_id=request.lineage_causality_id,
-                    correlation_id=request.lineage_correlation_id,
-                )
-            )
-        if command == "shadow":
-            if route_ref is None:
-                raise ValueError("shadow requires a write request route")
-            self._authorize(request.principal_id, route_ref, "metadata_read")
-            shadow = self.shadow_state(route_ref)
-            return tuple(
-                item
-                for item in (
-                    None if shadow.request is None else str(shadow.request.seq_source),
-                    None if shadow.desired is None else str(shadow.desired.seq_source),
-                    None
-                    if shadow.reported is None
-                    else str(shadow.reported.seq_source),
-                    None
-                    if shadow.effective is None
-                    else str(shadow.effective.seq_source),
-                    None if shadow.ack is None else str(shadow.ack.seq_source),
-                    "pending" if shadow.pending_write else "stable",
-                    *shadow.coherence_taints,
-                )
-                if item is not None
-            )
-        if command == "taints":
-            if route_ref is None:
-                raise ValueError("taints requires a route")
-            self._authorize(request.principal_id, route_ref, "metadata_read")
-            return self._taint_query_items(route_ref)
-        if command == "credit_snapshot":
-            if route_ref is None:
-                return tuple(
-                    f"{snapshot.route_display}|{snapshot.available}|{snapshot.blocked_senders}|{snapshot.dropped_messages}"
-                    for snapshot in self.credit_snapshot()
-                )
-            self._authorize(request.principal_id, route_ref, "metadata_read")
-            snapshot = self.flow_snapshot(route_ref)
-            return (
-                snapshot.route_display,
-                str(snapshot.available),
-                str(snapshot.blocked_senders),
-                str(snapshot.dropped_messages),
-                snapshot.backpressure_policy,
-            )
-        if command == "scheduler":
-            if route_ref is None:
-                self._authorize(request.principal_id, None, "graph_validation")
-                return tuple(
-                    "|".join(
-                        (
-                            snapshot.route_display,
-                            str(snapshot.scheduler_epoch),
-                            str(snapshot.attempt_count),
-                            str(snapshot.ready_now),
-                            str(snapshot.ack_observed),
-                            str(snapshot.not_before_epoch),
-                            str(snapshot.next_retry_epoch),
-                        )
-                    )
-                    for snapshot in self.scheduler_snapshot()
-                )
-            self._authorize(request.principal_id, route_ref, "metadata_read")
-            return tuple(
-                "|".join(
-                    (
-                        snapshot.route_display,
-                        str(snapshot.scheduler_epoch),
-                        str(snapshot.attempt_count),
-                        str(snapshot.ready_now),
-                        str(snapshot.ack_observed),
-                        str(snapshot.not_before_epoch),
-                        str(snapshot.next_retry_epoch),
-                    )
-                )
-                for snapshot in self.scheduler_snapshot(route_ref)
-            )
-        raise ValueError(f"unsupported query command: {request.command}")
 
     def register_port(self, route_ref: RouteLike) -> RouteRef:
         """Register a route in the native graph and return its concrete ref."""
@@ -4508,48 +2949,6 @@ class Graph:
         self._enforce_payload_retention(native_route)
         return resolved
 
-    def _read_port(self, route_ref: RouteLike) -> ReactiveReadablePort:
-        native_route = self._coerce_route_ref(route_ref)
-        return ReactiveReadablePort(self, native_route, self._graph.read(native_route))
-
-    def _write_port(self, target: WriteTarget) -> WriteBinding | ReactiveWritablePort:
-        if isinstance(target, LifecycleBinding):
-            self._write_bindings[target.request.display()] = target.binding
-            self._lifecycle_bindings[target.request.display()] = target
-            return self._graph.register_binding(
-                target.request.display(), target.binding
-            )
-        if isinstance(target, WriteBinding):
-            self._write_bindings[target.request.display()] = target
-            return self._graph.register_binding(target.request.display(), target)
-        native_route = self._coerce_route_ref(target)
-        return ReactiveWritablePort(
-            self, native_route, self._graph.writable_port(native_route)
-        )
-
-    def _emit_native(
-        self,
-        route_ref: RouteRef,
-        payload: bytes,
-        *,
-        producer: ProducerRef | None = None,
-        control_epoch: int | None = None,
-    ) -> list[ClosedEnvelope]:
-        _validate_control_epoch(control_epoch)
-        if hasattr(self._graph, "emit"):
-            return cast(
-                list[ClosedEnvelope],
-                self._graph.emit(
-                    route_ref, payload, producer=producer, control_epoch=control_epoch
-                ),
-            )
-        envelope = self._graph.writable_port(route_ref).write(
-            payload,
-            producer=producer,
-            control_epoch=control_epoch,
-        )
-        return [envelope]
-
     @overload
     def observe(
         self,
@@ -4584,75 +2983,6 @@ class Graph:
             subscriber_id=subscriber_id,
         )
 
-    def _observe_observable(
-        self,
-        route_ref: RouteLike,
-        *,
-        replay_latest: bool = True,
-        subscriber_id: str | None = None,
-        thread_placement: NodeThreadPlacement | None = None,
-    ) -> Observable[Any]:
-        """Compatibility observable for route updates.
-
-        Typed routes decode payloads before delivery; raw route refs expose the
-        underlying closed envelopes.
-        """
-        native_route = self._coerce_route_ref(route_ref)
-        typed_route = self._typed_route(route_ref)
-
-        def subscribe(
-            observer: ObserverLike[Any],
-            scheduler: object | None = None,
-        ) -> SubscriptionLike:
-            key = self._route_key(native_route)
-            resolved_subscriber_id = subscriber_id or self._next_subscriber_id()
-            self._subscriber_count[key] = self._subscriber_count.get(key, 0) + 1
-            self._route_subscribers.setdefault(key, set()).add(resolved_subscriber_id)
-
-            if typed_route is not None:
-                # Typed observers see decoded values, but the graph internally
-                # continues to fan out closed envelopes on one shared subject.
-                class _Observer:
-                    def on_next(_, envelope) -> None:
-                        observer.on_next(self._decode_envelope(typed_route, envelope))
-
-                    def on_error(_, error: Exception) -> None:
-                        observer.on_error(error)
-
-                    def on_completed(_) -> None:
-                        observer.on_completed()
-
-                inner = self._subject_for(native_route).subscribe(
-                    _Observer(), scheduler=scheduler
-                )
-            else:
-                inner = self._subject_for(native_route).subscribe(
-                    observer, scheduler=scheduler
-                )
-            try:
-                if replay_latest:
-                    latest = self.latest(route_ref)
-                    if latest is not None:
-                        observer.on_next(latest)
-            except Exception:
-                self._subscriber_count[key] -= 1
-                subscribers = self._route_subscribers.get(key)
-                if subscribers is not None:
-                    subscribers.discard(resolved_subscriber_id)
-                inner.dispose()
-                raise
-            return _TrackedSubscription(
-                self,
-                native_route,
-                inner,
-                resolved_subscriber_id,
-            )
-
-        return self._thread_placed_observable(
-            rx.create(subscribe),
-            thread_placement,
-        )
-
     def register_pipeline_operation(
         self,
         name: str,
@@ -4664,344 +2994,6 @@ class Graph:
         if name in self._pipeline_factories and not replace_existing:
             raise ValueError(f"pipeline operation already registered: {name}")
         self._pipeline_factories[name] = factory
-
-    def _pipeline_value_observable(
-        self,
-        route_ref: RouteLike,
-        *,
-        replay_latest: bool,
-        subscriber_id: str | None,
-        thread_placement: NodeThreadPlacement | None = None,
-    ) -> Observable[Any]:
-        native_route = self._coerce_route_ref(route_ref)
-
-        def subscribe(
-            observer: ObserverLike[Any],
-            scheduler: object | None = None,
-        ) -> SubscriptionLike:
-            def on_next(item: TypedEnvelope[Any] | ClosedEnvelope) -> None:
-                observer.on_next(self._operator_value(route_ref, native_route, item))
-
-            return self._observe_observable(
-                route_ref,
-                replay_latest=replay_latest,
-                subscriber_id=subscriber_id,
-            ).subscribe(
-                on_next,
-                observer.on_error,
-                observer.on_completed,
-                scheduler=scheduler,
-            )
-
-        return self._thread_placed_observable(
-            rx.create(subscribe),
-            thread_placement,
-        )
-
-    def _thread_placed_observable(
-        self,
-        observable: Observable[Any],
-        placement: NodeThreadPlacement | None,
-    ) -> Observable[Any]:
-        if placement is None:
-            return observable
-        if placement.kind == "main":
-            return reactive_threads.deliver_on_frame_thread(observable)
-
-        def subscribe(
-            observer: ObserverLike[Any],
-            scheduler: object | None = None,
-        ) -> SubscriptionLike:
-            thread_scheduler, owns_scheduler = self._thread_scheduler_for(placement)
-            inner = observable.pipe(ops.observe_on(thread_scheduler)).subscribe(
-                observer,
-                scheduler=scheduler,
-            )
-            return _ThreadPlacementSubscription(
-                inner,
-                owned_scheduler=thread_scheduler if owns_scheduler else None,
-            )
-
-        return rx.create(subscribe)
-
-    def _thread_scheduler_for(
-        self,
-        placement: NodeThreadPlacement,
-    ) -> tuple[object, bool]:
-        if placement.kind == "background":
-            return reactive_threads.background_scheduler(), False
-        if placement.kind == "pooled":
-            if placement.scheduler_name == "blocking_io":
-                return reactive_threads.blocking_io_scheduler(), False
-            if placement.scheduler_name == "input":
-                return reactive_threads.input_scheduler(), False
-            return reactive_threads.background_scheduler(), False
-        thread_name = placement.thread_name or self._next_pipeline_node_name("isolated")
-        return (
-            EventLoopScheduler(
-                thread_factory=reactive_threads.create_default_thread_factory(
-                    thread_name,
-                )
-            ),
-            True,
-        )
-
-    def _pipeline_output_route(self, node_name: str) -> TypedRoute[Any]:
-        route_id = next(_PIPELINE_ROUTE_IDS)
-        safe_name = (
-            "".join(
-                char if char.isalnum() or char in ("-", "_") else "-"
-                for char in node_name
-            ).strip("-")
-            or "node"
-        )
-        return route(
-            plane=Plane.Read,
-            layer=Layer.Internal,
-            owner=OwnerName("manyfold.graph"),
-            family=StreamFamily("pipeline"),
-            stream=StreamName(f"{safe_name}-{route_id}"),
-            variant=Variant.Event,
-            schema=Schema.any(f"ManyfoldPipeline{route_id}"),
-        )
-
-    def _connect_callback_pipeline(
-        self,
-        source: RouteLike,
-        node: CallbackNode[Any],
-        *,
-        replay_latest: bool,
-        subscriber_id: str | None,
-        thread_placement: NodeThreadPlacement | None,
-    ) -> GraphConnection:
-        self.register_diagram_node(
-            node.name,
-            input_routes=(source,),
-            thread_placement=thread_placement,
-        )
-        try:
-            subscription = self._pipeline_value_observable(
-                source,
-                replay_latest=replay_latest,
-                subscriber_id=subscriber_id,
-                thread_placement=thread_placement,
-            ).subscribe(node.receive)
-        except Exception:
-            self._diagram_nodes.pop(node.name, None)
-            raise
-        return GraphConnection(
-            self,
-            name=node.name,
-            subscriptions=(subscription,),
-            nodes=(node.name,),
-        )
-
-    def _connect_route_pipeline(
-        self,
-        source: RouteLike,
-        target: RouteLike,
-        *,
-        replay_latest: bool,
-        subscriber_id: str | None,
-        name: str | None = None,
-        thread_placement: NodeThreadPlacement | None = None,
-    ) -> GraphConnection:
-        connection_name = name or self._next_pipeline_node_name("route")
-        self.connect(source=source, sink=target)
-
-        def publish(value: Any) -> None:
-            self.publish(target, value)
-
-        try:
-            subscription = self._pipeline_value_observable(
-                source,
-                replay_latest=replay_latest,
-                subscriber_id=subscriber_id,
-                thread_placement=thread_placement,
-            ).subscribe(publish)
-        except Exception:
-            self.disconnect(source=source, sink=target)
-            raise
-        return GraphConnection(
-            self,
-            name=connection_name,
-            subscriptions=(subscription,),
-            edges=((source, target),),
-        )
-
-    def _connect_transform_pipeline(
-        self,
-        pipeline: RoutePipeline[Any],
-        node: MapNode[Any, Any] | FilterNode[Any],
-        apply: Callable[[Any], tuple[bool, Any]],
-        metadata: dict[str, Any] | None = None,
-    ) -> RoutePipeline[Any]:
-        output = self._pipeline_output_route(node.name)
-        thread_placement = node.thread_placement or pipeline._thread_placement
-        self.register_diagram_node(
-            node.name,
-            input_routes=(pipeline.route,),
-            output_routes=(output,),
-            metadata=metadata,
-            thread_placement=thread_placement,
-        )
-
-        def on_next(value: Any) -> None:
-            should_emit, next_value = apply(value)
-            if should_emit:
-                self.publish(output, next_value)
-
-        try:
-            subscription = self._pipeline_value_observable(
-                pipeline.route,
-                replay_latest=pipeline._replay_latest,
-                subscriber_id=pipeline._subscriber_id,
-                thread_placement=thread_placement,
-            ).subscribe(on_next)
-        except Exception:
-            self._diagram_nodes.pop(node.name, None)
-            raise
-        connection = GraphConnection(
-            self,
-            name=node.name,
-            subscriptions=(subscription,),
-            nodes=(node.name,),
-        )
-        return RoutePipeline(
-            self,
-            output,
-            replay_latest=True,
-            connections=(*pipeline._connections, connection),
-            thread_placement=thread_placement,
-            previous_thread_placements=pipeline._previous_thread_placements,
-        )
-
-    def _connect_coalesce_latest_pipeline(
-        self,
-        pipeline: RoutePipeline[T],
-        node: CoalesceLatestNode[T],
-    ) -> RoutePipeline[T]:
-        output = self._pipeline_output_route(node.name)
-        thread_placement = pipeline._thread_placement
-        self.register_diagram_node(
-            node.name,
-            input_routes=(pipeline.route,),
-            output_routes=(output,),
-            thread_placement=thread_placement,
-        )
-
-        def publish(value: T) -> None:
-            self.publish(output, value)
-
-        coalesced = node.observable(
-            self._pipeline_value_observable(
-                pipeline.route,
-                replay_latest=pipeline._replay_latest,
-                subscriber_id=pipeline._subscriber_id,
-                thread_placement=thread_placement,
-            )
-        )
-        try:
-            subscription = coalesced.subscribe(publish)
-        except Exception:
-            self._diagram_nodes.pop(node.name, None)
-            raise
-        connection = GraphConnection(
-            self,
-            name=node.name,
-            subscriptions=(subscription,),
-            nodes=(node.name,),
-        )
-        return RoutePipeline(
-            self,
-            output,
-            replay_latest=True,
-            connections=(*pipeline._connections, connection),
-            thread_placement=thread_placement,
-            previous_thread_placements=pipeline._previous_thread_placements,
-        )
-
-    def _connect_logging_pipeline(
-        self,
-        pipeline: RoutePipeline[T],
-        node: PipelineLoggingNode[T],
-    ) -> RoutePipeline[T]:
-        output = self._pipeline_output_route(node.name)
-        thread_placement = node.thread_placement or pipeline._thread_placement
-        self.register_diagram_node(
-            node.name,
-            input_routes=(pipeline.route,),
-            output_routes=(output,),
-            thread_placement=thread_placement,
-        )
-
-        def publish(value: T) -> None:
-            self.publish(output, value)
-
-        logged = node.observable(
-            self._pipeline_value_observable(
-                pipeline.route,
-                replay_latest=pipeline._replay_latest,
-                subscriber_id=pipeline._subscriber_id,
-                thread_placement=thread_placement,
-            )
-        )
-        try:
-            subscription = logged.subscribe(publish)
-        except Exception:
-            self._diagram_nodes.pop(node.name, None)
-            raise
-        connection = GraphConnection(
-            self,
-            name=node.name,
-            subscriptions=(subscription,),
-            nodes=(node.name,),
-        )
-        return RoutePipeline(
-            self,
-            output,
-            replay_latest=True,
-            connections=(*pipeline._connections, connection),
-            thread_placement=thread_placement,
-            previous_thread_placements=pipeline._previous_thread_placements,
-        )
-
-    def _apply_registered_pipeline_operation(
-        self,
-        pipeline: RoutePipeline[Any],
-        operation: str,
-        *args: Any,
-        **kwargs: Any,
-    ) -> Any:
-        factory = self._pipeline_factories.get(operation)
-        if factory is None:
-            raise AttributeError(operation)
-        node = factory(*args, **kwargs)
-        if isinstance(node, MapNode):
-            return self._connect_transform_pipeline(
-                pipeline,
-                node,
-                lambda value: (True, node.transform(value)),
-            )
-        if isinstance(node, FilterNode):
-            return self._connect_transform_pipeline(
-                pipeline,
-                node,
-                lambda value: (node.predicate(value), value),
-            )
-        if isinstance(node, CoalesceLatestNode):
-            return self._connect_coalesce_latest_pipeline(pipeline, node)
-        if isinstance(node, PipelineLoggingNode):
-            return self._connect_logging_pipeline(pipeline, node)
-        if isinstance(node, CallbackNode):
-            return pipeline.connect(
-                node.with_thread_placement(
-                    node.thread_placement or pipeline._thread_placement
-                )
-            )
-        raise TypeError(
-            f"registered pipeline operation {operation!r} returned unsupported node {type(node).__name__}"
-        )
 
     def pipe(
         self,
@@ -5597,9 +3589,6 @@ class Graph:
             return
         self._graph.install(control_loop)
 
-    def _tick_control_loop(self, name: str) -> ClosedEnvelope:
-        return self._graph.tick_control_loop(name)
-
     def run_control_loop(self, name: str) -> ClosedEnvelope:
         """Advance one installed control loop once."""
         envelope = self._tick_control_loop(name)
@@ -5975,112 +3964,6 @@ class Graph:
             lines.append(f"  {node_ids[source_name]} --> {node_ids[sink_name]}")
         return "\n".join(lines)
 
-    def _diagram_edges(self) -> tuple[tuple[str, str], ...]:
-        edges = list(self.topology())
-        for node in self._diagram_nodes.values():
-            node_key = self._diagram_registered_node_key(node.name)
-            edges.extend((route, node_key) for route in node.input_routes)
-            edges.extend((node_key, route) for route in node.output_routes)
-        edges.extend(
-            (
-                self._diagram_registered_node_key(parent),
-                self._diagram_registered_node_key(child),
-            )
-            for parent, child in sorted(self._context_edges)
-        )
-        return tuple(edges)
-
-    @staticmethod
-    def _diagram_registered_node_key(name: str) -> str:
-        return f"node:{name}"
-
-    def _diagram_node_metadata(
-        self,
-        node_name: str,
-        route_refs: dict[str, RouteRef],
-    ) -> dict[str, str]:
-        if node_name.startswith("node:"):
-            node = self._diagram_nodes.get(node_name.removeprefix("node:"))
-            if node is not None:
-                return self._diagram_registered_node_metadata(node)
-        return self._diagram_route_metadata(node_name, route_refs)
-
-    def _diagram_registered_node_metadata(self, node: DiagramNode) -> dict[str, str]:
-        group = node.group or "nodes"
-        metadata = dict(node.metadata)
-        metadata.update(
-            {
-                "display": self._diagram_registered_node_key(node.name),
-                "plane": "node",
-                "layer": "node",
-                "owner": group,
-                "family": group,
-                "stream": node.name,
-                "variant": "node",
-                "label": node.name,
-                "thread": (
-                    ""
-                    if node.thread_placement is None
-                    else node.thread_placement.display()
-                ),
-            }
-        )
-        return metadata
-
-    def _diagram_route_metadata(
-        self,
-        route_display: str,
-        route_refs: dict[str, RouteRef],
-    ) -> dict[str, str]:
-        route_ref = route_refs.get(route_display)
-        if route_ref is None:
-            return {
-                "display": route_display,
-                "plane": "",
-                "layer": "",
-                "owner": "",
-                "family": "",
-                "stream": route_display,
-                "variant": "",
-                "label": route_display,
-            }
-        plane = self._diagram_value(route_ref.namespace.plane)
-        layer = self._diagram_value(route_ref.namespace.layer)
-        owner = self._diagram_value(route_ref.namespace.owner)
-        family = self._diagram_value(route_ref.family)
-        stream = self._diagram_value(route_ref.stream)
-        variant = self._diagram_value(route_ref.variant).lower()
-        label = f"{family}.{stream}<br/>{variant}"
-        return {
-            "display": route_display,
-            "plane": plane,
-            "layer": layer,
-            "owner": owner,
-            "family": family,
-            "stream": stream,
-            "variant": variant,
-            "label": label,
-        }
-
-    @staticmethod
-    def _diagram_value(value: Any) -> str:
-        raw = getattr(value, "value", value)
-        return str(raw)
-
-    @staticmethod
-    def _diagram_escape(value: str) -> str:
-        return (
-            value.replace("\\", "\\\\")
-            .replace("\r\n", " ")
-            .replace("\n", " ")
-            .replace("\r", " ")
-            .replace('"', '\\"')
-        )
-
-    def _diagram_node_line(self, node_id: str, metadata: dict[str, str]) -> str:
-        label = self._diagram_escape(metadata["label"])
-        return f'    {node_id}["{label}"]'
-
     def validate_graph(self) -> Iterator[str]:
         """Return graph validation issues detected by the native layer and wrapper semantics."""
         issues = list(self._graph.validate_graph())
@@ -6097,79 +3980,6 @@ class Graph:
                 )
         issues.extend(self._unsafe_write_feedback_issues())
         return iter(tuple(issues))
-
-    def _unsafe_write_feedback_issues(self) -> list[str]:
-        adjacency: dict[str, set[str]] = {}
-        route_refs: dict[str, RouteRef] = {}
-        for left, right in self.topology():
-            adjacency.setdefault(left, set()).add(right)
-        for catalog_route in self.catalog():
-            route_refs[catalog_route.display()] = catalog_route
-
-        issues: list[str] = []
-        for binding in self._write_bindings.values():
-            request = binding.request.display()
-            feedback_sources = (
-                binding.reported.display(),
-                binding.effective.display(),
-            )
-            for feedback_source in feedback_sources:
-                if not self._path_exists(adjacency, feedback_source, request):
-                    continue
-                if not self._path_has_unprotected_feedback(
-                    adjacency, route_refs, feedback_source, request
-                ):
-                    continue
-                ack_seen = (
-                    binding.ack is not None and self.latest(binding.ack) is not None
-                )
-                if ack_seen:
-                    continue
-                issues.append(
-                    f"Unsafe write-back loop from {feedback_source} to {request} lacks mailbox, internal boundary, epoch guard, or ack barrier"
-                )
-        return issues
-
-    @staticmethod
-    def _path_exists(adjacency: dict[str, set[str]], start: str, goal: str) -> bool:
-        pending = [start]
-        seen: set[str] = set()
-        while pending:
-            current = pending.pop()
-            if current == goal:
-                return True
-            if current in seen:
-                continue
-            seen.add(current)
-            pending.extend(adjacency.get(current, ()))
-        return False
-
-    @staticmethod
-    def _path_has_unprotected_feedback(
-        adjacency: dict[str, set[str]],
-        route_refs: dict[str, RouteRef],
-        start: str,
-        goal: str,
-    ) -> bool:
-        pending: list[tuple[str, bool]] = [(start, False)]
-        seen: set[tuple[str, bool]] = set()
-        while pending:
-            current, has_boundary = pending.pop()
-            if current == goal:
-                if not has_boundary:
-                    return True
-                continue
-            state = (current, has_boundary)
-            if state in seen:
-                continue
-            seen.add(state)
-            route = route_refs.get(current)
-            next_has_boundary = has_boundary or (
-                route is not None and route.namespace.layer == Layer.Internal
-            )
-            for neighbor in adjacency.get(current, ()):
-                pending.append((neighbor, next_has_boundary))
-        return False
 
     def credit_snapshot(self) -> Iterator[CreditSnapshot]:
         """Expose the current credit/backpressure view for registered routes."""
@@ -7610,67 +5420,2196 @@ class Graph:
             )
         )
 
+    def _coerce_route_ref(self, route_ref: RouteLike) -> RouteRef:
+        if isinstance(route_ref, (Source, Sink)):
+            return self._coerce_route_ref(route_ref.route)
+        if isinstance(route_ref, TypedRoute):
+            return route_ref.route_ref
+        if isinstance(route_ref, RouteRef):
+            return route_ref
+        raise ValueError("route must be a TypedRoute, RouteRef, Source, or Sink")
 
-class _TrackedSubscription:
-    def __init__(
+    @staticmethod
+    def _typed_route(route_ref: RouteLike) -> TypedRoute[Any] | None:
+        if isinstance(route_ref, (Source, Sink)):
+            route_ref = route_ref.route
+        if isinstance(route_ref, TypedRoute):
+            return route_ref
+        return None
+
+    @staticmethod
+    def _source_replay_latest(route_ref: RouteLike) -> bool:
+        if isinstance(route_ref, Source):
+            return route_ref.replay_latest
+        return True
+
+    def _connectable_key(self, target: ConnectableTarget, *, edge_role: str) -> str:
+        if isinstance(target, NativeMailbox):
+            if edge_role == "source":
+                return target.egress.describe().route_display
+            return target.ingress.describe().route_display
+        return self._route_key(target)
+
+    def _route_key(self, route_ref: RouteLike) -> str:
+        return self._coerce_route_ref(route_ref).display()
+
+    @staticmethod
+    def _manifest_mapping_key(key: Any) -> tuple[str, str, str]:
+        key_type = type(key)
+        return (str(key), key_type.__module__, key_type.__qualname__)
+
+    @staticmethod
+    def _manifest_value(value: Any) -> Any:
+        if value is None or isinstance(value, (bool, int, float, str)):
+            return value
+        if isinstance(value, bytes):
+            return value.decode("utf-8", errors="replace")
+        if isinstance(value, tuple | list):
+            return tuple(Graph._manifest_value(item) for item in value)
+        if isinstance(value, dict):
+            return {
+                str(key): Graph._manifest_value(value[key])
+                for key in sorted(value, key=Graph._manifest_mapping_key)
+            }
+        display = getattr(value, "display", None)
+        if callable(display):
+            return display()
+        as_str = getattr(value, "as_str", None)
+        if callable(as_str):
+            return as_str()
+        enum_value = getattr(value, "value", None)
+        if enum_value is not None:
+            return enum_value
+        if isinstance(value, NamespaceRef):
+            return {
+                "plane": Graph._manifest_value(value.plane),
+                "layer": Graph._manifest_value(value.layer),
+                "owner": value.owner,
+            }
+        if isinstance(value, SchemaRef):
+            return {
+                "schema_id": value.schema_id,
+                "version": value.version,
+            }
+        if isinstance(value, ProducerRef):
+            return {
+                "producer_id": value.producer_id,
+                "kind": Graph._manifest_value(value.kind),
+            }
+        if isinstance(value, ManifestRoute):
+            descriptor = value.descriptor
+            return {
+                "route": value.route.display(),
+                "identity": Graph._manifest_block(descriptor.identity),
+                "schema": Graph._manifest_block(descriptor.schema),
+                "time": Graph._manifest_block(descriptor.time),
+                "ordering": Graph._manifest_block(descriptor.ordering),
+                "flow": Graph._manifest_block(descriptor.flow),
+                "retention": Graph._manifest_block(descriptor.retention),
+                "security": Graph._manifest_block(descriptor.security),
+                "visibility": Graph._manifest_block(descriptor.visibility),
+                "environment": Graph._manifest_block(descriptor.environment),
+                "debug": Graph._manifest_block(descriptor.debug),
+            }
+        if isinstance(value, ManifestEdge):
+            return {
+                "source": value.source.display(),
+                "sink": value.sink.display(),
+                "flow": Graph._manifest_block(value.flow),
+            }
+        if isinstance(value, ManifestDiagramNode):
+            return {
+                "name": value.name,
+                "input_routes": tuple(route.display() for route in value.input_routes),
+                "output_routes": tuple(
+                    route.display() for route in value.output_routes
+                ),
+                "group": value.group,
+                "metadata": tuple(
+                    {"name": name, "value": metadata_value}
+                    for name, metadata_value in sorted(value.metadata)
+                ),
+                "thread_placement": None
+                if value.thread_placement is None
+                else Graph._manifest_block(value.thread_placement),
+            }
+        if is_dataclass(value):
+            return Graph._manifest_block(value)
+        return str(value)
+
+    @staticmethod
+    def _manifest_block(value: Any) -> dict[str, Any]:
+        return {
+            field.name: Graph._manifest_value(getattr(value, field.name))
+            for field in fields(value)
+        }
+
+    def _manifest_route(self, route_ref: RouteRef) -> ManifestRoute:
+        return ManifestRoute(
+            route=route_ref,
+            descriptor=self.describe_route(route_ref),
+        )
+
+    def _manifest_edge(
         self,
-        graph: Graph,
-        route_ref: RouteRef,
-        inner: SubscriptionLike,
-        subscriber_id: str,
-    ) -> None:
-        self._graph = graph
-        self._route_ref = route_ref
-        self._inner = inner
-        self._subscriber_id = subscriber_id
-        self._disposed = False
+        source: str,
+        sink: str,
+        route_refs: dict[str, RouteRef],
+    ) -> ManifestEdge:
+        try:
+            source_ref = route_refs[source]
+            sink_ref = route_refs[sink]
+        except KeyError as exc:
+            raise RuntimeError(
+                "topology edge references a route outside the graph catalog"
+            ) from exc
+        return ManifestEdge(
+            source=source_ref,
+            sink=sink_ref,
+            flow=self.describe_edge(source=source_ref, sink=sink_ref),
+        )
 
-    def dispose(self) -> None:
-        if self._disposed:
+    def _manifest_diagram_node(
+        self,
+        node: DiagramNode,
+        route_refs: dict[str, RouteRef],
+    ) -> ManifestDiagramNode:
+        return ManifestDiagramNode(
+            name=node.name,
+            input_routes=tuple(route_refs[route] for route in node.input_routes),
+            output_routes=tuple(route_refs[route] for route in node.output_routes),
+            group=node.group,
+            metadata=tuple(sorted(node.metadata)),
+            thread_placement=node.thread_placement,
+        )
+
+    def _manifest_link(self, link: Link) -> ManifestLink:
+        return ManifestLink(
+            name=link.name,
+            link_class=link.link_class,
+            capabilities=link.capabilities,
+        )
+
+    def _manifest_mesh_primitive(
+        self,
+        primitive: MeshPrimitive,
+    ) -> ManifestMeshPrimitive:
+        return ManifestMeshPrimitive(
+            name=primitive.name,
+            kind=primitive.kind,
+            sources=primitive.sources,
+            destinations=primitive.destinations,
+            link_name=primitive.link_name,
+            ordering_policy=primitive.ordering_policy,
+            state_budget=primitive.state_budget,
+            threshold=primitive.threshold,
+            ack_policy=primitive.ack_policy,
+        )
+
+    def _manifest_write_binding(
+        self,
+        name: str,
+        binding: WriteBinding,
+    ) -> ManifestWriteBinding:
+        return ManifestWriteBinding(
+            name=name,
+            request=binding.request,
+            desired=binding.desired,
+            reported=binding.reported,
+            effective=binding.effective,
+            ack=binding.ack,
+        )
+
+    @staticmethod
+    def _context_route_role(route_ref: RouteRef) -> str | None:
+        if route_ref.namespace.plane == Plane.Debug:
+            return None
+        if (
+            route_ref.namespace.plane == Plane.Write
+            or route_ref.variant == Variant.Request
+        ):
+            return "input"
+        return "output"
+
+    @staticmethod
+    def _append_unique(items: tuple[str, ...], item: str) -> tuple[str, ...]:
+        if item in items:
+            return items
+        return (*items, item)
+
+    def _remember_active_context_key(self, route_key: str, role: str) -> None:
+        if not self._context_stack:
             return
-        self._disposed = True
-        route_key = self._graph._route_key(self._route_ref)
-        self._graph._subscriber_count[route_key] -= 1
-        subscribers = self._graph._route_subscribers.get(route_key)
-        if subscribers is not None:
-            subscribers.discard(self._subscriber_id)
-        self._inner.dispose()
+        if role not in {"input", "output"}:
+            raise ValueError(f"unknown context route role: {role}")
+        for context in self._context_stack:
+            node = self._diagram_nodes.get(context.name)
+            if node is None:
+                continue
+            if role == "input":
+                self._diagram_nodes[context.name] = replace(
+                    node,
+                    input_routes=self._append_unique(node.input_routes, route_key),
+                )
+            else:
+                self._diagram_nodes[context.name] = replace(
+                    node,
+                    output_routes=self._append_unique(node.output_routes, route_key),
+                )
 
-
-class _ThreadPlacementSubscription:
-    def __init__(
+    def _remember_active_context_route(
         self,
-        inner: SubscriptionLike,
+        route_ref: RouteLike,
+        role: str | None = None,
+    ) -> None:
+        if not self._context_stack:
+            return
+        native_route = self._coerce_route_ref(route_ref)
+        resolved_role = self._context_route_role(native_route) if role is None else role
+        if resolved_role is None:
+            return
+        self._diagram_routes[native_route.display()] = native_route
+        self._remember_active_context_key(native_route.display(), resolved_role)
+
+    def _remember_active_context_routes(
+        self,
         *,
-        owned_scheduler: object | None = None,
+        input_routes: Sequence[RouteLike] = (),
+        output_routes: Sequence[RouteLike] = (),
     ) -> None:
-        self._inner = inner
-        self._owned_scheduler = owned_scheduler
-        self._disposed = False
+        for route_ref in input_routes:
+            self._remember_active_context_route(route_ref, "input")
+        for route_ref in output_routes:
+            self._remember_active_context_route(route_ref, "output")
 
-    def dispose(self) -> None:
-        if self._disposed:
+    def _remember_active_context_node(self, name: str) -> None:
+        if not self._context_stack:
             return
-        self._disposed = True
-        self._inner.dispose()
-        if self._owned_scheduler is None:
+        parent = self._context_stack[-1]
+        if parent.name == name:
             return
-        dispose = getattr(self._owned_scheduler, "dispose", None)
-        if callable(dispose):
-            dispose()
+        self._context_edges.add((parent.name, name))
 
+    def _enter_context(self, context: GraphContext) -> None:
+        parent = self._context_stack[-1] if self._context_stack else None
+        context_metadata = dict(context.metadata)
+        context_metadata.setdefault("context", "true")
+        context_metadata["context_path"] = "/".join(
+            (*tuple(active.name for active in self._context_stack), context.name)
+        )
+        if parent is not None:
+            context_metadata["context_parent"] = parent.name
+            self._context_edges.add((parent.name, context.name))
+        self.register_diagram_node(
+            context.name,
+            group=context.group or "context",
+            metadata=context_metadata,
+        )
+        self._context_stack.append(context)
 
-class _CompositeSubscription:
-    def __init__(self, subscriptions: Sequence[SubscriptionLike]) -> None:
-        self._subscriptions = tuple(subscriptions)
-        self._disposed = False
+    def _exit_context(self, context: GraphContext) -> None:
+        if not self._context_stack or self._context_stack[-1] is not context:
+            raise RuntimeError(f"context {context.name!r} exited out of order")
+        self._context_stack.pop()
 
-    def dispose(self) -> None:
-        if self._disposed:
+    def _next_pipeline_node_name(self, kind: str) -> str:
+        self._pipeline_node_sequence += 1
+        return f"{kind}-{self._pipeline_node_sequence}"
+
+    def _auto_node_name(
+        self,
+        kind: str,
+        source: RouteLike,
+        sink: RouteLike,
+        *policy_parts: str,
+    ) -> str:
+        policy = ":".join(part for part in policy_parts if part)
+        base = f"{kind}:{self._route_key(source)}->{self._route_key(sink)}"
+        return f"{base}:{policy}" if policy else base
+
+    @staticmethod
+    def _closed_item(item: TypedEnvelope[Any] | ClosedEnvelope) -> ClosedEnvelope:
+        return item.closed if isinstance(item, TypedEnvelope) else item
+
+    def _event_ref(self, envelope: ClosedEnvelope) -> EventRef:
+        return EventRef(
+            route_display=envelope.route.display(),
+            seq_source=envelope.seq_source,
+        )
+
+    @staticmethod
+    def _event_index_key(event: EventRef) -> tuple[str, int]:
+        return (event.route_display, event.seq_source)
+
+    def _next_subscriber_id(self) -> str:
+        self._subscriber_sequence += 1
+        return f"subscriber-{self._subscriber_sequence}"
+
+    @staticmethod
+    def _mailbox_value(mailbox: NativeMailbox, name: str) -> Any:
+        value = getattr(mailbox, name)
+        return value() if callable(value) else value
+
+    def _subject_for(self, route_ref: RouteLike) -> Subject[ClosedEnvelope]:
+        key = self._route_key(route_ref)
+        if key not in self._subjects:
+            self._subjects[key] = Subject()
+        return self._subjects[key]
+
+    def _payload_stats(self, route_ref: RouteLike) -> dict[str, int]:
+        key = self._route_key(route_ref)
+        return self._payload_demand_stats.setdefault(
+            key,
+            {
+                "metadata_events": 0,
+                "payload_open_requests": 0,
+                "lazy_source_opens": 0,
+                "materialized_payload_bytes": 0,
+                "cache_hits": 0,
+            },
+        )
+
+    def _default_flow_policy_for_route(
+        self,
+        route_ref: RouteRef,
+        native: PortDescriptor | None = None,
+    ) -> FlowPolicy:
+        return FlowPolicy(
+            backpressure_policy=getattr(native, "backpressure_policy", None)
+            or "propagate",
+            credit_class=(
+                "bulk_payload"
+                if route_ref.namespace.layer == Layer.Bulk
+                else "control"
+                if route_ref.namespace.plane == Plane.Write
+                else "default"
+            ),
+            mailbox_policy="none",
+            async_boundary_kind="inline",
+            overflow_policy="reject_write",
+        )
+
+    def _resolved_route_flow_policy(
+        self,
+        route_ref: RouteRef,
+        native: PortDescriptor | None = None,
+    ) -> DescriptorFlowBlock:
+        key = self._route_key(route_ref)
+        policy = self._default_flow_policy_for_route(route_ref, native)
+        policy = policy.merged(self._graph_flow_defaults)
+        policy = policy.merged(self._mailbox_flow_policies.get(key))
+        policy = policy.merged(self._source_flow_defaults.get(key))
+        policy = policy.merged(self._sink_flow_requirements.get(key))
+        return policy.resolve()
+
+    def _resolved_edge_flow_policy(
+        self,
+        source: ConnectableTarget,
+        sink: ConnectableTarget,
+    ) -> DescriptorFlowBlock:
+        source_key = self._connectable_key(source, edge_role="source")
+        sink_key = self._connectable_key(sink, edge_role="sink")
+        source_route = (
+            None
+            if isinstance(source, NativeMailbox)
+            else self._coerce_route_ref(source)
+        )
+        policy = (
+            self._default_flow_policy_for_route(source_route)
+            if source_route is not None
+            else FlowPolicy()
+        )
+        policy = policy.merged(self._graph_flow_defaults)
+        policy = policy.merged(self._mailbox_flow_policies.get(source_key))
+        policy = policy.merged(self._mailbox_flow_policies.get(sink_key))
+        policy = policy.merged(self._source_flow_defaults.get(source_key))
+        policy = policy.merged(self._sink_flow_requirements.get(sink_key))
+        policy = policy.merged(self._edge_flow_overrides.get((source_key, sink_key)))
+        return policy.resolve()
+
+    def _default_retention_policy(self, route_ref: RouteRef) -> RouteRetentionPolicy:
+        if route_ref.namespace.layer == Layer.Ephemeral:
+            return RouteRetentionPolicy(
+                latest_replay_policy="none",
+                replay_window="none",
+                payload_retention_policy="non_replayable",
+                history_limit=1,
+            )
+        if route_ref.namespace.layer == Layer.Internal:
+            return RouteRetentionPolicy(
+                latest_replay_policy="latest_only",
+                replay_window="latest",
+                payload_retention_policy="separate_store",
+                history_limit=1,
+            )
+        return RouteRetentionPolicy(
+            latest_replay_policy="bounded_history",
+            replay_window="memory",
+            payload_retention_policy=(
+                "external_store"
+                if route_ref.namespace.layer == Layer.Bulk
+                else "separate_store"
+            ),
+        )
+
+    def _retention_policy_for(self, route_ref: RouteLike) -> RouteRetentionPolicy:
+        native_route = self._coerce_route_ref(route_ref)
+        key = native_route.display()
+        return self._retention_policies.get(
+            key, self._default_retention_policy(native_route)
+        )
+
+    def _payload_retention_policy_for(self, route_ref: RouteLike) -> str:
+        return cast(
+            str,
+            self._retention_policy_for(route_ref).payload_retention_policy,
+        )
+
+    def _purge_payload_ref(self, payload_id: str) -> None:
+        self._lazy_payload_sources.pop(payload_id, None)
+        self._materialized_payloads.pop(payload_id, None)
+        self._empty_inline_payload_ids.discard(payload_id)
+        self._payload_route_by_id.pop(payload_id, None)
+        self._opened_payload_ids.discard(payload_id)
+
+    def _enforce_payload_retention(self, route_ref: RouteLike) -> None:
+        key = self._route_key(route_ref)
+        retained_payload_ids = {
+            envelope.payload_ref.payload_id for envelope in self._history.get(key, ())
+        }
+        payload_policy = self._payload_retention_policy_for(route_ref)
+        if payload_policy == "non_replayable" and retained_payload_ids:
+            latest_payload_id = self._history[key][-1].payload_ref.payload_id
+            retained_payload_ids = {latest_payload_id}
+        for payload_id, payload_route in tuple(self._payload_route_by_id.items()):
+            if payload_route != key:
+                continue
+            if payload_id not in retained_payload_ids:
+                self._purge_payload_ref(payload_id)
+        if payload_policy in {"external_store", "non_replayable"}:
+            for payload_id in tuple(self._materialized_payloads):
+                if self._payload_route_by_id.get(payload_id) == key:
+                    del self._materialized_payloads[payload_id]
+
+    def _record_envelope(
+        self,
+        route_ref: RouteLike,
+        envelope: ClosedEnvelope,
+        *,
+        producer_id: str | None = None,
+        trace_id: str | None = None,
+        causality_id: str | None = None,
+        correlation_id: str | None = None,
+        parent_events: Sequence[EventRef] = (),
+    ) -> ClosedEnvelope:
+        """Persist envelope-derived bookkeeping before notifying observers."""
+        key = self._route_key(route_ref)
+        history = self._history.setdefault(key, [])
+        history.append(envelope)
+        retention = self._retention_policy_for(route_ref)
+        if (
+            retention.history_limit is not None
+            and len(history) > retention.history_limit
+        ):
+            del history[: len(history) - retention.history_limit]
+        self._payload_route_by_id[envelope.payload_ref.payload_id] = key
+        inline_payload = bytes(envelope.payload_ref.inline_bytes)
+        if (
+            not inline_payload
+            and envelope.payload_ref.payload_id not in self._lazy_payload_sources
+        ):
+            self._empty_inline_payload_ids.add(envelope.payload_ref.payload_id)
+        self._payload_stats(route_ref)["metadata_events"] += 1
+        self._enforce_payload_retention(route_ref)
+        self._remember_stream_taints(route_ref, envelope)
+        if producer_id is not None:
+            self._writers.setdefault(key, set()).add(producer_id)
+        event = self._event_ref(envelope)
+        resolved_trace_id = trace_id or event.display()
+        resolved_causality_id = causality_id or event.display()
+        record = LineageRecord(
+            event=event,
+            producer_id=producer_id,
+            trace_id=resolved_trace_id,
+            causality_id=resolved_causality_id,
+            correlation_id=correlation_id,
+            parent_events=tuple(parent_events),
+        )
+        self._lineage_by_event[self._event_index_key(event)] = record
+        self._lineage_events_by_trace.setdefault(resolved_trace_id, []).append(
+            self._event_index_key(event)
+        )
+        self._lineage_events_by_causality.setdefault(resolved_causality_id, []).append(
+            self._event_index_key(event)
+        )
+        if correlation_id is not None:
+            self._lineage_events_by_correlation.setdefault(correlation_id, []).append(
+                self._event_index_key(event)
+            )
+        self._publish(route_ref, envelope)
+        return envelope
+
+    def _publish(
+        self, route_ref: RouteLike, envelope: ClosedEnvelope
+    ) -> ClosedEnvelope:
+        self._subject_for(route_ref).on_next(envelope)
+        return envelope
+
+    @staticmethod
+    def _normalize_payload_chunks(
+        payload: bytes
+        | bytearray
+        | memoryview
+        | Sequence[bytes | bytearray | memoryview],
+    ) -> bytes:
+        if isinstance(payload, (bytes, bytearray, memoryview)):
+            return bytes(payload)
+        return b"".join(bytes(chunk) for chunk in payload)
+
+    def _known_payload_bytes(
+        self,
+        route_ref: RouteLike,
+        envelope: ClosedEnvelope,
+        *,
+        record_open: bool,
+    ) -> bytes | None:
+        payload_id = envelope.payload_ref.payload_id
+        stats = self._payload_stats(route_ref)
+        if record_open:
+            stats["payload_open_requests"] += 1
+        if payload_id in self._materialized_payloads:
+            payload = self._materialized_payloads[payload_id]
+            if record_open:
+                stats["cache_hits"] += 1
+        elif payload_id in self._empty_inline_payload_ids:
+            payload = b""
+        elif payload_id in self._lazy_payload_sources:
+            payload = self._normalize_payload_chunks(
+                self._lazy_payload_sources[payload_id].open()
+            )
+            if self._payload_retention_policy_for(route_ref) in {
+                "inline",
+                "separate_store",
+            }:
+                self._materialized_payloads[payload_id] = payload
+            stats["lazy_source_opens"] += 1
+            stats["materialized_payload_bytes"] += len(payload)
+        else:
+            inline_payload = bytes(envelope.payload_ref.inline_bytes)
+            if inline_payload:
+                payload = inline_payload
+            else:
+                payload = None
+        if record_open:
+            if payload is not None:
+                self._opened_payload_ids.add(payload_id)
+            self._emit_debug_event(
+                "payload_open",
+                f"opened payload {payload_id}",
+                route_ref,
+            )
+        return payload
+
+    def _resolve_payload_bytes(
+        self,
+        route_ref: RouteLike,
+        envelope: ClosedEnvelope,
+        *,
+        record_open: bool,
+    ) -> bytes:
+        payload = self._known_payload_bytes(
+            route_ref, envelope, record_open=record_open
+        )
+        if payload is not None:
+            return payload
+        opened = tuple(self._read_port(route_ref).open())
+        if not opened:
+            return b""
+        return bytes(opened[-1].payload)
+
+    def _decode_envelope(
+        self, route_ref: TypedRoute[T], envelope: ClosedEnvelope
+    ) -> TypedEnvelope[T]:
+        payload = self._payload_bytes(route_ref, envelope)
+        return TypedEnvelope(
+            route=route_ref, closed=envelope, value=route_ref.schema.decode(payload)
+        )
+
+    def _payload_bytes(
+        self, route_ref: TypedRoute[T], envelope: ClosedEnvelope
+    ) -> bytes:
+        return self._resolve_payload_bytes(route_ref, envelope, record_open=False)
+
+    def _operator_value(
+        self,
+        route_ref: RouteLike,
+        native_route: RouteRef,
+        item: TypedEnvelope[T] | ClosedEnvelope,
+    ) -> T | bytes:
+        if isinstance(item, TypedEnvelope):
+            return item.value
+        payload = self._resolve_payload_bytes(native_route, item, record_open=False)
+        typed_route = self._typed_route(route_ref)
+        if typed_route is not None:
+            return typed_route.schema.decode(payload)
+        return payload
+
+    def _progress_value(
+        self,
+        route_ref: RouteLike,
+        native_route: RouteRef,
+        item: TypedEnvelope[T] | ClosedEnvelope,
+        *,
+        extractor: Callable[[T | bytes], int] | None = None,
+    ) -> int:
+        """Resolve event-time or watermark progress for one observed item."""
+        value = self._operator_value(route_ref, native_route, item)
+        if extractor is not None:
+            return _require_progress_value(extractor(value))
+        closed = item.closed if isinstance(item, TypedEnvelope) else item
+        if closed.control_epoch is not None:
+            return _require_progress_value(closed.control_epoch)
+        return _require_progress_value(closed.seq_source)
+
+    @staticmethod
+    def _taint_key(taint: Any) -> tuple[Any, Any]:
+        domain = getattr(taint, "domain", None)
+        if hasattr(domain, "as_str"):
+            domain_key = domain.as_str()
+        elif hasattr(domain, "value"):
+            domain_key = domain.value
+        else:
+            domain_key = str(domain)
+        return (
+            domain_key,
+            getattr(taint, "value_id", None),
+        )
+
+    @staticmethod
+    def _taint_domain_name(domain: Any) -> str:
+        if hasattr(domain, "as_str"):
+            return cast(str, domain.as_str())
+        if hasattr(domain, "value"):
+            return cast(str, domain.value)
+        return str(domain)
+
+    def _item_taints(
+        self, item: TypedEnvelope[Any] | ClosedEnvelope
+    ) -> tuple[Any, ...]:
+        closed = item.closed if isinstance(item, TypedEnvelope) else item
+        return tuple(getattr(closed, "taints", ()))
+
+    def _lineage_for_item(
+        self,
+        item: TypedEnvelope[Any] | ClosedEnvelope,
+    ) -> LineageRecord:
+        closed = item.closed if isinstance(item, TypedEnvelope) else item
+        event = self._event_ref(closed)
+        record = self._lineage_by_event.get(self._event_index_key(event))
+        if record is not None:
+            return record
+        return LineageRecord(
+            event=event,
+            producer_id=getattr(getattr(closed, "producer", None), "producer_id", None),
+            trace_id=event.display(),
+            causality_id=event.display(),
+        )
+
+    def _remember_stream_taints(
+        self,
+        route_ref: RouteLike,
+        envelope: ClosedEnvelope,
+    ) -> None:
+        key = self._route_key(route_ref)
+        remembered = self._stream_taint_upper_bounds.setdefault(key, {})
+        for taint in getattr(envelope, "taints", ()):
+            domain_name = self._taint_domain_name(getattr(taint, "domain", None))
+            value_id = getattr(taint, "value_id", None)
+            if value_id is None:
+                continue
+            remembered.setdefault((domain_name, value_id), taint)
+
+    def _closed_with_taints(
+        self,
+        envelope: ClosedEnvelope,
+        taints: Sequence[Any],
+    ) -> ClosedEnvelope:
+        if hasattr(envelope, "with_taints"):
+            return cast(Any, envelope).with_taints(tuple(taints))
+        try:
+            envelope.taints = tuple(taints)
+        except AttributeError:
+            return envelope
+        return envelope
+
+    @staticmethod
+    def _replace_item_closed(
+        item: TypedEnvelope[Any] | ClosedEnvelope,
+        closed: ClosedEnvelope,
+    ) -> TypedEnvelope[Any] | ClosedEnvelope:
+        if isinstance(item, TypedEnvelope):
+            return replace(item, closed=closed)
+        return closed
+
+    def _replace_recorded_envelope(self, envelope: ClosedEnvelope) -> None:
+        key = envelope.route.display()
+        history = self._history.get(key)
+        if history is None:
             return
-        self._disposed = True
-        for subscription in self._subscriptions:
-            subscription.dispose()
+        for index in range(len(history) - 1, -1, -1):
+            candidate = history[index]
+            if (
+                candidate.seq_source == envelope.seq_source
+                and candidate.payload_ref.payload_id == envelope.payload_ref.payload_id
+            ):
+                history[index] = envelope
+                break
+
+    def _recorded_envelope_for(self, envelope: ClosedEnvelope) -> ClosedEnvelope:
+        history = self._history.get(envelope.route.display())
+        if history is None:
+            return envelope
+        for candidate in reversed(history):
+            if (
+                candidate.seq_source == envelope.seq_source
+                and candidate.payload_ref.payload_id == envelope.payload_ref.payload_id
+            ):
+                return candidate
+        return envelope
+
+    @staticmethod
+    def _taint_domain_matches(taint: Any, domain_name: str) -> bool:
+        domain = getattr(taint, "domain", None)
+        if domain == domain_name:
+            return True
+        if hasattr(domain, "as_str"):
+            return cast(str, domain.as_str()) == domain_name
+        if hasattr(domain, "value"):
+            return cast(str, domain.value) == domain_name
+        return False
+
+    def _set_domain_taints(
+        self,
+        envelope: ClosedEnvelope | None,
+        *,
+        domain_name: str,
+        values: Sequence[str],
+    ) -> ClosedEnvelope | None:
+        if envelope is None:
+            return None
+        retained = [
+            taint
+            for taint in getattr(envelope, "taints", ())
+            if not self._taint_domain_matches(taint, domain_name)
+        ]
+        retained.extend(
+            TaintMark(TaintDomain.Coherence, value, envelope.route.display())
+            for value in values
+        )
+        updated = self._closed_with_taints(envelope, retained)
+        self._replace_recorded_envelope(updated)
+        return updated
+
+    def _envelope_payload_bytes(self, envelope: ClosedEnvelope | None) -> bytes | None:
+        if envelope is None:
+            return None
+        return self._resolve_payload_bytes(envelope.route, envelope, record_open=False)
+
+    def _coherence_taints_for_binding(self, binding: WriteBinding) -> tuple[str, ...]:
+        desired = self._graph.latest(binding.desired)
+        reported = self._graph.latest(binding.reported)
+        effective = self._graph.latest(binding.effective)
+
+        desired_payload = self._envelope_payload_bytes(desired)
+        reported_payload = self._envelope_payload_bytes(reported)
+        effective_payload = self._envelope_payload_bytes(effective)
+
+        taints: list[str] = []
+        if desired_payload is None:
+            if effective_payload is not None:
+                taints.append("COHERENCE_STABLE")
+        else:
+            if effective_payload != desired_payload:
+                taints.append("COHERENCE_WRITE_PENDING")
+            if reported_payload is not None and reported_payload != desired_payload:
+                taints.append("COHERENCE_STALE_REPORTED")
+            if (
+                effective_payload is not None
+                and reported_payload is not None
+                and effective_payload != reported_payload
+            ):
+                taints.append("COHERENCE_ECHO_UNMATCHED")
+            if not taints:
+                taints.append("COHERENCE_STABLE")
+        return tuple(taints)
+
+    def _refresh_binding_coherence(self, binding: WriteBinding) -> tuple[str, ...]:
+        taints = self._coherence_taints_for_binding(binding)
+        for binding_route in (
+            binding.request,
+            binding.desired,
+            binding.reported,
+            binding.effective,
+        ):
+            latest = self._set_domain_taints(
+                self._graph.latest(binding_route),
+                domain_name="coherence",
+                values=taints,
+            )
+            if latest is not None:
+                self._remember_stream_taints(binding_route, latest)
+        return taints
+
+    def _resolve_write_binding(
+        self, binding_or_request: WriteBinding | LifecycleBinding | RouteLike
+    ) -> WriteBinding:
+        if isinstance(binding_or_request, LifecycleBinding):
+            self._write_bindings[binding_or_request.request.display()] = (
+                binding_or_request.binding
+            )
+            self._lifecycle_bindings[binding_or_request.request.display()] = (
+                binding_or_request
+            )
+            return binding_or_request.binding
+        if isinstance(binding_or_request, WriteBinding):
+            self._write_bindings[binding_or_request.request.display()] = (
+                binding_or_request
+            )
+            return binding_or_request
+        request = self._coerce_route_ref(binding_or_request)
+        if request.display() not in self._write_bindings:
+            raise KeyError(f"no write binding registered for {request.display()}")
+        return self._write_bindings[request.display()]
+
+    def _binding_for_route(self, route_ref: RouteLike) -> WriteBinding | None:
+        route_display = self._route_key(route_ref)
+        for lifecycle in self._lifecycle_bindings.values():
+            if any(
+                route.display() == route_display for route in lifecycle.scope_routes()
+            ):
+                return lifecycle.binding
+        for binding in self._write_bindings.values():
+            for candidate in (
+                binding.request,
+                binding.desired,
+                binding.reported,
+                binding.effective,
+                binding.ack,
+            ):
+                if candidate is not None and candidate.display() == route_display:
+                    return binding
+        return None
+
+    def _lifecycle_binding_for_request(
+        self, binding_or_request: WriteBinding | LifecycleBinding | RouteLike
+    ) -> LifecycleBinding | None:
+        if isinstance(binding_or_request, LifecycleBinding):
+            self._lifecycle_bindings[binding_or_request.request.display()] = (
+                binding_or_request
+            )
+            return binding_or_request
+        if isinstance(binding_or_request, WriteBinding):
+            return self._lifecycle_bindings.get(binding_or_request.request.display())
+        native_route = self._coerce_route_ref(binding_or_request)
+        if native_route.variant != Variant.Request:
+            binding = self._binding_for_route(native_route)
+            if binding is None:
+                return None
+            native_route = binding.request
+        return self._lifecycle_bindings.get(native_route.display())
+
+    def _audit_scope_routes(self, route_ref: RouteLike) -> tuple[RouteRef, ...]:
+        binding = self._binding_for_route(route_ref)
+        if binding is None:
+            return (self._coerce_route_ref(route_ref),)
+        lifecycle = self._lifecycle_binding_for_request(binding)
+        if lifecycle is not None:
+            return lifecycle.scope_routes()
+        return tuple(
+            route
+            for route in (
+                binding.request,
+                binding.desired,
+                binding.reported,
+                binding.effective,
+                binding.ack,
+            )
+            if route is not None
+        )
+
+    def _extend_taints(
+        self,
+        emitted: TypedEnvelope[Any] | ClosedEnvelope,
+        source_taints: Sequence[Any],
+    ) -> TypedEnvelope[Any] | ClosedEnvelope:
+        if not source_taints:
+            return emitted
+        closed = emitted.closed if isinstance(emitted, TypedEnvelope) else emitted
+        existing = list(getattr(closed, "taints", ()))
+        existing_keys = {self._taint_key(taint) for taint in existing}
+        for taint in source_taints:
+            key = self._taint_key(taint)
+            if key in existing_keys:
+                continue
+            existing.append(taint)
+            existing_keys.add(key)
+        updated = self._closed_with_taints(closed, existing)
+        self._replace_recorded_envelope(updated)
+        self._remember_stream_taints(updated.route, updated)
+        return self._replace_item_closed(emitted, updated)
+
+    def _apply_taint_repair(
+        self,
+        emitted: TypedEnvelope[Any] | ClosedEnvelope,
+        source_taints: Sequence[Any],
+        *,
+        repair: TaintRepair | None = None,
+    ) -> TypedEnvelope[Any] | ClosedEnvelope:
+        emitted = self._extend_taints(emitted, source_taints)
+        if repair is None:
+            return emitted
+        closed = emitted.closed if isinstance(emitted, TypedEnvelope) else emitted
+        domain_name = self._taint_domain_name(repair.domain)
+        cleared = set(repair.cleared)
+        if cleared:
+            absorbing = {
+                "determinism": {"DET_NONREPLAYABLE"},
+            }
+            for taint in getattr(closed, "taints", ()):
+                if (
+                    self._taint_domain_name(getattr(taint, "domain", None))
+                    != domain_name
+                ):
+                    continue
+                if getattr(taint, "value_id", None) not in cleared:
+                    continue
+                if getattr(taint, "value_id", None) in absorbing.get(
+                    domain_name, set()
+                ):
+                    raise ValueError(
+                        f"cannot clear absorbing taint {getattr(taint, 'value_id', None)}"
+                    )
+            repaired_taints = [
+                taint
+                for taint in getattr(closed, "taints", ())
+                if not (
+                    self._taint_domain_name(getattr(taint, "domain", None))
+                    == domain_name
+                    and getattr(taint, "value_id", None) in cleared
+                )
+            ]
+            closed = self._closed_with_taints(closed, repaired_taints)
+            emitted = self._replace_item_closed(emitted, closed)
+        existing = list(getattr(closed, "taints", ()))
+        existing_keys = {self._taint_key(taint) for taint in existing}
+        for taint in repair.added:
+            key = self._taint_key(taint)
+            if key in existing_keys:
+                continue
+            existing.append(taint)
+            existing_keys.add(key)
+        updated = self._closed_with_taints(closed, existing)
+        self._replace_recorded_envelope(updated)
+        self._remember_stream_taints(updated.route, updated)
+        return self._replace_item_closed(emitted, updated)
+
+    def _taint_query_items(self, route_ref: RouteLike) -> tuple[str, ...]:
+        key = self._route_key(route_ref)
+        upper_bound = self._stream_taint_upper_bounds.get(key, {})
+        stream_items = tuple(
+            f"stream:{domain}:{value_id}:{getattr(taint, 'origin_id', '')}"
+            for (domain, value_id), taint in sorted(upper_bound.items())
+        )
+
+        event_items: list[str] = []
+        for envelope in self._history.get(key, ()):
+            for taint in getattr(envelope, "taints", ()):
+                event_items.append(
+                    ":".join(
+                        (
+                            "event",
+                            str(envelope.seq_source),
+                            self._taint_domain_name(taint.domain),
+                            taint.value_id,
+                            taint.origin_id,
+                        )
+                    )
+                )
+
+        repair_items = tuple(
+            f"repair:{note}" for note in self._route_repair_notes.get(key, ())
+        )
+        return (*stream_items, *tuple(event_items), *repair_items)
+
+    def _replay_latest_value(
+        self,
+        route_ref: RouteLike,
+        on_next: Callable[[TypedEnvelope[T] | ClosedEnvelope], None],
+    ) -> None:
+        latest = self.latest(route_ref)
+        if latest is not None:
+            on_next(latest)
+
+    def _descriptor_defaults(
+        self, route_ref: RouteRef, native: PortDescriptor | None = None
+    ) -> RouteDescriptor:
+        route_display = route_ref.display()
+        retention = self._retention_policy_for(route_ref)
+        payload_open_policy = (
+            "lazy_external"
+            if route_ref.namespace.layer == Layer.Bulk
+            else "owner_only"
+            if route_ref.namespace.layer == Layer.Internal
+            else getattr(native, "payload_open_policy", None) or "lazy"
+        )
+        debug_enabled = bool(getattr(native, "debug_enabled", True))
+        visibility = self._route_visibility.get(route_display, "private")
+        third_party_subscription_allowed = visibility == "exported"
+        human_description = getattr(native, "human_description", None)
+        if not isinstance(human_description, str) or not human_description.strip():
+            human_description = f"Manyfold port for {route_display}"
+
+        if route_ref.namespace.plane in (Plane.Query, Plane.Debug):
+            producer_kind = getattr(ProducerKind, "QueryService", "query_service")
+        elif (
+            route_ref.namespace.plane == Plane.Write
+            and route_ref.namespace.layer == Layer.Shadow
+        ):
+            producer_kind = getattr(ProducerKind, "Reconciler", "reconciler")
+        elif (
+            route_ref.namespace.plane == Plane.Read
+            and route_ref.namespace.layer == Layer.Raw
+        ):
+            producer_kind = getattr(ProducerKind, "Device", "device")
+        else:
+            producer_kind = getattr(ProducerKind, "Application", "application")
+
+        return RouteDescriptor(
+            identity=DescriptorIdentityBlock(
+                route_ref=route_ref,
+                namespace_ref=route_ref.namespace,
+                producer_ref=ProducerRef(
+                    producer_id=route_ref.namespace.owner,
+                    kind=producer_kind,
+                ),
+                owning_runtime_kind="in_memory",
+                stream_family=route_ref.family,
+                stream_variant=getattr(
+                    route_ref.variant, "value", str(route_ref.variant)
+                ).lower(),
+                aliases=(route_display,),
+                human_description=human_description,
+            ),
+            schema=DescriptorSchemaBlock(
+                schema_ref=route_ref.schema,
+                payload_kind="structured",
+                codec_ref="identity",
+                structured_payload_type=route_ref.schema.schema_id,
+                payload_open_policy=payload_open_policy,
+            ),
+            time=DescriptorTimeBlock(
+                clock_domain=(
+                    "ephemeral"
+                    if route_ref.namespace.layer == Layer.Ephemeral
+                    else "control_epoch"
+                    if route_ref.namespace.plane == Plane.Write
+                    else "monotonic"
+                ),
+                event_time_policy="control_epoch_or_ingest"
+                if route_ref.namespace.plane == Plane.Write
+                else "ingest",
+                processing_time_allowed=True,
+                watermark_policy="recommended"
+                if route_ref.namespace.layer == Layer.Bulk
+                else "none",
+                control_epoch_policy="allowed"
+                if route_ref.namespace.plane == Plane.Write
+                else "optional",
+                ttl_policy="ttl_required"
+                if route_ref.namespace.layer == Layer.Ephemeral
+                else "retain_latest",
+            ),
+            ordering=DescriptorOrderingBlock(
+                partition_spec="unpartitioned",
+                sequence_source_kind="route_local",
+                resequence_policy="none",
+                dedupe_policy="none",
+                causality_policy="opaque",
+            ),
+            flow=self._resolved_route_flow_policy(route_ref, native),
+            retention=DescriptorRetentionBlock(
+                latest_replay_policy=retention.latest_replay_policy,
+                durability_class=retention.durability_class,
+                replay_window=retention.replay_window,
+                payload_retention_policy=retention.payload_retention_policy,
+            ),
+            security=DescriptorSecurityBlock(
+                read_capabilities=("read",),
+                write_capabilities=("write",),
+                payload_open_capabilities=("payload_open",),
+                redaction_policy="none",
+                integrity_policy="best_effort",
+            ),
+            visibility=DescriptorVisibilityBlock(
+                private_or_exported=visibility,
+                third_party_subscription_allowed=third_party_subscription_allowed,
+                query_plane_visibility="exported"
+                if third_party_subscription_allowed
+                else "owner",
+                debug_plane_visibility="exported"
+                if third_party_subscription_allowed
+                else "owner",
+            ),
+            environment=DescriptorEnvironmentBlock(
+                locality="process",
+                transport_preferences=(
+                    ("memory", "bulk_link")
+                    if route_ref.namespace.layer == Layer.Bulk
+                    else ("memory",)
+                ),
+                device_class="generic",
+                resource_class="standard",
+                ephemeral_scope=route_ref.namespace.owner
+                if route_ref.namespace.layer == Layer.Ephemeral
+                else None,
+            ),
+            debug=DescriptorDebugBlock(
+                audit_enabled=debug_enabled,
+                trace_enabled=debug_enabled,
+                metrics_enabled=True,
+                payload_peek_allowed=route_ref.namespace.layer != Layer.Bulk,
+                explain_enabled=True,
+            ),
+        )
+
+    def _watermark_snapshot_for_route(self, route_ref: RouteRef) -> WatermarkSnapshot:
+        descriptor = self.describe_route(route_ref)
+        latest = self._graph.latest(route_ref)
+        latest_seq_source = None if latest is None else latest.seq_source
+        latest_control_epoch = None if latest is None else latest.control_epoch
+        current_watermark = latest_control_epoch
+        if current_watermark is None and descriptor.time.watermark_policy != "none":
+            current_watermark = latest_seq_source
+        return WatermarkSnapshot(
+            route_display=route_ref.display(),
+            partition_spec=descriptor.ordering.partition_spec,
+            clock_domain=descriptor.time.clock_domain,
+            event_time_policy=descriptor.time.event_time_policy,
+            watermark_policy=descriptor.time.watermark_policy,
+            latest_seq_source=latest_seq_source,
+            latest_control_epoch=latest_control_epoch,
+            current_watermark=current_watermark,
+        )
+
+    def _scheduled_target_route(self, scheduled: ScheduledWrite) -> RouteRef:
+        if isinstance(scheduled.target, WriteBinding):
+            return scheduled.target.request
+        return self._coerce_route_ref(scheduled.target)
+
+    def _latest_closed(self, route_ref: RouteLike) -> ClosedEnvelope | None:
+        latest = self.latest(route_ref)
+        if isinstance(latest, TypedEnvelope):
+            return latest.closed
+        return latest
+
+    def _ack_observed_after(self, ack_route: RouteLike, baseline_seq: int) -> bool:
+        latest = self._latest_closed(ack_route)
+        return latest is not None and latest.seq_source > baseline_seq
+
+    def _scheduled_write_snapshot(
+        self,
+        scheduled: ScheduledWrite,
+    ) -> ScheduledWriteSnapshot | None:
+        target_route = self._scheduled_target_route(scheduled)
+        if (
+            scheduled.expires_at_epoch is not None
+            and self._scheduler_epoch > scheduled.expires_at_epoch
+        ):
+            return None
+        ack_observed = False
+        next_retry_epoch = None
+        if scheduled.attempt_count > 0 and scheduled.ack_route is not None:
+            ack_observed = self._ack_observed_after(
+                scheduled.ack_route,
+                scheduled.ack_baseline_seq,
+            )
+            if scheduled.retry_policy is not None:
+                next_retry_epoch = (
+                    self._scheduler_epoch
+                    if scheduled.last_attempt_epoch is None
+                    else scheduled.last_attempt_epoch
+                    + scheduled.retry_policy.backoff_epochs
+                    + 1
+                )
+        else:
+            ack_observed = (
+                scheduled.wait_for_ack is None
+                or self.latest(scheduled.wait_for_ack) is not None
+            )
+        epoch_ready = (
+            scheduled.not_before_epoch is None
+            or self._scheduler_epoch >= scheduled.not_before_epoch
+        )
+        retry_ready = (
+            next_retry_epoch is None or self._scheduler_epoch >= next_retry_epoch
+        )
+        ready_now = epoch_ready and ack_observed and retry_ready
+        return ScheduledWriteSnapshot(
+            route_display=target_route.display(),
+            scheduler_epoch=self._scheduler_epoch,
+            not_before_epoch=scheduled.not_before_epoch,
+            wait_for_ack_route=None
+            if scheduled.wait_for_ack is None
+            else self._route_key(scheduled.wait_for_ack),
+            expires_at_epoch=scheduled.expires_at_epoch,
+            ack_route=None
+            if scheduled.ack_route is None
+            else self._route_key(scheduled.ack_route),
+            ack_observed=ack_observed,
+            attempt_count=scheduled.attempt_count,
+            last_attempt_epoch=scheduled.last_attempt_epoch,
+            next_retry_epoch=next_retry_epoch,
+            ready_now=ready_now,
+        )
+
+    def _make_internal_route(
+        self,
+        *,
+        plane: Plane,
+        layer: Layer,
+        owner: str,
+        family: str,
+        stream: str,
+        variant: Variant,
+        schema_id: str,
+    ) -> RouteRef:
+        """Construct graph-owned internal routes for query/debug/state plumbing."""
+        return RouteRef(
+            namespace=NamespaceRef(plane=plane, layer=layer, owner=owner),
+            family=family,
+            stream=stream,
+            variant=variant,
+            schema=SchemaRef(schema_id=schema_id, version=1),
+        )
+
+    def _debug_route(self, event_type: str) -> RouteRef:
+        """Return the well-known route backing one debug event stream."""
+        if event_type not in self._debug_routes:
+            self._debug_routes[event_type] = self.register_port(
+                self._make_internal_route(
+                    plane=Plane.Debug,
+                    layer=Layer.Internal,
+                    owner="manyfold",
+                    family="debug",
+                    stream=event_type,
+                    variant=Variant.Event,
+                    schema_id="DebugEvent",
+                )
+            )
+        return self._debug_routes[event_type]
+
+    def _emit_debug_event(
+        self, event_type: str, detail: str, route_ref: RouteLike | None = None
+    ) -> DebugEvent:
+        """Emit a debug event on both the in-memory audit log and a debug route."""
+        debug_route = self._debug_route(event_type)
+        payload = json.dumps(
+            {
+                "event_type": event_type,
+                "detail": detail,
+                "route_display": None
+                if route_ref is None
+                else self._route_key(route_ref),
+            },
+            sort_keys=True,
+        ).encode()
+        envelope = self._graph.writable_port(debug_route).write(payload)
+        self._record_envelope(debug_route, envelope, producer_id="debug")
+        event = DebugEvent(
+            event_type=event_type,
+            detail=detail,
+            route_display=None if route_ref is None else self._route_key(route_ref),
+            seq_source=envelope.seq_source,
+        )
+        self._audit_events.append(event)
+        return event
+
+    def _correlation_id(self) -> str:
+        self._query_sequence += 1
+        return f"query-{self._query_sequence}"
+
+    def _authorize(
+        self, principal_id: str | None, route_ref: RouteLike | None, capability: str
+    ) -> None:
+        """Enforce per-route capability checks for third-party access."""
+        if principal_id in (None, "", "python", "internal"):
+            return
+        if capability == "graph_validation":
+            for grant in self._capability_grants.values():
+                if grant.principal_id == principal_id and grant.graph_validation:
+                    return
+            raise PermissionError(f"{principal_id} lacks graph validation capability")
+        if route_ref is None:
+            raise PermissionError(f"{principal_id} lacks {capability} capability")
+        key = (principal_id, self._route_key(route_ref))
+        grant = self._capability_grants.get(key)
+        if grant is None:
+            if (
+                capability == "metadata_read"
+                and self._route_visibility.get(key[1]) == "exported"
+            ):
+                return
+            raise PermissionError(
+                f"{principal_id} lacks {capability} capability for {key[1]}"
+            )
+        if not getattr(grant, capability):
+            raise PermissionError(
+                f"{principal_id} lacks {capability} capability for {key[1]}"
+            )
+
+    def _execute_query(self, request: QueryRequest) -> tuple[str, ...]:
+        """Resolve query commands against the current in-memory graph state."""
+        command = request.command.lower()
+        route_ref = (
+            None if request.route is None else self._coerce_route_ref(request.route)
+        )
+        if command == "catalog":
+            return tuple(route.display() for route in self.catalog())
+        if command == "describe_route":
+            if route_ref is None:
+                raise ValueError("describe_route requires a route")
+            self._authorize(request.principal_id, route_ref, "metadata_read")
+            descriptor = self.describe_route(route_ref)
+            return (
+                descriptor.route_display,
+                descriptor.human_description,
+                descriptor.payload_open_policy,
+                descriptor.backpressure_policy,
+            )
+        if command == "latest":
+            if route_ref is None:
+                raise ValueError("latest requires a route")
+            self._authorize(request.principal_id, route_ref, "metadata_read")
+            latest = self.latest(route_ref)
+            if latest is None:
+                return ()
+            return (
+                latest.route.display(),
+                str(latest.seq_source),
+                latest.payload_ref.payload_id,
+            )
+        if command == "topology":
+            return tuple(f"{left}->{right}" for left, right in self.topology())
+        if command == "replay":
+            if route_ref is None:
+                raise ValueError("replay requires a route")
+            self._authorize(request.principal_id, route_ref, "replay_read")
+            return tuple(
+                str(envelope.seq_source) for envelope in self.replay(route_ref)
+            )
+        if command == "subscribers":
+            if route_ref is None:
+                raise ValueError("subscribers requires a route")
+            self._authorize(request.principal_id, route_ref, "metadata_read")
+            return (str(self.subscribers(route_ref)),)
+        if command == "writers":
+            if route_ref is None:
+                raise ValueError("writers requires a route")
+            self._authorize(request.principal_id, route_ref, "metadata_read")
+            return tuple(sorted(self.writers(route_ref)))
+        if command == "validate_graph":
+            self._authorize(request.principal_id, None, "graph_validation")
+            return tuple(self.validate_graph())
+        if command == "explain_join":
+            if request.join_name is None:
+                raise ValueError("explain_join requires a join_name")
+            plan = self.explain_join(request.join_name)
+            return (
+                plan.name,
+                plan.join_class,
+                *(node.display() for node in plan.visible_nodes),
+                *plan.taint_implications,
+            )
+        if command == "open_payload":
+            if route_ref is None:
+                raise ValueError("open_payload requires a route")
+            self._authorize(request.principal_id, route_ref, "payload_open")
+            payload = self.open_payload(route_ref)
+            if payload is None:
+                return ()
+            return (payload.decode("utf-8", errors="replace"),)
+        if command == "payload_demand":
+            if route_ref is None:
+                raise ValueError("payload_demand requires a route")
+            self._authorize(request.principal_id, route_ref, "metadata_read")
+            snapshot = self.payload_demand_snapshot(route_ref)
+            return (
+                snapshot.route_display,
+                str(snapshot.metadata_events),
+                str(snapshot.payload_open_requests),
+                str(snapshot.lazy_source_opens),
+                str(snapshot.materialized_payload_bytes),
+                str(snapshot.cache_hits),
+                str(snapshot.unopened_lazy_payloads),
+            )
+        if command == "watermark":
+            if route_ref is None:
+                return tuple(
+                    f"{snapshot.route_display}|{snapshot.current_watermark}|{snapshot.latest_seq_source}|{snapshot.latest_control_epoch}"
+                    for snapshot in self.watermark_snapshot()
+                )
+            self._authorize(request.principal_id, route_ref, "metadata_read")
+            snapshot = self.watermark_snapshot(route_ref)
+            return (
+                snapshot.route_display,
+                snapshot.partition_spec,
+                snapshot.clock_domain,
+                snapshot.event_time_policy,
+                snapshot.watermark_policy,
+                str(snapshot.latest_seq_source),
+                str(snapshot.latest_control_epoch),
+                str(snapshot.current_watermark),
+            )
+        if command == "audit":
+            self._authorize(request.principal_id, route_ref, "debug_read")
+            return tuple(
+                f"{event.event_type}:{event.detail}" for event in self.audit(route_ref)
+            )
+        if command == "route_audit":
+            if route_ref is None:
+                raise ValueError("route_audit requires a route")
+            self._authorize(request.principal_id, route_ref, "debug_read")
+            snapshot = self.route_audit(route_ref)
+            return (
+                snapshot.route_display,
+                f"scope={','.join(snapshot.scope_routes)}",
+                f"producers={','.join(snapshot.recent_producers)}",
+                f"subscribers={','.join(snapshot.active_subscribers)}",
+                f"writes={','.join(snapshot.related_write_requests)}",
+                f"taints={','.join(snapshot.taint_upper_bounds)}",
+                f"repairs={','.join(snapshot.repair_notes)}",
+                f"events={','.join(snapshot.recent_debug_events)}",
+            )
+        if command in {"lineage", "trace"}:
+            if route_ref is not None:
+                self._authorize(request.principal_id, route_ref, "debug_read")
+            else:
+                self._authorize(request.principal_id, None, "graph_validation")
+            return tuple(
+                record.display()
+                for record in self.lineage(
+                    route_ref,
+                    trace_id=request.lineage_trace_id,
+                    causality_id=request.lineage_causality_id,
+                    correlation_id=request.lineage_correlation_id,
+                )
+            )
+        if command == "shadow":
+            if route_ref is None:
+                raise ValueError("shadow requires a write request route")
+            self._authorize(request.principal_id, route_ref, "metadata_read")
+            shadow = self.shadow_state(route_ref)
+            return tuple(
+                item
+                for item in (
+                    None if shadow.request is None else str(shadow.request.seq_source),
+                    None if shadow.desired is None else str(shadow.desired.seq_source),
+                    None
+                    if shadow.reported is None
+                    else str(shadow.reported.seq_source),
+                    None
+                    if shadow.effective is None
+                    else str(shadow.effective.seq_source),
+                    None if shadow.ack is None else str(shadow.ack.seq_source),
+                    "pending" if shadow.pending_write else "stable",
+                    *shadow.coherence_taints,
+                )
+                if item is not None
+            )
+        if command == "taints":
+            if route_ref is None:
+                raise ValueError("taints requires a route")
+            self._authorize(request.principal_id, route_ref, "metadata_read")
+            return self._taint_query_items(route_ref)
+        if command == "credit_snapshot":
+            if route_ref is None:
+                return tuple(
+                    f"{snapshot.route_display}|{snapshot.available}|{snapshot.blocked_senders}|{snapshot.dropped_messages}"
+                    for snapshot in self.credit_snapshot()
+                )
+            self._authorize(request.principal_id, route_ref, "metadata_read")
+            snapshot = self.flow_snapshot(route_ref)
+            return (
+                snapshot.route_display,
+                str(snapshot.available),
+                str(snapshot.blocked_senders),
+                str(snapshot.dropped_messages),
+                snapshot.backpressure_policy,
+            )
+        if command == "scheduler":
+            if route_ref is None:
+                self._authorize(request.principal_id, None, "graph_validation")
+                return tuple(
+                    "|".join(
+                        (
+                            snapshot.route_display,
+                            str(snapshot.scheduler_epoch),
+                            str(snapshot.attempt_count),
+                            str(snapshot.ready_now),
+                            str(snapshot.ack_observed),
+                            str(snapshot.not_before_epoch),
+                            str(snapshot.next_retry_epoch),
+                        )
+                    )
+                    for snapshot in self.scheduler_snapshot()
+                )
+            self._authorize(request.principal_id, route_ref, "metadata_read")
+            return tuple(
+                "|".join(
+                    (
+                        snapshot.route_display,
+                        str(snapshot.scheduler_epoch),
+                        str(snapshot.attempt_count),
+                        str(snapshot.ready_now),
+                        str(snapshot.ack_observed),
+                        str(snapshot.not_before_epoch),
+                        str(snapshot.next_retry_epoch),
+                    )
+                )
+                for snapshot in self.scheduler_snapshot(route_ref)
+            )
+        raise ValueError(f"unsupported query command: {request.command}")
+
+    def _read_port(self, route_ref: RouteLike) -> ReactiveReadablePort:
+        native_route = self._coerce_route_ref(route_ref)
+        return ReactiveReadablePort(self, native_route, self._graph.read(native_route))
+
+    def _write_port(self, target: WriteTarget) -> WriteBinding | ReactiveWritablePort:
+        if isinstance(target, LifecycleBinding):
+            self._write_bindings[target.request.display()] = target.binding
+            self._lifecycle_bindings[target.request.display()] = target
+            return self._graph.register_binding(
+                target.request.display(), target.binding
+            )
+        if isinstance(target, WriteBinding):
+            self._write_bindings[target.request.display()] = target
+            return self._graph.register_binding(target.request.display(), target)
+        native_route = self._coerce_route_ref(target)
+        return ReactiveWritablePort(
+            self, native_route, self._graph.writable_port(native_route)
+        )
+
+    def _emit_native(
+        self,
+        route_ref: RouteRef,
+        payload: bytes,
+        *,
+        producer: ProducerRef | None = None,
+        control_epoch: int | None = None,
+    ) -> list[ClosedEnvelope]:
+        _validate_control_epoch(control_epoch)
+        if hasattr(self._graph, "emit"):
+            return cast(
+                list[ClosedEnvelope],
+                self._graph.emit(
+                    route_ref, payload, producer=producer, control_epoch=control_epoch
+                ),
+            )
+        envelope = self._graph.writable_port(route_ref).write(
+            payload,
+            producer=producer,
+            control_epoch=control_epoch,
+        )
+        return [envelope]
+
+    def _observe_observable(
+        self,
+        route_ref: RouteLike,
+        *,
+        replay_latest: bool = True,
+        subscriber_id: str | None = None,
+        thread_placement: NodeThreadPlacement | None = None,
+    ) -> Observable[Any]:
+        """Compatibility observable for route updates.
+
+        Typed routes decode payloads before delivery; raw route refs expose the
+        underlying closed envelopes.
+        """
+        native_route = self._coerce_route_ref(route_ref)
+        typed_route = self._typed_route(route_ref)
+
+        def subscribe(
+            observer: ObserverLike[Any],
+            scheduler: object | None = None,
+        ) -> SubscriptionLike:
+            key = self._route_key(native_route)
+            resolved_subscriber_id = subscriber_id or self._next_subscriber_id()
+            self._subscriber_count[key] = self._subscriber_count.get(key, 0) + 1
+            self._route_subscribers.setdefault(key, set()).add(resolved_subscriber_id)
+
+            if typed_route is not None:
+                # Typed observers see decoded values, but the graph internally
+                # continues to fan out closed envelopes on one shared subject.
+                class _Observer:
+                    def on_next(_, envelope) -> None:
+                        observer.on_next(self._decode_envelope(typed_route, envelope))
+
+                    def on_error(_, error: Exception) -> None:
+                        observer.on_error(error)
+
+                    def on_completed(_) -> None:
+                        observer.on_completed()
+
+                inner = self._subject_for(native_route).subscribe(
+                    _Observer(), scheduler=scheduler
+                )
+            else:
+                inner = self._subject_for(native_route).subscribe(
+                    observer, scheduler=scheduler
+                )
+            try:
+                if replay_latest:
+                    latest = self.latest(route_ref)
+                    if latest is not None:
+                        observer.on_next(latest)
+            except Exception:
+                self._subscriber_count[key] -= 1
+                subscribers = self._route_subscribers.get(key)
+                if subscribers is not None:
+                    subscribers.discard(resolved_subscriber_id)
+                inner.dispose()
+                raise
+            return _TrackedSubscription(
+                self,
+                native_route,
+                inner,
+                resolved_subscriber_id,
+            )
+
+        return self._thread_placed_observable(
+            rx.create(subscribe),
+            thread_placement,
+        )
+
+    def _pipeline_value_observable(
+        self,
+        route_ref: RouteLike,
+        *,
+        replay_latest: bool,
+        subscriber_id: str | None,
+        thread_placement: NodeThreadPlacement | None = None,
+    ) -> Observable[Any]:
+        native_route = self._coerce_route_ref(route_ref)
+
+        def subscribe(
+            observer: ObserverLike[Any],
+            scheduler: object | None = None,
+        ) -> SubscriptionLike:
+            def on_next(item: TypedEnvelope[Any] | ClosedEnvelope) -> None:
+                observer.on_next(self._operator_value(route_ref, native_route, item))
+
+            return self._observe_observable(
+                route_ref,
+                replay_latest=replay_latest,
+                subscriber_id=subscriber_id,
+            ).subscribe(
+                on_next,
+                observer.on_error,
+                observer.on_completed,
+                scheduler=scheduler,
+            )
+
+        return self._thread_placed_observable(
+            rx.create(subscribe),
+            thread_placement,
+        )
+
+    def _thread_placed_observable(
+        self,
+        observable: Observable[Any],
+        placement: NodeThreadPlacement | None,
+    ) -> Observable[Any]:
+        if placement is None:
+            return observable
+        if placement.kind == "main":
+            return reactive_threads.deliver_on_frame_thread(observable)
+
+        def subscribe(
+            observer: ObserverLike[Any],
+            scheduler: object | None = None,
+        ) -> SubscriptionLike:
+            thread_scheduler, owns_scheduler = self._thread_scheduler_for(placement)
+            inner = observable.pipe(ops.observe_on(thread_scheduler)).subscribe(
+                observer,
+                scheduler=scheduler,
+            )
+            return _ThreadPlacementSubscription(
+                inner,
+                owned_scheduler=thread_scheduler if owns_scheduler else None,
+            )
+
+        return rx.create(subscribe)
+
+    def _thread_scheduler_for(
+        self,
+        placement: NodeThreadPlacement,
+    ) -> tuple[object, bool]:
+        if placement.kind == "background":
+            return reactive_threads.background_scheduler(), False
+        if placement.kind == "pooled":
+            if placement.scheduler_name == "blocking_io":
+                return reactive_threads.blocking_io_scheduler(), False
+            if placement.scheduler_name == "input":
+                return reactive_threads.input_scheduler(), False
+            return reactive_threads.background_scheduler(), False
+        thread_name = placement.thread_name or self._next_pipeline_node_name("isolated")
+        return (
+            EventLoopScheduler(
+                thread_factory=reactive_threads.create_default_thread_factory(
+                    thread_name,
+                )
+            ),
+            True,
+        )
+
+    def _pipeline_output_route(self, node_name: str) -> TypedRoute[Any]:
+        route_id = next(_PIPELINE_ROUTE_IDS)
+        safe_name = (
+            "".join(
+                char if char.isalnum() or char in ("-", "_") else "-"
+                for char in node_name
+            ).strip("-")
+            or "node"
+        )
+        return route(
+            plane=Plane.Read,
+            layer=Layer.Internal,
+            owner=OwnerName("manyfold.graph"),
+            family=StreamFamily("pipeline"),
+            stream=StreamName(f"{safe_name}-{route_id}"),
+            variant=Variant.Event,
+            schema=Schema.any(f"ManyfoldPipeline{route_id}"),
+        )
+
+    def _connect_callback_pipeline(
+        self,
+        source: RouteLike,
+        node: CallbackNode[Any],
+        *,
+        replay_latest: bool,
+        subscriber_id: str | None,
+        thread_placement: NodeThreadPlacement | None,
+    ) -> GraphConnection:
+        self.register_diagram_node(
+            node.name,
+            input_routes=(source,),
+            thread_placement=thread_placement,
+        )
+        try:
+            subscription = self._pipeline_value_observable(
+                source,
+                replay_latest=replay_latest,
+                subscriber_id=subscriber_id,
+                thread_placement=thread_placement,
+            ).subscribe(node.receive)
+        except Exception:
+            self._diagram_nodes.pop(node.name, None)
+            raise
+        return GraphConnection(
+            self,
+            name=node.name,
+            subscriptions=(subscription,),
+            nodes=(node.name,),
+        )
+
+    def _connect_route_pipeline(
+        self,
+        source: RouteLike,
+        target: RouteLike,
+        *,
+        replay_latest: bool,
+        subscriber_id: str | None,
+        name: str | None = None,
+        thread_placement: NodeThreadPlacement | None = None,
+    ) -> GraphConnection:
+        connection_name = name or self._next_pipeline_node_name("route")
+        self.connect(source=source, sink=target)
+
+        def publish(value: Any) -> None:
+            self.publish(target, value)
+
+        try:
+            subscription = self._pipeline_value_observable(
+                source,
+                replay_latest=replay_latest,
+                subscriber_id=subscriber_id,
+                thread_placement=thread_placement,
+            ).subscribe(publish)
+        except Exception:
+            self.disconnect(source=source, sink=target)
+            raise
+        return GraphConnection(
+            self,
+            name=connection_name,
+            subscriptions=(subscription,),
+            edges=((source, target),),
+        )
+
+    def _connect_transform_pipeline(
+        self,
+        pipeline: RoutePipeline[Any],
+        node: MapNode[Any, Any] | FilterNode[Any],
+        apply: Callable[[Any], tuple[bool, Any]],
+        metadata: dict[str, Any] | None = None,
+    ) -> RoutePipeline[Any]:
+        output = self._pipeline_output_route(node.name)
+        thread_placement = node.thread_placement or pipeline._thread_placement
+        self.register_diagram_node(
+            node.name,
+            input_routes=(pipeline.route,),
+            output_routes=(output,),
+            metadata=metadata,
+            thread_placement=thread_placement,
+        )
+
+        def on_next(value: Any) -> None:
+            should_emit, next_value = apply(value)
+            if should_emit:
+                self.publish(output, next_value)
+
+        try:
+            subscription = self._pipeline_value_observable(
+                pipeline.route,
+                replay_latest=pipeline._replay_latest,
+                subscriber_id=pipeline._subscriber_id,
+                thread_placement=thread_placement,
+            ).subscribe(on_next)
+        except Exception:
+            self._diagram_nodes.pop(node.name, None)
+            raise
+        connection = GraphConnection(
+            self,
+            name=node.name,
+            subscriptions=(subscription,),
+            nodes=(node.name,),
+        )
+        return RoutePipeline(
+            self,
+            output,
+            replay_latest=True,
+            connections=(*pipeline._connections, connection),
+            thread_placement=thread_placement,
+            previous_thread_placements=pipeline._previous_thread_placements,
+        )
+
+    def _connect_coalesce_latest_pipeline(
+        self,
+        pipeline: RoutePipeline[T],
+        node: CoalesceLatestNode[T],
+    ) -> RoutePipeline[T]:
+        output = self._pipeline_output_route(node.name)
+        thread_placement = pipeline._thread_placement
+        self.register_diagram_node(
+            node.name,
+            input_routes=(pipeline.route,),
+            output_routes=(output,),
+            thread_placement=thread_placement,
+        )
+
+        def publish(value: T) -> None:
+            self.publish(output, value)
+
+        coalesced = node.observable(
+            self._pipeline_value_observable(
+                pipeline.route,
+                replay_latest=pipeline._replay_latest,
+                subscriber_id=pipeline._subscriber_id,
+                thread_placement=thread_placement,
+            )
+        )
+        try:
+            subscription = coalesced.subscribe(publish)
+        except Exception:
+            self._diagram_nodes.pop(node.name, None)
+            raise
+        connection = GraphConnection(
+            self,
+            name=node.name,
+            subscriptions=(subscription,),
+            nodes=(node.name,),
+        )
+        return RoutePipeline(
+            self,
+            output,
+            replay_latest=True,
+            connections=(*pipeline._connections, connection),
+            thread_placement=thread_placement,
+            previous_thread_placements=pipeline._previous_thread_placements,
+        )
+
+    def _connect_logging_pipeline(
+        self,
+        pipeline: RoutePipeline[T],
+        node: PipelineLoggingNode[T],
+    ) -> RoutePipeline[T]:
+        output = self._pipeline_output_route(node.name)
+        thread_placement = node.thread_placement or pipeline._thread_placement
+        self.register_diagram_node(
+            node.name,
+            input_routes=(pipeline.route,),
+            output_routes=(output,),
+            thread_placement=thread_placement,
+        )
+
+        def publish(value: T) -> None:
+            self.publish(output, value)
+
+        logged = node.observable(
+            self._pipeline_value_observable(
+                pipeline.route,
+                replay_latest=pipeline._replay_latest,
+                subscriber_id=pipeline._subscriber_id,
+                thread_placement=thread_placement,
+            )
+        )
+        try:
+            subscription = logged.subscribe(publish)
+        except Exception:
+            self._diagram_nodes.pop(node.name, None)
+            raise
+        connection = GraphConnection(
+            self,
+            name=node.name,
+            subscriptions=(subscription,),
+            nodes=(node.name,),
+        )
+        return RoutePipeline(
+            self,
+            output,
+            replay_latest=True,
+            connections=(*pipeline._connections, connection),
+            thread_placement=thread_placement,
+            previous_thread_placements=pipeline._previous_thread_placements,
+        )
+
+    def _apply_registered_pipeline_operation(
+        self,
+        pipeline: RoutePipeline[Any],
+        operation: str,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
+        factory = self._pipeline_factories.get(operation)
+        if factory is None:
+            raise AttributeError(operation)
+        node = factory(*args, **kwargs)
+        if isinstance(node, MapNode):
+            return self._connect_transform_pipeline(
+                pipeline,
+                node,
+                lambda value: (True, node.transform(value)),
+            )
+        if isinstance(node, FilterNode):
+            return self._connect_transform_pipeline(
+                pipeline,
+                node,
+                lambda value: (node.predicate(value), value),
+            )
+        if isinstance(node, CoalesceLatestNode):
+            return self._connect_coalesce_latest_pipeline(pipeline, node)
+        if isinstance(node, PipelineLoggingNode):
+            return self._connect_logging_pipeline(pipeline, node)
+        if isinstance(node, CallbackNode):
+            return pipeline.connect(
+                node.with_thread_placement(
+                    node.thread_placement or pipeline._thread_placement
+                )
+            )
+        raise TypeError(
+            f"registered pipeline operation {operation!r} returned unsupported node {type(node).__name__}"
+        )
+
+    def _tick_control_loop(self, name: str) -> ClosedEnvelope:
+        return self._graph.tick_control_loop(name)
+
+    def _diagram_edges(self) -> tuple[tuple[str, str], ...]:
+        edges = list(self.topology())
+        for node in self._diagram_nodes.values():
+            node_key = self._diagram_registered_node_key(node.name)
+            edges.extend((route, node_key) for route in node.input_routes)
+            edges.extend((node_key, route) for route in node.output_routes)
+        edges.extend(
+            (
+                self._diagram_registered_node_key(parent),
+                self._diagram_registered_node_key(child),
+            )
+            for parent, child in sorted(self._context_edges)
+        )
+        return tuple(edges)
+
+    @staticmethod
+    def _diagram_registered_node_key(name: str) -> str:
+        return f"node:{name}"
+
+    def _diagram_node_metadata(
+        self,
+        node_name: str,
+        route_refs: dict[str, RouteRef],
+    ) -> dict[str, str]:
+        if node_name.startswith("node:"):
+            node = self._diagram_nodes.get(node_name.removeprefix("node:"))
+            if node is not None:
+                return self._diagram_registered_node_metadata(node)
+        return self._diagram_route_metadata(node_name, route_refs)
+
+    def _diagram_registered_node_metadata(self, node: DiagramNode) -> dict[str, str]:
+        group = node.group or "nodes"
+        metadata = dict(node.metadata)
+        metadata.update(
+            {
+                "display": self._diagram_registered_node_key(node.name),
+                "plane": "node",
+                "layer": "node",
+                "owner": group,
+                "family": group,
+                "stream": node.name,
+                "variant": "node",
+                "label": node.name,
+                "thread": (
+                    ""
+                    if node.thread_placement is None
+                    else node.thread_placement.display()
+                ),
+            }
+        )
+        return metadata
+
+    def _diagram_route_metadata(
+        self,
+        route_display: str,
+        route_refs: dict[str, RouteRef],
+    ) -> dict[str, str]:
+        route_ref = route_refs.get(route_display)
+        if route_ref is None:
+            return {
+                "display": route_display,
+                "plane": "",
+                "layer": "",
+                "owner": "",
+                "family": "",
+                "stream": route_display,
+                "variant": "",
+                "label": route_display,
+            }
+        plane = self._diagram_value(route_ref.namespace.plane)
+        layer = self._diagram_value(route_ref.namespace.layer)
+        owner = self._diagram_value(route_ref.namespace.owner)
+        family = self._diagram_value(route_ref.family)
+        stream = self._diagram_value(route_ref.stream)
+        variant = self._diagram_value(route_ref.variant).lower()
+        label = f"{family}.{stream}<br/>{variant}"
+        return {
+            "display": route_display,
+            "plane": plane,
+            "layer": layer,
+            "owner": owner,
+            "family": family,
+            "stream": stream,
+            "variant": variant,
+            "label": label,
+        }
+
+    @staticmethod
+    def _diagram_value(value: Any) -> str:
+        raw = getattr(value, "value", value)
+        return str(raw)
+
+    @staticmethod
+    def _diagram_escape(value: str) -> str:
+        return (
+            value.replace("\\", "\\\\")
+            .replace("\r\n", " ")
+            .replace("\n", " ")
+            .replace("\r", " ")
+            .replace('"', '\\"')
+        )
+
+    def _diagram_node_line(self, node_id: str, metadata: dict[str, str]) -> str:
+        label = self._diagram_escape(metadata["label"])
+        return f'    {node_id}["{label}"]'
+
+    def _unsafe_write_feedback_issues(self) -> list[str]:
+        adjacency: dict[str, set[str]] = {}
+        route_refs: dict[str, RouteRef] = {}
+        for left, right in self.topology():
+            adjacency.setdefault(left, set()).add(right)
+        for catalog_route in self.catalog():
+            route_refs[catalog_route.display()] = catalog_route
+
+        issues: list[str] = []
+        for binding in self._write_bindings.values():
+            request = binding.request.display()
+            feedback_sources = (
+                binding.reported.display(),
+                binding.effective.display(),
+            )
+            for feedback_source in feedback_sources:
+                if not self._path_exists(adjacency, feedback_source, request):
+                    continue
+                if not self._path_has_unprotected_feedback(
+                    adjacency, route_refs, feedback_source, request
+                ):
+                    continue
+                ack_seen = (
+                    binding.ack is not None and self.latest(binding.ack) is not None
+                )
+                if ack_seen:
+                    continue
+                issues.append(
+                    f"Unsafe write-back loop from {feedback_source} to {request} lacks mailbox, internal boundary, epoch guard, or ack barrier"
+                )
+        return issues
+
+    @staticmethod
+    def _path_exists(adjacency: dict[str, set[str]], start: str, goal: str) -> bool:
+        pending = [start]
+        seen: set[str] = set()
+        while pending:
+            current = pending.pop()
+            if current == goal:
+                return True
+            if current in seen:
+                continue
+            seen.add(current)
+            pending.extend(adjacency.get(current, ()))
+        return False
+
+    @staticmethod
+    def _path_has_unprotected_feedback(
+        adjacency: dict[str, set[str]],
+        route_refs: dict[str, RouteRef],
+        start: str,
+        goal: str,
+    ) -> bool:
+        pending: list[tuple[str, bool]] = [(start, False)]
+        seen: set[tuple[str, bool]] = set()
+        while pending:
+            current, has_boundary = pending.pop()
+            if current == goal:
+                if not has_boundary:
+                    return True
+                continue
+            state = (current, has_boundary)
+            if state in seen:
+                continue
+            seen.add(state)
+            route = route_refs.get(current)
+            next_has_boundary = has_boundary or (
+                route is not None and route.namespace.layer == Layer.Internal
+            )
+            for neighbor in adjacency.get(current, ()):
+                pending.append((neighbor, next_has_boundary))
+        return False
 
 
 def _require_non_empty_text(value: str, field_name: str) -> None:
@@ -7843,3 +7782,65 @@ def _validate_control_epoch(control_epoch: int | None) -> None:
         ) from exc
     if control_epoch < 0:
         raise ValueError("control_epoch must be a non-negative integer or None")
+
+
+class _TrackedSubscription:
+    def __init__(
+        self,
+        graph: Graph,
+        route_ref: RouteRef,
+        inner: SubscriptionLike,
+        subscriber_id: str,
+    ) -> None:
+        self._graph = graph
+        self._route_ref = route_ref
+        self._inner = inner
+        self._subscriber_id = subscriber_id
+        self._disposed = False
+
+    def dispose(self) -> None:
+        if self._disposed:
+            return
+        self._disposed = True
+        route_key = self._graph._route_key(self._route_ref)
+        self._graph._subscriber_count[route_key] -= 1
+        subscribers = self._graph._route_subscribers.get(route_key)
+        if subscribers is not None:
+            subscribers.discard(self._subscriber_id)
+        self._inner.dispose()
+
+
+class _ThreadPlacementSubscription:
+    def __init__(
+        self,
+        inner: SubscriptionLike,
+        *,
+        owned_scheduler: object | None = None,
+    ) -> None:
+        self._inner = inner
+        self._owned_scheduler = owned_scheduler
+        self._disposed = False
+
+    def dispose(self) -> None:
+        if self._disposed:
+            return
+        self._disposed = True
+        self._inner.dispose()
+        if self._owned_scheduler is None:
+            return
+        dispose = getattr(self._owned_scheduler, "dispose", None)
+        if callable(dispose):
+            dispose()
+
+
+class _CompositeSubscription:
+    def __init__(self, subscriptions: Sequence[SubscriptionLike]) -> None:
+        self._subscriptions = tuple(subscriptions)
+        self._disposed = False
+
+    def dispose(self) -> None:
+        if self._disposed:
+            return
+        self._disposed = True
+        for subscription in self._subscriptions:
+            subscription.dispose()

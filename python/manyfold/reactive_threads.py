@@ -32,58 +32,46 @@ from ._rx.scheduler import (
     TimeoutScheduler,
 )
 
-logger = logging.getLogger(__name__)
-
 T = TypeVar("T")
+
 TStarting = TypeVar("TStarting")
+
 StartableTarget = Callable[..., None]
 
+
+logger = logging.getLogger(__name__)
+
 FRAME_THREAD_LATENCY_STREAM = "frame_thread_handoff"
+
 DEFAULT_DELIVERY_LATENCY_HISTORY_SIZE = 2048
 
-
-@dataclass(frozen=True, slots=True)
-class DeliveryLatencyStats:
-    """Percentile summary of stream delivery latency."""
-
-    count: int
-    p50_ms: float
-    p95_ms: float
-    p99_ms: float
-    max_ms: float
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.count, int) or isinstance(self.count, bool):
-            raise ValueError("count must be an integer")
-        if self.count <= 0:
-            raise ValueError("count must be positive")
-        values = (
-            _require_finite_non_negative_number(self.p50_ms, "p50_ms"),
-            _require_finite_non_negative_number(self.p95_ms, "p95_ms"),
-            _require_finite_non_negative_number(self.p99_ms, "p99_ms"),
-            _require_finite_non_negative_number(self.max_ms, "max_ms"),
-        )
-        if values != tuple(sorted(values)):
-            raise ValueError("latency percentiles must be ordered")
-
-
-@dataclass
-class _SchedulerState:
-    lock: Lock
-    scheduler: SchedulerBase | None = None
-    max_workers: int | None = None
-
-
-@dataclass
-class _FrameThreadTask:
-    callback: Callable[[], None]
-    enqueued_monotonic: float
-
-
-@dataclass
-class _BackgroundObservableRun:
-    subscription: DisposableBase | None = None
-    error: BaseException | None = None
+__all__ = (
+    "DEFAULT_DELIVERY_LATENCY_HISTORY_SIZE",
+    "DeliveryLatencyStats",
+    "FRAME_THREAD_LATENCY_STREAM",
+    "background_scheduler",
+    "background_threaded_observable",
+    "blocking_io_scheduler",
+    "coalesce_scheduler",
+    "create_default_thread_factory",
+    "deliver_on_frame_thread",
+    "delivery_latency_snapshot",
+    "drain_frame_thread_queue",
+    "input_scheduler",
+    "interval_in_background",
+    "interval_scheduler",
+    "materialize_sequence",
+    "on_frame_thread",
+    "pipe_in_background",
+    "pipe_in_main_thread",
+    "pipe_to_background_event_loop",
+    "pipe_to_background_thread",
+    "replay_scheduler",
+    "reset_reactive_threading_state_for_tests",
+    "scheduler_diagnostics",
+    "shutdown",
+    "start_with_once",
+)
 
 
 class _NoStartingValue:
@@ -91,62 +79,6 @@ class _NoStartingValue:
 
 
 _NO_STARTING_VALUE = _NoStartingValue()
-
-
-class _LatencyRecorder:
-    def __init__(
-        self, history_size: int = DEFAULT_DELIVERY_LATENCY_HISTORY_SIZE
-    ) -> None:
-        if (
-            not isinstance(history_size, int)
-            or isinstance(history_size, bool)
-            or history_size <= 0
-        ):
-            raise ValueError("history_size must be a positive integer")
-        self._history_size = history_size
-        self._history: dict[str, deque[float]] = {}
-        self._lock = Lock()
-
-    def record(self, stream_name: str, delay_s: float) -> None:
-        stream_name = _require_non_empty_string(stream_name, "stream_name")
-        delay_s = _require_number(delay_s, "delay_s")
-        if not math.isfinite(delay_s):
-            delay_s = 0.0
-        with self._lock:
-            history = self._history.get(stream_name)
-            if history is None:
-                history = deque(maxlen=self._history_size)
-                self._history[stream_name] = history
-            history.append(max(delay_s, 0.0))
-
-    def snapshot(self) -> dict[str, DeliveryLatencyStats]:
-        with self._lock:
-            history = {
-                stream_name: tuple(values)
-                for stream_name, values in self._history.items()
-                if values
-            }
-        return {
-            stream_name: _latency_stats(values)
-            for stream_name, values in sorted(history.items())
-        }
-
-    def clear(self) -> None:
-        with self._lock:
-            self._history.clear()
-
-
-_COALESCE_SCHEDULER = TimeoutScheduler()
-_BACKGROUND_SCHEDULER = _SchedulerState(lock=Lock())
-_BLOCKING_IO_SCHEDULER = _SchedulerState(lock=Lock())
-_INPUT_SCHEDULER = _SchedulerState(lock=Lock())
-_INTERVAL_SCHEDULER = _SchedulerState(lock=Lock())
-_FRAME_THREAD_QUEUE: deque[_FrameThreadTask] = deque()
-_FRAME_THREAD_QUEUE_LOCK = Lock()
-_FRAME_THREAD_IDENT: int | None = None
-_LATENCY_RECORDER = _LatencyRecorder()
-
-shutdown: Subject[Any] = Subject()
 
 
 def background_scheduler() -> SchedulerBase:
@@ -462,6 +394,31 @@ def materialize_sequence(sequence: Iterable[T]) -> Observable[T]:
     return rx.from_iterable(snapshot)
 
 
+@dataclass(frozen=True, slots=True)
+class DeliveryLatencyStats:
+    """Percentile summary of stream delivery latency."""
+
+    count: int
+    p50_ms: float
+    p95_ms: float
+    p99_ms: float
+    max_ms: float
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.count, int) or isinstance(self.count, bool):
+            raise ValueError("count must be an integer")
+        if self.count <= 0:
+            raise ValueError("count must be positive")
+        values = (
+            _require_finite_non_negative_number(self.p50_ms, "p50_ms"),
+            _require_finite_non_negative_number(self.p95_ms, "p95_ms"),
+            _require_finite_non_negative_number(self.p99_ms, "p99_ms"),
+            _require_finite_non_negative_number(self.max_ms, "max_ms"),
+        )
+        if values != tuple(sorted(values)):
+            raise ValueError("latency percentiles must be ordered")
+
+
 def _require_non_empty_string(value: Any, field: str) -> str:
     if not isinstance(value, str):
         raise ValueError(f"{field} must be a string")
@@ -590,30 +547,84 @@ def _run_background_observable(
         ready.set()
 
 
-__all__ = (
-    "DEFAULT_DELIVERY_LATENCY_HISTORY_SIZE",
-    "DeliveryLatencyStats",
-    "FRAME_THREAD_LATENCY_STREAM",
-    "background_scheduler",
-    "background_threaded_observable",
-    "blocking_io_scheduler",
-    "coalesce_scheduler",
-    "create_default_thread_factory",
-    "deliver_on_frame_thread",
-    "delivery_latency_snapshot",
-    "drain_frame_thread_queue",
-    "input_scheduler",
-    "interval_in_background",
-    "interval_scheduler",
-    "materialize_sequence",
-    "on_frame_thread",
-    "pipe_in_background",
-    "pipe_in_main_thread",
-    "pipe_to_background_event_loop",
-    "pipe_to_background_thread",
-    "replay_scheduler",
-    "reset_reactive_threading_state_for_tests",
-    "scheduler_diagnostics",
-    "shutdown",
-    "start_with_once",
-)
+@dataclass
+class _SchedulerState:
+    lock: Lock
+    scheduler: SchedulerBase | None = None
+    max_workers: int | None = None
+
+
+@dataclass
+class _FrameThreadTask:
+    callback: Callable[[], None]
+    enqueued_monotonic: float
+
+
+@dataclass
+class _BackgroundObservableRun:
+    subscription: DisposableBase | None = None
+    error: BaseException | None = None
+
+
+class _LatencyRecorder:
+    def __init__(
+        self, history_size: int = DEFAULT_DELIVERY_LATENCY_HISTORY_SIZE
+    ) -> None:
+        if (
+            not isinstance(history_size, int)
+            or isinstance(history_size, bool)
+            or history_size <= 0
+        ):
+            raise ValueError("history_size must be a positive integer")
+        self._history_size = history_size
+        self._history: dict[str, deque[float]] = {}
+        self._lock = Lock()
+
+    def record(self, stream_name: str, delay_s: float) -> None:
+        stream_name = _require_non_empty_string(stream_name, "stream_name")
+        delay_s = _require_number(delay_s, "delay_s")
+        if not math.isfinite(delay_s):
+            delay_s = 0.0
+        with self._lock:
+            history = self._history.get(stream_name)
+            if history is None:
+                history = deque(maxlen=self._history_size)
+                self._history[stream_name] = history
+            history.append(max(delay_s, 0.0))
+
+    def snapshot(self) -> dict[str, DeliveryLatencyStats]:
+        with self._lock:
+            history = {
+                stream_name: tuple(values)
+                for stream_name, values in self._history.items()
+                if values
+            }
+        return {
+            stream_name: _latency_stats(values)
+            for stream_name, values in sorted(history.items())
+        }
+
+    def clear(self) -> None:
+        with self._lock:
+            self._history.clear()
+
+
+_COALESCE_SCHEDULER = TimeoutScheduler()
+
+_BACKGROUND_SCHEDULER = _SchedulerState(lock=Lock())
+
+_BLOCKING_IO_SCHEDULER = _SchedulerState(lock=Lock())
+
+_INPUT_SCHEDULER = _SchedulerState(lock=Lock())
+
+_INTERVAL_SCHEDULER = _SchedulerState(lock=Lock())
+
+_FRAME_THREAD_QUEUE: deque[_FrameThreadTask] = deque()
+
+_FRAME_THREAD_QUEUE_LOCK = Lock()
+
+_FRAME_THREAD_IDENT: int | None = None
+
+_LATENCY_RECORDER = _LatencyRecorder()
+
+shutdown: Subject[Any] = Subject()

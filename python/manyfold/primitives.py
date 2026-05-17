@@ -39,12 +39,11 @@ U = TypeVar("U")
 TRead = TypeVar("TRead")
 TWrite = TypeVar("TWrite")
 TProto = TypeVar("TProto", bound="ProtobufMessage")
+SchemaLike = Any
+
 _ANY_SCHEMA_IDS = count(1)
 _ANY_SCHEMA_LOCK = Lock()
 _ANY_SCHEMA_VALUES: dict[tuple[str, int, str], Any] = {}
-
-
-SchemaLike = Any
 
 
 def source(route: TypedRoute[T] | RouteRef, *, replay_latest: bool = True) -> Source[T]:

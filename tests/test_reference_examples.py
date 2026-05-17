@@ -21,23 +21,6 @@ from examples import (
 from tests.test_support import load_example_module, load_manyfold_package
 
 
-def _module_all_exports(module: ast.Module) -> tuple[str, ...]:
-    for node in module.body:
-        if not isinstance(node, ast.Assign):
-            continue
-        if not any(
-            isinstance(target, ast.Name) and target.id == "__all__"
-            for target in node.targets
-        ):
-            continue
-        return tuple(
-            value.value
-            for value in node.value.elts
-            if isinstance(value, ast.Constant) and isinstance(value.value, str)
-        )
-    raise AssertionError("module does not define __all__")
-
-
 class ReferenceExampleSuiteTests(unittest.TestCase):
     def test_reference_examples_file_import_uses_repo_path_fallback(self) -> None:
         module_path = (
@@ -680,6 +663,23 @@ class ReferenceExampleSuiteTests(unittest.TestCase):
         return {
             example.number: example for example in manyfold.reference_example_suite()
         }
+
+
+def _module_all_exports(module: ast.Module) -> tuple[str, ...]:
+    for node in module.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(
+            isinstance(target, ast.Name) and target.id == "__all__"
+            for target in node.targets
+        ):
+            continue
+        return tuple(
+            value.value
+            for value in node.value.elts
+            if isinstance(value, ast.Constant) and isinstance(value.value, str)
+        )
+    raise AssertionError("module does not define __all__")
 
 
 if __name__ == "__main__":

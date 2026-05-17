@@ -44,6 +44,102 @@ _README_EXAMPLE_GROUPS = {
 }
 
 
+def catalog_entry(module_name: str) -> ExampleCatalogEntry:
+    """Return one catalog entry by module name."""
+
+    _require_module_name(module_name)
+    try:
+        return EXAMPLE_CATALOG_BY_MODULE[module_name]
+    except KeyError as error:
+        raise KeyError(f"unknown example module {module_name!r}") from error
+
+
+def reference_example_metadata(
+    number: int,
+) -> ExampleCatalogEntry | ReferenceExampleGap:
+    """Return implemented or gap metadata for one RFC reference example number."""
+
+    _require_reference_number(number)
+    if entry := REFERENCE_EXAMPLE_ENTRY_BY_NUMBER.get(number):
+        return entry
+    if gap := REFERENCE_EXAMPLE_GAP_BY_NUMBER.get(number):
+        return gap
+    raise KeyError(f"unknown RFC reference example {number}")
+
+
+def render_readme_featured_examples() -> str:
+    """Render the README featured-example block from catalog metadata."""
+
+    lines = [*_README_INTRO_LINES]
+    for entry in README_EXAMPLE_ENTRIES:
+        if group := _README_EXAMPLE_GROUPS.get(entry.module_name):
+            lines.append("")
+            lines.append(f"**{group}**")
+        example_path = f"examples/{entry.module_name.replace('.', '/')}.py"
+        lines.append(f"- [{example_path}]({example_path}): {entry.summary}")
+    lines.append("")
+    lines.extend(_README_OUTRO_LINES)
+    return "\n".join(lines)
+
+
+def sync_readme_featured_examples(readme_text: str) -> str:
+    """Replace the generated featured-example block inside README content."""
+
+    generated = render_readme_featured_examples()
+    start_marker = README_FEATURED_EXAMPLES_START
+    end_marker = README_FEATURED_EXAMPLES_END
+    start = readme_text.find(start_marker)
+    end = readme_text.find(end_marker)
+    if start != readme_text.rfind(start_marker) or end != readme_text.rfind(end_marker):
+        raise ValueError("README featured-example markers must appear exactly once")
+    if start == -1 or end == -1 or end < start:
+        raise ValueError("README featured-example markers are missing or out of order")
+    start += len(start_marker)
+    replacement = f"\n{generated}\n"
+    return f"{readme_text[:start]}{replacement}{readme_text[end:]}"
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="validate the catalog manifest and generated README block",
+    )
+    parser.add_argument(
+        "--check-manifest",
+        action="store_true",
+        help="validate the example catalog against the filesystem",
+    )
+    parser.add_argument(
+        "--check-readme",
+        action="store_true",
+        help="validate the generated README featured-example block",
+    )
+    parser.add_argument(
+        "--list",
+        choices=("supported", "archived", "reference", "readme"),
+        help="print one example module name per line from the selected manifest",
+    )
+    args = parser.parse_args(argv)
+
+    _validate_catalog()
+    if args.list is not None:
+        print("\n".join(_manifest_for_list_mode(args.list)))
+        return 0
+    if args.check_manifest and not (args.check or args.check_readme):
+        return 0
+
+    readme = _README_PATH.read_text(encoding="utf-8")
+    updated = sync_readme_featured_examples(readme)
+    if args.check or args.check_readme:
+        return 0 if updated == readme else 1
+
+    if updated != readme:
+        _README_PATH.write_text(updated, encoding="utf-8")
+    return 0
+
+
 @dataclass(frozen=True)
 class ExampleCatalogEntry:
     """Describe one example module and how it should surface in the repo."""
@@ -335,61 +431,6 @@ REFERENCE_EXAMPLE_GAP_BY_NUMBER: dict[int, ReferenceExampleGap] = {
 }
 
 
-def catalog_entry(module_name: str) -> ExampleCatalogEntry:
-    """Return one catalog entry by module name."""
-
-    _require_module_name(module_name)
-    try:
-        return EXAMPLE_CATALOG_BY_MODULE[module_name]
-    except KeyError as error:
-        raise KeyError(f"unknown example module {module_name!r}") from error
-
-
-def reference_example_metadata(
-    number: int,
-) -> ExampleCatalogEntry | ReferenceExampleGap:
-    """Return implemented or gap metadata for one RFC reference example number."""
-
-    _require_reference_number(number)
-    if entry := REFERENCE_EXAMPLE_ENTRY_BY_NUMBER.get(number):
-        return entry
-    if gap := REFERENCE_EXAMPLE_GAP_BY_NUMBER.get(number):
-        return gap
-    raise KeyError(f"unknown RFC reference example {number}")
-
-
-def render_readme_featured_examples() -> str:
-    """Render the README featured-example block from catalog metadata."""
-
-    lines = [*_README_INTRO_LINES]
-    for entry in README_EXAMPLE_ENTRIES:
-        if group := _README_EXAMPLE_GROUPS.get(entry.module_name):
-            lines.append("")
-            lines.append(f"**{group}**")
-        example_path = f"examples/{entry.module_name.replace('.', '/')}.py"
-        lines.append(f"- [{example_path}]({example_path}): {entry.summary}")
-    lines.append("")
-    lines.extend(_README_OUTRO_LINES)
-    return "\n".join(lines)
-
-
-def sync_readme_featured_examples(readme_text: str) -> str:
-    """Replace the generated featured-example block inside README content."""
-
-    generated = render_readme_featured_examples()
-    start_marker = README_FEATURED_EXAMPLES_START
-    end_marker = README_FEATURED_EXAMPLES_END
-    start = readme_text.find(start_marker)
-    end = readme_text.find(end_marker)
-    if start != readme_text.rfind(start_marker) or end != readme_text.rfind(end_marker):
-        raise ValueError("README featured-example markers must appear exactly once")
-    if start == -1 or end == -1 or end < start:
-        raise ValueError("README featured-example markers are missing or out of order")
-    start += len(start_marker)
-    replacement = f"\n{generated}\n"
-    return f"{readme_text[:start]}{replacement}{readme_text[end:]}"
-
-
 _EXAMPLES_DIR = Path(__file__).resolve().parent
 _REPO_ROOT = _EXAMPLES_DIR.parent
 _README_PATH = _REPO_ROOT / "README.md"
@@ -578,47 +619,6 @@ def _validate_catalog() -> None:
 
 
 _validate_catalog()
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--check",
-        action="store_true",
-        help="validate the catalog manifest and generated README block",
-    )
-    parser.add_argument(
-        "--check-manifest",
-        action="store_true",
-        help="validate the example catalog against the filesystem",
-    )
-    parser.add_argument(
-        "--check-readme",
-        action="store_true",
-        help="validate the generated README featured-example block",
-    )
-    parser.add_argument(
-        "--list",
-        choices=("supported", "archived", "reference", "readme"),
-        help="print one example module name per line from the selected manifest",
-    )
-    args = parser.parse_args(argv)
-
-    _validate_catalog()
-    if args.list is not None:
-        print("\n".join(_manifest_for_list_mode(args.list)))
-        return 0
-    if args.check_manifest and not (args.check or args.check_readme):
-        return 0
-
-    readme = _README_PATH.read_text(encoding="utf-8")
-    updated = sync_readme_featured_examples(readme)
-    if args.check or args.check_readme:
-        return 0 if updated == readme else 1
-
-    if updated != readme:
-        _README_PATH.write_text(updated, encoding="utf-8")
-    return 0
 
 
 if __name__ == "__main__":
