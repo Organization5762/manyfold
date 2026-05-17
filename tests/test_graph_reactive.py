@@ -171,7 +171,7 @@ class GraphReactiveTests(unittest.TestCase):
             schema=int_schema(graph_module, "RuntimeNumber"),
         )
         graph = graph_module.Graph()
-        seen: list[int] = []
+        seen: list[object] = []
 
         connection = (
             graph.observe(route)
@@ -193,6 +193,104 @@ class GraphReactiveTests(unittest.TestCase):
 
         self.assertEqual(seen, [3])
         self.assertEqual(list(graph.diagram_nodes()), [])
+
+    def test_observe_pipeline_defers_map_until_terminal_output(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("lazy_numbers"),
+            variant=graph_module.Variant.Event,
+            schema=int_schema(graph_module, "LazyRuntimeNumber"),
+        )
+        graph = graph_module.Graph()
+        calls: list[int] = []
+
+        pipeline = graph.observe(route, replay_latest=False).map(
+            lambda value: calls.append(value) or value + 1,
+            name="lazy-plus-one",
+        )
+        graph.publish(route, 1)
+
+        self.assertEqual(calls, [])
+        self.assertEqual(list(graph.diagram_nodes()), [])
+
+        seen: list[object] = []
+        connection = pipeline.callback(seen.append, name="collect-lazy")
+        graph.publish(route, 2)
+
+        self.assertEqual(calls, [2])
+        self.assertEqual(seen, [3])
+        self.assertEqual(
+            [node.name for node in graph.diagram_nodes()],
+            ["lazy-plus-one", "collect-lazy"],
+        )
+
+        connection.remove()
+        graph.publish(route, 3)
+
+        self.assertEqual(calls, [2])
+        self.assertEqual(seen, [3])
+        self.assertEqual(list(graph.diagram_nodes()), [])
+
+    def test_lazy_pipeline_subscribe_disposes_materialized_chain(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("subscribed_lazy_numbers"),
+            variant=graph_module.Variant.Event,
+            schema=int_schema(graph_module, "SubscribedLazyRuntimeNumber"),
+        )
+        graph = graph_module.Graph()
+        seen: list[int] = []
+
+        subscription = graph.observe(route, replay_latest=False).map(
+            lambda value: value + 1,
+            name="subscribed-plus-one",
+        ).subscribe(seen.append)
+        graph.publish(route, 1)
+
+        self.assertEqual([item.value for item in seen], [2])
+        self.assertEqual(
+            [node.name for node in graph.diagram_nodes()],
+            ["subscribed-plus-one"],
+        )
+
+        subscription.dispose()
+        graph.publish(route, 2)
+
+        self.assertEqual([item.value for item in seen], [2])
+        self.assertEqual(list(graph.diagram_nodes()), [])
+
+    def test_lazy_pipeline_replays_latest_after_terminal_subscribes(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("replayed_lazy_numbers"),
+            variant=graph_module.Variant.Event,
+            schema=int_schema(graph_module, "ReplayedLazyRuntimeNumber"),
+        )
+        graph = graph_module.Graph()
+        calls: list[int] = []
+        graph.publish(route, 4)
+
+        seen: list[int] = []
+        connection = graph.observe(route).map(
+            lambda value: calls.append(value) or value + 1,
+            name="replayed-plus-one",
+        ).callback(seen.append, name="collect-replayed")
+
+        self.assertEqual(calls, [4])
+        self.assertEqual(seen, [5])
+        connection.remove()
 
     def test_registered_pipeline_operation_extends_fluent_route_pipeline(self) -> None:
         graph_module = load_graph_module()
