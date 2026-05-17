@@ -83,21 +83,6 @@ class FailingObservable:
         raise RuntimeError(self.message)
 
 
-class _ManifestMappingKey:
-    __module__ = "graph.alpha"
-
-    def __str__(self) -> str:
-        return "slot"
-
-
-class _OtherManifestMappingKey:
-    __module__ = "graph.beta"
-    __qualname__ = "_ManifestMappingKey"
-
-    def __str__(self) -> str:
-        return "slot"
-
-
 class GraphReactiveTests(unittest.TestCase):
     def test_producer_kind_exposes_all_runtime_kinds(self) -> None:
         graph_module = load_graph_module()
@@ -8442,6 +8427,21 @@ assert graph.latest(route) is None
         self.assertEqual(
             graph.shadow_state(lifecycle.request).ack.payload_ref.inline_bytes, b"ok"
         )
+
+
+class _ManifestMappingKey:
+    __module__ = "graph.alpha"
+
+    def __str__(self) -> str:
+        return "slot"
+
+
+class _OtherManifestMappingKey:
+    __module__ = "graph.beta"
+    __qualname__ = "_ManifestMappingKey"
+
+    def __str__(self) -> str:
+        return "slot"
 
 
 if __name__ == "__main__":

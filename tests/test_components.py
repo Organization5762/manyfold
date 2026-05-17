@@ -12,15 +12,6 @@ from unittest.mock import patch
 from tests.test_support import load_manyfold_package
 
 
-class _FakeProtobufMessage:
-    @staticmethod
-    def FromString(_payload: bytes) -> _FakeProtobufMessage:
-        return _FakeProtobufMessage()
-
-    def SerializeToString(self) -> bytes:
-        return b"fake"
-
-
 class ComponentTests(unittest.TestCase):
     def test_components_module_exports_intentional_surface(self) -> None:
         load_manyfold_package()
@@ -1861,6 +1852,15 @@ class ComponentTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "graph must be a Graph"):
                 memory.resume(object(), route)  # type: ignore[arg-type]
             self.assertFalse(path.exists())
+
+
+class _FakeProtobufMessage:
+    @staticmethod
+    def FromString(_payload: bytes) -> _FakeProtobufMessage:
+        return _FakeProtobufMessage()
+
+    def SerializeToString(self) -> bytes:
+        return b"fake"
 
 
 if __name__ == "__main__":

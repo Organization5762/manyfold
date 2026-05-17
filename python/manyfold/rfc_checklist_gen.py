@@ -263,16 +263,6 @@ class AppendixStatus:
     detail: str
 
 
-class _TextPath(Protocol):
-    """Minimal path protocol used by the generated-file writer."""
-
-    def exists(self) -> bool: ...
-
-    def read_text(self, *, encoding: str) -> str: ...
-
-    def write_text(self, content: str, *, encoding: str) -> int: ...
-
-
 def _parse_section_heading(line: str) -> SectionStatus | None:
     if line.startswith("## Appendix"):
         return None
@@ -347,6 +337,16 @@ def _write_if_changed(path: _TextPath, content: str) -> bool:
         return False
     path.write_text(content, encoding="utf-8")
     return True
+
+
+class _TextPath(Protocol):
+    """Minimal path protocol used by the generated-file writer."""
+
+    def exists(self) -> bool: ...
+
+    def read_text(self, *, encoding: str) -> str: ...
+
+    def write_text(self, content: str, *, encoding: str) -> int: ...
 
 
 if __name__ == "__main__":

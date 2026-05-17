@@ -2052,32 +2052,6 @@ class LocalDurableSpool(Generic[T]):
         return tuple(record.value for record in self.event_log().replay(graph))
 
 
-@dataclass
-class _NoopSubscription:
-    def dispose(self) -> None:
-        return None
-
-
-@dataclass
-class _CompositeSubscription:
-    subscriptions: tuple[SubscriptionLike, ...]
-    disposed: bool = False
-
-    def dispose(self) -> None:
-        if self.disposed:
-            return
-        self.disposed = True
-        first_error: Exception | None = None
-        for subscription in self.subscriptions:
-            try:
-                subscription.dispose()
-            except Exception as exc:
-                if first_error is None:
-                    first_error = exc
-        if first_error is not None:
-            raise first_error
-
-
 def _group_name(group: str | None, suffix: str) -> str | None:
     if group is None:
         return None
@@ -2573,3 +2547,29 @@ def _dispose_handle(handle: Any, *, timeout: float | None = None) -> None:
         return
     _call_if_present(handle, "stop")
     _call_if_present(handle, "join", timeout)
+
+
+@dataclass
+class _NoopSubscription:
+    def dispose(self) -> None:
+        return None
+
+
+@dataclass
+class _CompositeSubscription:
+    subscriptions: tuple[SubscriptionLike, ...]
+    disposed: bool = False
+
+    def dispose(self) -> None:
+        if self.disposed:
+            return
+        self.disposed = True
+        first_error: Exception | None = None
+        for subscription in self.subscriptions:
+            try:
+                subscription.dispose()
+            except Exception as exc:
+                if first_error is None:
+                    first_error = exc
+        if first_error is not None:
+            raise first_error

@@ -14,9 +14,9 @@ from manyfold import (
     route,
 )
 
-__all__ = ("example_route", "int_schema", "sibling_route")
-
 T = TypeVar("T")
+
+__all__ = ("example_route", "int_schema", "sibling_route")
 
 
 def int_schema(schema_id: str, version: int = 1) -> "Schema[int]":

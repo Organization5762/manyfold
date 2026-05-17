@@ -48,6 +48,27 @@ _MEMORY_RECORD_FIELDS = (
     "payload_b64",
 )
 _VALUE_FILENAME = "__value__.bin"
+__all__ = (
+    "AppendEntry",
+    "Consensus",
+    "ConsensusRoutes",
+    "EventLog",
+    "EventLogRecord",
+    "EventLogRoutes",
+    "FileStore",
+    "Heartbeat",
+    "Keyspace",
+    "LeaderState",
+    "Memory",
+    "MemoryRecord",
+    "QuorumState",
+    "ReplicatedLog",
+    "RequestVote",
+    "SnapshotStore",
+    "SnapshotStoreRoutes",
+    "StoreEntry",
+    "Vote",
+)
 
 
 @dataclass(frozen=True)
@@ -988,14 +1009,6 @@ class Consensus:
             self.graph.publish(self.routes.leader_state, state)
 
 
-@dataclass(frozen=True)
-class _ValidatedMemoryRecord:
-    """Raw memory JSON plus payload bytes already checked with strict base64."""
-
-    record: dict[str, Any]
-    payload: bytes
-
-
 def _component_route(
     *,
     plane: Plane,
@@ -1555,24 +1568,9 @@ def _encode_json_tuple(value: tuple[Any, ...]) -> bytes:
     return json.dumps(value, allow_nan=False, separators=(",", ":")).encode("utf-8")
 
 
-__all__ = (
-    "AppendEntry",
-    "Consensus",
-    "ConsensusRoutes",
-    "EventLog",
-    "EventLogRecord",
-    "EventLogRoutes",
-    "FileStore",
-    "Heartbeat",
-    "Keyspace",
-    "LeaderState",
-    "Memory",
-    "MemoryRecord",
-    "QuorumState",
-    "ReplicatedLog",
-    "RequestVote",
-    "SnapshotStore",
-    "SnapshotStoreRoutes",
-    "StoreEntry",
-    "Vote",
-)
+@dataclass(frozen=True)
+class _ValidatedMemoryRecord:
+    """Raw memory JSON plus payload bytes already checked with strict base64."""
+
+    record: dict[str, Any]
+    payload: bytes

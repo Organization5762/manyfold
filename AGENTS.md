@@ -82,11 +82,13 @@ uv run python -m unittest tests.test_components.ComponentTests.test_file_store_a
   instead of only wrapping paths in code ticks.
 - Keep the top-level `manyfold` namespace narrow; advanced helpers belong under
   `manyfold.graph` or in semi-private helpers.
-- Organize files in this order after module docstrings and imports: constants,
-  public functions, public classes, public methods within each class, private
-  methods within each class, then private functions. Keep runtime-derived
-  constants, type aliases, and base classes before declarations that require
-  them at import time. Keep files under about 1000 lines of code.
+- Organize files in this order after module docstrings and imports where
+  dependencies allow: type aliases, constants, public functions, public classes,
+  private functions, then private classes. Within classes, keep public methods
+  before private methods, with dunder lifecycle hooks placed where idiomatic.
+  Keep runtime-derived constants, type aliases, and base classes before
+  declarations that require them at import time. Keep files under about 1000
+  lines of code.
 - Avoid stubs unless absolutely necessary. Prefer runners that exercise actual
   code paths instead of replacing behavior.
 - Do not use `assert` for runtime invariants in `python/manyfold`; raise

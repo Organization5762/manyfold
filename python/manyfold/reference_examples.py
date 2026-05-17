@@ -33,14 +33,14 @@ except ModuleNotFoundError as exc:
     ReferenceExampleGap = Any
     reference_example_metadata = None
 
+ExampleRunner = Callable[[], Any]
+
 __all__ = (
     "REFERENCE_EXAMPLE_SUITE",
     "ReferenceExample",
     "implemented_reference_examples",
     "reference_example_suite",
 )
-
-ExampleRunner = Callable[[], Any]
 
 
 def reference_example_suite() -> tuple[ReferenceExample, ...]:
@@ -53,10 +53,6 @@ def implemented_reference_examples() -> tuple[ReferenceExample, ...]:
     """Return the runnable subset of the RFC reference example suite."""
 
     return _IMPLEMENTED_REFERENCE_EXAMPLES
-
-
-def _is_blank(value: str) -> bool:
-    return not value.strip()
 
 
 @dataclass(frozen=True)
@@ -97,6 +93,10 @@ class ReferenceExample:
             raise ValueError(
                 "missing reference examples cannot include module_name or runner"
             )
+
+
+def _is_blank(value: str) -> bool:
+    return not value.strip()
 
 
 def _example_runner(import_path: str) -> ExampleRunner:

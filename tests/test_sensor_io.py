@@ -14,26 +14,6 @@ import reactivex as rx
 from tests.test_support import load_manyfold_package
 
 
-class _StableMappingKey:
-    __module__ = "sensor.alpha"
-
-    def __str__(self) -> str:
-        return "slot"
-
-
-class _OtherStableMappingKey:
-    __module__ = "sensor.beta"
-    __qualname__ = "_StableMappingKey"
-
-    def __str__(self) -> str:
-        return "slot"
-
-
-class _NonFiniteClock:
-    def now(self) -> float:
-        return math.nan
-
-
 class SensorIoTests(unittest.TestCase):
     def test_sensor_io_exports_are_tuple_shaped(self) -> None:
         load_manyfold_package()
@@ -3131,3 +3111,23 @@ def _route(manyfold, stream: str, schema):
         variant=manyfold.Variant.Meta,
         schema=schema,
     )
+
+
+class _StableMappingKey:
+    __module__ = "sensor.alpha"
+
+    def __str__(self) -> str:
+        return "slot"
+
+
+class _OtherStableMappingKey:
+    __module__ = "sensor.beta"
+    __qualname__ = "_StableMappingKey"
+
+    def __str__(self) -> str:
+        return "slot"
+
+
+class _NonFiniteClock:
+    def now(self) -> float:
+        return math.nan
