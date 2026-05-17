@@ -48,29 +48,6 @@ _MEMORY_RECORD_FIELDS = (
     "payload_b64",
 )
 _VALUE_FILENAME = "__value__.bin"
-__all__ = (
-    "AppendEntry",
-    "Consensus",
-    "ConsensusRoutes",
-    "EventLog",
-    "EventLogRecord",
-    "EventLogRoutes",
-    "FileStore",
-    "Heartbeat",
-    "Keyspace",
-    "LeaderState",
-    "Memory",
-    "MemoryRecord",
-    "QuorumState",
-    "ReplicatedLog",
-    "RequestVote",
-    "SnapshotStore",
-    "SnapshotStoreRoutes",
-    "StoreEntry",
-    "Vote",
-)
-
-
 @dataclass(frozen=True)
 class StoreEntry:
     """One byte value stored under a keyspace prefix."""
@@ -1574,3 +1551,26 @@ class _ValidatedMemoryRecord:
 
     record: dict[str, Any]
     payload: bytes
+
+
+__all__ = (
+    "AppendEntry",
+    "Consensus",
+    "ConsensusRoutes",
+    "EventLog",
+    "EventLogRecord",
+    "EventLogRoutes",
+    "FileStore",
+    "Heartbeat",
+    "Keyspace",
+    "LeaderState",
+    "Memory",
+    "MemoryRecord",
+    "QuorumState",
+    "ReplicatedLog",
+    "RequestVote",
+    "SnapshotStore",
+    "SnapshotStoreRoutes",
+    "StoreEntry",
+    "Vote",
+)

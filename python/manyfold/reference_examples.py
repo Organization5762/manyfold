@@ -35,14 +35,6 @@ except ModuleNotFoundError as exc:
 
 ExampleRunner = Callable[[], Any]
 
-__all__ = (
-    "REFERENCE_EXAMPLE_SUITE",
-    "ReferenceExample",
-    "implemented_reference_examples",
-    "reference_example_suite",
-)
-
-
 def reference_example_suite() -> tuple[ReferenceExample, ...]:
     """Return the ordered RFC reference example suite."""
 
@@ -149,4 +141,12 @@ else:
 
 _IMPLEMENTED_REFERENCE_EXAMPLES: tuple[ReferenceExample, ...] = tuple(
     example for example in REFERENCE_EXAMPLE_SUITE if example.implemented
+)
+
+
+__all__ = (
+    "REFERENCE_EXAMPLE_SUITE",
+    "ReferenceExample",
+    "implemented_reference_examples",
+    "reference_example_suite",
 )

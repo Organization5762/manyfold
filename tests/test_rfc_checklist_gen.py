@@ -238,18 +238,18 @@ class RfcChecklistGenTests(unittest.TestCase):
 
                 stderr = StringIO()
                 with redirect_stderr(stderr):
-                    self.assertEqual(generator.main(["--check"]), 1)
+                    self.assertEqual(generator._main(["--check"]), 1)
                 self.assertIn(
                     f"{checklist_path} is out of date; run manyfold-rfc-checklist",
                     stderr.getvalue(),
                 )
 
-                self.assertEqual(generator.main([]), 0)
+                self.assertEqual(generator._main([]), 0)
                 self.assertEqual(checklist_path.read_text(), rendered)
 
                 stderr = StringIO()
                 with redirect_stderr(stderr):
-                    self.assertEqual(generator.main(["--check"]), 0)
+                    self.assertEqual(generator._main(["--check"]), 0)
                 self.assertEqual(stderr.getvalue(), "")
             finally:
                 generator.CHECKLIST_PATH = original_path

@@ -28,14 +28,14 @@ except ImportError:
 
 ensure_repo_import_paths()
 
-catalog_main = importlib.import_module("examples.catalog").main
+_catalog_main = importlib.import_module("examples.catalog")._main
 
 
-def main(argv: list[str] | None = None) -> int:
+def _main(argv: list[str] | None = None) -> int:
     ensure_repo_import_paths()
 
-    return catalog_main(argv)
+    return _catalog_main(argv)
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(_main())

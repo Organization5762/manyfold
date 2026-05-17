@@ -10,9 +10,6 @@ from ._exports import CATALOG_EXPORTS
 _EXPORT_CACHE: dict[str, Any] = {}
 _EXPORT_NAMES = frozenset(CATALOG_EXPORTS)
 
-__all__ = CATALOG_EXPORTS
-
-
 def __getattr__(name: str) -> Any:
     if name not in _EXPORT_NAMES:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
@@ -27,3 +24,6 @@ def __getattr__(name: str) -> Any:
 
 def __dir__() -> list[str]:
     return sorted(set(globals()).union(__all__))
+
+
+__all__ = CATALOG_EXPORTS

@@ -13,8 +13,6 @@ from ._exports import CATALOG_EXPORTS
 
 T = TypeVar("T", bound=Hashable)
 
-__all__ = (*CATALOG_EXPORTS,)
-
 _MODULE_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*\Z")
 _README_INTRO_LINES = (
     "The `examples/` directory is organized as a short path through the mental",
@@ -99,47 +97,6 @@ def sync_readme_featured_examples(readme_text: str) -> str:
     return f"{readme_text[:start]}{replacement}{readme_text[end:]}"
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--check",
-        action="store_true",
-        help="validate the catalog manifest and generated README block",
-    )
-    parser.add_argument(
-        "--check-manifest",
-        action="store_true",
-        help="validate the example catalog against the filesystem",
-    )
-    parser.add_argument(
-        "--check-readme",
-        action="store_true",
-        help="validate the generated README featured-example block",
-    )
-    parser.add_argument(
-        "--list",
-        choices=("supported", "archived", "reference", "readme"),
-        help="print one example module name per line from the selected manifest",
-    )
-    args = parser.parse_args(argv)
-
-    _validate_catalog()
-    if args.list is not None:
-        print("\n".join(_manifest_for_list_mode(args.list)))
-        return 0
-    if args.check_manifest and not (args.check or args.check_readme):
-        return 0
-
-    readme = _README_PATH.read_text(encoding="utf-8")
-    updated = sync_readme_featured_examples(readme)
-    if args.check or args.check_readme:
-        return 0 if updated == readme else 1
-
-    if updated != readme:
-        _README_PATH.write_text(updated, encoding="utf-8")
-    return 0
-
-
 @dataclass(frozen=True)
 class ExampleCatalogEntry:
     """Describe one example module and how it should surface in the repo."""
@@ -216,7 +173,10 @@ class ReferenceExampleGap:
             raise TypeError("reference example gap number must be an integer")
         if self.reference_number <= 0:
             raise ValueError("reference example gap number must be positive")
-        if not isinstance(self.reference_title, str) or not self.reference_title.strip():
+        if (
+            not isinstance(self.reference_title, str)
+            or not self.reference_title.strip()
+        ):
             raise ValueError("reference example gap title must be a non-empty string")
         if not isinstance(self.summary, str) or not self.summary.strip():
             raise ValueError("reference example gap summary must be a non-empty string")
@@ -322,6 +282,47 @@ EXAMPLE_CATALOG: tuple[ExampleCatalogEntry, ...] = (
         archived=True,
     ),
 )
+
+
+def _main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="validate the catalog manifest and generated README block",
+    )
+    parser.add_argument(
+        "--check-manifest",
+        action="store_true",
+        help="validate the example catalog against the filesystem",
+    )
+    parser.add_argument(
+        "--check-readme",
+        action="store_true",
+        help="validate the generated README featured-example block",
+    )
+    parser.add_argument(
+        "--list",
+        choices=("supported", "archived", "reference", "readme"),
+        help="print one example module name per line from the selected manifest",
+    )
+    args = parser.parse_args(argv)
+
+    _validate_catalog()
+    if args.list is not None:
+        print("\n".join(_manifest_for_list_mode(args.list)))
+        return 0
+    if args.check_manifest and not (args.check or args.check_readme):
+        return 0
+
+    readme = _README_PATH.read_text(encoding="utf-8")
+    updated = sync_readme_featured_examples(readme)
+    if args.check or args.check_readme:
+        return 0 if updated == readme else 1
+
+    if updated != readme:
+        _README_PATH.write_text(updated, encoding="utf-8")
+    return 0
 
 
 def _catalog_entries(
@@ -621,5 +622,7 @@ def _validate_catalog() -> None:
 _validate_catalog()
 
 
+__all__ = (*CATALOG_EXPORTS,)
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(_main())

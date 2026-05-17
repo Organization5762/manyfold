@@ -16,9 +16,6 @@ from manyfold import (
 
 T = TypeVar("T")
 
-__all__ = ("example_route", "int_schema", "sibling_route")
-
-
 def int_schema(schema_id: str, version: int = 1) -> "Schema[int]":
     """ASCII integer schema used by the executable examples."""
     return Schema(
@@ -72,3 +69,6 @@ def sibling_route(
         variant=base.variant if variant is None else variant,
         schema=base.schema if schema is None else schema,
     )
+
+
+__all__ = ("example_route", "int_schema", "sibling_route")
