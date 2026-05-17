@@ -2455,6 +2455,12 @@ class PipelineLoggingNode(_ThreadPlaceableNode, Generic[T]):
         ).observable(source)
 
 
+@dataclass(frozen=True)
+class _PipelineStage:
+    kind: str
+    node: object
+
+
 class RoutePipeline(Generic[T]):
     """Fluent graph pipeline rooted at one route."""
 
@@ -2466,6 +2472,7 @@ class RoutePipeline(Generic[T]):
         replay_latest: bool = True,
         subscriber_id: str | None = None,
         connections: Sequence[GraphConnection] = (),
+        stages: Sequence[_PipelineStage] = (),
         thread_placement: NodeThreadPlacement | None = None,
     ) -> None:
         self._graph = graph
@@ -2473,6 +2480,7 @@ class RoutePipeline(Generic[T]):
         self._replay_latest = replay_latest
         self._subscriber_id = subscriber_id
         self._connections = tuple(connections)
+        self._stages = tuple(stages)
         self._thread_placement = thread_placement
 
     @property
@@ -2486,31 +2494,32 @@ class RoutePipeline(Generic[T]):
         name: str | None = None,
     ) -> GraphConnection:
         """Install this pipeline into a route or callback sink."""
+        pipeline = self._materialize()
         if isinstance(target, (TypedRoute, RouteRef, Source, Sink)):
-            connection = self._connect_route(target, name=name)
+            connection = pipeline._connect_route(target, name=name)
         else:
             node = (
                 target
                 if isinstance(target, CallbackNode)
                 else CallbackNode(
-                    name or self._graph._next_pipeline_node_name("callback"),
+                    name or pipeline._graph._next_pipeline_node_name("callback"),
                     target,
-                    thread_placement=self._thread_placement,
+                    thread_placement=pipeline._thread_placement,
                 )
             )
-            connection = self._graph._connect_callback_pipeline(
-                self._route_ref,
+            connection = pipeline._graph._connect_callback_pipeline(
+                pipeline._route_ref,
                 node,
-                replay_latest=self._replay_latest,
-                subscriber_id=self._subscriber_id,
-                thread_placement=node.thread_placement or self._thread_placement,
+                replay_latest=pipeline._replay_latest,
+                subscriber_id=pipeline._subscriber_id,
+                thread_placement=node.thread_placement or pipeline._thread_placement,
             )
-        if not self._connections:
+        if not pipeline._connections:
             return connection
         return GraphConnection(
-            self._graph,
+            pipeline._graph,
             name=connection.name,
-            connections=(*self._connections, connection),
+            connections=(*pipeline._connections, connection),
         )
 
     def callback(
@@ -2541,7 +2550,15 @@ class RoutePipeline(Generic[T]):
             window_ms=window_ms,
             stream_name=stream_name,
         )
-        return self._graph._connect_coalesce_latest_pipeline(self, node)
+        return RoutePipeline(
+            self._graph,
+            self._route_ref,
+            replay_latest=self._replay_latest,
+            subscriber_id=self._subscriber_id,
+            connections=self._connections,
+            stages=(*self._stages, _PipelineStage("coalesce_latest", node)),
+            thread_placement=self._thread_placement,
+        )
 
     def filter(
         self,
@@ -2555,10 +2572,14 @@ class RoutePipeline(Generic[T]):
             predicate,
             thread_placement=self._thread_placement,
         )
-        return self._graph._connect_transform_pipeline(
-            self,
-            node,
-            lambda value: (node.predicate(value), value),
+        return RoutePipeline(
+            self._graph,
+            self._route_ref,
+            replay_latest=self._replay_latest,
+            subscriber_id=self._subscriber_id,
+            connections=self._connections,
+            stages=(*self._stages, _PipelineStage("filter", node)),
+            thread_placement=self._thread_placement,
         )
 
     def distinct_until_changed(
@@ -2585,10 +2606,14 @@ class RoutePipeline(Generic[T]):
             predicate,
             thread_placement=self._thread_placement,
         )
-        return self._graph._connect_transform_pipeline(
-            self,
-            node,
-            lambda value: (node.predicate(value), value),
+        return RoutePipeline(
+            self._graph,
+            self._route_ref,
+            replay_latest=self._replay_latest,
+            subscriber_id=self._subscriber_id,
+            connections=self._connections,
+            stages=(*self._stages, _PipelineStage("filter", node)),
+            thread_placement=self._thread_placement,
         )
 
     def log(
@@ -2606,7 +2631,15 @@ class RoutePipeline(Generic[T]):
             interval_ms=interval_ms,
             thread_placement=self._thread_placement,
         )
-        return self._graph._connect_logging_pipeline(self, node)
+        return RoutePipeline(
+            self._graph,
+            self._route_ref,
+            replay_latest=self._replay_latest,
+            subscriber_id=self._subscriber_id,
+            connections=self._connections,
+            stages=(*self._stages, _PipelineStage("log", node)),
+            thread_placement=self._thread_placement,
+        )
 
     def map(
         self,
@@ -2620,10 +2653,14 @@ class RoutePipeline(Generic[T]):
             transform,
             thread_placement=self._thread_placement,
         )
-        return self._graph._connect_transform_pipeline(
-            self,
-            node,
-            lambda value: (True, node.transform(value)),
+        return RoutePipeline(
+            self._graph,
+            self._route_ref,
+            replay_latest=self._replay_latest,
+            subscriber_id=self._subscriber_id,
+            connections=self._connections,
+            stages=(*self._stages, _PipelineStage("map", node)),
+            thread_placement=self._thread_placement,
         )
 
     def then_on_main_thread(self) -> RoutePipeline[T]:
@@ -2739,16 +2776,25 @@ class RoutePipeline(Generic[T]):
         """Compatibility shim for existing Rx-style callers."""
         if on_next is not None:
             observer = on_next
-        return self._graph._observe_observable(
-            self._route_ref,
-            replay_latest=self._replay_latest,
-            subscriber_id=self._subscriber_id,
-            thread_placement=self._thread_placement,
+        pipeline = self._materialize()
+        subscription = pipeline._graph._observe_observable(
+            pipeline._route_ref,
+            replay_latest=pipeline._replay_latest,
+            subscriber_id=pipeline._subscriber_id,
+            thread_placement=pipeline._thread_placement,
         ).subscribe(
             observer,
             on_error,
             on_completed,
             scheduler=scheduler,
+        )
+        if not pipeline._connections:
+            return subscription
+        return GraphConnection(
+            pipeline._graph,
+            name=pipeline._graph._next_pipeline_node_name("subscription"),
+            subscriptions=(subscription,),
+            connections=pipeline._connections,
         )
 
     def pipe(self, *operators: Any) -> Observable[Any]:
@@ -2785,7 +2831,39 @@ class RoutePipeline(Generic[T]):
             replay_latest=self._replay_latest,
             subscriber_id=self._subscriber_id,
             connections=self._connections,
+            stages=self._stages,
             thread_placement=placement,
+        )
+
+    def _materialize(self) -> RoutePipeline[T]:
+        if not self._stages:
+            return self
+        pipeline: RoutePipeline[Any] = RoutePipeline(
+            self._graph,
+            self._route_ref,
+            replay_latest=self._replay_latest,
+            subscriber_id=self._subscriber_id,
+            connections=self._connections,
+            thread_placement=self._thread_placement,
+        )
+        try:
+            for stage in self._stages:
+                pipeline = self._graph._connect_pipeline_stage(pipeline, stage)
+        except Exception:
+            if pipeline._connections != self._connections:
+                GraphConnection(
+                    self._graph,
+                    name=self._graph._next_pipeline_node_name("rollback"),
+                    connections=pipeline._connections[len(self._connections) :],
+                ).remove()
+            raise
+        return RoutePipeline(
+            self._graph,
+            pipeline._route_ref,
+            replay_latest=self._replay_latest,
+            subscriber_id=pipeline._subscriber_id,
+            connections=pipeline._connections,
+            thread_placement=pipeline._thread_placement,
         )
 
     def __getattr__(self, operation: str) -> Callable[..., Any]:
@@ -4616,6 +4694,37 @@ class Graph:
             connections=(*pipeline._connections, connection),
             thread_placement=thread_placement,
         )
+
+    def _connect_pipeline_stage(
+        self,
+        pipeline: RoutePipeline[Any],
+        stage: _PipelineStage,
+    ) -> RoutePipeline[Any]:
+        if stage.kind == "map":
+            node = cast(MapNode[Any, Any], stage.node)
+            return self._connect_transform_pipeline(
+                pipeline,
+                node,
+                lambda value: (True, node.transform(value)),
+            )
+        if stage.kind == "filter":
+            node = cast(FilterNode[Any], stage.node)
+            return self._connect_transform_pipeline(
+                pipeline,
+                node,
+                lambda value: (node.predicate(value), value),
+            )
+        if stage.kind == "coalesce_latest":
+            return self._connect_coalesce_latest_pipeline(
+                pipeline,
+                cast(CoalesceLatestNode[Any], stage.node),
+            )
+        if stage.kind == "log":
+            return self._connect_logging_pipeline(
+                pipeline,
+                cast(PipelineLoggingNode[Any], stage.node),
+            )
+        raise ValueError(f"unknown pipeline stage kind: {stage.kind}")
 
     def _connect_coalesce_latest_pipeline(
         self,
