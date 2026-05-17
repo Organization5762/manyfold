@@ -204,9 +204,20 @@ def _literal_string_sequence(node: ast.expr) -> tuple[str, ...] | None:
 def _declaration_order_issues(path: Path) -> tuple[str, ...]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     return (
+        *_public_main_function_issues(path, tree),
         *_preamble_type_alias_order_issues(path, tree),
+        *_module_metadata_order_issues(path, tree),
         *_top_level_declaration_order_issues(path, tree),
         *_class_method_order_issues(path, tree),
+    )
+
+
+def _public_main_function_issues(path: Path, tree: ast.Module) -> tuple[str, ...]:
+    return tuple(
+        f"{path.relative_to(PROJECT_ROOT)}:{node.lineno} use _main for entrypoints"
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+        and node.name == "main"
     )
 
 
@@ -231,6 +242,24 @@ def _preamble_type_alias_order_issues(path: Path, tree: ast.Module) -> tuple[str
             continue
         saw_constant = True
     return tuple(issues)
+
+
+def _module_metadata_order_issues(path: Path, tree: ast.Module) -> tuple[str, ...]:
+    declaration_lines = tuple(
+        node.lineno
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
+    )
+    if not declaration_lines:
+        return ()
+    last_declaration_line = max(declaration_lines)
+    return tuple(
+        f"{path.relative_to(PROJECT_ROOT)}:{node.lineno} __all__ belongs after declarations"
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and _assigns_name(node, "__all__")
+        and node.lineno < last_declaration_line
+    )
 
 
 def _top_level_declaration_order_issues(

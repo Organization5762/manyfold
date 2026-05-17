@@ -87,8 +87,11 @@ uv run python -m unittest tests.test_components.ComponentTests.test_file_store_a
   private functions, then private classes. Within classes, keep public methods
   before private methods, with dunder lifecycle hooks placed where idiomatic.
   Keep runtime-derived constants, type aliases, and base classes before
-  declarations that require them at import time. Keep files under about 1000
-  lines of code.
+  declarations that require them at import time. Keep module metadata such as
+  `__all__` near the bottom instead of in the import preamble. Keep files under
+  about 1000 lines of code.
+- Use private `_main` functions for script and console entrypoints instead of
+  public `main` functions.
 - Avoid stubs unless absolutely necessary. Prefer runners that exercise actual
   code paths instead of replacing behavior.
 - Do not use `assert` for runtime invariants in `python/manyfold`; raise

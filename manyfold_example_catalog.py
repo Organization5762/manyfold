@@ -30,10 +30,10 @@ except BaseException:
         sys.modules[_IMPL_MODULE_NAME] = _PREVIOUS_MODULE
     raise
 
-main = _MODULE.main
+_main = _MODULE._main
 
-__all__ = ("main",)
 
+__all__ = ()
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(_main())

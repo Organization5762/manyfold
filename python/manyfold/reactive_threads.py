@@ -45,35 +45,6 @@ FRAME_THREAD_LATENCY_STREAM = "frame_thread_handoff"
 
 DEFAULT_DELIVERY_LATENCY_HISTORY_SIZE = 2048
 
-__all__ = (
-    "DEFAULT_DELIVERY_LATENCY_HISTORY_SIZE",
-    "DeliveryLatencyStats",
-    "FRAME_THREAD_LATENCY_STREAM",
-    "background_scheduler",
-    "background_threaded_observable",
-    "blocking_io_scheduler",
-    "coalesce_scheduler",
-    "create_default_thread_factory",
-    "deliver_on_frame_thread",
-    "delivery_latency_snapshot",
-    "drain_frame_thread_queue",
-    "input_scheduler",
-    "interval_in_background",
-    "interval_scheduler",
-    "materialize_sequence",
-    "on_frame_thread",
-    "pipe_in_background",
-    "pipe_in_main_thread",
-    "pipe_to_background_event_loop",
-    "pipe_to_background_thread",
-    "replay_scheduler",
-    "reset_reactive_threading_state_for_tests",
-    "scheduler_diagnostics",
-    "shutdown",
-    "start_with_once",
-)
-
-
 class _NoStartingValue:
     pass
 
@@ -628,3 +599,32 @@ _FRAME_THREAD_IDENT: int | None = None
 _LATENCY_RECORDER = _LatencyRecorder()
 
 shutdown: Subject[Any] = Subject()
+
+
+__all__ = (
+    "DEFAULT_DELIVERY_LATENCY_HISTORY_SIZE",
+    "DeliveryLatencyStats",
+    "FRAME_THREAD_LATENCY_STREAM",
+    "background_scheduler",
+    "background_threaded_observable",
+    "blocking_io_scheduler",
+    "coalesce_scheduler",
+    "create_default_thread_factory",
+    "deliver_on_frame_thread",
+    "delivery_latency_snapshot",
+    "drain_frame_thread_queue",
+    "input_scheduler",
+    "interval_in_background",
+    "interval_scheduler",
+    "materialize_sequence",
+    "on_frame_thread",
+    "pipe_in_background",
+    "pipe_in_main_thread",
+    "pipe_to_background_event_loop",
+    "pipe_to_background_thread",
+    "replay_scheduler",
+    "reset_reactive_threading_state_for_tests",
+    "scheduler_diagnostics",
+    "shutdown",
+    "start_with_once",
+)

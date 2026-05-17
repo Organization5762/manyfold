@@ -386,7 +386,7 @@ class ExampleTests(unittest.TestCase):
             recorded.append(passed_argv)
             return 29
 
-        fake_impl.main = fake_main
+        fake_impl._main = fake_main
 
         original_spec_from_file_location = importlib.util.spec_from_file_location
 
@@ -407,9 +407,9 @@ class ExampleTests(unittest.TestCase):
             spec.loader.exec_module(module)
 
         argv = ["--check"]
-        self.assertEqual(module.main(argv), 29)
+        self.assertEqual(module._main(argv), 29)
         self.assertEqual(recorded, [argv])
-        self.assertEqual(module.__all__, ("main",))
+        self.assertEqual(module.__all__, ())
 
     def test_repo_root_manyfold_example_catalog_wrapper_uses_python_impl_path(
         self,
@@ -547,7 +547,7 @@ class ExampleTests(unittest.TestCase):
             recorded.append(passed_argv)
             return 17
 
-        fake_catalog.main = fake_main
+        fake_catalog._main = fake_main
 
         original_sys_path = list(sys.path)
         try:
@@ -560,7 +560,7 @@ class ExampleTests(unittest.TestCase):
                 spec.loader.exec_module(module)
 
                 argv = ["--check-readme"]
-                self.assertEqual(module.main(argv), 17)
+                self.assertEqual(module._main(argv), 17)
 
                 self.assertEqual(recorded, [argv])
                 self.assertEqual(sys.path[:2], [repo_root, python_dir])
@@ -592,7 +592,7 @@ class ExampleTests(unittest.TestCase):
             recorded.append(passed_argv)
             return 23
 
-        fake_catalog.main = fake_main
+        fake_catalog._main = fake_main
 
         with mock.patch.dict(
             sys.modules,
@@ -604,7 +604,7 @@ class ExampleTests(unittest.TestCase):
         ):
             spec.loader.exec_module(module)
 
-        self.assertEqual(module.main(), 23)
+        self.assertEqual(module._main(), 23)
 
         self.assertEqual(recorded, [None])
 
@@ -824,10 +824,10 @@ class ExampleTests(unittest.TestCase):
                 )
                 catalog_module._README_PATH = readme_path
 
-                self.assertEqual(catalog_module.main(["--check-manifest"]), 0)
-                self.assertEqual(catalog_module.main(["--check"]), 1)
-                self.assertEqual(catalog_module.main(["--check-readme"]), 1)
-                self.assertEqual(catalog_module.main([]), 0)
+                self.assertEqual(catalog_module._main(["--check-manifest"]), 0)
+                self.assertEqual(catalog_module._main(["--check"]), 1)
+                self.assertEqual(catalog_module._main(["--check-readme"]), 1)
+                self.assertEqual(catalog_module._main([]), 0)
                 self.assertEqual(
                     readme_path.read_text(encoding="utf-8"),
                     "\n".join(
@@ -840,8 +840,8 @@ class ExampleTests(unittest.TestCase):
                         )
                     ),
                 )
-                self.assertEqual(catalog_module.main(["--check"]), 0)
-                self.assertEqual(catalog_module.main(["--check-readme"]), 0)
+                self.assertEqual(catalog_module._main(["--check"]), 0)
+                self.assertEqual(catalog_module._main(["--check-readme"]), 0)
         finally:
             catalog_module._README_PATH = original_path
 

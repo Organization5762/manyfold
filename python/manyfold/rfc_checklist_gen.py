@@ -218,7 +218,22 @@ def render_checklist(
     return "\n".join(lines)
 
 
-def main(argv: list[str] | None = None) -> int:
+@dataclass(frozen=True)
+class SectionStatus:
+    number: str
+    title: str
+    checkbox: str
+    detail: str
+
+
+@dataclass(frozen=True)
+class AppendixStatus:
+    title: str
+    checkbox: str
+    detail: str
+
+
+def _main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--check",
@@ -246,21 +261,6 @@ def main(argv: list[str] | None = None) -> int:
 
     _write_if_changed(CHECKLIST_PATH, checklist_content)
     return 0
-
-
-@dataclass(frozen=True)
-class SectionStatus:
-    number: str
-    title: str
-    checkbox: str
-    detail: str
-
-
-@dataclass(frozen=True)
-class AppendixStatus:
-    title: str
-    checkbox: str
-    detail: str
 
 
 def _parse_section_heading(line: str) -> SectionStatus | None:
@@ -350,4 +350,4 @@ class _TextPath(Protocol):
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(_main())

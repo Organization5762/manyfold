@@ -62,15 +62,6 @@ _FIRMWARE_BOOL_FIELDS = tuple(field for field, _message in _FIRMWARE_ISSUE_CHECK
 _RUNTIME_BOOL_FIELDS = tuple(
     field for field, _message in _EMBEDDED_RUNTIME_ISSUE_CHECKS
 ) + tuple(field for field, _message in _BULK_RUNTIME_ISSUE_CHECKS)
-__all__ = (
-    "EmbeddedBulkSensor",
-    "EmbeddedDeviceProfile",
-    "EmbeddedRuntimeRules",
-    "EmbeddedScalarSensor",
-    "FirmwareAgentProfile",
-)
-
-
 @dataclass(frozen=True)
 class FirmwareAgentProfile:
     """Capabilities expected from the firmware-lite agent profile."""
@@ -291,3 +282,12 @@ def _require_runtime_rules(value: object, field: str) -> None:
 def _require_typed_route(value: object, field: str) -> None:
     if not isinstance(value, TypedRoute):
         raise ValueError(f"{field} must be a TypedRoute")
+
+
+__all__ = (
+    "EmbeddedBulkSensor",
+    "EmbeddedDeviceProfile",
+    "EmbeddedRuntimeRules",
+    "EmbeddedScalarSensor",
+    "FirmwareAgentProfile",
+)

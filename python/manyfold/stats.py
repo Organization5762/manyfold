@@ -6,8 +6,6 @@ import math
 from dataclasses import dataclass
 from typing import Sequence
 
-__all__ = ("Average",)
-
 
 @dataclass(frozen=True)
 class Average:
@@ -47,3 +45,6 @@ def _require_finite_number(value: object) -> float:
     if not math.isfinite(number):
         raise ValueError("average values must be finite numbers")
     return number
+
+
+__all__ = ("Average",)
