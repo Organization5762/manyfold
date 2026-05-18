@@ -18,7 +18,7 @@ from dataclasses import dataclass, field, replace
 from datetime import timedelta
 from enum import Enum
 from itertools import count
-from threading import Lock, RLock, Thread, Timer as ThreadingTimer, get_ident
+from threading import Event, Lock, RLock, Thread, Timer as ThreadingTimer, get_ident
 from typing import (
     Any,
     Callable,
@@ -73,6 +73,7 @@ from .primitives import (
     StreamName,
     TypedEnvelope,
     TypedRoute,
+    _release_any_schema_value,
     route,
     sink as sink,
     source as source,
@@ -106,6 +107,9 @@ _SHARE_GRACE_SCHEDULER = TimeoutScheduler()
 _COALESCE_SCHEDULER = TimeoutScheduler()
 FRAME_THREAD_LATENCY_STREAM = "frame_thread_handoff"
 DEFAULT_DELIVERY_LATENCY_HISTORY_SIZE = 2048
+DEFAULT_AUDIT_HISTORY_SIZE = 2048
+DEFAULT_PENDING_WRITE_LIMIT = 2048
+DEFAULT_ROUTE_REPAIR_NOTE_LIMIT = 128
 _FRAME_THREAD_QUEUE: deque["_FrameThreadTask"] = deque()
 _FRAME_THREAD_QUEUE_LOCK = Lock()
 _FRAME_THREAD_IDENT: int | None = None
@@ -475,7 +479,7 @@ _LATENCY_RECORDER = _LatencyRecorder()
 
 
 def _interval_in_background(period: timedelta, *, name: str | None = None) -> Observable[int]:
-    """Emit integer ticks from a recurring timer until disposed or shut down."""
+    """Emit integer ticks from one worker thread until disposed or shut down."""
 
     period_seconds = period.total_seconds()
     if period_seconds < 0:
@@ -484,41 +488,37 @@ def _interval_in_background(period: timedelta, *, name: str | None = None) -> Ob
     def subscribe(observer: ObserverLike[int], scheduler: object | None = None) -> Any:
         del scheduler
         lock = Lock()
+        stop_event = Event()
         disposed = False
         tick = 0
-        timer: ThreadingTimer | None = None
 
         def dispose() -> None:
-            nonlocal disposed, timer
+            nonlocal disposed
             with lock:
                 disposed = True
-                if timer is not None:
-                    timer.cancel()
-                    timer = None
+                stop_event.set()
 
-        def emit() -> None:
+        def next_tick() -> int | None:
             nonlocal tick
             with lock:
                 if disposed:
-                    return
+                    return None
                 value = tick
                 tick += 1
-            observer.on_next(value)
-            schedule()
+                return value
 
-        def schedule() -> None:
-            nonlocal timer
-            with lock:
-                if disposed:
+        def run() -> None:
+            while not stop_event.wait(period_seconds):
+                value = next_tick()
+                if value is None:
                     return
-                timer = ThreadingTimer(period_seconds, emit)
-                timer.daemon = True
-                if name is not None:
-                    timer.name = name
-                timer.start()
+                observer.on_next(value)
 
         shutdown_subscription = shutdown.subscribe(lambda _: dispose())
-        schedule()
+        thread = Thread(target=run, daemon=True)
+        if name is not None:
+            thread.name = name
+        thread.start()
 
         def dispose_all() -> None:
             dispose()
@@ -535,27 +535,57 @@ def deliver_on_frame_thread(source: Observable[T]) -> Observable[T]:
     def subscribe(observer: ObserverLike[T], scheduler: object | None = None) -> Any:
         disposed = False
         dispose_lock = Lock()
+        pending_kind: str | None = None
+        pending_value: Any = None
+        pending_enqueued = False
 
-        def deliver(callback: Callable[[], None]) -> None:
+        def deliver(kind: str, value: Any = None) -> None:
+            nonlocal pending_kind, pending_value, pending_enqueued
+            with dispose_lock:
+                if disposed:
+                    return
+                pending_kind = kind
+                pending_value = value
+                if pending_enqueued:
+                    return
+                pending_enqueued = True
+
             def run() -> None:
+                nonlocal pending_kind, pending_value, pending_enqueued
                 with dispose_lock:
                     if disposed:
+                        pending_kind = None
+                        pending_value = None
+                        pending_enqueued = False
                         return
-                callback()
+                    kind_to_run = pending_kind
+                    value_to_run = pending_value
+                    pending_kind = None
+                    pending_value = None
+                    pending_enqueued = False
+                if kind_to_run == "next":
+                    observer.on_next(value_to_run)
+                elif kind_to_run == "error":
+                    observer.on_error(value_to_run)
+                elif kind_to_run == "completed":
+                    observer.on_completed()
 
             _enqueue_frame_thread_task(run)
 
         subscription = source.subscribe(
-            on_next=lambda value: deliver(lambda: observer.on_next(value)),
-            on_error=lambda error: deliver(lambda: observer.on_error(error)),
-            on_completed=lambda: deliver(observer.on_completed),
+            on_next=lambda value: deliver("next", value),
+            on_error=lambda error: deliver("error", error),
+            on_completed=lambda: deliver("completed"),
             scheduler=scheduler,
         )
 
         def dispose() -> None:
-            nonlocal disposed
+            nonlocal disposed, pending_kind, pending_value, pending_enqueued
             with dispose_lock:
                 disposed = True
+                pending_kind = None
+                pending_value = None
+                pending_enqueued = False
             subscription.dispose()
 
         return Disposable(dispose)
@@ -1475,6 +1505,24 @@ class EventRef:
 
     def display(self) -> str:
         return f"{self.route_display}@{self.seq_source}"
+
+
+@dataclass(frozen=True)
+class _InlinePayloadRef:
+    payload_id: str
+    logical_length_bytes: int
+    codec_id: str
+    inline_bytes: bytes
+
+
+@dataclass(frozen=True)
+class _EphemeralClosedEnvelope:
+    route: RouteRef
+    payload_ref: _InlinePayloadRef
+    seq_source: int
+    producer: ProducerRef | None = None
+    control_epoch: int | None = None
+    taints: Sequence[TaintMark] = ()
 
 
 @dataclass(frozen=True)
@@ -3061,7 +3109,8 @@ class Graph:
         self._debug_routes: dict[str, RouteRef] = {}
         self._diagram_nodes: dict[str, DiagramNode] = {}
         self._diagram_routes: dict[str, RouteRef] = {}
-        self._audit_events: list[DebugEvent] = []
+        self._audit_events: deque[DebugEvent] = deque(maxlen=DEFAULT_AUDIT_HISTORY_SIZE)
+        self._ephemeral_sequences: dict[str, int] = {}
         self._capability_grants: dict[tuple[str, str], CapabilityGrant] = {}
         self._route_visibility: dict[str, str] = {}
         self._retention_policies: dict[str, RouteRetentionPolicy] = {}
@@ -3073,7 +3122,7 @@ class Graph:
         self._opened_payload_ids: set[str] = set()
         self._payload_demand_stats: dict[str, dict[str, int]] = {}
         self._stream_taint_upper_bounds: dict[str, dict[tuple[str, str], Any]] = {}
-        self._route_repair_notes: dict[str, list[str]] = {}
+        self._route_repair_notes: dict[str, deque[str]] = {}
         self._lineage_by_event: dict[tuple[str, int], LineageRecord] = {}
         self._lineage_events_by_trace: dict[str, list[tuple[str, int]]] = {}
         self._lineage_events_by_causality: dict[str, list[tuple[str, int]]] = {}
@@ -3099,6 +3148,23 @@ class Graph:
             "log": PipelineLoggingNode,
             "map": MapNode,
         }
+
+    def _append_pending_write(self, scheduled: ScheduledWrite) -> None:
+        if len(self._pending_writes) >= DEFAULT_PENDING_WRITE_LIMIT:
+            raise OverflowError(
+                "pending guarded-write queue exceeded "
+                f"{DEFAULT_PENDING_WRITE_LIMIT} entries"
+            )
+        self._pending_writes.append(scheduled)
+
+    def _remember_repair_note(self, route_ref: RouteLike, note: str) -> None:
+        key = self._route_key(route_ref)
+        notes = self._route_repair_notes.setdefault(
+            key,
+            deque(maxlen=DEFAULT_ROUTE_REPAIR_NOTE_LIMIT),
+        )
+        if note not in notes:
+            notes.append(note)
 
     def _coerce_route_ref(self, route_ref: RouteLike) -> RouteRef:
         if isinstance(route_ref, (Source, Sink)):
@@ -3159,6 +3225,22 @@ class Graph:
     @staticmethod
     def _event_index_key(event: EventRef) -> tuple[str, int]:
         return (event.route_display, event.seq_source)
+
+    @staticmethod
+    def _remove_lineage_index(
+        index: dict[str, list[tuple[str, int]]],
+        lineage_id: str,
+        event_key: tuple[str, int],
+    ) -> None:
+        events = index.get(lineage_id)
+        if events is None:
+            return
+        try:
+            events.remove(event_key)
+        except ValueError:
+            return
+        if not events:
+            del index[lineage_id]
 
     def _next_subscriber_id(self) -> str:
         self._subscriber_sequence += 1
@@ -3288,6 +3370,12 @@ class Graph:
         self._payload_route_by_id.pop(payload_id, None)
         self._opened_payload_ids.discard(payload_id)
 
+    def _purge_envelope_payload_ref(self, envelope: ClosedEnvelope) -> None:
+        inline_payload = getattr(envelope.payload_ref, "inline_bytes", b"")
+        if inline_payload:
+            _release_any_schema_value(bytes(inline_payload))
+        self._purge_payload_ref(envelope.payload_ref.payload_id)
+
     def _enforce_payload_retention(self, route_ref: RouteLike) -> None:
         key = self._route_key(route_ref)
         retained_payload_ids = {
@@ -3307,6 +3395,30 @@ class Graph:
                 if self._payload_route_by_id.get(payload_id) == key:
                     del self._materialized_payloads[payload_id]
 
+    def _forget_lineage_for(self, envelopes: Sequence[ClosedEnvelope]) -> None:
+        for envelope in envelopes:
+            event = self._event_ref(envelope)
+            event_key = self._event_index_key(event)
+            record = self._lineage_by_event.pop(event_key, None)
+            if record is None:
+                continue
+            self._remove_lineage_index(
+                self._lineage_events_by_trace,
+                record.trace_id,
+                event_key,
+            )
+            self._remove_lineage_index(
+                self._lineage_events_by_causality,
+                record.causality_id,
+                event_key,
+            )
+            if record.correlation_id is not None:
+                self._remove_lineage_index(
+                    self._lineage_events_by_correlation,
+                    record.correlation_id,
+                    event_key,
+                )
+
     def _record_envelope(
         self,
         route_ref: RouteLike,
@@ -3324,7 +3436,11 @@ class Graph:
         history.append(envelope)
         retention = self._retention_policy_for(route_ref)
         if retention.history_limit is not None and len(history) > retention.history_limit:
+            expired = tuple(history[: len(history) - retention.history_limit])
             del history[: len(history) - retention.history_limit]
+            for expired_envelope in expired:
+                self._purge_envelope_payload_ref(expired_envelope)
+            self._forget_lineage_for(expired)
         self._payload_route_by_id[envelope.payload_ref.payload_id] = key
         self._payload_stats(route_ref)["metadata_events"] += 1
         self._enforce_payload_retention(route_ref)
@@ -3361,6 +3477,9 @@ class Graph:
     ) -> ClosedEnvelope:
         self._subject_for(route_ref).on_next(envelope)
         return envelope
+
+    def _should_emit_publish_debug(self, route_ref: RouteLike) -> bool:
+        return self._coerce_route_ref(route_ref).namespace.layer != Layer.Ephemeral
 
     @staticmethod
     def _normalize_payload_chunks(
@@ -4369,7 +4488,11 @@ class Graph:
         self._retention_policies[key] = resolved
         history = self._history.get(key)
         if history is not None and resolved.history_limit is not None:
+            expired = tuple(history[: max(0, len(history) - resolved.history_limit)])
             del history[: max(0, len(history) - resolved.history_limit)]
+            for expired_envelope in expired:
+                self._purge_envelope_payload_ref(expired_envelope)
+            self._forget_lineage_for(expired)
         self._enforce_payload_retention(native_route)
         return resolved
 
@@ -4400,6 +4523,43 @@ class Graph:
         producer: ProducerRef | None = None,
         control_epoch: int | None = None,
     ) -> list[ClosedEnvelope]:
+        if route_ref.namespace.layer == Layer.Ephemeral:
+            key = route_ref.display()
+            seq_source = self._ephemeral_sequences.get(key, 0) + 1
+            self._ephemeral_sequences[key] = seq_source
+            taints = [
+                TaintMark(
+                    TaintDomain.Determinism,
+                    "DET_NONREPLAYABLE",
+                    key,
+                )
+            ]
+            if control_epoch is not None:
+                taints.append(
+                    TaintMark(
+                        TaintDomain.Scheduling,
+                        "SCHED_READY",
+                        key,
+                    )
+                )
+            return cast(
+                list[ClosedEnvelope],
+                [
+                    _EphemeralClosedEnvelope(
+                        route=route_ref,
+                        payload_ref=_InlinePayloadRef(
+                            payload_id=f"{key}:{seq_source}",
+                            logical_length_bytes=len(payload),
+                            codec_id="identity",
+                            inline_bytes=bytes(payload),
+                        ),
+                        seq_source=seq_source,
+                        producer=producer,
+                        control_epoch=control_epoch,
+                        taints=tuple(taints),
+                    )
+                ],
+            )
         if hasattr(self._graph, "emit"):
             return cast(
                 list[ClosedEnvelope],
@@ -4584,7 +4744,12 @@ class Graph:
             thread_name = placement.thread_name or self._next_pipeline_node_name("isolated")
         return _observe_on_thread(observable, thread_name)
 
-    def _pipeline_output_route(self, node_name: str) -> TypedRoute[Any]:
+    def _pipeline_output_route(
+        self,
+        node_name: str,
+        *,
+        layer: Layer = Layer.Internal,
+    ) -> TypedRoute[Any]:
         route_id = next(_PIPELINE_ROUTE_IDS)
         safe_name = "".join(
             char if char.isalnum() or char in ("-", "_") else "-"
@@ -4592,7 +4757,7 @@ class Graph:
         ).strip("-") or "node"
         return route(
             plane=Plane.Read,
-            layer=Layer.Internal,
+            layer=layer,
             owner=OwnerName("manyfold.graph"),
             family=StreamFamily("pipeline"),
             stream=StreamName(f"{safe_name}-{route_id}"),
@@ -4763,7 +4928,7 @@ class Graph:
         )
 
     def _connect_interval_pipeline(self, node: IntervalNode) -> RoutePipeline[int]:
-        output = self._pipeline_output_route(node.name)
+        output = self._pipeline_output_route(node.name, layer=Layer.Ephemeral)
         self.register_diagram_node(
             node.name,
             output_routes=(output,),
@@ -4972,9 +5137,10 @@ class Graph:
                     parent_events=parent_events,
                 )
             self._refresh_binding_coherence(binding)
-            self._emit_debug_event(
-                "write", f"published {binding.request.display()}", binding.request
-            )
+            if self._should_emit_publish_debug(binding.request):
+                self._emit_debug_event(
+                    "write", f"published {binding.request.display()}", binding.request
+                )
             return emitted[0]
         typed_target = self._typed_route(target)
         if typed_target is not None:
@@ -4997,9 +5163,10 @@ class Graph:
                     correlation_id=correlation_id,
                     parent_events=parent_events,
                 )
-            self._emit_debug_event(
-                "write", f"published {typed_target.display()}", typed_target
-            )
+            if self._should_emit_publish_debug(typed_target):
+                self._emit_debug_event(
+                    "write", f"published {typed_target.display()}", typed_target
+                )
             return self._decode_envelope(typed_target, envelope)
         emitted = self._emit_native(
             self._coerce_route_ref(target),
@@ -5019,7 +5186,8 @@ class Graph:
                 correlation_id=correlation_id,
                 parent_events=parent_events,
             )
-        self._emit_debug_event("write", f"published {self._route_key(target)}", target)
+        if self._should_emit_publish_debug(target):
+            self._emit_debug_event("write", f"published {self._route_key(target)}", target)
         return envelope
 
     def publish_lazy(
@@ -5433,7 +5601,11 @@ class Graph:
         self, route_ref: RouteLike
     ) -> TypedEnvelope[Any] | ClosedEnvelope | None:
         """Return the latest envelope seen for one route."""
-        latest = self._graph.latest(self._coerce_route_ref(route_ref))
+        native_route = self._coerce_route_ref(route_ref)
+        latest = self._graph.latest(native_route)
+        if latest is None:
+            history = self._history.get(self._route_key(native_route), ())
+            latest = history[-1] if history else None
         if latest is None:
             return None
         typed_route = self._typed_route(route_ref)
@@ -5443,7 +5615,9 @@ class Graph:
 
     def open_payload(self, route_ref: RouteLike | ClosedEnvelope) -> bytes | None:
         """Open payload bytes for the latest route event or one specific envelope."""
-        if isinstance(route_ref, ClosedEnvelope):
+        if isinstance(route_ref, ClosedEnvelope) or (
+            hasattr(route_ref, "route") and hasattr(route_ref, "payload_ref")
+        ):
             return self._known_payload_bytes(
                 route_ref.route,
                 route_ref,
@@ -5451,6 +5625,9 @@ class Graph:
             )
         native_route = self._coerce_route_ref(route_ref)
         latest = self._graph.latest(native_route)
+        if latest is None:
+            history = self._history.get(self._route_key(native_route), ())
+            latest = history[-1] if history else None
         if latest is None:
             return None
         return self._resolve_payload_bytes(native_route, latest, record_open=True)
@@ -6116,7 +6293,7 @@ class Graph:
             correlation_id=correlation_id,
             parent_events=tuple(parent_events),
         )
-        self._pending_writes.append(scheduled)
+        self._append_pending_write(scheduled)
         self._emit_debug_event(
             "scheduler",
             f"queued guarded write for {self._route_key(target.request if isinstance(target, WriteBinding) else target)}",
@@ -6213,7 +6390,7 @@ class Graph:
                 )
             )
             if scheduled.retry_policy is not None:
-                self._pending_writes.append(
+                self._append_pending_write(
                     replace(
                         scheduled,
                         attempt_count=scheduled.attempt_count + 1,
@@ -6822,14 +6999,11 @@ class Graph:
                     parent_events=(lineage.event,),
                 )
             self._apply_taint_repair(emitted, self._item_taints(item), repair=repair)
-            key = self._route_key(output)
             note = (
                 f"{self._taint_domain_name(repair.domain)}:"
                 f"{repair.proof}"
             )
-            notes = self._route_repair_notes.setdefault(key, [])
-            if note not in notes:
-                notes.append(note)
+            self._remember_repair_note(output, note)
             self._emit_debug_event(
                 "repair",
                 f"applied taint repair on {self._route_key(output)} with proof {repair.proof}",

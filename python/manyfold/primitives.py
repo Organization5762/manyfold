@@ -38,7 +38,24 @@ TWrite = TypeVar("TWrite")
 TProto = TypeVar("TProto", bound="ProtobufMessage")
 _ANY_SCHEMA_IDS = count(1)
 _ANY_SCHEMA_LOCK = Lock()
+_ANY_SCHEMA_PREFIX = "any:"
 _ANY_SCHEMA_VALUES: dict[str, Any] = {}
+
+
+def _any_schema_value_count() -> int:
+    with _ANY_SCHEMA_LOCK:
+        return len(_ANY_SCHEMA_VALUES)
+
+
+def _release_any_schema_value(payload: bytes) -> None:
+    try:
+        key = payload.decode("ascii")
+    except UnicodeDecodeError:
+        return
+    if not key.startswith(_ANY_SCHEMA_PREFIX):
+        return
+    with _ANY_SCHEMA_LOCK:
+        _ANY_SCHEMA_VALUES.pop(key, None)
 
 
 @runtime_checkable
@@ -135,7 +152,7 @@ class Schema(Generic[T]):
 
         def encode(value: Any) -> bytes:
             with _ANY_SCHEMA_LOCK:
-                key = str(next(_ANY_SCHEMA_IDS))
+                key = f"{_ANY_SCHEMA_PREFIX}{next(_ANY_SCHEMA_IDS)}"
                 _ANY_SCHEMA_VALUES[key] = value
             return key.encode("ascii")
 

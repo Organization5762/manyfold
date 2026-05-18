@@ -76,3 +76,20 @@ uv run python -m unittest tests.test_components.ComponentTests.test_file_store_a
 - If you discover a new setup trap, missing command, or repeated source of agent
   confusion, update this file in the same change. Keep it short, concrete, and
   startup-oriented.
+
+## Memory Bounds
+
+- Treat runtime memory as bounded by default. Any in-memory history, queue,
+  cache, audit log, pending-work list, debug record, lineage index, or per-route
+  note store must either have an explicit maximum size, be scoped to static graph
+  topology, or document why it is safe to grow.
+- Prefer bounded collections (`deque(maxlen=...)`, explicit limits with
+  backpressure, or retention policies) over append-only `list`/`dict` structures
+  in hot paths.
+- When adding or changing a runtime-retained collection, add a test that drives
+  repeated events past the bound and verifies memory-facing counts stay bounded.
+- High-rate streams, timers, debug/audit paths, and frame-thread handoff paths
+  are hot paths; avoid per-event native writes, unbounded callback queues, and
+  unbounded metadata indexes there.
+- Record validation commands run for memory/runtime changes, especially focused
+  stress tests and full test-suite results.

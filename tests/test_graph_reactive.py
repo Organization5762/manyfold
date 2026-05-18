@@ -663,6 +663,109 @@ class GraphReactiveTests(unittest.TestCase):
         finally:
             connection.remove()
 
+    def test_interval_source_reuses_one_worker_thread(self) -> None:
+        graph_module = load_graph_module()
+        created_threads: list[threading.Thread] = []
+        original_thread = graph_module.Thread
+
+        class RecordingThread(threading.Thread):
+            def __init__(self, *args, **kwargs) -> None:
+                super().__init__(*args, **kwargs)
+                created_threads.append(self)
+
+        graph_module.Thread = RecordingThread
+        seen: list[int] = []
+        connection = graph_module.Interval(
+            period=timedelta(milliseconds=1),
+            name="ticks",
+        ).callback(seen.append)
+        try:
+            deadline = time.monotonic() + 1
+            while len(seen) < 5 and time.monotonic() < deadline:
+                time.sleep(0.01)
+
+            self.assertGreaterEqual(len(seen), 5)
+            self.assertEqual(len(created_threads), 1)
+        finally:
+            connection.remove()
+            graph_module.Thread = original_thread
+
+    def test_interval_source_prunes_retained_lineage(self) -> None:
+        graph_module = load_graph_module()
+        interval = graph_module.Interval(
+            period=timedelta(milliseconds=1),
+            name="ticks",
+        )
+        seen: list[int] = []
+        connection = interval.callback(seen.append)
+        try:
+            deadline = time.monotonic() + 1
+            while len(seen) < 5 and time.monotonic() < deadline:
+                time.sleep(0.01)
+
+            self.assertGreaterEqual(len(seen), 5)
+            connection.remove()
+            retained_history_count = sum(
+                len(history) for history in interval.graph._history.values()
+            )
+            self.assertEqual(len(interval.graph._lineage_by_event), retained_history_count)
+            self.assertEqual(
+                len(interval.graph._lineage_events_by_trace),
+                retained_history_count,
+            )
+            self.assertEqual(
+                len(interval.graph._lineage_events_by_causality),
+                retained_history_count,
+            )
+        finally:
+            connection.remove()
+
+    def test_interval_source_keeps_audit_history_bounded(self) -> None:
+        graph_module = load_graph_module()
+        graph = graph_module.Graph()
+        audit_route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("audit_values"),
+            variant=graph_module.Variant.Event,
+            schema=int_schema(graph_module, "AuditRuntimeNumber"),
+        )
+
+        for value in range(graph_module.DEFAULT_AUDIT_HISTORY_SIZE + 10):
+            graph.publish(audit_route, value)
+
+        self.assertEqual(
+            len(graph._audit_events),
+            graph_module.DEFAULT_AUDIT_HISTORY_SIZE,
+        )
+
+    def test_schema_any_values_are_released_when_history_expires(self) -> None:
+        graph_module = load_graph_module()
+        graph = graph_module.Graph()
+        any_schema_value_count = graph_module._release_any_schema_value.__globals__[
+            "_any_schema_value_count"
+        ]
+        start_count = any_schema_value_count()
+        any_route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Internal,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("any_values"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.any("RuntimeAnyValue"),
+        )
+
+        for value in range(10):
+            graph.publish(any_route, {"value": value})
+
+        self.assertEqual(any_schema_value_count(), start_count + 1)
+        latest = graph.latest(any_route)
+        self.assertIsNotNone(latest)
+        self.assertEqual(latest.value, {"value": 9})
+
     def test_graph_interval_exposes_source_node_in_diagram(self) -> None:
         graph_module = load_graph_module()
         graph = graph_module.Graph()
@@ -698,6 +801,22 @@ class GraphReactiveTests(unittest.TestCase):
         self.assertEqual(seen, [])
         self.assertEqual(graph_module.drain_frame_thread_queue(), 1)
         self.assertEqual(seen, [7])
+
+    def test_main_thread_node_coalesces_pending_delivery(self) -> None:
+        graph_module = load_graph_module()
+        testing_module = load_testing_module()
+        testing_module.reset_reactive_threading_state()
+        source = graph_module.Subject()
+        seen: list[int] = []
+
+        graph_module.MainThreadNode().observable(source).subscribe(seen.append)
+        source.on_next(1)
+        source.on_next(2)
+        source.on_next(3)
+
+        self.assertEqual(seen, [])
+        self.assertEqual(graph_module.drain_frame_thread_queue(), 1)
+        self.assertEqual(seen, [3])
 
     def test_materialize_stream_replays_latest_when_configured(self) -> None:
         graph_module = load_graph_module()
@@ -2928,6 +3047,30 @@ class GraphReactiveTests(unittest.TestCase):
             )
         )
 
+    def test_repair_notes_are_bounded_per_route(self) -> None:
+        graph_module = load_graph_module()
+        graph = graph_module.Graph()
+        route_ref = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("sensor"),
+            family=graph_module.StreamFamily("clock"),
+            stream=graph_module.StreamName("bounded_repairs"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes("BoundedRepairNotes"),
+        )
+
+        for index in range(graph_module.DEFAULT_ROUTE_REPAIR_NOTE_LIMIT + 10):
+            graph._remember_repair_note(route_ref, f"time:repair-{index}")
+
+        notes = graph._route_repair_notes[route_ref.display()]
+        self.assertEqual(len(notes), graph_module.DEFAULT_ROUTE_REPAIR_NOTE_LIMIT)
+        self.assertNotIn("time:repair-0", notes)
+        self.assertIn(
+            f"time:repair-{graph_module.DEFAULT_ROUTE_REPAIR_NOTE_LIMIT + 9}",
+            notes,
+        )
+
     def test_repair_taints_rejects_absorbing_determinism_clear(self) -> None:
         graph_module = load_graph_module()
 
@@ -4339,6 +4482,25 @@ class GraphReactiveTests(unittest.TestCase):
         shadow = graph.shadow_state(binding.request)
         self.assertTrue(shadow.pending_write)
         self.assertIsNotNone(shadow.desired)
+
+    def test_publish_guarded_rejects_unbounded_pending_write_backlog(self) -> None:
+        graph_module = load_graph_module()
+        target = graph_module.route(
+            plane=graph_module.Plane.Write,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("scheduler"),
+            family=graph_module.StreamFamily("backlog"),
+            stream=graph_module.StreamName("target"),
+            variant=graph_module.Variant.Request,
+            schema=graph_module.Schema.bytes("SchedulerBacklogTarget"),
+        )
+        graph = graph_module.Graph()
+
+        for index in range(graph_module.DEFAULT_PENDING_WRITE_LIMIT):
+            graph.publish_guarded(target, str(index).encode("ascii"), not_before_epoch=10)
+
+        with self.assertRaisesRegex(OverflowError, "pending guarded-write queue"):
+            graph.publish_guarded(target, b"overflow", not_before_epoch=10)
 
     def test_publish_guarded_drops_expired_write_and_emits_audit_event(self) -> None:
         graph_module = load_graph_module()
