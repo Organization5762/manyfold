@@ -847,6 +847,39 @@ assert graph.latest(route) is None
             connection.remove()
             reactive_threads.reset_reactive_threading_state_for_tests()
 
+    def test_main_thread_delivery_coalesces_pending_values(self) -> None:
+        graph_module = load_graph_module()
+        reactive_threads = importlib.import_module("manyfold.reactive_threads")
+        reactive_threads.reset_reactive_threading_state_for_tests()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("coalesced_main_thread_values"),
+            variant=graph_module.Variant.Event,
+            schema=int_schema(graph_module, "CoalescedMainThreadRuntimeNumber"),
+        )
+        graph = graph_module.Graph()
+        seen: list[int] = []
+        connection = (
+            graph.observe(route, replay_latest=False)
+            .on_main_thread()
+            .callback(seen.append, name="collect-coalesced-main")
+        )
+
+        try:
+            graph.publish(route, 1)
+            graph.publish(route, 2)
+            graph.publish(route, 3)
+
+            self.assertEqual(seen, [])
+            self.assertEqual(reactive_threads.drain_frame_thread_queue(), 1)
+            self.assertEqual(seen, [3])
+        finally:
+            connection.remove()
+            reactive_threads.reset_reactive_threading_state_for_tests()
+
     def test_pipeline_can_place_following_nodes_on_pooled_thread(self) -> None:
         graph_module = load_graph_module()
         route = graph_module.route(
@@ -1177,6 +1210,59 @@ assert graph.latest(route) is None
         finally:
             connection.remove()
             reactive_threads.reset_reactive_threading_state_for_tests()
+
+    def test_audit_history_is_bounded(self) -> None:
+        graph_module = load_graph_module()
+        graph = graph_module.Graph()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("bounded_audit_values"),
+            variant=graph_module.Variant.Event,
+            schema=int_schema(graph_module, "BoundedAuditRuntimeNumber"),
+        )
+
+        for value in range(graph_module.DEFAULT_AUDIT_HISTORY_SIZE + 10):
+            graph.publish(route, value)
+
+        self.assertEqual(
+            len(graph._audit_events),
+            graph_module.DEFAULT_AUDIT_HISTORY_SIZE,
+        )
+
+    def test_schema_any_values_are_released_when_history_expires(self) -> None:
+        graph_module = load_graph_module()
+        graph = graph_module.Graph()
+        any_schema_value_count = graph_module._release_any_schema_value.__globals__[
+            "_any_schema_value_count"
+        ]
+        start_count = any_schema_value_count()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("bounded_any_values"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.any("BoundedRuntimeAnyValue"),
+        )
+        graph.configure_retention(
+            route,
+            graph_module.RouteRetentionPolicy(
+                latest_replay_policy="bounded_history",
+                history_limit=1,
+            ),
+        )
+
+        for value in range(10):
+            graph.publish(route, {"value": value})
+
+        self.assertEqual(any_schema_value_count(), start_count + 1)
+        latest = graph.latest(route)
+        self.assertIsNotNone(latest)
+        self.assertEqual(latest.value, {"value": 9})
 
     def test_instrument_stream_logs_periodic_delivery_stats(self) -> None:
         graph_module = load_graph_module()
@@ -4914,6 +5000,30 @@ assert graph.latest(route) is None
             )
         )
 
+    def test_repair_notes_are_bounded_per_route(self) -> None:
+        graph_module = load_graph_module()
+        graph = graph_module.Graph()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("sensor"),
+            family=graph_module.StreamFamily("clock"),
+            stream=graph_module.StreamName("bounded_repairs"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="BoundedRepairNotes"),
+        )
+
+        for index in range(graph_module.DEFAULT_ROUTE_REPAIR_NOTE_LIMIT + 10):
+            graph._remember_repair_note(route, f"time:repair-{index}")
+
+        notes = graph._route_repair_notes[route.display()]
+        self.assertEqual(len(notes), graph_module.DEFAULT_ROUTE_REPAIR_NOTE_LIMIT)
+        self.assertNotIn("time:repair-0", notes)
+        self.assertIn(
+            f"time:repair-{graph_module.DEFAULT_ROUTE_REPAIR_NOTE_LIMIT + 9}",
+            notes,
+        )
+
     def test_repair_taints_rejects_absorbing_determinism_clear(self) -> None:
         graph_module = load_graph_module()
 
@@ -7072,6 +7182,29 @@ assert graph.latest(route) is None
         shadow = graph.shadow_state(binding.request)
         self.assertTrue(shadow.pending_write)
         self.assertIsNotNone(shadow.desired)
+
+    def test_publish_guarded_rejects_unbounded_pending_write_backlog(self) -> None:
+        graph_module = load_graph_module()
+        target = graph_module.route(
+            plane=graph_module.Plane.Write,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("scheduler"),
+            family=graph_module.StreamFamily("backlog"),
+            stream=graph_module.StreamName("target"),
+            variant=graph_module.Variant.Request,
+            schema=graph_module.Schema.bytes(name="SchedulerBacklogTarget"),
+        )
+        graph = graph_module.Graph()
+
+        for index in range(graph_module.DEFAULT_PENDING_WRITE_LIMIT):
+            graph.publish_guarded(
+                target,
+                str(index).encode("ascii"),
+                not_before_epoch=10,
+            )
+
+        with self.assertRaisesRegex(OverflowError, "pending guarded-write queue"):
+            graph.publish_guarded(target, b"overflow", not_before_epoch=10)
 
     def test_publish_guarded_drops_expired_write_and_emits_audit_event(self) -> None:
         graph_module = load_graph_module()

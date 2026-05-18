@@ -204,28 +204,57 @@ def deliver_on_frame_thread(source: Observable[T]) -> Observable[T]:
     ) -> DisposableBase:
         disposed = False
         dispose_lock = Lock()
+        pending_kind: str | None = None
+        pending_value: Any = None
+        pending_enqueued = False
 
-        def _deliver(callback: Callable[[], None]) -> None:
+        def _deliver(kind: str, value: Any = None) -> None:
+            nonlocal pending_kind, pending_value, pending_enqueued
+            with dispose_lock:
+                if disposed:
+                    return
+                pending_kind = kind
+                pending_value = value
+                if pending_enqueued:
+                    return
+                pending_enqueued = True
+
             def _run() -> None:
-                nonlocal disposed
+                nonlocal disposed, pending_kind, pending_value, pending_enqueued
                 with dispose_lock:
                     if disposed:
+                        pending_kind = None
+                        pending_value = None
+                        pending_enqueued = False
                         return
-                callback()
+                    kind_to_run = pending_kind
+                    value_to_run = pending_value
+                    pending_kind = None
+                    pending_value = None
+                    pending_enqueued = False
+                if kind_to_run == "next":
+                    observer.on_next(value_to_run)
+                elif kind_to_run == "error":
+                    observer.on_error(value_to_run)
+                elif kind_to_run == "completed":
+                    observer.on_completed()
 
             _enqueue_frame_thread_task(_run)
 
         subscription = source.subscribe(
-            on_next=lambda value: _deliver(lambda: observer.on_next(value)),
-            on_error=lambda error: _deliver(lambda: observer.on_error(error)),
-            on_completed=lambda: _deliver(observer.on_completed),
+            on_next=lambda value: _deliver("next", value),
+            on_error=lambda error: _deliver("error", error),
+            on_completed=lambda: _deliver("completed"),
             scheduler=scheduler,
         )
 
         def _dispose() -> None:
-            nonlocal disposed
+            nonlocal disposed, pending_kind, pending_value, pending_enqueued
             with dispose_lock:
                 disposed = True
+                pending_kind = None
+                pending_value = None
+                pending_enqueued = False
             subscription.dispose()
 
         return Disposable(_dispose)

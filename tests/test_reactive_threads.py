@@ -187,7 +187,7 @@ class ReactiveThreadsTests(unittest.TestCase):
             ):
                 self.reactive_threads.background_scheduler()
 
-    def test_deliver_on_frame_thread_queues_until_drained(self) -> None:
+    def test_deliver_on_frame_thread_coalesces_until_drained(self) -> None:
         source = self.rx.Subject()
         values: list[int] = []
 
@@ -198,15 +198,15 @@ class ReactiveThreadsTests(unittest.TestCase):
         self.assertEqual(values, [])
         self.assertFalse(self.reactive_threads.on_frame_thread())
         self.assertEqual(self.reactive_threads.drain_frame_thread_queue(max_items=1), 1)
-        self.assertEqual(values, [1])
+        self.assertEqual(values, [2])
         self.assertTrue(self.reactive_threads.on_frame_thread())
-        self.assertEqual(self.reactive_threads.drain_frame_thread_queue(), 1)
-        self.assertEqual(values, [1, 2])
+        self.assertEqual(self.reactive_threads.drain_frame_thread_queue(), 0)
+        self.assertEqual(values, [2])
 
         latency = self.reactive_threads.delivery_latency_snapshot()
         self.assertEqual(
             latency[self.reactive_threads.FRAME_THREAD_LATENCY_STREAM].count,
-            2,
+            1,
         )
 
     def test_drain_frame_thread_queue_zero_limit_leaves_queue_pending(self) -> None:
@@ -357,7 +357,7 @@ class ReactiveThreadsTests(unittest.TestCase):
         self.reactive_threads.drain_frame_thread_queue()
 
         self.assertEqual(background_values, [2, 4, 6])
-        self.assertEqual(main_thread_values, [11, 12])
+        self.assertEqual(main_thread_values, [12])
 
     def test_pipe_in_background_emits_starting_value_once_per_subscription(
         self,

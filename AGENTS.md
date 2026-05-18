@@ -104,3 +104,39 @@ uv run python -m unittest tests.test_components.ComponentTests.test_file_store_a
 - If you discover a new setup trap, missing command, or repeated source of agent
   confusion, update this file in the same change. Keep it short, concrete, and
   startup-oriented.
+
+## Memory Lifecycle
+
+- Treat memory leaks as release blockers. Manyfold is a long-running runtime;
+  code that grows without a clear bound, owner, and disposal path is incorrect
+  even when tests pass functionally.
+- Every retained object must have an explicit lifecycle. When adding a cache,
+  queue, history, audit log, subscription, timer, callback, payload handle,
+  lineage index, route note, native allocation, or global registry entry, define
+  who owns it, when it is released, and how repeated events prove it stays
+  bounded.
+- Runtime memory is bounded by default. Any in-memory collection in a hot path
+  must use a hard maximum (`deque(maxlen=...)`, retention policy, backpressure
+  limit, or explicit eviction), be scoped to static graph topology, or document
+  why unbounded growth is safe.
+- Never add append-only `list`/`dict` structures to event, timer, observer,
+  debug, audit, payload, or scheduler paths. Prefer bounded collections and
+  remove all secondary indexes when the primary record expires.
+- Pair every encoded or registered payload with a release path. In particular,
+  process-local object stores such as `Schema.any()` must delete values when the
+  corresponding envelope leaves retention.
+- Pair every subscription, timer, thread, callback queue, and native handle with
+  disposal. Disposal must clear pending callbacks and release captured payloads;
+  shutdown hooks are not a substitute for per-owner cleanup.
+- Coalesce high-rate handoff paths by default. Frame-thread delivery, timers,
+  sensors, and debug streams should not allocate one durable callback, envelope,
+  native write, or metadata record per tick unless retention is explicitly
+  bounded and tested.
+- When adding or changing retained runtime state, add a stress test that drives
+  repeated events past the bound and asserts the relevant counts stay flat after
+  expiry/disposal.
+- Validate suspicious memory behavior with runtime probes, not intuition. Use
+  RSS/PSS/anonymous memory, `tracemalloc`, GC object counts, and domain-specific
+  counters to distinguish true live retention from allocator high-water marks.
+- Record validation commands for memory/runtime changes, including focused
+  stress probes and the full test suite when practical.

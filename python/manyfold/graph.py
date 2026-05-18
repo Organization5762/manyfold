@@ -67,6 +67,7 @@ from .primitives import (
     StreamName,
     TypedEnvelope,
     TypedRoute,
+    _release_any_schema_value,
     route,
     sink as sink,
     source as source,
@@ -105,6 +106,9 @@ _THREAD_PLACEMENT_KINDS = frozenset(("main", "background", "pooled", "isolated")
 _POOLED_THREAD_SCHEDULERS = frozenset(("background", "blocking_io", "input"))
 _NO_PENDING: Any = object()
 _STATS_SCHEDULER = TimeoutScheduler()
+DEFAULT_AUDIT_HISTORY_SIZE = 2048
+DEFAULT_PENDING_WRITE_LIMIT = 2048
+DEFAULT_ROUTE_REPAIR_NOTE_LIMIT = 128
 logger = logging.getLogger(__name__)
 
 
@@ -2858,7 +2862,7 @@ class Graph:
         self._diagram_routes: dict[str, RouteRef] = {}
         self._context_stack: list[GraphContext] = []
         self._context_edges: set[tuple[str, str]] = set()
-        self._audit_events: list[DebugEvent] = []
+        self._audit_events: deque[DebugEvent] = deque(maxlen=DEFAULT_AUDIT_HISTORY_SIZE)
         self._capability_grants: dict[tuple[str, str], CapabilityGrant] = {}
         self._route_visibility: dict[str, str] = {}
         self._retention_policies: dict[str, RouteRetentionPolicy] = {}
@@ -2871,7 +2875,7 @@ class Graph:
         self._opened_payload_ids: set[str] = set()
         self._payload_demand_stats: dict[str, dict[str, int]] = {}
         self._stream_taint_upper_bounds: dict[str, dict[tuple[str, str], Any]] = {}
-        self._route_repair_notes: dict[str, list[str]] = {}
+        self._route_repair_notes: dict[str, deque[str]] = {}
         self._lineage_by_event: dict[tuple[str, int], LineageRecord] = {}
         self._lineage_events_by_trace: dict[str, list[tuple[str, int]]] = {}
         self._lineage_events_by_causality: dict[str, list[tuple[str, int]]] = {}
@@ -2945,7 +2949,11 @@ class Graph:
         self._retention_policies[key] = resolved
         history = self._history.get(key)
         if history is not None and resolved.history_limit is not None:
+            expired = tuple(history[: max(0, len(history) - resolved.history_limit)])
             del history[: max(0, len(history) - resolved.history_limit)]
+            for expired_envelope in expired:
+                self._purge_envelope_payload_ref(expired_envelope)
+            self._forget_lineage_for(expired)
         self._enforce_payload_retention(native_route)
         return resolved
 
@@ -4273,7 +4281,7 @@ class Graph:
             correlation_id=correlation_id,
             parent_events=tuple(parent_events),
         )
-        self._pending_writes.append(scheduled)
+        self._append_pending_write(scheduled)
         self._emit_debug_event(
             "scheduler",
             f"queued guarded write for {self._route_key(target.request if isinstance(target, WriteBinding) else target)}",
@@ -4379,7 +4387,7 @@ class Graph:
                 )
             )
             if scheduled.retry_policy is not None:
-                self._pending_writes.append(
+                self._append_pending_write(
                     replace(
                         scheduled,
                         attempt_count=scheduled.attempt_count + 1,
@@ -5069,11 +5077,8 @@ class Graph:
                     parent_events=(lineage.event,),
                 )
             self._apply_taint_repair(emitted, self._item_taints(item), repair=repair)
-            key = self._route_key(output)
             note = f"{self._taint_domain_name(repair.domain)}:{repair.proof}"
-            notes = self._route_repair_notes.setdefault(key, [])
-            if note not in notes:
-                notes.append(note)
+            self._remember_repair_note(output, note)
             self._emit_debug_event(
                 "repair",
                 f"applied taint repair on {self._route_key(output)} with proof {repair.proof}",
@@ -5865,12 +5870,35 @@ class Graph:
             self._retention_policy_for(route_ref).payload_retention_policy,
         )
 
+    def _append_pending_write(self, scheduled: ScheduledWrite) -> None:
+        if len(self._pending_writes) >= DEFAULT_PENDING_WRITE_LIMIT:
+            raise OverflowError(
+                "pending guarded-write queue exceeded "
+                f"{DEFAULT_PENDING_WRITE_LIMIT} entries"
+            )
+        self._pending_writes.append(scheduled)
+
+    def _remember_repair_note(self, route_ref: RouteLike, note: str) -> None:
+        key = self._route_key(route_ref)
+        notes = self._route_repair_notes.setdefault(
+            key,
+            deque(maxlen=DEFAULT_ROUTE_REPAIR_NOTE_LIMIT),
+        )
+        if note not in notes:
+            notes.append(note)
+
     def _purge_payload_ref(self, payload_id: str) -> None:
         self._lazy_payload_sources.pop(payload_id, None)
         self._materialized_payloads.pop(payload_id, None)
         self._empty_inline_payload_ids.discard(payload_id)
         self._payload_route_by_id.pop(payload_id, None)
         self._opened_payload_ids.discard(payload_id)
+
+    def _purge_envelope_payload_ref(self, envelope: ClosedEnvelope) -> None:
+        inline_payload = getattr(envelope.payload_ref, "inline_bytes", b"")
+        if inline_payload:
+            _release_any_schema_value(bytes(inline_payload))
+        self._purge_payload_ref(envelope.payload_ref.payload_id)
 
     def _enforce_payload_retention(self, route_ref: RouteLike) -> None:
         key = self._route_key(route_ref)
@@ -5890,6 +5918,46 @@ class Graph:
             for payload_id in tuple(self._materialized_payloads):
                 if self._payload_route_by_id.get(payload_id) == key:
                     del self._materialized_payloads[payload_id]
+
+    def _remove_lineage_index(
+        self,
+        index: dict[str, list[tuple[str, int]]],
+        lineage_id: str,
+        event_key: tuple[str, int],
+    ) -> None:
+        events = index.get(lineage_id)
+        if events is None:
+            return
+        try:
+            events.remove(event_key)
+        except ValueError:
+            return
+        if not events:
+            del index[lineage_id]
+
+    def _forget_lineage_for(self, envelopes: Sequence[ClosedEnvelope]) -> None:
+        for envelope in envelopes:
+            event = self._event_ref(envelope)
+            event_key = self._event_index_key(event)
+            record = self._lineage_by_event.pop(event_key, None)
+            if record is None:
+                continue
+            self._remove_lineage_index(
+                self._lineage_events_by_trace,
+                record.trace_id,
+                event_key,
+            )
+            self._remove_lineage_index(
+                self._lineage_events_by_causality,
+                record.causality_id,
+                event_key,
+            )
+            if record.correlation_id is not None:
+                self._remove_lineage_index(
+                    self._lineage_events_by_correlation,
+                    record.correlation_id,
+                    event_key,
+                )
 
     def _record_envelope(
         self,
@@ -5911,7 +5979,11 @@ class Graph:
             retention.history_limit is not None
             and len(history) > retention.history_limit
         ):
+            expired = tuple(history[: len(history) - retention.history_limit])
             del history[: len(history) - retention.history_limit]
+            for expired_envelope in expired:
+                self._purge_envelope_payload_ref(expired_envelope)
+            self._forget_lineage_for(expired)
         self._payload_route_by_id[envelope.payload_ref.payload_id] = key
         inline_payload = bytes(envelope.payload_ref.inline_bytes)
         if (
