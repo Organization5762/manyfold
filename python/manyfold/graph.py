@@ -660,11 +660,29 @@ class FluentStream(Generic[T]):
         del name
         return self.then_on_background_thread()
 
-    def map(self, transform: Callable[[T], U]) -> "FluentStream[U]":
+    def map(self, transform: Callable[[T], U], *, name: str | None = None) -> "FluentStream[U]":
+        del name
         return FluentStream(self._observable.pipe(ops.map(transform)))
 
-    def filter(self, predicate: Callable[[T], bool]) -> "FluentStream[T]":
+    def filter(
+        self,
+        predicate: Callable[[T], bool],
+        *,
+        name: str | None = None,
+    ) -> "FluentStream[T]":
+        del name
         return FluentStream(self._observable.pipe(ops.filter(predicate)))
+
+    def scan(
+        self,
+        accumulator: Callable[[Any, T], U],
+        *,
+        seed: Any = None,
+    ) -> "FluentStream[U]":
+        return FluentStream(self._observable.pipe(ops.scan(accumulator, seed=seed)))
+
+    def start_with(self, *values: Any) -> "FluentStream[Any]":
+        return FluentStream(self._observable.pipe(ops.start_with(*values)))
 
     def distinct_until_changed(
         self,
@@ -673,6 +691,28 @@ class FluentStream(Generic[T]):
         return FluentStream(
             self._observable.pipe(ops.distinct_until_changed(key_mapper=key_mapper))
         )
+
+    def do_action(
+        self,
+        on_next: Callable[[T], None] | None = None,
+        on_error: Callable[[Exception], None] | None = None,
+        on_completed: Callable[[], None] | None = None,
+    ) -> "FluentStream[T]":
+        return FluentStream(
+            self._observable.pipe(
+                ops.do_action(
+                    on_next=on_next,
+                    on_error=on_error,
+                    on_completed=on_completed,
+                )
+            )
+        )
+
+    def take(self, count: int) -> "FluentStream[T]":
+        return FluentStream(self._observable.pipe(ops.take(count)))
+
+    def switch_latest(self) -> "FluentStream[Any]":
+        return FluentStream(self._observable.pipe(ops.switch_latest()))
 
     def subscribe(
         self,
