@@ -52,14 +52,6 @@ DEFAULT_DELIVERY_LATENCY_HISTORY_SIZE = 2048
 DEFAULT_BACKGROUND_PRIORITY_QUEUE_LIMIT = 2048
 
 
-class StreamPriority(IntEnum):
-    """Priority for queued stream handoffs."""
-
-    HIGH = 0
-    NORMAL = 10
-    LOW = 20
-
-
 class _NoStartingValue:
     pass
 
@@ -280,7 +272,7 @@ def deliver_on_frame_thread(source: Observable[T]) -> Observable[T]:
 def observe_on_background(
     source: Observable[T],
     *,
-    priority: StreamPriority | StreamPriorityResolver = StreamPriority.NORMAL,
+    priority: StreamPriority | StreamPriorityResolver | None = None,
 ) -> Observable[T]:
     """Queue source emissions onto a priority-aware background stream worker."""
 
@@ -514,6 +506,14 @@ def materialize_sequence(sequence: Iterable[T]) -> Observable[T]:
     return rx.from_iterable(snapshot)
 
 
+class StreamPriority(IntEnum):
+    """Priority for queued stream handoffs."""
+
+    HIGH = 0
+    NORMAL = 10
+    LOW = 20
+
+
 @dataclass(frozen=True, slots=True)
 class DeliveryLatencyStats:
     """Percentile summary of stream delivery latency."""
@@ -591,8 +591,10 @@ def _require_stream_priority(value: Any) -> StreamPriority:
 
 
 def _require_stream_priority_resolver(
-    value: StreamPriority | StreamPriorityResolver,
+    value: StreamPriority | StreamPriorityResolver | None,
 ) -> StreamPriorityResolver:
+    if value is None:
+        return lambda: StreamPriority.NORMAL
     if callable(value):
         def _resolve() -> StreamPriority:
             return _require_stream_priority(value())
