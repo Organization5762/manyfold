@@ -3091,15 +3091,16 @@ class Graph:
                 producer=producer,
                 control_epoch=control_epoch,
             )
+            self._remember_eager_payloads(emitted, bytes(payload))
             if not any(envelope.route == binding.desired for envelope in emitted):
-                emitted.extend(
-                    self._emit_native(
-                        binding.desired,
-                        bytes(payload),
-                        producer=producer,
-                        control_epoch=control_epoch,
-                    )
+                desired_emitted = self._emit_native(
+                    binding.desired,
+                    bytes(payload),
+                    producer=producer,
+                    control_epoch=control_epoch,
                 )
+                self._remember_eager_payloads(desired_emitted, bytes(payload))
+                emitted.extend(desired_emitted)
             for envelope in emitted:
                 producer_id = "python" if producer is None else producer.producer_id
                 self._record_envelope(
@@ -3126,6 +3127,7 @@ class Graph:
                 producer=producer,
                 control_epoch=control_epoch,
             )
+            self._remember_eager_payloads(emitted, encoded)
             envelope = emitted[0]
             producer_id = "python" if producer is None else producer.producer_id
             for emitted_envelope in emitted:
@@ -3150,6 +3152,7 @@ class Graph:
             producer=producer,
             control_epoch=control_epoch,
         )
+        self._remember_eager_payloads(emitted, bytes(payload))
         envelope = emitted[0]
         producer_id = "python" if producer is None else producer.producer_id
         for emitted_envelope in emitted:
@@ -6020,6 +6023,14 @@ class Graph:
             )
         self._publish(route_ref, envelope)
         return envelope
+
+    def _remember_eager_payloads(
+        self,
+        envelopes: Sequence[ClosedEnvelope],
+        payload: bytes,
+    ) -> None:
+        for envelope in envelopes:
+            self._materialized_payloads[envelope.payload_ref.payload_id] = payload
 
     def _publish(
         self, route_ref: RouteLike, envelope: ClosedEnvelope

@@ -3,7 +3,7 @@ from __future__ import annotations
 import importlib
 import os
 import unittest
-from threading import Event
+from threading import Event, get_ident
 from unittest.mock import patch
 
 from tests.test_support import load_manyfold_package
@@ -57,6 +57,7 @@ class ReactiveThreadsTests(unittest.TestCase):
             self.reactive_threads.scheduler_diagnostics(),
             {
                 "background_max_workers": 7,
+                "background_priority_queue_limit": 2048,
                 "blocking_io_max_workers": 3,
                 "input_max_workers": 5,
             },
@@ -80,6 +81,7 @@ class ReactiveThreadsTests(unittest.TestCase):
             self.reactive_threads.scheduler_diagnostics(),
             {
                 "background_max_workers": 6,
+                "background_priority_queue_limit": 2048,
                 "blocking_io_max_workers": 4,
                 "input_max_workers": 2,
             },
@@ -132,6 +134,7 @@ class ReactiveThreadsTests(unittest.TestCase):
         source = object()
         cases = (
             lambda: self.reactive_threads.deliver_on_frame_thread(source),
+            lambda: self.reactive_threads.observe_on_background(source),
             lambda: self.reactive_threads.pipe_in_background(source),
             lambda: self.reactive_threads.pipe_in_main_thread(source),
             lambda: self.reactive_threads.pipe_to_background_event_loop(
@@ -338,6 +341,156 @@ class ReactiveThreadsTests(unittest.TestCase):
 
         self.assertEqual(self.reactive_threads.drain_frame_thread_queue(), 1)
         self.assertEqual(values, [])
+
+    def test_observe_on_background_delivers_off_caller_thread(self) -> None:
+        source = self.rx.Subject()
+        caller_thread = get_ident()
+        delivered = Event()
+        values: list[tuple[int, int]] = []
+
+        subscription = self.reactive_threads.observe_on_background(source).subscribe(
+            lambda value: (values.append((value, get_ident())), delivered.set())
+        )
+        try:
+            source.on_next(3)
+
+            self.assertTrue(delivered.wait(timeout=1.0))
+            self.assertEqual(values[0][0], 3)
+            self.assertNotEqual(values[0][1], caller_thread)
+        finally:
+            subscription.dispose()
+
+    def test_observe_on_background_coalesces_until_worker_runs(self) -> None:
+        source = self.rx.Subject()
+        started = Event()
+        release = Event()
+        delivered = Event()
+        values: list[int] = []
+
+        self.reactive_threads._enqueue_background_priority_task(
+            lambda: (started.set(), release.wait(timeout=1.0)),
+            priority=self.reactive_threads.StreamPriority.LOW,
+        )
+        self.assertTrue(started.wait(timeout=1.0))
+
+        subscription = self.reactive_threads.observe_on_background(
+            source,
+            priority=self.reactive_threads.StreamPriority.LOW,
+        ).subscribe(lambda value: (values.append(value), delivered.set()))
+        try:
+            source.on_next(1)
+            source.on_next(2)
+            release.set()
+
+            self.assertTrue(delivered.wait(timeout=1.0))
+            self.assertEqual(values, [2])
+        finally:
+            subscription.dispose()
+
+    def test_background_priority_worker_prefers_higher_priority_pending_work(
+        self,
+    ) -> None:
+        started = Event()
+        release = Event()
+        completed = Event()
+        values: list[str] = []
+
+        def record(value: str) -> None:
+            values.append(value)
+            if len(values) == 3:
+                completed.set()
+
+        self.reactive_threads._enqueue_background_priority_task(
+            lambda: (started.set(), release.wait(timeout=1.0), record("low-blocking")),
+            priority=self.reactive_threads.StreamPriority.LOW,
+        )
+        self.assertTrue(started.wait(timeout=1.0))
+        self.reactive_threads._enqueue_background_priority_task(
+            lambda: record("low-pending"),
+            priority=self.reactive_threads.StreamPriority.LOW,
+        )
+        self.reactive_threads._enqueue_background_priority_task(
+            lambda: record("high-pending"),
+            priority=self.reactive_threads.StreamPriority.HIGH,
+        )
+        release.set()
+
+        self.assertTrue(completed.wait(timeout=1.0))
+        self.assertEqual(values, ["low-blocking", "high-pending", "low-pending"])
+
+    def test_observe_on_background_can_promote_pending_work_with_dynamic_priority(
+        self,
+    ) -> None:
+        source = self.rx.Subject()
+        active = False
+        started = Event()
+        release = Event()
+        completed = Event()
+        values: list[str] = []
+
+        def current_priority() -> object:
+            if active:
+                return self.reactive_threads.StreamPriority.HIGH
+            return self.reactive_threads.StreamPriority.LOW
+
+        def record(value: str) -> None:
+            values.append(value)
+            if len(values) == 3:
+                completed.set()
+
+        self.reactive_threads._enqueue_background_priority_task(
+            lambda: (started.set(), release.wait(timeout=1.0), record("low-blocking")),
+            priority=self.reactive_threads.StreamPriority.LOW,
+        )
+        self.assertTrue(started.wait(timeout=1.0))
+
+        subscription = self.reactive_threads.observe_on_background(
+            source,
+            priority=current_priority,
+        ).subscribe(lambda value: record(f"dynamic-{value}"))
+        try:
+            source.on_next(1)
+            active = True
+            source.on_next(2)
+            self.reactive_threads._enqueue_background_priority_task(
+                lambda: record("low-pending"),
+                priority=self.reactive_threads.StreamPriority.LOW,
+            )
+            release.set()
+
+            self.assertTrue(completed.wait(timeout=1.0))
+            self.assertEqual(values, ["low-blocking", "dynamic-2", "low-pending"])
+        finally:
+            subscription.dispose()
+
+    def test_observe_on_background_rejects_invalid_dynamic_priority_result(
+        self,
+    ) -> None:
+        source = self.rx.Subject()
+        errors: list[Exception] = []
+
+        self.reactive_threads.observe_on_background(
+            source,
+            priority=lambda: "urgent",
+        ).subscribe(on_error=errors.append)
+        source.on_next(1)
+
+        self.assertEqual(len(errors), 1)
+        self.assertRegex(str(errors[0]), "priority must be a StreamPriority")
+
+    def test_observe_on_background_rejects_invalid_priority(self) -> None:
+        source = self.rx.Subject()
+
+        for priority in (True, 7, "low"):
+            with self.subTest(priority=priority):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "priority must be a StreamPriority",
+                ):
+                    self.reactive_threads.observe_on_background(
+                        source,
+                        priority=priority,
+                    )
 
     def test_pipe_helpers_apply_operators_and_materialized_streams(self) -> None:
         background_values: list[int] = []

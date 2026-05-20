@@ -2,6 +2,7 @@ from collections.abc import Callable, Iterable, Iterator
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import timedelta
+from enum import IntEnum
 from threading import Thread
 from typing import Any, TypeVar
 
@@ -12,10 +13,17 @@ from ._rx.scheduler import TimeoutScheduler
 T = TypeVar("T")
 TStarting = TypeVar("TStarting")
 StartableTarget = Callable[..., None]
+StreamPriorityResolver = Callable[[], "StreamPriority"]
 
 FRAME_THREAD_LATENCY_STREAM: str
 DEFAULT_DELIVERY_LATENCY_HISTORY_SIZE: int
+DEFAULT_BACKGROUND_PRIORITY_QUEUE_LIMIT: int
 shutdown: Subject[Any]
+
+class StreamPriority(IntEnum):
+    HIGH = 0
+    NORMAL = 10
+    LOW = 20
 
 @dataclass(frozen=True, slots=True)
 class DeliveryLatencyStats:
@@ -42,6 +50,11 @@ def delivery_latency_snapshot() -> dict[str, DeliveryLatencyStats]: ...
 def drain_frame_thread_queue(max_items: int | None = None) -> int: ...
 def on_frame_thread() -> bool: ...
 def deliver_on_frame_thread(source: Observable[T]) -> Observable[T]: ...
+def observe_on_background(
+    source: Observable[T],
+    *,
+    priority: StreamPriority | StreamPriorityResolver = ...,
+) -> Observable[T]: ...
 def start_with_once(value: TStarting) -> Callable[[Observable[T]], Observable[Any]]: ...
 def pipe_in_background(
     source: Observable[T],

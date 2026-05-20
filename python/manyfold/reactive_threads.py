@@ -15,9 +15,12 @@ import time
 from collections import deque
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
+from enum import IntEnum
 from functools import partial
+from itertools import count
+from queue import Full, PriorityQueue
 from threading import Event, Lock, Thread, get_ident
 from typing import Any, TypeVar
 
@@ -38,12 +41,24 @@ TStarting = TypeVar("TStarting")
 
 StartableTarget = Callable[..., None]
 
+StreamPriorityResolver = Callable[[], "StreamPriority"]
+
 
 logger = logging.getLogger(__name__)
 
 FRAME_THREAD_LATENCY_STREAM = "frame_thread_handoff"
 
 DEFAULT_DELIVERY_LATENCY_HISTORY_SIZE = 2048
+DEFAULT_BACKGROUND_PRIORITY_QUEUE_LIMIT = 2048
+
+
+class StreamPriority(IntEnum):
+    """Priority for queued stream handoffs."""
+
+    HIGH = 0
+    NORMAL = 10
+    LOW = 20
+
 
 class _NoStartingValue:
     pass
@@ -262,6 +277,107 @@ def deliver_on_frame_thread(source: Observable[T]) -> Observable[T]:
     return rx.create(_subscribe)
 
 
+def observe_on_background(
+    source: Observable[T],
+    *,
+    priority: StreamPriority | StreamPriorityResolver = StreamPriority.NORMAL,
+) -> Observable[T]:
+    """Queue source emissions onto a priority-aware background stream worker."""
+
+    _require_observable(source, "source")
+    priority_resolver = _require_stream_priority_resolver(priority)
+
+    def _subscribe(
+        observer: Any,
+        scheduler: SchedulerBase | None = None,
+    ) -> DisposableBase:
+        disposed = False
+        dispose_lock = Lock()
+        pending_kind: str | None = None
+        pending_value: Any = None
+        pending_enqueued = False
+        pending_generation = 0
+        queued_priority: StreamPriority | None = None
+
+        def _deliver(kind: str, value: Any = None) -> None:
+            nonlocal pending_kind, pending_value, pending_enqueued
+            nonlocal pending_generation, queued_priority
+            try:
+                resolved_priority = priority_resolver()
+            except Exception as exc:
+                observer.on_error(exc)
+                return
+            with dispose_lock:
+                if disposed:
+                    return
+                pending_kind = kind
+                pending_value = value
+                if pending_enqueued and queued_priority == resolved_priority:
+                    return
+                pending_generation += 1
+                generation_to_run = pending_generation
+                pending_enqueued = True
+                queued_priority = resolved_priority
+
+            def _run() -> None:
+                nonlocal disposed, pending_kind, pending_value, pending_enqueued
+                nonlocal queued_priority
+                with dispose_lock:
+                    if generation_to_run != pending_generation:
+                        return
+                    if disposed:
+                        pending_kind = None
+                        pending_value = None
+                        pending_enqueued = False
+                        queued_priority = None
+                        return
+                    kind_to_run = pending_kind
+                    value_to_run = pending_value
+                    pending_kind = None
+                    pending_value = None
+                    pending_enqueued = False
+                    queued_priority = None
+                if kind_to_run == "next":
+                    observer.on_next(value_to_run)
+                elif kind_to_run == "error":
+                    observer.on_error(value_to_run)
+                elif kind_to_run == "completed":
+                    observer.on_completed()
+
+            if not _enqueue_background_priority_task(
+                _run,
+                priority=resolved_priority,
+            ):
+                with dispose_lock:
+                    pending_kind = None
+                    pending_value = None
+                    pending_enqueued = False
+                    queued_priority = None
+                observer.on_error(RuntimeError("background priority queue is full"))
+
+        subscription = source.subscribe(
+            on_next=lambda value: _deliver("next", value),
+            on_error=lambda error: _deliver("error", error),
+            on_completed=lambda: _deliver("completed"),
+            scheduler=scheduler,
+        )
+
+        def _dispose() -> None:
+            nonlocal disposed, pending_kind, pending_value, pending_enqueued
+            nonlocal queued_priority
+            with dispose_lock:
+                disposed = True
+                pending_kind = None
+                pending_value = None
+                pending_enqueued = False
+                queued_priority = None
+            subscription.dispose()
+
+        return Disposable(_dispose)
+
+    return rx.create(_subscribe)
+
+
 def start_with_once(value: TStarting) -> Callable[[Observable[T]], Observable[Any]]:
     """Prepend one value to a stream for each subscription."""
 
@@ -358,6 +474,7 @@ def scheduler_diagnostics() -> dict[str, int | None]:
 
     return {
         "background_max_workers": _BACKGROUND_SCHEDULER.max_workers,
+        "background_priority_queue_limit": _BACKGROUND_PRIORITY_QUEUE.maxsize,
         "blocking_io_max_workers": _BLOCKING_IO_SCHEDULER.max_workers,
         "input_max_workers": _INPUT_SCHEDULER.max_workers,
     }
@@ -366,7 +483,7 @@ def scheduler_diagnostics() -> dict[str, int | None]:
 def reset_reactive_threading_state_for_tests() -> None:
     """Reset module-level schedulers, queues, shutdown, and latency state."""
 
-    global _FRAME_THREAD_IDENT, shutdown
+    global _BACKGROUND_PRIORITY_QUEUE, _FRAME_THREAD_IDENT, shutdown
     for state in (
         _BACKGROUND_SCHEDULER,
         _BLOCKING_IO_SCHEDULER,
@@ -380,6 +497,9 @@ def reset_reactive_threading_state_for_tests() -> None:
         _dispose_scheduler(scheduler)
     with _FRAME_THREAD_QUEUE_LOCK:
         _FRAME_THREAD_QUEUE.clear()
+    with _BACKGROUND_PRIORITY_LOCK:
+        _stop_background_priority_worker_locked()
+        _BACKGROUND_PRIORITY_QUEUE = _new_background_priority_queue()
     _FRAME_THREAD_IDENT = None
     _LATENCY_RECORDER.clear()
     shutdown = Subject()
@@ -459,6 +579,29 @@ def _require_positive_timedelta(value: Any) -> timedelta:
     return value
 
 
+def _require_stream_priority(value: Any) -> StreamPriority:
+    if isinstance(value, StreamPriority):
+        return value
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("priority must be a StreamPriority")
+    try:
+        return StreamPriority(value)
+    except ValueError as exc:
+        raise ValueError("priority must be a StreamPriority") from exc
+
+
+def _require_stream_priority_resolver(
+    value: StreamPriority | StreamPriorityResolver,
+) -> StreamPriorityResolver:
+    if callable(value):
+        def _resolve() -> StreamPriority:
+            return _require_stream_priority(value())
+
+        return _resolve
+    priority = _require_stream_priority(value)
+    return lambda: priority
+
+
 def _latency_stats(values: tuple[float, ...]) -> DeliveryLatencyStats:
     ordered = sorted(values)
     return DeliveryLatencyStats(
@@ -533,6 +676,78 @@ def _enqueue_frame_thread_task(callback: Callable[[], None]) -> None:
         _FRAME_THREAD_QUEUE.append(task)
 
 
+def _enqueue_background_priority_task(
+    callback: Callable[[], None],
+    *,
+    priority: StreamPriority,
+) -> bool:
+    _ensure_background_priority_worker()
+    task = _BackgroundPriorityTask(
+        priority=int(priority),
+        sequence=next(_BACKGROUND_PRIORITY_SEQUENCE),
+        callback=callback,
+    )
+    try:
+        _BACKGROUND_PRIORITY_QUEUE.put_nowait(task)
+    except Full:
+        return False
+    return True
+
+
+def _ensure_background_priority_worker() -> None:
+    with _BACKGROUND_PRIORITY_LOCK:
+        if _BACKGROUND_PRIORITY_WORKER.thread is not None:
+            return
+        thread = Thread(
+            target=_run_background_priority_worker,
+            args=(_BACKGROUND_PRIORITY_QUEUE,),
+            name="manyfold-priority-background",
+            daemon=True,
+        )
+        _BACKGROUND_PRIORITY_WORKER.thread = thread
+        thread.start()
+
+
+def _run_background_priority_worker(
+    queue: PriorityQueue[_BackgroundPriorityTask],
+) -> None:
+    while True:
+        task = queue.get()
+        try:
+            if task.stop:
+                return
+            task.callback()
+        finally:
+            queue.task_done()
+
+
+def _stop_background_priority_worker_locked() -> None:
+    thread = _BACKGROUND_PRIORITY_WORKER.thread
+    if thread is None:
+        return
+    _BACKGROUND_PRIORITY_QUEUE.put(
+        _BackgroundPriorityTask(
+            priority=int(StreamPriority.HIGH),
+            sequence=next(_BACKGROUND_PRIORITY_SEQUENCE),
+            callback=lambda: None,
+            stop=True,
+        ),
+        timeout=1.0,
+    )
+    thread.join(timeout=1.0)
+    _BACKGROUND_PRIORITY_WORKER.thread = None
+
+
+def _new_background_priority_queue() -> PriorityQueue[_BackgroundPriorityTask]:
+    return PriorityQueue(
+        maxsize=_env_int(
+            "MANYFOLD_RX_BACKGROUND_PRIORITY_QUEUE_LIMIT",
+            legacy_name="HEART_RX_BACKGROUND_PRIORITY_QUEUE_LIMIT",
+            default=DEFAULT_BACKGROUND_PRIORITY_QUEUE_LIMIT,
+        )
+    )
+
+
 def _run_background_observable(
     subject: Subject[T],
     observable: Observable[T],
@@ -560,10 +775,23 @@ class _FrameThreadTask:
     enqueued_monotonic: float
 
 
+@dataclass(order=True)
+class _BackgroundPriorityTask:
+    priority: int
+    sequence: int
+    callback: Callable[[], None] = field(compare=False)
+    stop: bool = field(default=False, compare=False)
+
+
 @dataclass
 class _BackgroundObservableRun:
     subscription: DisposableBase | None = None
     error: BaseException | None = None
+
+
+@dataclass
+class _BackgroundPriorityWorker:
+    thread: Thread | None = None
 
 
 class _LatencyRecorder:
@@ -613,6 +841,14 @@ _COALESCE_SCHEDULER = TimeoutScheduler()
 
 _BACKGROUND_SCHEDULER = _SchedulerState(lock=Lock())
 
+_BACKGROUND_PRIORITY_LOCK = Lock()
+
+_BACKGROUND_PRIORITY_SEQUENCE = count()
+
+_BACKGROUND_PRIORITY_QUEUE = _new_background_priority_queue()
+
+_BACKGROUND_PRIORITY_WORKER = _BackgroundPriorityWorker()
+
 _BLOCKING_IO_SCHEDULER = _SchedulerState(lock=Lock())
 
 _INPUT_SCHEDULER = _SchedulerState(lock=Lock())
@@ -631,9 +867,11 @@ shutdown: Subject[Any] = Subject()
 
 
 __all__ = (
+    "DEFAULT_BACKGROUND_PRIORITY_QUEUE_LIMIT",
     "DEFAULT_DELIVERY_LATENCY_HISTORY_SIZE",
     "DeliveryLatencyStats",
     "FRAME_THREAD_LATENCY_STREAM",
+    "StreamPriority",
     "background_scheduler",
     "background_threaded_observable",
     "blocking_io_scheduler",
@@ -646,6 +884,7 @@ __all__ = (
     "interval_in_background",
     "interval_scheduler",
     "materialize_sequence",
+    "observe_on_background",
     "on_frame_thread",
     "pipe_in_background",
     "pipe_in_main_thread",

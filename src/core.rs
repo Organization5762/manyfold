@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -826,6 +826,70 @@ impl GraphCore {
             });
     }
 
+    fn native_history_limit(descriptor: &PortDescriptorCore) -> Option<usize> {
+        match descriptor.retention.latest_replay_policy.as_str() {
+            "none" => Some(0),
+            "latest_only" => Some(1),
+            _ => None,
+        }
+    }
+
+    fn retained_payload_ids_for_route(&self, route: &RouteRefCore) -> HashSet<String> {
+        let mut retained = HashSet::new();
+        if let Some(latest) = self.latest.get(route) {
+            retained.insert(latest.payload_ref.payload_id.clone());
+        }
+        if let Some(history) = self.history.get(route) {
+            for envelope in history {
+                retained.insert(envelope.payload_ref.payload_id.clone());
+            }
+        }
+        retained
+    }
+
+    fn enforce_route_retention(
+        &mut self,
+        route: &RouteRefCore,
+        descriptor: &PortDescriptorCore,
+    ) {
+        if let Some(limit) = Self::native_history_limit(descriptor) {
+            if let Some(history) = self.history.get_mut(route) {
+                if history.len() > limit {
+                    let expired_count = history.len() - limit;
+                    history.drain(..expired_count);
+                }
+            }
+        }
+
+        let retained_payload_ids = self.retained_payload_ids_for_route(route);
+        let route_payload_prefix = format!("{}:", route.display());
+        self.payloads.retain(|payload_id, _| {
+            !payload_id.starts_with(&route_payload_prefix)
+                || retained_payload_ids.contains(payload_id)
+        });
+
+        if let Some(audit) = self.route_audit.get_mut(route) {
+            let retained_seq_sources = self
+                .history
+                .get(route)
+                .map(|history| {
+                    history
+                        .iter()
+                        .map(|envelope| envelope.seq_source)
+                        .collect::<HashSet<_>>()
+                })
+                .unwrap_or_default();
+            let latest_seq_source = self.latest.get(route).map(|envelope| envelope.seq_source);
+            audit.retain(|event| match event.seq_source {
+                Some(seq_source) => {
+                    retained_seq_sources.contains(&seq_source)
+                        || Some(seq_source) == latest_seq_source
+                }
+                None => true,
+            });
+        }
+    }
+
     fn event_taints(route: &RouteRefCore, control_epoch: Option<u64>) -> Vec<TaintMarkCore> {
         let mut taints = Vec::new();
         if route.namespace.plane == Plane::Write && route.variant == Variant::Request {
@@ -982,6 +1046,7 @@ impl GraphCore {
             Some(payload_id),
             Some(seq_source),
         );
+        self.enforce_route_retention(route, &descriptor);
         envelope
     }
 
@@ -1981,6 +2046,84 @@ mod tests {
             .expect("payload should open from store");
         assert_eq!(opened.payload, b"point-cloud".to_vec());
         assert_eq!(graph.route_audit.get(&route).expect("audit trail").len(), 2);
+    }
+
+    #[test]
+    fn latest_only_routes_bound_native_history_payloads_and_audit() {
+        let route = sample_route(
+            Plane::Read,
+            Layer::Logical,
+            "imu",
+            "sensor",
+            "accel",
+            Variant::Meta,
+        );
+        let mut graph = GraphCore::default();
+        let producer = ProducerRefCore {
+            producer_id: "imu".to_string(),
+            kind: ProducerKind::Device,
+        };
+
+        for value in 0..10 {
+            graph.write(
+                &route,
+                format!("sample-{value}").into_bytes(),
+                producer.clone(),
+                None,
+            );
+        }
+
+        let history = graph.history.get(&route).expect("retained history");
+        let audit = graph.route_audit.get(&route).expect("retained audit");
+
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].seq_source, 10);
+        assert_eq!(graph.payloads.len(), 1);
+        assert_eq!(audit.len(), 1);
+        assert_eq!(audit[0].seq_source, Some(10));
+        assert_eq!(
+            graph
+                .open_latest(&route)
+                .expect("latest payload should remain")
+                .payload,
+            b"sample-9".to_vec()
+        );
+    }
+
+    #[test]
+    fn non_replayable_routes_keep_latest_payload_without_history_growth() {
+        let route = sample_route(
+            Plane::Read,
+            Layer::Ephemeral,
+            "session",
+            "trace",
+            "entropy",
+            Variant::Event,
+        );
+        let mut graph = GraphCore::default();
+        let producer = ProducerRefCore {
+            producer_id: "session".to_string(),
+            kind: ProducerKind::Application,
+        };
+
+        for value in 0..10 {
+            graph.write(
+                &route,
+                format!("nonce-{value}").into_bytes(),
+                producer.clone(),
+                None,
+            );
+        }
+
+        assert_eq!(graph.history.get(&route).map_or(0, Vec::len), 0);
+        assert_eq!(graph.payloads.len(), 1);
+        assert_eq!(
+            graph
+                .open_latest(&route)
+                .expect("latest payload should remain")
+                .payload,
+            b"nonce-9".to_vec()
+        );
     }
 
     #[test]
