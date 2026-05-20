@@ -27,6 +27,7 @@ from ._manyfold_rust import (
     WriteBinding as WriteBinding,
     bridge_version as bridge_version,
 )
+from ._rx.subject import BehaviorSubject as BehaviorSubject
 from .components import (
     Consensus as Consensus,
     ConsensusRoutes as ConsensusRoutes,
@@ -131,6 +132,10 @@ from .primitives import (
     sink as sink,
     source as source,
 )
+from .reactive_threads import (
+    drain_frame_thread_queue as drain_frame_thread_queue,
+    shutdown as shutdown,
+)
 from .reference_examples import (
     REFERENCE_EXAMPLE_SUITE as REFERENCE_EXAMPLE_SUITE,
     ReferenceExample as ReferenceExample,
@@ -192,6 +197,7 @@ from .stats import Average as Average
 __all__ = (
     "Average",
     "BackoffPolicy",
+    "BehaviorSubject",
     "BoundedRingBuffer",
     "CallbackNode",
     "CallbackObservable",
@@ -349,6 +355,7 @@ __all__ = (
     "dependencies_of",
     "dependency_closure_of",
     "dependents_of",
+    "drain_frame_thread_queue",
     "get_lego",
     "health_status_schema",
     "implemented_reference_examples",
@@ -359,6 +366,7 @@ __all__ = (
     "route",
     "sensor_event_schema",
     "sensor_sample_schema",
+    "shutdown",
     "sink",
     "source",
     "xor_checksum",
