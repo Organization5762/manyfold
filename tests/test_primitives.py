@@ -21,10 +21,12 @@ class PrimitiveTests(unittest.TestCase):
         route_ref = route.route_ref
 
         self.assertIs(route.route_ref, route_ref)
+        self.assertIs(route.route_display, route.route_display)
         self.assertEqual(
             route.display(),
             "read.logical.sensor.events.temperature.meta.v1",
         )
+        self.assertEqual(route.route_display, route.display())
 
     def test_route_reports_missing_identity_parts_in_stable_order(self) -> None:
         manyfold = load_manyfold_package()
@@ -202,7 +204,9 @@ class PrimitiveTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, message):
                     manyfold.TypedEnvelope(**{**kwargs, field: value})
 
-        self.assertIs(manyfold.TypedEnvelope(**kwargs).close(), closed)
+        envelope = manyfold.TypedEnvelope(**kwargs)
+        self.assertIs(envelope.close(), closed)
+        self.assertFalse(hasattr(envelope, "__dict__"))
 
     def test_source_and_sink_reject_invalid_direct_construction(self) -> None:
         manyfold = load_manyfold_package()
@@ -472,6 +476,23 @@ for build, message in cases:
 
         self.assertIs(schema.decode(bytearray(token)), handle)
         self.assertIs(schema.decode(memoryview(token)), handle)
+
+    def test_schema_process_local_marker_tracks_any_payloads(self) -> None:
+        manyfold = load_manyfold_package()
+
+        self.assertFalse(manyfold.Schema.bytes(name="RawFrame").process_local)
+        self.assertTrue(manyfold.Schema.any("RuntimeHandle").process_local)
+        with self.assertRaisesRegex(
+            ValueError,
+            "schema process_local must be a boolean",
+        ):
+            manyfold.Schema(
+                schema_id="Payload",
+                version=1,
+                encode=lambda value: bytes(value),
+                decode=lambda payload: payload,
+                process_local="yes",
+            )
 
     def test_any_schema_rejects_malformed_tokens_clearly(self) -> None:
         manyfold = load_manyfold_package()

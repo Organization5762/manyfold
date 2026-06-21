@@ -136,6 +136,102 @@ class GraphReactiveTests(unittest.TestCase):
         self.assertEqual([item.value for item in observed], [b"first", b"second"])
         self.assertEqual([item.closed.seq_source for item in observed], [1, 2])
 
+    def test_byte_publish_return_uses_passthrough_payload(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("imu"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("byte_publish_fast_path"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="BytePublishFastPath"),
+        )
+        graph = graph_module.Graph()
+
+        def _unexpected_payload_decode(*_args: object) -> bytes:
+            raise AssertionError("byte publish should use passthrough payload")
+
+        graph._payload_bytes = _unexpected_payload_decode
+
+        envelope = graph.publish(route, bytearray(b"frame"))
+
+        self.assertEqual(envelope.value, b"frame")
+
+    def test_byte_observer_uses_passthrough_payload(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("imu"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("byte_observer_fast_path"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="ByteObserverFastPath"),
+        )
+        graph = graph_module.Graph()
+        observed: list[bytes] = []
+        subscription = graph.observe(route, replay_latest=False).subscribe(
+            lambda envelope: observed.append(envelope.value)
+        )
+
+        def _unexpected_payload_decode(*_args: object) -> bytes:
+            raise AssertionError("byte observer should use passthrough payload")
+
+        graph._payload_bytes = _unexpected_payload_decode
+        graph.publish(route, b"frame")
+        subscription.dispose()
+
+        self.assertEqual(observed, [b"frame"])
+
+    def test_event_stream_reuses_subscriber_snapshot_between_emits(self) -> None:
+        graph_module = load_graph_module()
+        stream = graph_module.EventStream()
+        observed: list[int] = []
+
+        subscription = stream.subscribe(observed.append)
+        snapshot = stream._subscriber_snapshot
+
+        for value in range(100):
+            stream.emit(value)
+
+        self.assertIs(stream._subscriber_snapshot, snapshot)
+        self.assertEqual(observed, list(range(100)))
+
+        subscription.dispose()
+        self.assertEqual(stream._subscriber_snapshot, ())
+
+    def test_graph_route_fanout_reuses_subscriber_snapshot_between_publishes(
+        self,
+    ) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("imu"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("stable_fanout_snapshot"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="StableFanoutSnapshot"),
+        )
+        graph = graph_module.Graph()
+        observed: list[bytes] = []
+
+        subscription = graph.observe(route, replay_latest=False).subscribe(
+            lambda envelope: observed.append(envelope.value)
+        )
+        subject = graph._subjects[route.display()]
+        snapshot = subject._subscriber_snapshot
+
+        for value in range(100):
+            graph.publish(route, f"value-{value}".encode("ascii"))
+
+        self.assertIs(subject._subscriber_snapshot, snapshot)
+        self.assertEqual(len(observed), 100)
+
+        subscription.dispose()
+        self.assertNotIn(route.display(), graph._subjects)
+
     def test_observe_can_skip_latest_replay_and_tracks_live_subscribers(self) -> None:
         graph_module = load_graph_module()
         route = graph_module.route(
@@ -162,6 +258,198 @@ class GraphReactiveTests(unittest.TestCase):
 
         self.assertEqual([item.value for item in observed], [b"second"])
         self.assertEqual(graph.subscribers(route), 0)
+
+    def test_observe_dispose_clears_subscriber_metadata_idempotently(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("imu"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("subscriber_lifecycle"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="SubscriberLifecycle"),
+        )
+        graph = graph_module.Graph()
+
+        first = graph.observe(
+            route, replay_latest=False, subscriber_id="dashboard"
+        ).subscribe(lambda _envelope: None)
+        second = graph.observe(
+            route, replay_latest=False, subscriber_id="dashboard"
+        ).subscribe(lambda _envelope: None)
+
+        self.assertEqual(graph.subscribers(route), 2)
+        self.assertEqual(graph.route_audit(route).active_subscribers, ("dashboard",))
+
+        first.dispose()
+        first.dispose()
+
+        self.assertEqual(graph.subscribers(route), 1)
+        self.assertEqual(graph.route_audit(route).active_subscribers, ("dashboard",))
+
+        second.dispose()
+
+        self.assertEqual(graph.subscribers(route), 0)
+        self.assertEqual(graph.route_audit(route).active_subscribers, ())
+        route_key = route.display()
+        self.assertNotIn(route_key, graph._subscriber_count)
+        self.assertNotIn(route_key, graph._route_subscribers)
+        self.assertNotIn(route_key, graph._route_subscriber_refs)
+        self.assertNotIn(route_key, graph._subjects)
+
+    def test_publish_without_observers_does_not_create_subject_metadata(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("imu"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("unobserved_publish"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="UnobservedPublish"),
+        )
+        graph = graph_module.Graph()
+
+        for value in range(100):
+            graph.publish(route, f"value-{value}".encode("ascii"))
+
+        self.assertEqual(graph._subjects, {})
+        self.assertEqual(graph._subscriber_count, {})
+        self.assertEqual(graph._route_subscribers, {})
+        self.assertEqual(graph._route_subscriber_refs, {})
+
+    def test_graph_dispose_releases_runtime_retained_state(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("imu"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("dispose_lifecycle"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="DisposeLifecycle"),
+        )
+        graph = graph_module.Graph()
+        disposed: list[str] = []
+        graph._subscriptions.append(
+            graph_module.CallbackSubscription(lambda: disposed.append("owned"))
+        )
+        subscription = graph.observe(
+            route, replay_latest=False, subscriber_id="dashboard"
+        ).subscribe(lambda _envelope: None)
+
+        graph.publish(route, b"value")
+
+        self.assertNotEqual(tuple(graph.retention_snapshot()), ())
+        self.assertIsNotNone(graph.latest(route))
+        self.assertNotEqual(graph._subjects, {})
+
+        graph.dispose()
+        graph.dispose()
+
+        self.assertEqual(disposed, ["owned"])
+        self.assertEqual(tuple(graph.retention_snapshot()), ())
+        self.assertEqual(graph._history, {})
+        self.assertEqual(graph._subjects, {})
+        self.assertEqual(graph._subscriber_count, {})
+        self.assertEqual(graph._route_subscribers, {})
+        self.assertEqual(graph._route_subscriber_refs, {})
+        self.assertEqual(graph._payload_route_by_id, {})
+        self.assertEqual(graph._payload_ids_by_route, {})
+        self.assertEqual(graph._materialized_payloads, {})
+        self.assertEqual(graph._lazy_payload_sources, {})
+        self.assertEqual(graph._stream_taint_upper_bounds, {})
+        self.assertEqual(graph._default_retention_policies, {})
+
+        subscription.dispose()
+        self.assertEqual(graph._subscriber_count, {})
+
+    def test_taint_upper_bounds_follow_route_retention(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("imu"),
+            family=graph_module.StreamFamily("sensor"),
+            stream=graph_module.StreamName("retained_taints"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="RetainedTaints"),
+        )
+        graph = graph_module.Graph()
+        graph.configure_retention(
+            route,
+            graph_module.RouteRetentionPolicy(
+                latest_replay_policy="bounded_history",
+                replay_window="last_3",
+                history_limit=3,
+            ),
+        )
+
+        for value in range(10):
+            graph.publish(route, f"value-{value}".encode("ascii"))
+            latest = graph.latest(route)
+            self.assertIsNotNone(latest)
+            latest_closed = latest.closed
+            taint = graph_module.TaintMark(
+                graph_module.TaintDomain.Time,
+                f"DYNAMIC_TIME_{value}",
+                route.display(),
+            )
+            updated = graph._closed_with_taints(
+                latest_closed,
+                (*getattr(latest_closed, "taints", ()), taint),
+            )
+            graph._replace_recorded_envelope(updated)
+            graph._remember_stream_taints(route, updated)
+
+        taints = graph.query(graph_module.QueryRequest(command="taints", route=route))
+
+        self.assertFalse(
+            any("DYNAMIC_TIME_0" in item for item in taints.items),
+            taints.items,
+        )
+        self.assertFalse(
+            any("DYNAMIC_TIME_6" in item for item in taints.items),
+            taints.items,
+        )
+        for value in range(7, 10):
+            self.assertTrue(
+                any(f"DYNAMIC_TIME_{value}" in item for item in taints.items),
+                taints.items,
+            )
+        self.assertLessEqual(
+            len(graph._stream_taint_upper_bounds[route.display()]),
+            3,
+        )
+
+    def test_untainted_hot_stream_skips_taint_history_rebuild(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("untainted_hot_path"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="UntaintedHotPath"),
+        )
+        graph = graph_module.Graph()
+        rebuilds = 0
+        original_rebuild = graph._rebuild_stream_taint_upper_bound
+
+        def count_rebuild(route_ref) -> None:
+            nonlocal rebuilds
+            rebuilds += 1
+            original_rebuild(route_ref)
+
+        graph._rebuild_stream_taint_upper_bound = count_rebuild
+
+        for value in range(graph_module.DEFAULT_ROUTE_HISTORY_LIMIT * 4):
+            graph.publish(route, f"value-{value}".encode("ascii"))
+
+        self.assertEqual(rebuilds, 0)
+        self.assertNotIn(route.display(), graph._stream_taint_upper_bounds)
 
     def test_observe_rolls_back_subscriber_tracking_when_latest_replay_fails(
         self,
@@ -341,6 +629,53 @@ for control_epoch in (True, False, -1, "3"):
         raise AssertionError(f"expected ValueError for {control_epoch!r}")
 
 assert graph.latest(route) is None
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            check=False,
+            capture_output=True,
+            env=subprocess_test_env(),
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_native_route_refs_compare_and_hash_by_value(self) -> None:
+        script = """
+import manyfold._manyfold_rust as native
+
+left = native.RouteRef(
+    native.NamespaceRef(native.Plane.Read, native.Layer.Logical, "heart"),
+    "runtime",
+    "sample",
+    native.Variant.Event,
+    native.SchemaRef("RuntimeSample", 1),
+)
+right = native.RouteRef(
+    native.NamespaceRef(native.Plane.Read, native.Layer.Logical, "heart"),
+    "runtime",
+    "sample",
+    native.Variant.Event,
+    native.SchemaRef("RuntimeSample", 1),
+)
+other = native.RouteRef(
+    native.NamespaceRef(native.Plane.Read, native.Layer.Logical, "heart"),
+    "runtime",
+    "other",
+    native.Variant.Event,
+    native.SchemaRef("RuntimeSample", 1),
+)
+
+assert left == right
+assert left != other
+assert hash(left) == hash(right)
+assert {left: "cached"}[right] == "cached"
+try:
+    left < right
+except TypeError:
+    pass
+else:
+    raise AssertionError("RouteRef ordering should not be supported")
 """
         result = subprocess.run(
             [sys.executable, "-c", script],
@@ -1211,7 +1546,7 @@ assert graph.latest(route) is None
             connection.remove()
             reactive_threads.reset_reactive_threading_state_for_tests()
 
-    def test_audit_history_is_bounded(self) -> None:
+    def test_repeated_write_audit_events_are_coalesced(self) -> None:
         graph_module = load_graph_module()
         graph = graph_module.Graph()
         route = graph_module.route(
@@ -1227,10 +1562,146 @@ assert graph.latest(route) is None
         for value in range(graph_module.DEFAULT_AUDIT_HISTORY_SIZE + 10):
             graph.publish(route, value)
 
+        self.assertEqual(len(graph._audit_events), 1)
+        self.assertEqual(len(tuple(graph.audit(route))), 1)
+        self.assertEqual(graph._debug_routes, {})
+
+    def test_repeated_write_audit_reuses_coalesced_detail(self) -> None:
+        graph_module = load_graph_module()
+        graph = graph_module.Graph()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("coalesced_audit_detail_values"),
+            variant=graph_module.Variant.Event,
+            schema=int_schema(graph_module, "CoalescedAuditDetailRuntimeNumber"),
+        )
+
+        graph.publish(route, 1)
+
+        def _unexpected_detail_build(_route_key: str) -> str:
+            raise AssertionError("coalesced write audit should reuse the last event")
+
+        graph._write_debug_detail_for_key = _unexpected_detail_build
+        for value in range(2, 12):
+            graph.publish(route, value)
+
+        self.assertEqual(len(graph._audit_events), 1)
+
+    def test_alternating_write_audit_events_are_coalesced_per_route(self) -> None:
+        graph_module = load_graph_module()
+        graph = graph_module.Graph()
+        first = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("alternating_audit_first"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="AlternatingAuditFirst"),
+        )
+        second = graph_module.route(
+            plane=graph_module.Plane.State,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("alternating_audit_second"),
+            variant=graph_module.Variant.State,
+            schema=graph_module.Schema.bytes(name="AlternatingAuditSecond"),
+        )
+
+        graph.publish(first, b"first")
+        graph.publish(second, b"second")
+
+        def _unexpected_debug_emit(*_args: object) -> object:
+            raise AssertionError("coalesced route-local writes should skip debug emission")
+
+        graph._emit_debug_event_for_key = _unexpected_debug_emit
+        for value in range(20):
+            graph.publish(first, f"first-{value}".encode("ascii"))
+            graph.publish(second, f"second-{value}".encode("ascii"))
+
+        self.assertEqual(len(graph._audit_events), 2)
+        self.assertEqual(len(tuple(graph.audit(first))), 1)
+        self.assertEqual(len(tuple(graph.audit(second))), 1)
+
+    def test_sparse_repeated_write_skips_coalesced_debug_emit(self) -> None:
+        graph_module = load_graph_module()
+        graph = graph_module.Graph()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("coalesced_sparse_debug_emit"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="CoalescedSparseDebugEmit"),
+        )
+
+        graph.publish(route, b"first")
+
+        def _unexpected_debug_emit(_route_key: str) -> object:
+            raise AssertionError("coalesced sparse write should skip debug emission")
+
+        graph._emit_write_debug_event_for_key = _unexpected_debug_emit
+        for value in range(10):
+            graph.publish(route, f"value-{value}".encode("ascii"))
+
+        self.assertEqual(len(graph._audit_events), 1)
+
+    def test_unique_audit_history_is_bounded(self) -> None:
+        graph_module = load_graph_module()
+        graph = graph_module.Graph()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("bounded_unique_audit_values"),
+            variant=graph_module.Variant.Event,
+            schema=int_schema(graph_module, "BoundedUniqueAuditRuntimeNumber"),
+        )
+
+        for value in range(graph_module.DEFAULT_AUDIT_HISTORY_SIZE + 10):
+            graph._emit_debug_event(
+                "write",
+                f"published {route.display()} value={value}",
+                route,
+            )
+
         self.assertEqual(
             len(graph._audit_events),
             graph_module.DEFAULT_AUDIT_HISTORY_SIZE,
         )
+        self.assertEqual(graph._debug_routes, {})
+
+    def test_debug_routes_materialize_only_when_requested(self) -> None:
+        graph_module = load_graph_module()
+        graph = graph_module.Graph()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("sparse_debug_routes"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="SparseDebugRoutes"),
+        )
+
+        graph.publish(route, b"first")
+
+        self.assertEqual(graph._debug_routes, {})
+        self.assertEqual([event.event_type for event in graph.audit(route)], ["write"])
+
+        debug_routes = tuple(graph.debug_routes())
+        write_debug_route = next(
+            debug_route for debug_route in debug_routes if debug_route.stream == "write"
+        )
+        graph.publish(route, b"second")
+
+        self.assertIsNotNone(graph.latest(write_debug_route))
 
     def test_schema_any_values_are_released_when_history_expires(self) -> None:
         graph_module = load_graph_module()
@@ -1263,6 +1734,177 @@ assert graph.latest(route) is None
         latest = graph.latest(route)
         self.assertIsNotNone(latest)
         self.assertEqual(latest.value, {"value": 9})
+
+    def test_publish_nowait_schema_any_releases_expired_values_without_publish_fallback(
+        self,
+    ) -> None:
+        graph_module = load_graph_module()
+        graph = graph_module.Graph()
+        any_schema_value_count = graph_module._release_any_schema_value.__globals__[
+            "_any_schema_value_count"
+        ]
+        start_count = any_schema_value_count()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("nowait_bounded_any_values"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.any("NowaitBoundedRuntimeAnyValue"),
+        )
+        graph.configure_retention(
+            route,
+            graph_module.RouteRetentionPolicy(
+                latest_replay_policy="bounded_history",
+                history_limit=1,
+            ),
+        )
+
+        def _unexpected_publish(*_args: object, **_kwargs: object) -> None:
+            raise AssertionError("Schema.any publish_nowait should not call publish")
+
+        graph.publish = _unexpected_publish
+        for value in range(10):
+            graph.publish_nowait(route, {"value": value})
+
+        self.assertEqual(any_schema_value_count(), start_count + 1)
+        self.assertEqual(len(graph._materialized_payloads), 1)
+        self.assertEqual(len(graph._process_local_payload_ids), 1)
+        self.assertEqual(
+            len(graph._process_local_payload_ids_by_route[route.display()]),
+            1,
+        )
+        self.assertEqual(len(graph._payload_route_by_id), 1)
+        self.assertEqual(len(graph._payload_ids_by_route[route.display()]), 1)
+        self.assertNotIn(route.display(), graph._history)
+        latest = graph.latest(route)
+        self.assertIsNotNone(latest)
+        self.assertEqual(latest.value, {"value": 9})
+        replay = list(graph.replay(route))
+        self.assertEqual(len(replay), 1)
+        replay_payload = graph.open_payload(replay[0])
+        self.assertIsNotNone(replay_payload)
+        self.assertEqual(route.schema.decode(replay_payload), {"value": 9})
+
+    def test_publish_nowait_schema_any_uses_cached_process_local_route(
+        self,
+    ) -> None:
+        graph_module = load_graph_module()
+        graph = graph_module.Graph()
+        any_schema_value_count = graph_module._release_any_schema_value.__globals__[
+            "_any_schema_value_count"
+        ]
+        start_count = any_schema_value_count()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("nowait_cached_any_values"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.any("NowaitCachedRuntimeAnyValue"),
+        )
+        graph.configure_retention(
+            route,
+            graph_module.RouteRetentionPolicy(
+                latest_replay_policy="bounded_history",
+                history_limit=2,
+            ),
+        )
+        graph.publish_nowait(route, {"value": 0})
+
+        def _unexpected_subscriber_probe(_route_display: str) -> bool:
+            raise AssertionError("cached process-local nowait should skip subscriber probes")
+
+        graph._route_has_python_subscribers = _unexpected_subscriber_probe
+        for value in range(1, 10):
+            graph.publish_nowait(route, {"value": value})
+
+        key = route.display()
+        self.assertIsNotNone(graph._last_process_local_nowait_cache)
+        self.assertEqual(any_schema_value_count(), start_count + 2)
+        self.assertEqual(len(graph._materialized_payloads), 2)
+        self.assertEqual(len(graph._process_local_payload_ids), 2)
+        self.assertEqual(len(graph._process_local_payload_ids_by_route[key]), 2)
+        self.assertEqual(len(graph._payload_ids_by_route[key]), 2)
+        self.assertEqual(
+            tuple(route.schema.decode(graph.open_payload(envelope)) for envelope in graph.replay(route)),
+            ({"value": 8}, {"value": 9}),
+        )
+
+    def test_publish_nowait_schema_any_cache_invalidates_for_observer(
+        self,
+    ) -> None:
+        graph_module = load_graph_module()
+        graph = graph_module.Graph()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("nowait_cached_any_observed_values"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.any("NowaitCachedObservedRuntimeAnyValue"),
+        )
+        graph.publish_nowait(route, {"value": "warmup"})
+        seen: list[graph_module.TypedEnvelope[dict[str, str]]] = []
+        subscription = graph.observe(route, replay_latest=False).subscribe(seen.append)
+
+        try:
+            graph.publish_nowait(route, {"value": "observed"})
+        finally:
+            subscription.dispose()
+
+        self.assertEqual([envelope.value for envelope in seen], [{"value": "observed"}])
+
+    def test_schema_any_non_replayable_values_stay_bounded_and_decodable(
+        self,
+    ) -> None:
+        graph_module = load_graph_module()
+        graph = graph_module.Graph()
+        any_schema_value_count = graph_module._release_any_schema_value.__globals__[
+            "_any_schema_value_count"
+        ]
+        start_count = any_schema_value_count()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Ephemeral,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("non_replayable_any_values"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.any("NonReplayableRuntimeAnyValue"),
+        )
+
+        for value in range(10):
+            graph.publish(route, {"value": value})
+
+        key = route.display()
+        self.assertEqual(any_schema_value_count(), start_count + 1)
+        self.assertEqual(len(graph._materialized_payloads), 1)
+        self.assertEqual(len(graph._process_local_payload_ids), 1)
+        self.assertEqual(len(graph._payload_ids_by_route[key]), 1)
+        latest = graph.latest(route)
+        self.assertIsNotNone(latest)
+        self.assertEqual(latest.value, {"value": 9})
+
+    def test_schema_any_materialized_payload_release_drops_object_token(self) -> None:
+        graph_module = load_graph_module()
+        graph = graph_module.Graph()
+        any_schema_value_count = graph_module._release_any_schema_value.__globals__[
+            "_any_schema_value_count"
+        ]
+        start_count = any_schema_value_count()
+        schema = graph_module.Schema.any("MaterializedRuntimeAnyValue")
+        payload = schema.encode({"value": "retained"})
+
+        graph._materialized_payloads["payload"] = payload
+        self.assertEqual(any_schema_value_count(), start_count + 1)
+
+        graph._purge_payload_ref("payload")
+
+        self.assertEqual(any_schema_value_count(), start_count)
 
     def test_instrument_stream_logs_periodic_delivery_stats(self) -> None:
         graph_module = load_graph_module()
@@ -4844,6 +5486,282 @@ assert graph.latest(route) is None
         assert latest is not None
         self.assertEqual(latest.value, b"8")
 
+    def test_materialize_uses_native_byte_edge_without_direct_subscription(
+        self,
+    ) -> None:
+        graph_module = load_graph_module()
+
+        source = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("native_materialize_source"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="NativeMaterializeSource"),
+        )
+        state_route = graph_module.route(
+            plane=graph_module.Plane.State,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("native_materialize_state"),
+            variant=graph_module.Variant.State,
+            schema=graph_module.Schema.bytes(name="NativeMaterializeState"),
+        )
+        graph = graph_module.Graph()
+        observed = []
+        state_subscription = graph.observe(state_route, replay_latest=False).subscribe(
+            lambda envelope: observed.append(envelope.value)
+        )
+
+        def _unexpected_direct_subscription(*_args: object, **_kwargs: object) -> None:
+            raise AssertionError("byte materialize should use native edge")
+
+        graph._observe_closed_envelopes = _unexpected_direct_subscription
+        subscription = graph.materialize(source, state_route=state_route)
+        try:
+            self.assertEqual(
+                graph._native_materialize_edges_by_source,
+                {source.display(): {state_route.display(): 1}},
+            )
+            graph._stream_taint_upper_bounds[source.display()] = {}
+            graph.publish_nowait(source, b"frame-1")
+            graph.publish(source, b"frame-2")
+        finally:
+            subscription.dispose()
+            state_subscription.dispose()
+
+        self.assertEqual(observed, [b"frame-1", b"frame-2"])
+        self.assertEqual(graph._native_materialize_edges_by_source, {})
+        self.assertEqual(graph._direct_envelope_subscribers, {})
+        self.assertEqual(graph._materialized_payloads, {})
+
+    def test_publish_nowait_native_materialize_drops_envelopes_without_observers(
+        self,
+    ) -> None:
+        graph_module = load_graph_module()
+
+        source = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("native_materialize_drop_source"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="NativeMaterializeDropSource"),
+        )
+        state_route = graph_module.route(
+            plane=graph_module.Plane.State,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("native_materialize_drop_state"),
+            variant=graph_module.Variant.State,
+            schema=graph_module.Schema.bytes(name="NativeMaterializeDropState"),
+        )
+        graph = graph_module.Graph()
+        drop_calls = 0
+        if (
+            graph._native_emit_single_if_unrouted_and_materializer_drop_python
+            is not None
+        ):
+            native_drop_name = (
+                "_native_emit_single_if_unrouted_and_materializer_drop_python"
+            )
+        elif graph._native_emit_single_if_unrouted_and_materializer_drop is not None:
+            native_drop_name = "_native_emit_single_if_unrouted_and_materializer_drop"
+        elif (
+            graph._native_emit_single_if_unrouted_with_lineage_no_parents_and_materializers_drop_python
+            is not None
+        ):
+            native_drop_name = "_native_emit_single_if_unrouted_with_lineage_no_parents_and_materializers_drop_python"
+        else:
+            native_drop_name = "_native_emit_single_if_unrouted_with_lineage_no_parents_and_materializers_drop"
+        native_drop = getattr(graph, native_drop_name)
+
+        def _count_native_drop(*args: object, **kwargs: object) -> object:
+            nonlocal drop_calls
+            drop_calls += 1
+            return native_drop(*args, **kwargs)
+
+        def _unexpected_envelope_emit(*_args: object, **_kwargs: object) -> object:
+            raise AssertionError("unobserved nowait materialize should drop envelopes")
+
+        subscription = graph.materialize(source, state_route=state_route)
+        setattr(graph, native_drop_name, _count_native_drop)
+        graph._native_emit_single_if_unrouted_with_lineage_no_parents_and_materializers = (
+            _unexpected_envelope_emit
+        )
+        try:
+            graph.publish_nowait(source, b"frame-1")
+        finally:
+            subscription.dispose()
+
+        self.assertEqual(drop_calls, 1)
+        self.assertEqual(graph.latest(source).value, b"frame-1")
+        self.assertEqual(graph.latest(state_route).value, b"frame-1")
+        self.assertEqual(graph._materialized_payloads, {})
+
+    def test_publish_nowait_native_materialize_drop_reuses_guarded_cache(
+        self,
+    ) -> None:
+        graph_module = load_graph_module()
+
+        source = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("native_materialize_drop_cache_source"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="NativeMaterializeDropCacheSource"),
+        )
+        state_route = graph_module.route(
+            plane=graph_module.Plane.State,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("native_materialize_drop_cache_state"),
+            variant=graph_module.Variant.State,
+            schema=graph_module.Schema.bytes(name="NativeMaterializeDropCacheState"),
+        )
+        graph = graph_module.Graph()
+        graph.attach(graph_module.NativeLineageTracingStore())
+        graph.attach(graph_module.NativeCorrelationTracingStore())
+        graph.configure_retention(
+            source,
+            graph_module.RouteRetentionPolicy(
+                latest_replay_policy="bounded_history",
+                lineage_retention_policy="retained",
+            ),
+        )
+        subscription = graph.materialize(source, state_route=state_route)
+
+        def _unexpected_delivery_scan(*_args: object, **_kwargs: object) -> bool:
+            raise AssertionError("cached materialize drop should skip delivery scan")
+
+        class _UnexpectedMaterializeMembership(dict):
+            def __contains__(self, _key: object) -> bool:
+                raise AssertionError(
+                    "cached materialize drop should skip materializer scan"
+                )
+
+        materializer_edges = graph._native_materialize_edges_by_source
+        try:
+            graph.publish_nowait(
+                source,
+                b"warmup",
+                trace_id="trace",
+                causality_id="chain",
+                correlation_id="first",
+            )
+            native_single_target = getattr(
+                graph,
+                "_native_emit_single_if_unrouted_with_lineage_ids_no_parents_and_materializer_drop_python",
+                None,
+            )
+            if native_single_target is not None:
+                self.assertEqual(
+                    graph._last_nowait_drop_native_call_kind,
+                    "single_target_explicit_ids",
+                )
+                self.assertIs(
+                    graph._last_nowait_drop_explicit_lineage_native,
+                    native_single_target,
+                )
+                self.assertEqual(
+                    graph._last_nowait_drop_materialized_target,
+                    state_route.route_ref,
+                )
+            materializer_edges = graph._native_materialize_edges_by_source
+            graph._native_materialize_edges_by_source = (
+                _UnexpectedMaterializeMembership()
+            )
+            graph._routes_have_delivery_subscribers = _unexpected_delivery_scan
+            graph.publish_nowait(
+                source,
+                b"cached",
+                trace_id="trace",
+                causality_id="chain",
+                correlation_id="second",
+            )
+        finally:
+            graph._native_materialize_edges_by_source = materializer_edges
+            subscription.dispose()
+
+        self.assertEqual(graph.latest(source).value, b"cached")
+        self.assertEqual(graph.latest(state_route).value, b"cached")
+        self.assertEqual(tuple(graph.lineage(source))[-1].correlation_id, "second")
+        self.assertEqual(graph._materialized_payloads, {})
+        self.assertEqual(graph._native_materialize_route_refs_by_source, {})
+
+    def test_publish_nowait_no_lineage_materialize_uses_specialized_cache(
+        self,
+    ) -> None:
+        graph_module = load_graph_module()
+
+        source = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("native_no_lineage_cache_source"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="NativeNoLineageCacheSource"),
+        )
+        state_route = graph_module.route(
+            plane=graph_module.Plane.State,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("native_no_lineage_cache_state"),
+            variant=graph_module.Variant.State,
+            schema=graph_module.Schema.bytes(name="NativeNoLineageCacheState"),
+        )
+        graph = graph_module.Graph()
+        subscription = graph.materialize(source, state_route=state_route)
+        cached_native = None
+
+        try:
+            graph.publish_nowait(source, b"warmup")
+            if (
+                graph._native_compile_no_lineage_materializer_drop_profile
+                is not None
+            ):
+                self.assertEqual(
+                    graph._last_nowait_drop_native_call_kind,
+                    "no_lineage_profile",
+                )
+                self.assertIsNotNone(
+                    graph._last_nowait_drop_no_lineage_profile
+                )
+                self.assertIsNotNone(
+                    graph._last_nowait_drop_no_lineage_profile_emit
+                )
+            else:
+                self.assertIn(
+                    graph._last_nowait_drop_native_call_kind,
+                    ("no_lineage_python", "rust_kwargs"),
+                )
+            cached_native = graph._last_nowait_drop_explicit_lineage_native
+            self.assertIsNotNone(cached_native)
+            graph._last_nowait_drop_mode = "unexpected"
+            if (
+                graph._last_nowait_drop_native_call_kind
+                == "no_lineage_profile"
+            ):
+                graph._last_nowait_drop_explicit_lineage_native = None
+            graph.publish_nowait(source, b"cached")
+        finally:
+            graph._last_nowait_drop_explicit_lineage_native = cached_native
+            subscription.dispose()
+
+        self.assertEqual(graph.latest(source).value, b"cached")
+        self.assertEqual(graph.latest(state_route).value, b"cached")
+        self.assertEqual(graph._materialized_payloads, {})
+        self.assertIsNone(graph._last_nowait_drop_no_lineage_profile)
+
     def test_materialize_preserves_source_taints_on_state_route(self) -> None:
         graph_module = load_graph_module()
 
@@ -5292,6 +6210,107 @@ assert graph.latest(route) is None
         self.assertEqual(subscribers.items, ("1",))
         self.assertEqual(writers.items, ("python", "sensor-a"))
 
+    def test_recent_writers_are_bounded_per_route(self) -> None:
+        graph_module = load_graph_module()
+
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("bounded_writers"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="BoundedWriters"),
+        )
+        graph = graph_module.Graph()
+
+        for value in range(graph_module.DEFAULT_ROUTE_WRITER_LIMIT + 5):
+            graph.publish(
+                route,
+                f"value-{value}".encode("ascii"),
+                producer=graph_module.ProducerRef(f"producer-{value}", "application"),
+            )
+
+        writers = tuple(graph.writers(route))
+        audit = graph.route_audit(route)
+
+        self.assertEqual(len(writers), graph_module.DEFAULT_ROUTE_WRITER_LIMIT)
+        self.assertNotIn("producer-0", writers)
+        self.assertIn(f"producer-{graph_module.DEFAULT_ROUTE_WRITER_LIMIT + 4}", writers)
+        self.assertEqual(audit.recent_producers, writers)
+
+    def test_repeated_writer_metadata_is_coalesced(self) -> None:
+        graph_module = load_graph_module()
+
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("coalesced_writers"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="CoalescedWriters"),
+        )
+        graph = graph_module.Graph()
+
+        for value in range(20):
+            graph.publish(route, f"value-{value}".encode("ascii"))
+
+        self.assertEqual(tuple(graph.writers(route)), ("python",))
+        self.assertEqual(tuple(graph._writers[route.display()]), ("python",))
+
+    def test_sparse_repeated_writer_skips_writer_metadata_update(self) -> None:
+        graph_module = load_graph_module()
+
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("sparse_coalesced_writers"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="SparseCoalescedWriters"),
+        )
+        graph = graph_module.Graph()
+        graph.publish(route, b"first")
+
+        def _unexpected_writer_update(*_args: object) -> None:
+            raise AssertionError("same sparse writer should use last-writer cache")
+
+        graph._remember_writer = _unexpected_writer_update
+        for value in range(20):
+            graph.publish(route, f"value-{value}".encode("ascii"))
+
+        self.assertEqual(tuple(graph.writers(route)), ("python",))
+        self.assertEqual(graph._last_writer_by_key[route.display()], "python")
+
+    def test_sparse_writer_cache_tracks_non_sparse_writer_changes(self) -> None:
+        graph_module = load_graph_module()
+
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("sparse_writer_cache_transition"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="SparseWriterCacheTransition"),
+        )
+        graph = graph_module.Graph()
+
+        graph.publish(route, b"sparse-python")
+        subscription = graph.observe(route, replay_latest=False).subscribe(lambda _item: None)
+        graph.publish(
+            route,
+            b"observed-device",
+            producer=graph_module.ProducerRef("device", "application"),
+        )
+        subscription.dispose()
+        graph.publish(route, b"sparse-python-again")
+
+        self.assertEqual(tuple(graph.writers(route)), ("device", "python"))
+        self.assertEqual(graph._last_writer_by_key[route.display()], "python")
+
     def test_materialize_preserves_lineage_causality_and_parent_event(self) -> None:
         graph_module = load_graph_module()
 
@@ -5314,6 +6333,16 @@ assert graph.latest(route) is None
             schema=str_schema(graph_module, "AccelState"),
         )
         graph = graph_module.Graph()
+        graph.attach(graph_module.NativeLineageTracingStore())
+        graph.attach(graph_module.NativeCorrelationTracingStore())
+        for retained_route in (source, state_route):
+            graph.configure_retention(
+                retained_route,
+                graph_module.RouteRetentionPolicy(
+                    latest_replay_policy="bounded_history",
+                    lineage_retention_policy="retained",
+                ),
+            )
 
         subscription = graph.materialize(source, state_route=state_route)
         source_event = graph.publish(
@@ -5335,6 +6364,250 @@ assert graph.latest(route) is None
             tuple(parent.display() for parent in records[0].parent_events),
             (f"{source.display()}@{source_event.closed.seq_source}",),
         )
+
+    def test_materialize_skips_lineage_lookup_for_non_retained_source(self) -> None:
+        graph_module = load_graph_module()
+
+        source = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("lineage_skip_default_source"),
+            variant=graph_module.Variant.Event,
+            schema=str_schema(graph_module, "LineageSkipSource"),
+        )
+        state_route = graph_module.route(
+            plane=graph_module.Plane.State,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("lineage_skip_default_state"),
+            variant=graph_module.Variant.State,
+            schema=str_schema(graph_module, "LineageSkipState"),
+        )
+        graph = graph_module.Graph()
+        graph.attach(graph_module.NativeLineageTracingStore())
+        graph.configure_retention(
+            state_route,
+            graph_module.RouteRetentionPolicy(
+                latest_replay_policy="bounded_history",
+                lineage_retention_policy="retained",
+            ),
+        )
+
+        def _unexpected_lookup(*_args: object, **_kwargs: object) -> None:
+            raise AssertionError("non-retained source lineage should not be queried")
+
+        graph._native_lineage_record_for_route_event = _unexpected_lookup
+        subscription = graph.materialize(source, state_route=state_route)
+        source_event = graph.publish(source, "frame-1")
+        subscription.dispose()
+
+        records = tuple(graph.lineage(state_route))
+        self.assertEqual(len(records), 1)
+        self.assertEqual(
+            tuple(parent.display() for parent in records[0].parent_events),
+            (f"{source.display()}@{source_event.closed.seq_source}",),
+        )
+
+    def test_materialize_uses_exact_native_lineage_lookup_for_retained_source(
+        self,
+    ) -> None:
+        graph_module = load_graph_module()
+
+        source = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("lineage_exact_source"),
+            variant=graph_module.Variant.Event,
+            schema=str_schema(graph_module, "LineageExactSource"),
+        )
+        state_route = graph_module.route(
+            plane=graph_module.Plane.State,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("lineage_exact_state"),
+            variant=graph_module.Variant.State,
+            schema=str_schema(graph_module, "LineageExactState"),
+        )
+        graph = graph_module.Graph()
+        graph.attach(graph_module.NativeLineageTracingStore())
+        graph.attach(graph_module.NativeCorrelationTracingStore())
+        for retained_route in (source, state_route):
+            graph.configure_retention(
+                retained_route,
+                graph_module.RouteRetentionPolicy(
+                    latest_replay_policy="bounded_history",
+                    lineage_retention_policy="retained",
+                ),
+            )
+        native_lookup = graph._native_lineage_record_for_route_event
+        self.assertIsNotNone(native_lookup)
+        calls: list[tuple[object, int]] = []
+
+        def _count_lookup(route_ref: object, seq_source: int) -> object | None:
+            calls.append((route_ref, seq_source))
+            return native_lookup(route_ref, seq_source)
+
+        graph._native_lineage_record_for_route_event = _count_lookup
+        subscription = graph.materialize(source, state_route=state_route)
+        source_event = graph.publish(
+            source,
+            "frame-1",
+            trace_id="trace-exact",
+            causality_id="chain-exact",
+            correlation_id="request-exact",
+        )
+        subscription.dispose()
+
+        records = tuple(graph.lineage(state_route))
+        self.assertEqual(calls, [(source.route_ref, source_event.closed.seq_source)])
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].trace_id, "trace-exact")
+        self.assertEqual(records[0].causality_id, "chain-exact")
+        self.assertEqual(records[0].correlation_id, "request-exact")
+
+    def test_materialize_uses_nowait_for_untainted_state_writes(self) -> None:
+        graph_module = load_graph_module()
+
+        source = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("materialize_nowait_source"),
+            variant=graph_module.Variant.Event,
+            schema=str_schema(graph_module, "MaterializeNowaitSource"),
+        )
+        state_route = graph_module.route(
+            plane=graph_module.Plane.State,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("materialize_nowait_state"),
+            variant=graph_module.Variant.State,
+            schema=str_schema(graph_module, "MaterializeNowaitState"),
+        )
+        graph = graph_module.Graph()
+        graph.attach(graph_module.NativeLineageTracingStore())
+        for retained_route in (source, state_route):
+            graph.configure_retention(
+                retained_route,
+                graph_module.RouteRetentionPolicy(
+                    latest_replay_policy="bounded_history",
+                    lineage_retention_policy="retained",
+                ),
+            )
+        publish_nowait = graph.publish_nowait
+        calls: list[tuple[object, str]] = []
+        native_one_parent = graph._native_record_lineage_for_route_one_parent
+        self.assertIsNotNone(native_one_parent)
+        lineage_calls: list[tuple[object, int, str, int]] = []
+
+        def _record_nowait(target: object, value: str, **kwargs: object) -> None:
+            calls.append((target, value))
+            publish_nowait(target, value, **kwargs)
+
+        def _record_one_parent(
+            route_ref: object,
+            seq_source: int,
+            producer_id: str | None,
+            trace_id: str,
+            causality_id: str,
+            correlation_id: str | None,
+            parent_route_display: str,
+            parent_seq_source: int,
+        ) -> None:
+            lineage_calls.append(
+                (route_ref, seq_source, parent_route_display, parent_seq_source)
+            )
+            native_one_parent(
+                route_ref,
+                seq_source,
+                producer_id,
+                trace_id,
+                causality_id,
+                correlation_id,
+                parent_route_display,
+                parent_seq_source,
+            )
+
+        def _unexpected_publish(*_args: object, **_kwargs: object) -> None:
+            raise AssertionError("untainted materialize should not require publish")
+
+        graph.publish_nowait = _record_nowait
+        graph._native_record_lineage_for_route_one_parent = _record_one_parent
+        graph.publish = _unexpected_publish
+        subscription = graph.materialize(source, state_route=state_route)
+        try:
+            source_event = graph_module.Graph.publish(
+                graph,
+                source,
+                "frame-1",
+                trace_id="trace-nowait",
+            )
+        finally:
+            subscription.dispose()
+
+        records = tuple(graph.lineage(state_route))
+        self.assertEqual(calls, [(state_route, "frame-1")])
+        self.assertEqual(len(records), 1)
+        self.assertEqual(
+            lineage_calls,
+            [
+                (
+                    state_route.route_ref,
+                    records[0].event.seq_source,
+                    source.display(),
+                    source_event.closed.seq_source,
+                )
+            ],
+        )
+        self.assertEqual(records[0].trace_id, "trace-nowait")
+
+    def test_materialize_subscribes_to_closed_envelopes_directly(self) -> None:
+        graph_module = load_graph_module()
+
+        source = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("materialize_direct_source"),
+            variant=graph_module.Variant.Event,
+            schema=str_schema(graph_module, "MaterializeDirectSource"),
+        )
+        state_route = graph_module.route(
+            plane=graph_module.Plane.State,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("materialize_direct_state"),
+            variant=graph_module.Variant.State,
+            schema=str_schema(graph_module, "MaterializeDirectState"),
+        )
+        graph = graph_module.Graph()
+
+        def _unexpected_typed_observable(*_args: object, **_kwargs: object) -> None:
+            raise AssertionError("materialize should not use typed observable wrapping")
+
+        graph._observe_observable = _unexpected_typed_observable
+        subscription = graph.materialize(source, state_route=state_route)
+        try:
+            graph.publish(source, "frame-1")
+        finally:
+            subscription.dispose()
+
+        latest = graph.latest(state_route)
+        self.assertIsNotNone(latest)
+        assert latest is not None
+        self.assertEqual(latest.value, "frame-1")
+        self.assertEqual(graph._subscriber_count, {})
+        self.assertEqual(graph._subjects, {})
 
     def test_query_trace_filters_by_trace_id(self) -> None:
         graph_module = load_graph_module()
@@ -5358,6 +6631,15 @@ assert graph.latest(route) is None
             schema=str_schema(graph_module, "GyroState"),
         )
         graph = graph_module.Graph()
+        graph.attach(graph_module.NativeLineageTracingStore())
+        for route in (source, state_route):
+            graph.configure_retention(
+                route,
+                graph_module.RouteRetentionPolicy(
+                    latest_replay_policy="bounded_history",
+                    lineage_retention_policy="retained",
+                ),
+            )
         graph.grant_access(
             graph_module.CapabilityGrant(
                 principal_id="auditor",
@@ -5411,6 +6693,15 @@ assert graph.latest(route) is None
             schema=str_schema(graph_module, "Mag"),
         )
         graph = graph_module.Graph()
+        graph.attach(graph_module.NativeLineageTracingStore())
+        graph.attach(graph_module.NativeCorrelationTracingStore())
+        graph.configure_retention(
+            route,
+            graph_module.RouteRetentionPolicy(
+                latest_replay_policy="bounded_history",
+                lineage_retention_policy="retained",
+            ),
+        )
 
         graph.publish(route, "frame-1", correlation_id="request-11")
         graph.publish(route, "frame-2", correlation_id="request-12")
@@ -5419,6 +6710,227 @@ assert graph.latest(route) is None
 
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0].correlation_id, "request-11")
+
+    def test_native_lineage_indexes_follow_route_retention(self) -> None:
+        graph_module = load_graph_module()
+
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("bounded_lineage"),
+            variant=graph_module.Variant.Event,
+            schema=str_schema(graph_module, "BoundedLineage"),
+        )
+        graph = graph_module.Graph()
+        graph.attach(graph_module.NativeLineageTracingStore())
+        graph.attach(graph_module.NativeCorrelationTracingStore())
+        graph.configure_retention(
+            route,
+            graph_module.RouteRetentionPolicy(
+                latest_replay_policy="bounded_history",
+                replay_window="last_2",
+                history_limit=2,
+                lineage_retention_policy="retained",
+            ),
+        )
+
+        for value in range(20):
+            graph.publish(
+                route,
+                f"frame-{value}",
+                trace_id="runtime-trace",
+                causality_id="runtime-chain",
+                correlation_id=f"request-{value}",
+            )
+
+        records = tuple(graph.lineage(route))
+        trace_records = tuple(graph.lineage(trace_id="runtime-trace"))
+        expired_records = tuple(graph.lineage(correlation_id="request-0"))
+
+        self.assertEqual(tuple(record.event.seq_source for record in records), (19, 20))
+        self.assertEqual(
+            tuple(record.event.seq_source for record in trace_records), (19, 20)
+        )
+        self.assertEqual(expired_records, ())
+
+    def test_retained_lineage_drops_correlation_ids_without_correlation_store(
+        self,
+    ) -> None:
+        graph_module = load_graph_module()
+
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("sparse_correlation_lineage"),
+            variant=graph_module.Variant.Event,
+            schema=str_schema(graph_module, "SparseCorrelationLineage"),
+        )
+        graph = graph_module.Graph()
+        graph.attach(graph_module.NativeLineageTracingStore())
+        graph.configure_retention(
+            route,
+            graph_module.RouteRetentionPolicy(
+                latest_replay_policy="bounded_history",
+                lineage_retention_policy="retained",
+            ),
+        )
+
+        graph.publish(
+            route,
+            "frame-1",
+            trace_id="trace-retained",
+            causality_id="cause-retained",
+            correlation_id="debug-request",
+        )
+        snapshot = next(graph.retention_snapshot(route))
+        records = tuple(graph.lineage(route))
+
+        self.assertEqual(snapshot.lineage_count, 1)
+        self.assertEqual(snapshot.trace_index_count, 1)
+        self.assertEqual(snapshot.causality_index_count, 1)
+        self.assertEqual(snapshot.correlation_index_count, 0)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].trace_id, "trace-retained")
+        self.assertEqual(records[0].causality_id, "cause-retained")
+        self.assertIsNone(records[0].correlation_id)
+        self.assertEqual(tuple(graph.lineage(correlation_id="debug-request")), ())
+
+    def test_lineage_store_class_attachment_retains_trace_without_correlation(
+        self,
+    ) -> None:
+        graph_module = load_graph_module()
+
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("class_lineage_store"),
+            variant=graph_module.Variant.Event,
+            schema=str_schema(graph_module, "ClassLineageStore"),
+        )
+        graph = graph_module.Graph()
+        store = graph.attach(graph_module.LineageTracingStore)
+        graph.configure_retention(
+            route,
+            graph_module.RouteRetentionPolicy(
+                latest_replay_policy="bounded_history",
+                lineage_retention_policy="retained",
+            ),
+        )
+
+        graph.publish(
+            route,
+            "frame-1",
+            trace_id="trace-class",
+            causality_id="cause-class",
+            correlation_id="debug-class",
+        )
+        snapshot = next(graph.retention_snapshot(route))
+        records = tuple(graph.lineage(route))
+
+        self.assertIsInstance(store, graph_module.NativeLineageTracingStore)
+        self.assertEqual(snapshot.lineage_count, 1)
+        self.assertEqual(snapshot.trace_index_count, 1)
+        self.assertEqual(snapshot.causality_index_count, 1)
+        self.assertEqual(snapshot.correlation_index_count, 0)
+        self.assertEqual(records[0].trace_id, "trace-class")
+        self.assertEqual(records[0].causality_id, "cause-class")
+        self.assertIsNone(records[0].correlation_id)
+
+    def test_correlation_store_class_attachment_retains_debug_correlation(
+        self,
+    ) -> None:
+        graph_module = load_graph_module()
+
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("class_correlation_store"),
+            variant=graph_module.Variant.Event,
+            schema=str_schema(graph_module, "ClassCorrelationStore"),
+        )
+        graph = graph_module.Graph()
+        lineage_store = graph.attach(graph_module.LineageTracingStore)
+        correlation_store = graph.attach(graph_module.CorrelationTracingStore)
+        graph.configure_retention(
+            route,
+            graph_module.RouteRetentionPolicy(
+                latest_replay_policy="bounded_history",
+                lineage_retention_policy="retained",
+            ),
+        )
+
+        graph.publish(
+            route,
+            "frame-1",
+            trace_id="trace-debug",
+            causality_id="cause-debug",
+            correlation_id="debug-request",
+        )
+        snapshot = next(graph.retention_snapshot(route))
+        records = tuple(graph.lineage(correlation_id="debug-request"))
+
+        self.assertIsInstance(lineage_store, graph_module.NativeLineageTracingStore)
+        self.assertIsInstance(
+            correlation_store,
+            graph_module.NativeCorrelationTracingStore,
+        )
+        self.assertEqual(snapshot.lineage_count, 1)
+        self.assertEqual(snapshot.correlation_index_count, 1)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].correlation_id, "debug-request")
+
+    def test_noop_correlation_store_skips_correlation_dispatch(self) -> None:
+        graph_module = load_graph_module()
+
+        class CountingNoopCorrelationStore(graph_module.NoopCorrelationTracingStore):
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def retained_correlation_id(self, correlation_id: str | None) -> None:
+                self.calls += 1
+                return None
+
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("noop_correlation_dispatch"),
+            variant=graph_module.Variant.Event,
+            schema=str_schema(graph_module, "NoopCorrelationDispatch"),
+        )
+        graph = graph_module.Graph()
+        store = CountingNoopCorrelationStore()
+        graph.attach(graph_module.LineageTracingStore)
+        graph.attach(store)
+        graph.configure_retention(
+            route,
+            graph_module.RouteRetentionPolicy(
+                latest_replay_policy="bounded_history",
+                lineage_retention_policy="retained",
+            ),
+        )
+
+        graph.publish(
+            route,
+            "frame-1",
+            trace_id="trace-noop",
+            causality_id="cause-noop",
+            correlation_id="debug-noop",
+        )
+        records = tuple(graph.lineage(route))
+
+        self.assertEqual(store.calls, 0)
+        self.assertEqual(len(records), 1)
+        self.assertIsNone(records[0].correlation_id)
 
     def test_configure_retention_latest_only_limits_replay_and_descriptor(self) -> None:
         graph_module = load_graph_module()
@@ -5451,6 +6963,248 @@ assert graph.latest(route) is None
         self.assertEqual(descriptor.retention.latest_replay_policy, "latest_only")
         self.assertEqual(descriptor.retention.replay_window, "latest")
         self.assertEqual(replay, (2,))
+
+    def test_default_route_history_is_bounded(self) -> None:
+        graph_module = load_graph_module()
+
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("default_bounded_history"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="DefaultBoundedHistory"),
+        )
+        graph = graph_module.Graph()
+
+        for value in range(graph_module.DEFAULT_ROUTE_HISTORY_LIMIT + 5):
+            graph.publish(route, f"value-{value}".encode("ascii"))
+
+        replay = tuple(envelope.seq_source for envelope in graph.replay(route))
+        descriptor = graph.describe_route(route)
+
+        self.assertEqual(len(replay), graph_module.DEFAULT_ROUTE_HISTORY_LIMIT)
+        self.assertEqual(replay[0], 6)
+        self.assertEqual(replay[-1], graph_module.DEFAULT_ROUTE_HISTORY_LIMIT + 5)
+        self.assertEqual(descriptor.retention.latest_replay_policy, "bounded_history")
+        self.assertEqual(
+            descriptor.retention.replay_window,
+            f"last_{graph_module.DEFAULT_ROUTE_HISTORY_LIMIT}",
+        )
+
+    def test_default_retention_does_not_retain_lineage(self) -> None:
+        graph_module = load_graph_module()
+
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("sparse_lineage"),
+            variant=graph_module.Variant.Event,
+            schema=str_schema(graph_module, "SparseLineage"),
+        )
+        graph = graph_module.Graph()
+
+        graph.publish(
+            route,
+            "frame-1",
+            trace_id="trace-sparse",
+            causality_id="cause-sparse",
+            correlation_id="request-sparse",
+        )
+
+        snapshot = next(graph.retention_snapshot(route))
+
+        self.assertEqual(tuple(graph.lineage(route)), ())
+        self.assertEqual(tuple(graph.lineage(trace_id="trace-sparse")), ())
+        self.assertEqual(snapshot.replay_count, 1)
+        self.assertEqual(snapshot.payload_count, 1)
+        self.assertEqual(snapshot.lineage_count, 0)
+        self.assertEqual(snapshot.trace_index_count, 0)
+        self.assertEqual(snapshot.correlation_index_count, 0)
+
+    def test_noop_lineage_tracing_store_suppresses_retained_lineage(self) -> None:
+        graph_module = load_graph_module()
+
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("noop_lineage_store"),
+            variant=graph_module.Variant.Event,
+            schema=str_schema(graph_module, "NoopLineageStore"),
+        )
+        graph = graph_module.Graph()
+        store = graph.attach(graph_module.NoopLineageTracingStore())
+        self.assertFalse(graph._lineage_tracing_enabled_flag)
+        graph.configure_retention(
+            route,
+            graph_module.RouteRetentionPolicy(
+                latest_replay_policy="bounded_history",
+                lineage_retention_policy="retained",
+            ),
+        )
+
+        graph.publish(
+            route,
+            "frame-1",
+            trace_id="trace-noop",
+            causality_id="cause-noop",
+            correlation_id="request-noop",
+        )
+        snapshot = next(graph.retention_snapshot(route))
+
+        self.assertIsInstance(store, graph_module.NoopLineageTracingStore)
+        self.assertEqual(tuple(graph.lineage(route)), ())
+        self.assertEqual(snapshot.replay_count, 1)
+        self.assertEqual(snapshot.lineage_count, 0)
+        self.assertEqual(snapshot.trace_index_count, 0)
+        self.assertEqual(snapshot.correlation_index_count, 0)
+
+    def test_default_lineage_tracing_store_is_noop(self) -> None:
+        graph_module = load_graph_module()
+
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("default_noop_lineage_store"),
+            variant=graph_module.Variant.Event,
+            schema=str_schema(graph_module, "DefaultNoopLineageStore"),
+        )
+        graph = graph_module.Graph()
+        self.assertFalse(graph._lineage_tracing_enabled_flag)
+        graph.configure_retention(
+            route,
+            graph_module.RouteRetentionPolicy(
+                latest_replay_policy="bounded_history",
+                lineage_retention_policy="retained",
+            ),
+        )
+
+        graph.publish(
+            route,
+            "frame-1",
+            trace_id="trace-default-noop",
+            causality_id="cause-default-noop",
+            correlation_id="request-default-noop",
+        )
+        snapshot = next(graph.retention_snapshot(route))
+
+        self.assertEqual(tuple(graph.lineage(route)), ())
+        self.assertEqual(snapshot.replay_count, 1)
+        self.assertEqual(snapshot.lineage_count, 0)
+        self.assertEqual(snapshot.trace_index_count, 0)
+        self.assertEqual(snapshot.causality_index_count, 0)
+        self.assertEqual(snapshot.correlation_index_count, 0)
+
+    def test_absent_correlation_id_skips_correlation_store_dispatch(self) -> None:
+        graph_module = load_graph_module()
+
+        class CountingCorrelationStore:
+            calls = 0
+
+            def retained_correlation_id(
+                self,
+                correlation_id: str | None,
+            ) -> str | None:
+                self.calls += 1
+                return correlation_id
+
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("absent_correlation_fast_path"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="AbsentCorrelationFastPath"),
+        )
+        graph = graph_module.Graph()
+        store = CountingCorrelationStore()
+        graph._correlation_tracing_store = store
+
+        graph.publish(route, b"frame-1")
+        graph.publish_nowait(route, b"frame-2")
+
+        self.assertEqual(store.calls, 0)
+        self.assertEqual(graph.latest(route).value, b"frame-2")
+
+    def test_native_lineage_tracing_store_reenables_retained_lineage(self) -> None:
+        graph_module = load_graph_module()
+
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("native_lineage_store"),
+            variant=graph_module.Variant.Event,
+            schema=str_schema(graph_module, "NativeLineageStore"),
+        )
+        graph = graph_module.Graph()
+        graph.attach(graph_module.NoopLineageTracingStore())
+        self.assertFalse(graph._lineage_tracing_enabled_flag)
+        graph.configure_retention(
+            route,
+            graph_module.RouteRetentionPolicy(
+                latest_replay_policy="bounded_history",
+                lineage_retention_policy="retained",
+            ),
+        )
+        graph.attach(graph_module.NativeLineageTracingStore())
+        graph.attach(graph_module.NativeCorrelationTracingStore())
+        self.assertTrue(graph._lineage_tracing_enabled_flag)
+
+        graph.publish(
+            route,
+            "frame-1",
+            trace_id="trace-native",
+            causality_id="cause-native",
+            correlation_id="request-native",
+        )
+        snapshot = next(graph.retention_snapshot(route))
+        records = tuple(graph.lineage(route))
+
+        self.assertEqual(snapshot.lineage_count, 1)
+        self.assertEqual(snapshot.trace_index_count, 1)
+        self.assertEqual(snapshot.correlation_index_count, 1)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].trace_id, "trace-native")
+        self.assertEqual(records[0].correlation_id, "request-native")
+
+    def test_bounded_history_without_limit_uses_default_bound(self) -> None:
+        graph_module = load_graph_module()
+
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("implicit_bounded_history"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="ImplicitBoundedHistory"),
+        )
+        graph = graph_module.Graph()
+        graph.configure_retention(
+            route,
+            graph_module.RouteRetentionPolicy(
+                latest_replay_policy="bounded_history",
+            ),
+        )
+
+        for value in range(graph_module.DEFAULT_ROUTE_HISTORY_LIMIT + 2):
+            graph.publish(route, f"value-{value}".encode("ascii"))
+
+        replay = tuple(envelope.seq_source for envelope in graph.replay(route))
+
+        self.assertEqual(len(replay), graph_module.DEFAULT_ROUTE_HISTORY_LIMIT)
+        self.assertEqual(replay[0], 3)
+        self.assertEqual(replay[-1], graph_module.DEFAULT_ROUTE_HISTORY_LIMIT + 2)
 
     def test_ephemeral_routes_default_to_non_replayable_retention(self) -> None:
         graph_module = load_graph_module()
@@ -5503,11 +7257,696 @@ assert graph.latest(route) is None
         graph.publish(route, b"three")
 
         replay = tuple(envelope.seq_source for envelope in graph.replay(route))
+        native_replay = tuple(
+            envelope.seq_source for envelope in graph._graph.replay(route.route_ref)
+        )
         descriptor = graph.describe_route(route)
 
         self.assertEqual(replay, (2, 3))
+        self.assertEqual(native_replay, (2, 3))
+        self.assertEqual(graph._graph.retained_payload_count(route.route_ref), 2)
         self.assertEqual(descriptor.retention.latest_replay_policy, "bounded_history")
         self.assertEqual(descriptor.retention.replay_window, "last_2")
+
+    def test_native_bounded_history_retention_stays_flat_under_repeated_writes(
+        self,
+    ) -> None:
+        graph_module = load_graph_module()
+
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("native_bounded_values"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="NativeBoundedRuntimeValue"),
+        )
+        graph = graph_module.Graph()
+        graph.configure_retention(
+            route,
+            graph_module.RouteRetentionPolicy(
+                latest_replay_policy="bounded_history",
+                replay_window="last_3",
+                history_limit=3,
+            ),
+        )
+
+        for value in range(200):
+            graph.publish(route, f"value-{value}".encode("ascii"))
+
+        native_replay = tuple(
+            envelope.seq_source for envelope in graph._graph.replay(route.route_ref)
+        )
+        public_replay = tuple(envelope.seq_source for envelope in graph.replay(route))
+
+        self.assertEqual(native_replay, (198, 199, 200))
+        self.assertEqual(public_replay, (198, 199, 200))
+        self.assertEqual(graph._graph.retained_payload_count(route.route_ref), 3)
+
+    def test_payload_route_index_stays_bounded_per_route(self) -> None:
+        graph_module = load_graph_module()
+
+        first = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("payload_index_first"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="PayloadIndexFirst"),
+        )
+        second = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("payload_index_second"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="PayloadIndexSecond"),
+        )
+        graph = graph_module.Graph()
+        for route in (first, second):
+            graph.configure_retention(
+                route,
+                graph_module.RouteRetentionPolicy(
+                    latest_replay_policy="bounded_history",
+                    replay_window="last_2",
+                    history_limit=2,
+                ),
+            )
+
+        for value in range(50):
+            graph.publish(first, f"first-{value}".encode("ascii"))
+            graph.publish(second, f"second-{value}".encode("ascii"))
+
+        self.assertNotIn(first.display(), graph._payload_ids_by_route)
+        self.assertNotIn(second.display(), graph._payload_ids_by_route)
+        self.assertEqual(graph._payload_route_by_id, {})
+        self.assertEqual(graph._graph.retained_payload_count(first.route_ref), 2)
+        self.assertEqual(graph._graph.retained_payload_count(second.route_ref), 2)
+        self.assertEqual(
+            tuple(envelope.seq_source for envelope in graph.replay(first)),
+            (49, 50),
+        )
+        self.assertEqual(
+            tuple(envelope.seq_source for envelope in graph.replay(second)),
+            (49, 50),
+        )
+
+    def test_separate_store_payload_retention_uses_history_expiry(self) -> None:
+        graph_module = load_graph_module()
+
+        stream = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("payload_history_expiry"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="PayloadHistoryExpiry"),
+        )
+        graph = graph_module.Graph()
+        graph.attach(graph_module.NativeLineageTracingStore())
+        graph.configure_retention(
+            stream,
+            graph_module.RouteRetentionPolicy(
+                latest_replay_policy="bounded_history",
+                replay_window="last_2",
+                payload_retention_policy="separate_store",
+                history_limit=2,
+            ),
+        )
+
+        def _unexpected_payload_sweep(*_args: object) -> None:
+            raise AssertionError("separate_store should not sweep payload indexes")
+
+        graph._enforce_payload_retention_for_key = _unexpected_payload_sweep
+
+        for value in range(20):
+            graph.publish(stream, f"value-{value}".encode("ascii"))
+
+        key = stream.display()
+        self.assertNotIn(key, graph._payload_ids_by_route)
+        self.assertEqual(graph._payload_route_by_id, {})
+        self.assertEqual(
+            tuple(envelope.seq_source for envelope in graph.replay(stream)),
+            (19, 20),
+        )
+        self.assertEqual(graph._graph.retained_payload_count(stream.route_ref), 2)
+
+    def test_external_store_payload_retention_drops_eager_bytes_without_sweep(
+        self,
+    ) -> None:
+        graph_module = load_graph_module()
+
+        stream = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Bulk,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("external_payload_sparse"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="ExternalPayloadSparse"),
+        )
+        graph = graph_module.Graph()
+
+        def _unexpected_payload_sweep(*_args: object) -> None:
+            raise AssertionError("external_store publish should not sweep payload indexes")
+
+        graph._enforce_payload_retention_for_key = _unexpected_payload_sweep
+
+        for value in range(20):
+            graph.publish(stream, f"value-{value}".encode("ascii"))
+
+        key = stream.display()
+        replay = tuple(graph.replay(stream))
+        self.assertNotIn(key, graph._payload_ids_by_route)
+        self.assertEqual(graph._payload_route_by_id, {})
+        self.assertEqual(graph._materialized_payloads, {})
+        self.assertEqual(tuple(envelope.seq_source for envelope in replay), tuple(range(13, 21)))
+        self.assertEqual(graph._graph.retained_payload_count(stream.route_ref), 8)
+
+    def test_publish_applies_history_limit_without_expiry_helper(self) -> None:
+        graph_module = load_graph_module()
+
+        stream = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("inline_history_expiry"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="InlineHistoryExpiry"),
+        )
+        graph = graph_module.Graph()
+        graph.attach(graph_module.NativeLineageTracingStore())
+        graph.configure_retention(
+            stream,
+            graph_module.RouteRetentionPolicy(
+                latest_replay_policy="bounded_history",
+                replay_window="last_2",
+                history_limit=2,
+            ),
+        )
+
+        def _unexpected_expiry_helper(*_args: object) -> None:
+            raise AssertionError("publish should expire history inline")
+
+        graph._expire_python_history_for_key = _unexpected_expiry_helper
+
+        for value in range(20):
+            graph.publish(stream, f"value-{value}".encode("ascii"))
+
+        key = stream.display()
+        replay = tuple(graph.replay(stream))
+        self.assertEqual(tuple(envelope.seq_source for envelope in replay), (19, 20))
+        self.assertNotIn(key, graph._history)
+        self.assertNotIn(key, graph._payload_ids_by_route)
+        self.assertEqual(graph._payload_route_by_id, {})
+        self.assertEqual(graph._materialized_payloads, {})
+        self.assertEqual(graph.latest(stream).value, b"value-19")
+        self.assertEqual(graph.open_payload(stream), b"value-19")
+        self.assertEqual(graph._graph.retained_payload_count(stream.route_ref), 2)
+
+    def test_sparse_byte_publish_skips_python_retention_policy_lookup(self) -> None:
+        graph_module = load_graph_module()
+
+        stream = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("sparse_native_retention_policy_lookup"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="SparseNativeRetentionPolicyLookup"),
+        )
+        graph = graph_module.Graph()
+
+        def _unexpected_retention_lookup(*_args: object) -> object:
+            raise AssertionError("sparse byte publish should use native retention")
+
+        original_retention_lookup = graph._retention_policy_for_key
+        graph._retention_policy_for_key = _unexpected_retention_lookup
+        try:
+            for value in range(20):
+                graph.publish(stream, f"value-{value}".encode("ascii"))
+        finally:
+            graph._retention_policy_for_key = original_retention_lookup
+
+        key = stream.display()
+        self.assertNotIn(key, graph._history)
+        self.assertNotIn(key, graph._payload_ids_by_route)
+        self.assertEqual(graph._payload_route_by_id, {})
+        self.assertEqual(tuple(envelope.seq_source for envelope in graph.replay(stream)), tuple(range(13, 21)))
+        self.assertEqual(graph._graph.retained_payload_count(stream.route_ref), 8)
+
+    def test_sparse_byte_publish_caches_typed_route_runtime_flags(self) -> None:
+        graph_module = load_graph_module()
+
+        schema = graph_module.Schema.bytes(name="SparseRuntimeFlagCache")
+        bytes_passthrough_checks = 0
+
+        def _count_bytes_passthrough() -> bool:
+            nonlocal bytes_passthrough_checks
+            bytes_passthrough_checks += 1
+            return True
+
+        object.__setattr__(schema, "is_bytes_passthrough", _count_bytes_passthrough)
+        stream = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("sparse_runtime_flag_cache"),
+            variant=graph_module.Variant.Event,
+            schema=schema,
+        )
+        graph = graph_module.Graph()
+
+        for value in range(20):
+            graph.publish(stream, f"value-{value}".encode("ascii"))
+
+        self.assertEqual(bytes_passthrough_checks, 1)
+        self.assertEqual(
+            graph._typed_route_runtime_flags_by_key[stream.display()],
+            (False, True, True, False),
+        )
+        self.assertEqual(graph._graph.retained_payload_count(stream.route_ref), 8)
+
+    def test_sparse_byte_publish_skips_encoder_for_exact_bytes_after_flags_cache(
+        self,
+    ) -> None:
+        graph_module = load_graph_module()
+
+        schema = graph_module.Schema.bytes(name="SparseExactBytesEncoderBypass")
+        stream = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("sparse_exact_bytes_encoder_bypass"),
+            variant=graph_module.Variant.Event,
+            schema=schema,
+        )
+        graph = graph_module.Graph()
+        graph.publish(stream, b"warmup")
+
+        def _unexpected_encode(_payload: object) -> bytes:
+            raise AssertionError("exact byte payload should bypass schema encode")
+
+        object.__setattr__(schema, "encode", _unexpected_encode)
+        envelope = graph.publish(stream, b"value")
+
+        self.assertEqual(envelope.value, b"value")
+        with self.assertRaisesRegex(AssertionError, "exact byte payload"):
+            graph.publish(stream, bytearray(b"value"))
+
+    def test_sparse_byte_publish_refreshes_lineage_runtime_flag_on_retention_change(
+        self,
+    ) -> None:
+        graph_module = load_graph_module()
+
+        stream = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("lineage_runtime_flag_refresh"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="LineageRuntimeFlagRefresh"),
+        )
+        graph = graph_module.Graph()
+        graph.attach(graph_module.NativeLineageTracingStore())
+
+        graph.publish(stream, b"warmup")
+        graph.configure_retention(
+            stream,
+            graph_module.RouteRetentionPolicy(
+                latest_replay_policy="bounded_history",
+                lineage_retention_policy="retained",
+            ),
+        )
+        graph.publish(stream, b"value", trace_id="trace-after-warmup")
+
+        self.assertEqual(
+            graph._typed_route_runtime_flags_by_key[stream.display()],
+            (False, True, True, True),
+        )
+        records = tuple(graph.lineage(stream))
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].trace_id, "trace-after-warmup")
+
+    def test_sparse_lineage_uses_native_no_parent_entrypoint(self) -> None:
+        graph_module = load_graph_module()
+
+        stream = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("lineage_no_parent_native_entrypoint"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="LineageNoParentNativeEntrypoint"),
+        )
+        graph = graph_module.Graph()
+        graph.attach(graph_module.NativeLineageTracingStore())
+        graph.configure_retention(
+            stream,
+            graph_module.RouteRetentionPolicy(
+                latest_replay_policy="bounded_history",
+                lineage_retention_policy="retained",
+            ),
+        )
+        native_emit = graph._native_emit_single_if_unrouted_with_lineage_no_parents
+        self.assertIsNotNone(native_emit)
+        calls = []
+
+        def _count_native_emit(*args, **kwargs):
+            calls.append((args, kwargs))
+            return native_emit(*args, **kwargs)
+
+        def _unexpected_lineage_record(*args, **kwargs) -> None:
+            del args, kwargs
+            raise AssertionError("lineage should be recorded by fused native emit")
+
+        graph._native_emit_single_if_unrouted_with_lineage_no_parents = _count_native_emit
+        graph._native_record_lineage_for_route_no_parents = _unexpected_lineage_record
+        graph.publish(stream, b"value", trace_id="trace-no-parent")
+
+        records = tuple(graph.lineage(stream))
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].trace_id, "trace-no-parent")
+        self.assertEqual(records[0].parent_events, ())
+
+    def test_publish_source_wrapper_uses_typed_fast_path(self) -> None:
+        graph_module = load_graph_module()
+
+        stream = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("source_wrapper_fast_path"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="SourceWrapperFastPath"),
+        )
+        graph = graph_module.Graph()
+
+        envelope = graph.publish(graph_module.Source(stream), b"value")
+
+        self.assertEqual(envelope.value, b"value")
+        self.assertEqual(graph.latest(stream).value, b"value")
+        self.assertIn(stream.display(), graph._typed_route_runtime_flags_by_key)
+        self.assertEqual(graph._last_publish_typed_target, stream)
+
+        direct_envelope = graph.publish(stream, b"direct")
+
+        self.assertEqual(direct_envelope.value, b"direct")
+        self.assertEqual(graph.latest(stream).value, b"direct")
+        self.assertIs(graph._last_publish_route_target, stream)
+        self.assertEqual(graph._last_publish_typed_target, stream)
+
+    def test_sparse_typed_publish_does_not_call_typed_route_helper(self) -> None:
+        graph_module = load_graph_module()
+
+        stream = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("typed_route_helper_bypass"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="TypedRouteHelperBypass"),
+        )
+        graph = graph_module.Graph()
+
+        def _unexpected_typed_route(_route_ref: object) -> object:
+            raise AssertionError("typed sparse publish should not call _typed_route")
+
+        graph._typed_route = _unexpected_typed_route
+        envelope = graph.publish(stream, b"value")
+
+        self.assertEqual(envelope.value, b"value")
+        self.assertEqual(graph._graph.retained_payload_count(stream.route_ref), 1)
+
+    def test_sparse_unobserved_publish_skips_python_subject_publish(self) -> None:
+        graph_module = load_graph_module()
+
+        stream = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("sparse_no_subject_publish"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="SparseNoSubjectPublish"),
+        )
+        graph = graph_module.Graph()
+
+        def _unexpected_subject_publish(*_args: object) -> object:
+            raise AssertionError("sparse unobserved publish should stay native-owned")
+
+        graph._publish_key = _unexpected_subject_publish
+
+        for value in range(20):
+            graph.publish(stream, f"value-{value}".encode("ascii"))
+
+        key = stream.display()
+        self.assertNotIn(key, graph._subjects)
+        self.assertEqual(tuple(envelope.seq_source for envelope in graph.replay(stream)), tuple(range(13, 21)))
+        self.assertEqual(graph._graph.retained_payload_count(stream.route_ref), 8)
+
+    def test_plain_byte_payload_expiry_skips_full_release_path(self) -> None:
+        graph_module = load_graph_module()
+
+        stream = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("plain_byte_fast_purge"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="PlainByteFastPurge"),
+        )
+        graph = graph_module.Graph()
+        graph.configure_retention(
+            stream,
+            graph_module.RouteRetentionPolicy(
+                latest_replay_policy="bounded_history",
+                replay_window="last_2",
+                history_limit=2,
+            ),
+        )
+
+        def _unexpected_full_purge(*_args: object) -> None:
+            raise AssertionError("plain byte expiry should use fast index purge")
+
+        graph._purge_payload_ref = _unexpected_full_purge
+
+        for value in range(20):
+            graph.publish(stream, f"value-{value}".encode("ascii"))
+
+        key = stream.display()
+        replay = tuple(graph.replay(stream))
+        self.assertEqual(tuple(envelope.seq_source for envelope in replay), (19, 20))
+        self.assertNotIn(key, graph._history)
+        self.assertNotIn(key, graph._payload_ids_by_route)
+        self.assertEqual(graph._payload_route_by_id, {})
+        self.assertEqual(graph._graph.retained_payload_count(stream.route_ref), 2)
+
+    def test_byte_payload_expiry_skips_process_local_release_hook(self) -> None:
+        graph_module = load_graph_module()
+
+        stream = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("byte_release_fast_path"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="ByteReleaseFastPath"),
+        )
+        graph = graph_module.Graph()
+        graph.configure_retention(
+            stream,
+            graph_module.RouteRetentionPolicy(
+                latest_replay_policy="bounded_history",
+                replay_window="last_2",
+                history_limit=2,
+            ),
+        )
+
+        def _unexpected_any_release(_payload: bytes) -> None:
+            raise AssertionError("byte payload expiry should not check Schema.any release")
+
+        original_any_release = graph_module._release_any_schema_value
+        graph_module._release_any_schema_value = _unexpected_any_release
+        try:
+            for value in range(20):
+                graph.publish(stream, f"value-{value}".encode("ascii"))
+        finally:
+            graph_module._release_any_schema_value = original_any_release
+
+        self.assertEqual(tuple(graph.writers(stream)), ("python",))
+        self.assertEqual(graph._materialized_payloads, {})
+        self.assertEqual(graph._process_local_payload_ids, set())
+
+    def test_observed_byte_route_uses_native_payload_lookup_for_delivery(
+        self,
+    ) -> None:
+        graph_module = load_graph_module()
+
+        stream = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("observed_byte_eager_payload"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="ObservedByteEagerPayload"),
+        )
+        graph = graph_module.Graph()
+        graph.configure_retention(
+            stream,
+            graph_module.RouteRetentionPolicy(
+                latest_replay_policy="bounded_history",
+                history_limit=2,
+            ),
+        )
+        observed: list[bytes] = []
+        subscription = graph.observe(stream, replay_latest=False).subscribe(
+            lambda envelope: observed.append(envelope.value)
+        )
+        try:
+            graph.publish(stream, b"frame-1")
+            graph.publish(stream, b"frame-2")
+        finally:
+            subscription.dispose()
+
+        replay = tuple(graph.replay(stream))
+        self.assertEqual(observed, [b"frame-1", b"frame-2"])
+        self.assertEqual(
+            tuple(graph.open_payload(envelope) for envelope in replay),
+            (b"frame-1", b"frame-2"),
+        )
+        replayed: list[bytes] = []
+        replay_subscription = graph.observe(stream).subscribe(
+            lambda envelope: replayed.append(envelope.value)
+        )
+        replay_subscription.dispose()
+        key = stream.display()
+        self.assertEqual(replayed, [b"frame-2"])
+        self.assertNotIn(key, graph._history)
+        self.assertNotIn(key, graph._payload_ids_by_route)
+        self.assertEqual(graph._payload_route_by_id, {})
+        self.assertEqual(graph._materialized_payloads, {})
+
+    def test_observed_taint_tracked_route_keeps_python_history(self) -> None:
+        graph_module = load_graph_module()
+
+        stream = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("observed_taint_history"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="ObservedTaintHistory"),
+        )
+        graph = graph_module.Graph()
+        graph.configure_retention(
+            stream,
+            graph_module.RouteRetentionPolicy(
+                latest_replay_policy="bounded_history",
+                history_limit=2,
+            ),
+        )
+        key = stream.display()
+        graph._stream_taint_upper_bounds[key] = {}
+        subscription = graph.observe(stream, replay_latest=False).subscribe(
+            lambda _envelope: None
+        )
+        try:
+            graph.publish(stream, b"frame-1")
+        finally:
+            subscription.dispose()
+
+        self.assertIn(key, graph._history)
+        self.assertEqual(len(graph._history[key]), 1)
+
+    def test_route_display_cache_is_bounded_by_route_identity(self) -> None:
+        graph_module = load_graph_module()
+
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("route_display_cache"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="RouteDisplayCache"),
+        )
+        graph = graph_module.Graph()
+        graph.register_port(route)
+
+        for value in range(100):
+            graph.publish(route, f"value-{value}".encode("ascii"))
+
+        self.assertEqual(graph._route_key(route), route.display())
+        self.assertIn(route.route_ref, graph._route_display_cache)
+        self.assertLessEqual(len(graph._route_display_cache), 2)
+
+    def test_retention_snapshot_reports_native_retained_counts(self) -> None:
+        graph_module = load_graph_module()
+
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("retention_snapshot"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="RetentionSnapshotValue"),
+        )
+        graph = graph_module.Graph()
+        graph.attach(graph_module.NativeLineageTracingStore())
+        graph.attach(graph_module.NativeCorrelationTracingStore())
+        graph.configure_retention(
+            route,
+            graph_module.RouteRetentionPolicy(
+                latest_replay_policy="bounded_history",
+                replay_window="last_3",
+                history_limit=3,
+                lineage_retention_policy="retained",
+            ),
+        )
+
+        for value in range(20):
+            graph.publish(
+                route,
+                f"value-{value}".encode("ascii"),
+                trace_id="snapshot-trace",
+                causality_id="snapshot-causality",
+                correlation_id=f"snapshot-{value}",
+            )
+
+        snapshot = next(graph.retention_snapshot(route))
+        all_snapshots = tuple(graph.retention_snapshot())
+
+        self.assertEqual(snapshot.route_display, route.display())
+        self.assertEqual(snapshot.latest_seq_source, 20)
+        self.assertEqual(snapshot.metadata_event_count, 20)
+        self.assertEqual(snapshot.replay_count, 3)
+        self.assertEqual(snapshot.payload_count, 3)
+        self.assertEqual(snapshot.lineage_count, 3)
+        self.assertEqual(snapshot.trace_index_count, 3)
+        self.assertEqual(snapshot.causality_index_count, 3)
+        self.assertEqual(snapshot.correlation_index_count, 3)
+        self.assertEqual(snapshot.history_limit, 3)
+        self.assertIn(route.display(), {item.route_display for item in all_snapshots})
+        self.assertEqual(tuple(graph.retention_violations()), ())
 
     def test_route_retention_policy_rejects_invalid_replay_policy_and_history(
         self,
@@ -5539,6 +7978,13 @@ assert graph.latest(route) is None
                 latest_replay_policy="latest_only",
                 payload_retention_policy="forever_cache",
             )
+        with self.assertRaisesRegex(
+            ValueError, "lineage_retention_policy must be one of"
+        ):
+            graph_module.RouteRetentionPolicy(
+                latest_replay_policy="latest_only",
+                lineage_retention_policy="forever",
+            )
         for kwargs, message in (
             ({"latest_replay_policy": ""}, "latest_replay_policy"),
             (
@@ -5563,6 +8009,254 @@ assert graph.latest(route) is None
             "retention policy must be a RouteRetentionPolicy",
         ):
             graph.configure_retention(object(), object())  # type: ignore[arg-type]
+
+    def test_default_retention_policy_is_cached_per_route_identity(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("cached_default_retention"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="CachedDefaultRetention"),
+        )
+        graph = graph_module.Graph()
+
+        key = route.display()
+        first_policy = graph._retention_policy_for(route)
+        for value in range(100):
+            graph.publish(route, f"value-{value}".encode("ascii"))
+
+        self.assertIs(graph._retention_policy_for(route.route_ref), first_policy)
+        self.assertIs(graph._resolved_retention_by_key[key], first_policy)
+        self.assertEqual(len(graph._default_retention_policies), 1)
+
+        configured = graph.configure_retention(
+            route,
+            graph_module.RouteRetentionPolicy(
+                latest_replay_policy="latest_only",
+                replay_window="latest",
+                history_limit=1,
+            ),
+        )
+
+        self.assertIs(graph._retention_policy_for(route), configured)
+        self.assertIs(graph._resolved_retention_by_key[key], configured)
+        self.assertEqual(len(graph._default_retention_policies), 1)
+
+    def test_publish_reuses_route_key_across_retention_bookkeeping(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("publish_route_key_budget"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="PublishRouteKeyBudget"),
+        )
+        graph = graph_module.Graph()
+        route_display_calls = 0
+        original_route_display = graph._route_display
+
+        def count_route_display(route_ref) -> str:
+            nonlocal route_display_calls
+            route_display_calls += 1
+            return original_route_display(route_ref)
+
+        graph._route_display = count_route_display
+        for value in range(10):
+            graph.publish(route, f"value-{value}".encode("ascii"))
+
+        self.assertLessEqual(route_display_calls, 10)
+        self.assertEqual(
+            graph._write_debug_detail_by_key[route.display()],
+            f"published {route.display()}",
+        )
+
+    def test_publish_nowait_sparse_writer_metadata_updates_once(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("publish_nowait_writer_metadata_once"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="PublishNowaitWriterMetadataOnce"),
+        )
+        graph = graph_module.Graph()
+        writer_updates = 0
+        original_remember_writer = graph._remember_writer
+
+        def count_remember_writer(route_display: str, producer_id: str) -> None:
+            nonlocal writer_updates
+            writer_updates += 1
+            original_remember_writer(route_display, producer_id)
+
+        graph._remember_writer = count_remember_writer
+        for value in range(20):
+            graph.publish_nowait(route, f"value-{value}".encode("ascii"))
+
+        self.assertEqual(writer_updates, 1)
+        self.assertEqual(graph._last_writer_by_key[route.display()], "python")
+        self.assertEqual(tuple(graph._writers[route.display()]), ("python",))
+
+    def test_publish_uses_single_native_emit_for_unrouted_route(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("single_native_emit"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="SingleNativeEmit"),
+        )
+        graph = graph_module.Graph()
+
+        def _unexpected_multi_emit(*_args: object, **_kwargs: object) -> object:
+            raise AssertionError("unrouted publish should use native single emit")
+
+        graph._emit_native = _unexpected_multi_emit
+
+        envelope = graph.publish(route, b"frame")
+
+        self.assertEqual(envelope.value, b"frame")
+        self.assertEqual(graph.latest(route).value, b"frame")
+        self.assertNotIn(route.display(), graph._payload_ids_by_route)
+        self.assertEqual(graph._payload_route_by_id, {})
+        self.assertEqual(graph._graph.retained_payload_count(route.route_ref), 1)
+
+    def test_publish_nowait_uses_native_drop_for_sparse_unrouted_route(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("publish_nowait_sparse_drop"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="PublishNowaitSparseDrop"),
+        )
+        graph = graph_module.Graph()
+        native_emit_drop = graph._native_emit_single_if_unrouted_drop
+        calls = 0
+
+        def _count_native_emit_drop(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            return native_emit_drop(*args, **kwargs)
+
+        def _unexpected_envelope_emit(*_args: object, **_kwargs: object) -> object:
+            raise AssertionError("publish_nowait should avoid envelope materialization")
+
+        graph._native_emit_single_if_unrouted_drop = _count_native_emit_drop
+        graph._native_emit_single_if_unrouted = _unexpected_envelope_emit
+
+        graph.publish_nowait(route, b"frame")
+
+        self.assertEqual(calls, 1)
+        self.assertEqual(graph.latest(route).value, b"frame")
+        self.assertEqual(graph._graph.retained_payload_count(route.route_ref), 1)
+
+    def test_publish_nowait_falls_back_when_route_has_observers(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("publish_nowait_observed"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="PublishNowaitObserved"),
+        )
+        graph = graph_module.Graph()
+        observed = []
+        subscription = graph.observe(route, replay_latest=False).subscribe(
+            lambda envelope: observed.append(envelope.value)
+        )
+
+        def _unexpected_native_drop(*_args: object, **_kwargs: object) -> object:
+            raise AssertionError("observed routes need the normal publish path")
+
+        graph._native_emit_single_if_unrouted_drop = _unexpected_native_drop
+        try:
+            graph.publish_nowait(route, b"frame")
+        finally:
+            subscription.dispose()
+
+        self.assertEqual(observed, [b"frame"])
+        self.assertEqual(graph.latest(route).value, b"frame")
+
+    def test_publish_nowait_sparse_drop_cache_invalidates_for_late_observer(
+        self,
+    ) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("publish_nowait_late_observer"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="PublishNowaitLateObserver"),
+        )
+        graph = graph_module.Graph()
+
+        graph.publish_nowait(route, b"warm-cache")
+
+        observed = []
+        subscription = graph.observe(route, replay_latest=False).subscribe(
+            lambda envelope: observed.append(envelope.value)
+        )
+        try:
+            graph.publish_nowait(route, b"observed-after-cache")
+        finally:
+            subscription.dispose()
+
+        self.assertEqual(observed, [b"observed-after-cache"])
+        self.assertEqual(graph.latest(route).value, b"observed-after-cache")
+
+    def test_publish_falls_back_to_multi_emit_for_connected_route(self) -> None:
+        graph_module = load_graph_module()
+        source = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("single_emit_source"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="SingleEmitSource"),
+        )
+        sink = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("single_emit_sink"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="SingleEmitSink"),
+        )
+        graph = graph_module.Graph()
+        graph.connect(source=source, sink=sink)
+        original_emit_native = graph._emit_native
+        multi_emit_calls = 0
+
+        def _count_multi_emit(*args: object, **kwargs: object) -> object:
+            nonlocal multi_emit_calls
+            multi_emit_calls += 1
+            return original_emit_native(*args, **kwargs)
+
+        graph._emit_native = _count_multi_emit
+
+        graph.publish(source, b"frame")
+
+        self.assertEqual(multi_emit_calls, 1)
+        latest_sink = graph.latest(sink)
+        self.assertIsNotNone(latest_sink)
+        self.assertEqual(latest_sink.value, b"frame")
 
     def test_query_plane_streams_and_capabilities(self) -> None:
         graph_module = load_graph_module()
@@ -6143,6 +8837,34 @@ assert graph.latest(route) is None
                 graph_module.QueryRequest(command="manifest"),
                 requester_id="",
             )
+
+    def test_eager_payload_demand_metadata_count_comes_from_native_snapshot(
+        self,
+    ) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Read,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("heart"),
+            family=graph_module.StreamFamily("runtime"),
+            stream=graph_module.StreamName("native_payload_demand_count"),
+            variant=graph_module.Variant.Event,
+            schema=graph_module.Schema.bytes(name="NativePayloadDemandCount"),
+        )
+        graph = graph_module.Graph()
+
+        for value in range(20):
+            graph.publish(route, f"value-{value}".encode("ascii"))
+
+        snapshot = graph.payload_demand_snapshot(route)
+        retention = next(graph.retention_snapshot(route))
+
+        self.assertEqual(snapshot.metadata_events, 20)
+        self.assertEqual(retention.metadata_event_count, 20)
+        self.assertEqual(snapshot.payload_open_requests, 0)
+        self.assertEqual(snapshot.lazy_source_opens, 0)
+        self.assertEqual(snapshot.cache_hits, 0)
+        self.assertNotIn(route.display(), graph._payload_demand_stats)
 
     def test_publish_lazy_defers_payload_open_until_demand(self) -> None:
         graph_module = load_graph_module()

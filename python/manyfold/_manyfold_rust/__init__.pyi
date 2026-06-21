@@ -11,9 +11,11 @@ __all__ = [
     "CreditSnapshot",
     "Graph",
     "Layer",
+    "LineageProfile",
     "Mailbox",
     "MailboxDescriptor",
     "NamespaceRef",
+    "NoLineageMaterializerDropProfile",
     "OpenedEnvelope",
     "PayloadRef",
     "Plane",
@@ -21,6 +23,7 @@ __all__ = [
     "ProducerKind",
     "ProducerRef",
     "ReadablePort",
+    "RetentionSnapshot",
     "RouteRef",
     "RuntimeRef",
     "ScheduleGuard",
@@ -57,6 +60,12 @@ class ClosedEnvelope:
     def guards(self) -> builtins.list[ScheduleGuard]: ...
     @property
     def payload_ref(self) -> PayloadRef: ...
+    @property
+    def payload_id(self) -> builtins.str: ...
+    @property
+    def has_inline_payload(self) -> builtins.bool: ...
+    @property
+    def inline_payload(self) -> builtins.list[builtins.int]: ...
     def with_taints(self, taints: typing.Sequence[TaintMark]) -> ClosedEnvelope: ...
     def close(self) -> ClosedEnvelope: ...
 
@@ -89,9 +98,67 @@ class CreditSnapshot:
     def largest_queue_depth(self) -> builtins.int: ...
 
 @typing.final
+class RetentionSnapshot:
+    @property
+    def route_display(self) -> builtins.str: ...
+    @property
+    def latest_seq_source(self) -> typing.Optional[builtins.int]: ...
+    @property
+    def metadata_event_count(self) -> builtins.int: ...
+    @property
+    def replay_count(self) -> builtins.int: ...
+    @property
+    def payload_count(self) -> builtins.int: ...
+    @property
+    def lineage_count(self) -> builtins.int: ...
+    @property
+    def trace_index_count(self) -> builtins.int: ...
+    @property
+    def causality_index_count(self) -> builtins.int: ...
+    @property
+    def correlation_index_count(self) -> builtins.int: ...
+    @property
+    def history_limit(self) -> typing.Optional[builtins.int]: ...
+
+@typing.final
+class LineageProfile: ...
+
+@typing.final
+class NoLineageMaterializerDropProfile: ...
+
+@typing.final
 class Graph:
     def __new__(cls) -> Graph: ...
     def register_port(self, route: RouteRef) -> RouteRef: ...
+    def compile_lineage_profile(
+        self, trace_id: builtins.str, causality_id: builtins.str
+    ) -> LineageProfile: ...
+    def release_lineage_profile(self, profile: LineageProfile) -> None: ...
+    def compile_no_lineage_materializer_drop_profile(
+        self, route: RouteRef, target_route: RouteRef
+    ) -> NoLineageMaterializerDropProfile: ...
+    def release_no_lineage_materializer_drop_profile(
+        self, profile: NoLineageMaterializerDropProfile
+    ) -> None: ...
+    def emit_no_lineage_materializer_drop_profile_python(
+        self,
+        profile: NoLineageMaterializerDropProfile,
+        payload: typing.Sequence[builtins.int],
+    ) -> builtins.bool: ...
+    def attach_noop_correlation_store(self) -> None: ...
+    def attach_noop_lineage_store(self) -> None: ...
+    def attach_retained_correlation_store(self) -> None: ...
+    def attach_retained_lineage_store(self) -> None: ...
+    def configure_retention(
+        self,
+        route: RouteRef,
+        latest_replay_policy: builtins.str,
+        durability_class: builtins.str,
+        replay_window: builtins.str,
+        payload_retention_policy: builtins.str,
+        history_limit: typing.Optional[builtins.int] = None,
+        lineage_retention_policy: typing.Optional[builtins.str] = None,
+    ) -> None: ...
     def read(self, route: RouteRef) -> ReadablePort: ...
     def writable_port(self, route: RouteRef) -> WritablePort: ...
     def emit(
@@ -101,6 +168,110 @@ class Graph:
         producer: typing.Optional[ProducerRef] = None,
         control_epoch: typing.Optional[builtins.int] = None,
     ) -> builtins.list[ClosedEnvelope]: ...
+    def emit_single_if_unrouted(
+        self,
+        route: RouteRef,
+        payload: typing.Sequence[builtins.int],
+        producer: typing.Optional[ProducerRef] = None,
+        control_epoch: typing.Optional[builtins.int] = None,
+    ) -> typing.Optional[ClosedEnvelope]: ...
+    def emit_single_if_unrouted_drop(
+        self,
+        route: RouteRef,
+        payload: typing.Sequence[builtins.int],
+        producer: typing.Optional[ProducerRef] = None,
+        control_epoch: typing.Optional[builtins.int] = None,
+    ) -> builtins.bool: ...
+    def emit_single_if_unrouted_and_materializer_drop(
+        self,
+        route: RouteRef,
+        target_route: RouteRef,
+        payload: typing.Sequence[builtins.int],
+        producer: typing.Optional[ProducerRef] = None,
+        control_epoch: typing.Optional[builtins.int] = None,
+    ) -> builtins.bool: ...
+    def emit_single_if_unrouted_and_materializer_drop_python(
+        self,
+        route: RouteRef,
+        target_route: RouteRef,
+        payload: typing.Sequence[builtins.int],
+    ) -> builtins.bool: ...
+    def emit_single_if_unrouted_with_lineage_no_parents(
+        self,
+        route: RouteRef,
+        payload: typing.Sequence[builtins.int],
+        producer: typing.Optional[ProducerRef] = None,
+        control_epoch: typing.Optional[builtins.int] = None,
+        trace_id: typing.Optional[builtins.str] = None,
+        causality_id: typing.Optional[builtins.str] = None,
+        correlation_id: typing.Optional[builtins.str] = None,
+    ) -> typing.Optional[ClosedEnvelope]: ...
+    def emit_single_if_unrouted_with_lineage_no_parents_and_materializers(
+        self,
+        route: RouteRef,
+        payload: typing.Sequence[builtins.int],
+        producer: typing.Optional[ProducerRef] = None,
+        control_epoch: typing.Optional[builtins.int] = None,
+        trace_id: typing.Optional[builtins.str] = None,
+        causality_id: typing.Optional[builtins.str] = None,
+        correlation_id: typing.Optional[builtins.str] = None,
+    ) -> typing.Optional[builtins.list[ClosedEnvelope]]: ...
+    def emit_single_if_unrouted_with_lineage_no_parents_and_materializers_drop(
+        self,
+        route: RouteRef,
+        payload: typing.Sequence[builtins.int],
+        producer: typing.Optional[ProducerRef] = None,
+        control_epoch: typing.Optional[builtins.int] = None,
+        trace_id: typing.Optional[builtins.str] = None,
+        causality_id: typing.Optional[builtins.str] = None,
+        correlation_id: typing.Optional[builtins.str] = None,
+    ) -> builtins.bool: ...
+    def emit_single_if_unrouted_with_lineage_no_parents_and_materializers_drop_python(
+        self,
+        route: RouteRef,
+        payload: typing.Sequence[builtins.int],
+        trace_id: typing.Optional[builtins.str] = None,
+        causality_id: typing.Optional[builtins.str] = None,
+        correlation_id: typing.Optional[builtins.str] = None,
+    ) -> builtins.bool: ...
+    def emit_single_if_unrouted_with_lineage_ids_no_parents_and_materializers_drop_python(
+        self,
+        route: RouteRef,
+        payload: typing.Sequence[builtins.int],
+        trace_id: builtins.str,
+        causality_id: builtins.str,
+        correlation_id: typing.Optional[builtins.str] = None,
+    ) -> builtins.bool: ...
+    def emit_single_if_unrouted_with_lineage_ids_no_parents_and_materializer_drop_python(
+        self,
+        route: RouteRef,
+        target_route: RouteRef,
+        payload: typing.Sequence[builtins.int],
+        trace_id: builtins.str,
+        causality_id: builtins.str,
+        correlation_id: typing.Optional[builtins.str] = None,
+    ) -> builtins.bool: ...
+    def emit_single_if_unrouted_with_lineage_profile_no_parents_and_materializer_drop_python(
+        self,
+        route: RouteRef,
+        target_route: RouteRef,
+        payload: typing.Sequence[builtins.int],
+        profile: LineageProfile,
+        correlation_id: typing.Optional[builtins.str] = None,
+    ) -> builtins.bool: ...
+    def materialize_bytes_one_parent(
+        self,
+        source_route: RouteRef,
+        source_seq_source: builtins.int,
+        target_route: RouteRef,
+        producer: typing.Optional[ProducerRef] = None,
+    ) -> typing.Optional[ClosedEnvelope]: ...
+    def register_materialize_bytes(
+        self, source_route: RouteRef, target_route: RouteRef
+    ) -> builtins.bool: ...
+    def unregister_materialize_bytes(
+        self, source_route: RouteRef, target_route: RouteRef
+    ) -> builtins.bool: ...
     def register_binding(
         self, name: builtins.str, binding: WriteBinding
     ) -> WriteBinding: ...
@@ -114,6 +285,86 @@ class Graph:
     def catalog(self) -> builtins.list[RouteRef]: ...
     def describe_route(self, route: RouteRef) -> PortDescriptor: ...
     def latest(self, route: RouteRef) -> typing.Optional[ClosedEnvelope]: ...
+    def replay(self, route: RouteRef) -> builtins.list[ClosedEnvelope]: ...
+    def record_lineage(
+        self,
+        route_display: builtins.str,
+        seq_source: builtins.int,
+        producer_id: typing.Optional[builtins.str],
+        trace_id: builtins.str,
+        causality_id: builtins.str,
+        correlation_id: typing.Optional[builtins.str],
+        parent_events: typing.Sequence[tuple[builtins.str, builtins.int]],
+    ) -> None: ...
+    def record_lineage_for_route(
+        self,
+        route: RouteRef,
+        seq_source: builtins.int,
+        producer_id: typing.Optional[builtins.str],
+        trace_id: builtins.str,
+        causality_id: builtins.str,
+        correlation_id: typing.Optional[builtins.str],
+        parent_events: typing.Sequence[tuple[builtins.str, builtins.int]],
+    ) -> None: ...
+    def record_lineage_for_route_no_parents(
+        self,
+        route: RouteRef,
+        seq_source: builtins.int,
+        producer_id: typing.Optional[builtins.str],
+        trace_id: builtins.str,
+        causality_id: builtins.str,
+        correlation_id: typing.Optional[builtins.str],
+    ) -> None: ...
+    def record_lineage_for_route_one_parent(
+        self,
+        route: RouteRef,
+        seq_source: builtins.int,
+        producer_id: typing.Optional[builtins.str],
+        trace_id: builtins.str,
+        causality_id: builtins.str,
+        correlation_id: typing.Optional[builtins.str],
+        parent_route_display: builtins.str,
+        parent_seq_source: builtins.int,
+    ) -> None: ...
+    def lineage_records(
+        self,
+        route: typing.Optional[RouteRef] = None,
+        trace_id: typing.Optional[builtins.str] = None,
+        causality_id: typing.Optional[builtins.str] = None,
+        correlation_id: typing.Optional[builtins.str] = None,
+    ) -> builtins.list[
+        tuple[
+            builtins.str,
+            builtins.int,
+            typing.Optional[builtins.str],
+            builtins.str,
+            builtins.str,
+            typing.Optional[builtins.str],
+            builtins.list[tuple[builtins.str, builtins.int]],
+        ]
+    ]: ...
+    def lineage_record_for_route_event(
+        self, route: RouteRef, seq_source: builtins.int
+    ) -> typing.Optional[
+        tuple[
+            builtins.str,
+            builtins.int,
+            typing.Optional[builtins.str],
+            builtins.str,
+            builtins.str,
+            typing.Optional[builtins.str],
+            builtins.list[tuple[builtins.str, builtins.int]],
+        ]
+    ]: ...
+    def retained_payload_count(self, route: RouteRef) -> builtins.int: ...
+    def payload_by_id(
+        self, payload_id: builtins.str
+    ) -> typing.Optional[builtins.bytes]: ...
+    def retention_snapshot(
+        self, route: typing.Optional[RouteRef] = None
+    ) -> builtins.list[RetentionSnapshot]: ...
+    def retention_violations(self) -> builtins.list[builtins.str]: ...
+    def lineage_intern_value_count(self) -> builtins.int: ...
     def topology(self) -> builtins.list[tuple[builtins.str, builtins.str]]: ...
     def validate_graph(self) -> builtins.list[builtins.str]: ...
     def credit_snapshot(self) -> builtins.list[CreditSnapshot]: ...
@@ -280,6 +531,8 @@ class RouteRef:
         schema: SchemaRef,
     ) -> RouteRef: ...
     def display(self) -> builtins.str: ...
+    def __eq__(self, other: builtins.object) -> builtins.bool: ...
+    def __hash__(self) -> builtins.int: ...
     def __repr__(self) -> builtins.str: ...
 
 @typing.final

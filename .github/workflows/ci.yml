@@ -1,0 +1,1036 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "17 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  unit:
+    name: Unit and lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: python -m pip install uv
+
+      - name: Set up Rust
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Sync Python environment
+        run: uv sync --locked
+
+      - name: Check Rust formatting
+        run: cargo fmt --check
+
+      - name: Run Rust tests
+        run: cargo test
+
+      - name: Run Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Run Ruff
+        run: uv run ruff check
+
+      - name: Run Python tests
+        run: uv run python -m unittest discover -s tests -p 'test_*.py'
+
+  memory-regression:
+    name: Memory regression benchmarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: python -m pip install uv
+
+      - name: Set up Rust
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Install jemalloc profiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libjemalloc-dev
+
+      - name: Sync Python environment
+        run: uv sync --locked
+
+      - name: Prepare benchmark output directory
+        run: mkdir -p benchmark-results
+
+      - name: Native sparse retention plateau
+        run: |
+          set -o pipefail
+          cargo run --release --bin memory_retention_benchmark -- \
+            --iterations 1000000 \
+            --sample-every 100000 \
+            --history-limit 8 \
+            --live-plateau-bytes 0 \
+            --peak-plateau-bytes 0 \
+            --rss-tail-plateau-kib 512 \
+            --rss-tail-min-samples 3 \
+            --project-events 1000000000 \
+            --projected-live-growth-bytes 0 \
+            --projected-live-segment-growth-bytes 0 \
+            --projected-peak-growth-bytes 0 \
+            --projected-peak-segment-growth-bytes 0 \
+            --max-elapsed-seconds 30 \
+            --max-cpu-seconds 30 \
+            --max-average-event-us 100 \
+            --max-interval-event-us 100 \
+            --max-disk-input-blocks 0 \
+            --max-disk-output-blocks 0 \
+            --warmup-samples 1 \
+            --check-invariants-every 10000 \
+            --lineage-retention none \
+            --metadata-mode none \
+            | tee benchmark-results/native-sparse.txt
+
+      - name: Native retained-lineage plateau
+        run: |
+          set -o pipefail
+          cargo run --release --bin memory_retention_benchmark -- \
+            --iterations 1000000 \
+            --sample-every 100000 \
+            --history-limit 8 \
+            --live-plateau-bytes 0 \
+            --peak-plateau-bytes 0 \
+            --rss-tail-plateau-kib 512 \
+            --rss-tail-min-samples 3 \
+            --project-events 1000000000 \
+            --projected-live-growth-bytes 0 \
+            --projected-live-segment-growth-bytes 0 \
+            --projected-peak-growth-bytes 0 \
+            --projected-peak-segment-growth-bytes 0 \
+            --max-elapsed-seconds 30 \
+            --max-cpu-seconds 30 \
+            --max-average-event-us 100 \
+            --max-interval-event-us 100 \
+            --max-disk-input-blocks 0 \
+            --max-disk-output-blocks 0 \
+            --warmup-samples 1 \
+            --check-invariants-every 10000 \
+            --lineage-retention retained \
+            --correlation-store retained \
+            | tee benchmark-results/native-retained-lineage.txt
+
+      - name: Native Heart materialized-state retained-lineage plateau
+        run: |
+          set -o pipefail
+          cargo run --release --bin memory_retention_benchmark -- \
+            --iterations 1000000 \
+            --sample-every 100000 \
+            --history-limit 8 \
+            --live-plateau-bytes 0 \
+            --peak-plateau-bytes 0 \
+            --rss-tail-plateau-kib 512 \
+            --rss-tail-min-samples 3 \
+            --project-events 1000000000 \
+            --projected-live-growth-bytes 0 \
+            --projected-live-segment-growth-bytes 0 \
+            --projected-peak-growth-bytes 0 \
+            --projected-peak-segment-growth-bytes 0 \
+            --max-elapsed-seconds 30 \
+            --max-cpu-seconds 30 \
+            --max-average-event-us 100 \
+            --max-interval-event-us 100 \
+            --max-disk-input-blocks 0 \
+            --max-disk-output-blocks 0 \
+            --warmup-samples 1 \
+            --check-invariants-every 10000 \
+            --lineage-retention retained \
+            --metadata-mode none \
+            --materialize-state \
+            | tee benchmark-results/native-heart-materialized-state.txt
+
+      - name: Native Heart materialized-state noop-lineage plateau
+        run: |
+          set -o pipefail
+          cargo run --release --bin memory_retention_benchmark -- \
+            --iterations 1000000 \
+            --sample-every 100000 \
+            --history-limit 8 \
+            --live-plateau-bytes 0 \
+            --peak-plateau-bytes 0 \
+            --rss-tail-plateau-kib 512 \
+            --rss-tail-min-samples 3 \
+            --project-events 1000000000 \
+            --projected-live-growth-bytes 0 \
+            --projected-live-segment-growth-bytes 0 \
+            --projected-peak-growth-bytes 0 \
+            --projected-peak-segment-growth-bytes 0 \
+            --max-elapsed-seconds 30 \
+            --max-cpu-seconds 30 \
+            --max-average-event-us 100 \
+            --max-interval-event-us 100 \
+            --max-disk-input-blocks 0 \
+            --max-disk-output-blocks 0 \
+            --warmup-samples 1 \
+            --check-invariants-every 10000 \
+            --lineage-retention retained \
+            --lineage-store noop \
+            --metadata-mode static \
+            --materialize-state \
+            | tee benchmark-results/native-heart-materialized-state-noop-lineage.txt
+
+      - name: Native Heart materialized-state large-payload plateau
+        run: |
+          set -o pipefail
+          cargo run --release --bin memory_retention_benchmark -- \
+            --iterations 100000 \
+            --sample-every 25000 \
+            --history-limit 8 \
+            --payload-bytes 65536 \
+            --live-plateau-bytes 0 \
+            --peak-plateau-bytes 0 \
+            --rss-tail-plateau-kib 1024 \
+            --rss-tail-min-samples 3 \
+            --project-events 1000000000 \
+            --projected-live-growth-bytes 0 \
+            --projected-live-segment-growth-bytes 0 \
+            --projected-peak-growth-bytes 0 \
+            --projected-peak-segment-growth-bytes 0 \
+            --max-elapsed-seconds 30 \
+            --max-cpu-seconds 30 \
+            --max-average-event-us 500 \
+            --max-interval-event-us 500 \
+            --max-disk-input-blocks 0 \
+            --max-disk-output-blocks 0 \
+            --warmup-samples 1 \
+            --check-invariants-every 10000 \
+            --lineage-retention retained \
+            --metadata-mode none \
+            --materialize-state \
+            | tee benchmark-results/native-heart-materialized-state-large-payload.txt
+
+      - name: Native high-sequence retained-lineage smoke
+        run: |
+          set -o pipefail
+          cargo run --release --bin memory_retention_benchmark -- \
+            --seed-seq-source 999999990 \
+            --iterations 32 \
+            --sample-every 8 \
+            --history-limit 8 \
+            --live-plateau-bytes 0 \
+            --peak-plateau-bytes 0 \
+            --warmup-samples 1 \
+            --check-invariants-every 1 \
+            --lineage-retention retained \
+            --correlation-store retained \
+            | tee benchmark-results/native-high-sequence.txt
+
+      - name: jemalloc leak check for native sparse mode
+        run: |
+          set -o pipefail
+          uv run manyfold-jemalloc-leak-check \
+            --output-dir benchmark-results/jemalloc-sparse \
+            -- ./target/release/memory_retention_benchmark \
+            --iterations 200000 \
+            --sample-every 100000 \
+            --history-limit 8 \
+            --live-plateau-bytes 0 \
+            --peak-plateau-bytes 0 \
+            --project-events 1000000000 \
+            --projected-live-growth-bytes 0 \
+            --projected-live-segment-growth-bytes 0 \
+            --projected-peak-growth-bytes 0 \
+            --projected-peak-segment-growth-bytes 0 \
+            --max-elapsed-seconds 30 \
+            --max-cpu-seconds 30 \
+            --max-average-event-us 100 \
+            --max-interval-event-us 100 \
+            --max-disk-input-blocks 0 \
+            --max-disk-output-blocks 0 \
+            --warmup-samples 1 \
+            --check-invariants-every 10000 \
+            --lineage-retention none \
+            | tee benchmark-results/jemalloc-sparse.txt
+
+      - name: jemalloc leak check for native retained-lineage mode
+        run: |
+          set -o pipefail
+          uv run manyfold-jemalloc-leak-check \
+            --output-dir benchmark-results/jemalloc-retained-lineage \
+            -- ./target/release/memory_retention_benchmark \
+            --iterations 200000 \
+            --sample-every 100000 \
+            --history-limit 8 \
+            --live-plateau-bytes 0 \
+            --peak-plateau-bytes 0 \
+            --project-events 1000000000 \
+            --projected-live-growth-bytes 0 \
+            --projected-live-segment-growth-bytes 0 \
+            --projected-peak-growth-bytes 0 \
+            --projected-peak-segment-growth-bytes 0 \
+            --max-elapsed-seconds 30 \
+            --max-cpu-seconds 30 \
+            --max-average-event-us 100 \
+            --max-interval-event-us 100 \
+            --max-disk-input-blocks 0 \
+            --max-disk-output-blocks 0 \
+            --warmup-samples 1 \
+            --check-invariants-every 10000 \
+            --lineage-retention retained \
+            --correlation-store retained \
+            | tee benchmark-results/jemalloc-retained-lineage.txt
+
+      - name: jemalloc leak check for native Heart materialized-state mode
+        run: |
+          set -o pipefail
+          uv run manyfold-jemalloc-leak-check \
+            --output-dir benchmark-results/jemalloc-heart-materialized-state \
+            -- ./target/release/memory_retention_benchmark \
+            --iterations 200000 \
+            --sample-every 100000 \
+            --history-limit 8 \
+            --live-plateau-bytes 0 \
+            --peak-plateau-bytes 0 \
+            --project-events 1000000000 \
+            --projected-live-growth-bytes 0 \
+            --projected-live-segment-growth-bytes 0 \
+            --projected-peak-growth-bytes 0 \
+            --projected-peak-segment-growth-bytes 0 \
+            --max-elapsed-seconds 30 \
+            --max-cpu-seconds 30 \
+            --max-average-event-us 100 \
+            --max-interval-event-us 100 \
+            --max-disk-input-blocks 0 \
+            --max-disk-output-blocks 0 \
+            --warmup-samples 1 \
+            --check-invariants-every 10000 \
+            --lineage-retention retained \
+            --materialize-state \
+            | tee benchmark-results/jemalloc-heart-materialized-state.txt
+
+      - name: Verify jemalloc leak summaries
+        run: |
+          uv run manyfold-jemalloc-verify \
+            benchmark-results/jemalloc-sparse/summary.json \
+            --require-command-fragment memory_retention_benchmark
+          uv run manyfold-jemalloc-verify \
+            benchmark-results/jemalloc-retained-lineage/summary.json \
+            --require-command-fragment memory_retention_benchmark
+          uv run manyfold-jemalloc-verify \
+            benchmark-results/jemalloc-heart-materialized-state/summary.json \
+            --require-command-fragment memory_retention_benchmark
+
+      - name: Python sparse retention plateau
+        run: |
+          set -o pipefail
+          uv run manyfold-memory-benchmark \
+            --iterations 75000 \
+            --sample-every 25000 \
+            --history-limit 8 \
+            --traced-plateau-bytes 65536 \
+            --project-events 1000000000 \
+            --traced-projected-growth-bytes 134217728 \
+            --traced-segment-projected-growth-bytes 134217728 \
+            --rss-tail-plateau-kib 512 \
+            --rss-tail-min-samples 3 \
+            --max-elapsed-seconds 30 \
+            --max-cpu-seconds 30 \
+            --max-average-event-us 500 \
+            --max-interval-event-us 1000 \
+            --max-disk-input-blocks 0 \
+            --max-disk-output-blocks 0 \
+            --max-materialized-payloads 0 \
+            --lineage-retention none \
+            --metadata-mode none \
+            --check \
+            | tee benchmark-results/python-sparse.txt
+
+      - name: Python sparse nowait plateau
+        run: |
+          set -o pipefail
+          uv run manyfold-memory-benchmark \
+            --iterations 75000 \
+            --sample-every 25000 \
+            --history-limit 8 \
+            --publish-mode nowait \
+            --traced-plateau-bytes 65536 \
+            --project-events 1000000000 \
+            --traced-projected-growth-bytes 134217728 \
+            --traced-segment-projected-growth-bytes 134217728 \
+            --rss-tail-plateau-kib 512 \
+            --rss-tail-min-samples 3 \
+            --max-elapsed-seconds 30 \
+            --max-cpu-seconds 5 \
+            --max-average-event-us 100 \
+            --max-interval-event-us 1000 \
+            --max-disk-input-blocks 0 \
+            --max-disk-output-blocks 0 \
+            --max-materialized-payloads 0 \
+            --lineage-retention none \
+            --metadata-mode none \
+            --check \
+            | tee benchmark-results/python-sparse-nowait.txt
+
+      - name: Python retained-lineage plateau
+        run: |
+          set -o pipefail
+          uv run manyfold-memory-benchmark \
+            --iterations 75000 \
+            --sample-every 25000 \
+            --history-limit 8 \
+            --traced-plateau-bytes 65536 \
+            --project-events 1000000000 \
+            --traced-projected-growth-bytes 134217728 \
+            --traced-segment-projected-growth-bytes 134217728 \
+            --rss-tail-plateau-kib 512 \
+            --rss-tail-min-samples 3 \
+            --max-elapsed-seconds 30 \
+            --max-cpu-seconds 30 \
+            --max-average-event-us 500 \
+            --max-interval-event-us 1000 \
+            --max-disk-input-blocks 0 \
+            --max-disk-output-blocks 0 \
+            --max-materialized-payloads 0 \
+            --lineage-retention retained \
+            --correlation-store native \
+            --check \
+            | tee benchmark-results/python-retained-lineage.txt
+
+      - name: Python Heart process-local nowait plateau
+        run: |
+          set -o pipefail
+          uv run manyfold-memory-benchmark \
+            --iterations 75000 \
+            --sample-every 25000 \
+            --history-limit 8 \
+            --payload-schema any \
+            --publish-mode nowait \
+            --traced-plateau-bytes 65536 \
+            --project-events 1000000000 \
+            --traced-projected-growth-bytes 134217728 \
+            --traced-segment-projected-growth-bytes 134217728 \
+            --rss-tail-plateau-kib 512 \
+            --rss-tail-min-samples 3 \
+            --max-elapsed-seconds 30 \
+            --max-cpu-seconds 30 \
+            --max-average-event-us 500 \
+            --max-interval-event-us 1000 \
+            --max-disk-input-blocks 0 \
+            --max-disk-output-blocks 0 \
+            --max-materialized-payloads 8 \
+            --lineage-retention none \
+            --metadata-mode none \
+            --check \
+            | tee benchmark-results/python-heart-process-local-nowait.txt
+
+      - name: Python Heart materialized-state retained-lineage plateau
+        run: |
+          set -o pipefail
+          uv run manyfold-memory-benchmark \
+            --iterations 75000 \
+            --sample-every 25000 \
+            --history-limit 8 \
+            --materialize-state \
+            --traced-plateau-bytes 65536 \
+            --project-events 1000000000 \
+            --traced-projected-growth-bytes 134217728 \
+            --traced-segment-projected-growth-bytes 134217728 \
+            --rss-tail-plateau-kib 512 \
+            --rss-tail-min-samples 3 \
+            --max-elapsed-seconds 30 \
+            --max-cpu-seconds 30 \
+            --max-average-event-us 500 \
+            --max-interval-event-us 1000 \
+            --max-disk-input-blocks 0 \
+            --max-disk-output-blocks 0 \
+            --max-materialized-payloads 0 \
+            --lineage-retention retained \
+            --check \
+            | tee benchmark-results/python-heart-materialized-state.txt
+
+      - name: Python Heart materialized-state nowait plateau
+        run: |
+          set -o pipefail
+          uv run manyfold-memory-benchmark \
+            --iterations 75000 \
+            --sample-every 25000 \
+            --history-limit 8 \
+            --materialize-state \
+            --publish-mode nowait \
+            --traced-plateau-bytes 65536 \
+            --project-events 1000000000 \
+            --traced-projected-growth-bytes 134217728 \
+            --traced-segment-projected-growth-bytes 134217728 \
+            --rss-tail-plateau-kib 512 \
+            --rss-tail-min-samples 3 \
+            --max-elapsed-seconds 30 \
+            --max-cpu-seconds 5 \
+            --max-average-event-us 100 \
+            --max-interval-event-us 1000 \
+            --max-disk-input-blocks 0 \
+            --max-disk-output-blocks 0 \
+            --max-materialized-payloads 0 \
+            --lineage-retention retained \
+            --check \
+            | tee benchmark-results/python-heart-materialized-state-nowait.txt
+
+      - name: Python Heart materialized-state noop-lineage plateau
+        run: |
+          set -o pipefail
+          uv run manyfold-memory-benchmark \
+            --iterations 75000 \
+            --sample-every 25000 \
+            --history-limit 8 \
+            --materialize-state \
+            --publish-mode nowait \
+            --lineage-store noop \
+            --metadata-mode static \
+            --traced-plateau-bytes 0 \
+            --project-events 1000000000 \
+            --traced-projected-growth-bytes 0 \
+            --traced-segment-projected-growth-bytes 0 \
+            --rss-tail-plateau-kib 512 \
+            --rss-tail-min-samples 3 \
+            --max-elapsed-seconds 30 \
+            --max-cpu-seconds 5 \
+            --max-average-event-us 100 \
+            --max-interval-event-us 1000 \
+            --max-disk-input-blocks 0 \
+            --max-disk-output-blocks 0 \
+            --max-materialized-payloads 0 \
+            --lineage-retention retained \
+            --check \
+            | tee benchmark-results/python-heart-materialized-state-noop-lineage.txt
+
+      - name: Python unrelated-topology no-fanout fast path
+        run: |
+          set -o pipefail
+          uv run manyfold-memory-benchmark \
+            --iterations 50000 \
+            --sample-every 25000 \
+            --history-limit 8 \
+            --unrelated-edges 2000 \
+            --traced-plateau-bytes 65536 \
+            --project-events 1000000000 \
+            --traced-projected-growth-bytes 134217728 \
+            --traced-segment-projected-growth-bytes 134217728 \
+            --rss-tail-plateau-kib 512 \
+            --rss-tail-min-samples 3 \
+            --max-elapsed-seconds 30 \
+            --max-cpu-seconds 30 \
+            --max-average-event-us 500 \
+            --max-interval-event-us 1000 \
+            --max-disk-input-blocks 0 \
+            --max-disk-output-blocks 0 \
+            --max-materialized-payloads 0 \
+            --lineage-retention none \
+            --metadata-mode none \
+            --check \
+            | tee benchmark-results/python-unrelated-topology.txt
+
+      - name: Python subscription churn disposal
+        run: |
+          set -o pipefail
+          uv run manyfold-memory-benchmark \
+            --iterations 50000 \
+            --sample-every 25000 \
+            --history-limit 8 \
+            --traced-plateau-bytes 131072 \
+            --project-events 1000000000 \
+            --traced-projected-growth-bytes 134217728 \
+            --traced-segment-projected-growth-bytes 134217728 \
+            --rss-tail-plateau-kib 512 \
+            --rss-tail-min-samples 3 \
+            --max-elapsed-seconds 30 \
+            --max-cpu-seconds 30 \
+            --max-average-event-us 500 \
+            --max-interval-event-us 1000 \
+            --max-disk-input-blocks 0 \
+            --max-disk-output-blocks 0 \
+            --max-materialized-payloads 0 \
+            --lineage-retention none \
+            --metadata-mode none \
+            --churn-subscriptions \
+            --check \
+            | tee benchmark-results/python-subscription-churn.txt
+
+      - name: Python graph churn disposal
+        run: |
+          set -o pipefail
+          uv run manyfold-memory-benchmark \
+            --iterations 20000 \
+            --sample-every 10000 \
+            --history-limit 8 \
+            --traced-plateau-bytes 131072 \
+            --max-elapsed-seconds 30 \
+            --max-cpu-seconds 30 \
+            --max-average-event-us 5000 \
+            --max-interval-event-us 10000 \
+            --max-disk-input-blocks 0 \
+            --max-disk-output-blocks 0 \
+            --max-materialized-payloads 0 \
+            --churn-graphs \
+            --check \
+            | tee benchmark-results/python-graph-churn.txt
+
+      - name: Verify benchmark text artifacts
+        run: |
+          uv run manyfold-benchmark-log-verify \
+            benchmark-results/native-sparse.txt \
+            --min-final-step 1000000 \
+            --min-samples 10 \
+            --require-final history=8 \
+            --require-final payloads=8 \
+            --require-final lineage=0 \
+            --require-max correlation_index=0 \
+            --require-final-max cpu_seconds=30 \
+            --require-final-max elapsed_seconds=30 \
+            --require-final-max average_event_us=100 \
+            --require-numeric-max interval_event_us=100 \
+            --require-numeric-max input_blocks=0 \
+            --require-numeric-max output_blocks=0 \
+            --require-tail-plateau live_allocated_bytes=0:3 \
+            --require-tail-plateau peak_allocated_bytes=0:3 \
+            --require-tail-plateau current_rss_kib=512:3
+          uv run manyfold-benchmark-log-verify \
+            benchmark-results/native-retained-lineage.txt \
+            --min-final-step 1000000 \
+            --min-samples 10 \
+            --require-final history=8 \
+            --require-final payloads=8 \
+            --require-final lineage=8 \
+            --require-final correlation_index=8 \
+            --require-final-max cpu_seconds=30 \
+            --require-final-max elapsed_seconds=30 \
+            --require-final-max average_event_us=100 \
+            --require-numeric-max interval_event_us=100 \
+            --require-numeric-max input_blocks=0 \
+            --require-numeric-max output_blocks=0 \
+            --require-tail-plateau live_allocated_bytes=0:3 \
+            --require-tail-plateau peak_allocated_bytes=0:3 \
+            --require-tail-plateau current_rss_kib=512:3
+          uv run manyfold-benchmark-log-verify \
+            benchmark-results/native-heart-materialized-state-noop-lineage.txt \
+            --min-final-step 1000000 \
+            --min-samples 10 \
+            --require-final history=16 \
+            --require-final payloads=16 \
+            --require-final lineage=0 \
+            --require-max correlation_index=0 \
+            --require-final-max cpu_seconds=30 \
+            --require-final-max elapsed_seconds=30 \
+            --require-final-max average_event_us=100 \
+            --require-numeric-max interval_event_us=100 \
+            --require-numeric-max input_blocks=0 \
+            --require-numeric-max output_blocks=0 \
+            --require-tail-plateau live_allocated_bytes=0:3 \
+            --require-tail-plateau peak_allocated_bytes=0:3 \
+            --require-tail-plateau current_rss_kib=512:3
+          uv run manyfold-benchmark-log-verify \
+            benchmark-results/native-heart-materialized-state.txt \
+            --min-final-step 1000000 \
+            --min-samples 10 \
+            --require-final history=16 \
+            --require-final payloads=16 \
+            --require-final lineage=16 \
+            --require-max correlation_index=0 \
+            --require-final-max cpu_seconds=30 \
+            --require-final-max elapsed_seconds=30 \
+            --require-final-max average_event_us=100 \
+            --require-numeric-max interval_event_us=100 \
+            --require-numeric-max input_blocks=0 \
+            --require-numeric-max output_blocks=0 \
+            --require-tail-plateau live_allocated_bytes=0:3 \
+            --require-tail-plateau peak_allocated_bytes=0:3 \
+            --require-tail-plateau current_rss_kib=512:3
+          uv run manyfold-benchmark-log-verify \
+            benchmark-results/native-heart-materialized-state-large-payload.txt \
+            --min-final-step 100000 \
+            --min-samples 5 \
+            --require-final history=16 \
+            --require-final payloads=16 \
+            --require-final lineage=16 \
+            --require-max correlation_index=0 \
+            --require-final-max cpu_seconds=30 \
+            --require-final-max elapsed_seconds=30 \
+            --require-final-max average_event_us=500 \
+            --require-numeric-max interval_event_us=500 \
+            --require-numeric-max input_blocks=0 \
+            --require-numeric-max output_blocks=0 \
+            --require-tail-plateau live_allocated_bytes=0:3 \
+            --require-tail-plateau peak_allocated_bytes=0:3 \
+            --require-tail-plateau current_rss_kib=1024:3
+          uv run manyfold-benchmark-log-verify \
+            benchmark-results/native-high-sequence.txt \
+            --min-final-step 32 \
+            --min-samples 4 \
+            --require-final history=8 \
+            --require-final payloads=8 \
+            --require-final lineage=8 \
+            --require-final correlation_index=8 \
+            --require-final-max elapsed_seconds=30 \
+            --require-final-max average_event_us=100
+          uv run manyfold-benchmark-log-verify \
+            benchmark-results/python-sparse.txt \
+            --min-final-step 75000 \
+            --min-samples 4 \
+            --require-final replay=8 \
+            --require-final payloads=8 \
+            --require-final lineage=0 \
+            --require-final materialized_payloads=0 \
+            --require-max correlation_index=0 \
+            --require-final-max cpu_seconds=30 \
+            --require-final-max elapsed_seconds=30 \
+            --require-final-max average_event_us=500 \
+            --require-numeric-max interval_event_us=1000 \
+            --require-numeric-max input_blocks=0 \
+            --require-numeric-max output_blocks=0 \
+            --require-tail-plateau current_rss_kib=512:3
+          uv run manyfold-benchmark-log-verify \
+            benchmark-results/python-sparse-nowait.txt \
+            --min-final-step 75000 \
+            --min-samples 4 \
+            --require-final replay=8 \
+            --require-final payloads=8 \
+            --require-final lineage=0 \
+            --require-max correlation_index=0 \
+            --require-final-max cpu_seconds=5 \
+            --require-final-max elapsed_seconds=30 \
+            --require-final-max average_event_us=100 \
+            --require-numeric-max interval_event_us=1000 \
+            --require-numeric-max input_blocks=0 \
+            --require-numeric-max output_blocks=0 \
+            --require-tail-plateau current_rss_kib=512:3
+          uv run manyfold-benchmark-log-verify \
+            benchmark-results/python-retained-lineage.txt \
+            --min-final-step 75000 \
+            --min-samples 4 \
+            --require-final replay=8 \
+            --require-final payloads=8 \
+            --require-final lineage=8 \
+            --require-final materialized_payloads=0 \
+            --require-final correlation_index=8 \
+            --require-final-max cpu_seconds=30 \
+            --require-final-max elapsed_seconds=30 \
+            --require-final-max average_event_us=500 \
+            --require-numeric-max interval_event_us=1000 \
+            --require-numeric-max input_blocks=0 \
+            --require-numeric-max output_blocks=0 \
+            --require-tail-plateau current_rss_kib=512:3
+          uv run manyfold-benchmark-log-verify \
+            benchmark-results/python-heart-process-local-nowait.txt \
+            --min-final-step 75000 \
+            --min-samples 4 \
+            --require-final replay=8 \
+            --require-final payloads=8 \
+            --require-final lineage=0 \
+            --require-max correlation_index=0 \
+            --require-max materialized_payloads=8 \
+            --require-final-max cpu_seconds=30 \
+            --require-final-max elapsed_seconds=30 \
+            --require-final-max average_event_us=500 \
+            --require-numeric-max interval_event_us=1000 \
+            --require-numeric-max input_blocks=0 \
+            --require-numeric-max output_blocks=0 \
+            --require-tail-plateau current_rss_kib=512:3
+          uv run manyfold-benchmark-log-verify \
+            benchmark-results/python-heart-materialized-state.txt \
+            --min-final-step 75000 \
+            --min-samples 4 \
+            --require-final replay=8 \
+            --require-final payloads=8 \
+            --require-final lineage=8 \
+            --require-final materialized_payloads=0 \
+            --require-max correlation_index=0 \
+            --require-final-max cpu_seconds=30 \
+            --require-final-max elapsed_seconds=30 \
+            --require-final-max average_event_us=500 \
+            --require-numeric-max interval_event_us=1000 \
+            --require-numeric-max input_blocks=0 \
+            --require-numeric-max output_blocks=0 \
+            --require-tail-plateau current_rss_kib=512:3
+          uv run manyfold-benchmark-log-verify \
+            benchmark-results/python-heart-materialized-state-nowait.txt \
+            --min-final-step 75000 \
+            --min-samples 4 \
+            --require-final replay=8 \
+            --require-final payloads=8 \
+            --require-final lineage=8 \
+            --require-final materialized_payloads=0 \
+            --require-max correlation_index=0 \
+            --require-final-max cpu_seconds=5 \
+            --require-final-max elapsed_seconds=30 \
+            --require-final-max average_event_us=100 \
+            --require-numeric-max interval_event_us=1000 \
+            --require-numeric-max input_blocks=0 \
+            --require-numeric-max output_blocks=0 \
+            --require-tail-plateau current_rss_kib=512:3
+          uv run manyfold-benchmark-log-verify \
+            benchmark-results/python-heart-materialized-state-noop-lineage.txt \
+            --min-final-step 75000 \
+            --min-samples 4 \
+            --require-final replay=8 \
+            --require-final payloads=8 \
+            --require-final lineage=0 \
+            --require-final materialized_payloads=0 \
+            --require-max correlation_index=0 \
+            --require-final-max cpu_seconds=5 \
+            --require-final-max elapsed_seconds=30 \
+            --require-final-max average_event_us=100 \
+            --require-numeric-max interval_event_us=1000 \
+            --require-numeric-max input_blocks=0 \
+            --require-numeric-max output_blocks=0 \
+            --require-tail-plateau current_rss_kib=512:3
+          uv run manyfold-benchmark-log-verify \
+            benchmark-results/python-unrelated-topology.txt \
+            --min-final-step 50000 \
+            --min-samples 3 \
+            --require-final replay=8 \
+            --require-final payloads=8 \
+            --require-final lineage=0 \
+            --require-final materialized_payloads=0 \
+            --require-max correlation_index=0 \
+            --require-final-max cpu_seconds=30 \
+            --require-final-max elapsed_seconds=30 \
+            --require-final-max average_event_us=500 \
+            --require-numeric-max interval_event_us=1000 \
+            --require-numeric-max input_blocks=0 \
+            --require-numeric-max output_blocks=0 \
+            --require-tail-plateau current_rss_kib=512:3
+          uv run manyfold-benchmark-log-verify \
+            benchmark-results/python-subscription-churn.txt \
+            --min-final-step 50000 \
+            --min-samples 3 \
+            --require-final replay=8 \
+            --require-final payloads=8 \
+            --require-final lineage=0 \
+            --require-final materialized_payloads=0 \
+            --require-max correlation_index=0 \
+            --require-final-max cpu_seconds=30 \
+            --require-final-max elapsed_seconds=30 \
+            --require-final-max average_event_us=500 \
+            --require-numeric-max interval_event_us=1000 \
+            --require-numeric-max input_blocks=0 \
+            --require-numeric-max output_blocks=0 \
+            --require-tail-plateau current_rss_kib=512:3
+
+      - name: Heart wrapper provenance smoke
+        run: |
+          set -o pipefail
+          mkdir -p benchmark-results/fake-heart/src
+          uv run manyfold-heart-benchmark \
+            --heart-root benchmark-results/fake-heart \
+            --totem-command /usr/bin/true \
+            --duration-seconds 0.1 \
+            --external-min-elapsed-seconds 0 \
+            --external-min-samples 1 \
+            --monitor-interval 0.01 \
+            --output-json benchmark-results/heart-wrapper-provenance.json \
+            --no-check \
+            | tee benchmark-results/heart-wrapper-provenance.txt
+          manyfold_source="$(pwd)/python/manyfold/__init__.py"
+          manyfold_bridge_version="$(uv run python -c 'import manyfold; print(manyfold.bridge_version())')"
+          uv run manyfold-monitor-verify \
+            benchmark-results/heart-wrapper-provenance.json \
+            --allow-unchecked \
+            --min-samples 1 \
+            --require-command-fragment lib_2026 \
+            --require-metric rss \
+            --require-sample-field rss \
+            --require-metadata "manyfold_source=${manyfold_source}" \
+            --require-metadata "manyfold_bridge_version=${manyfold_bridge_version}"
+
+      - name: Write benchmark summary
+        if: always()
+        run: |
+          {
+            echo "### Memory regression benchmarks"
+            echo
+            echo "These checks fail when retained Manyfold state grows past its declared bound."
+            echo
+            for file in benchmark-results/*.txt; do
+              echo "#### $(basename "$file" .txt)"
+              echo '```'
+              tail -n 20 "$file"
+              echo '```'
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Generate jemalloc profile summaries
+        if: always()
+        run: |
+          if ! command -v jeprof >/dev/null 2>&1; then
+            echo "jeprof not found; raw heap profiles will still be uploaded."
+            exit 0
+          fi
+          find benchmark-results -name '*.heap' -print0 |
+            while IFS= read -r -d '' heap; do
+              jeprof --show_bytes --text ./target/release/memory_retention_benchmark "$heap" \
+                > "${heap}.txt" || true
+            done
+
+      - name: Upload benchmark logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: memory-benchmark-results
+          path: benchmark-results/**
+
+  native-profiling:
+    name: Native profiler smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: python -m pip install uv
+
+      - name: Set up Rust
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Install profiling tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y heaptrack valgrind
+          sudo apt-get install -y linux-tools-common linux-tools-generic || true
+          sudo apt-get install -y coz-profiler || true
+          sudo sh -c 'echo 1 >/proc/sys/kernel/perf_event_paranoid' || true
+
+      - name: Sync Python environment
+        run: uv sync --locked
+
+      - name: Build profiling benchmark
+        run: |
+          RUSTFLAGS="-C force-frame-pointers=yes -C symbol-mangling-version=v0" \
+            cargo build --profile profiling --features coz-profiler --bin memory_retention_benchmark
+
+      - name: Prepare profiling output directory
+        run: mkdir -p benchmark-results
+
+      - name: Run required memory profilers
+        run: |
+          set -o pipefail
+          uv run manyfold-native-profiler \
+            --output-dir benchmark-results/native-profilers-required \
+            --profiler dhat \
+            --profiler heaptrack \
+            --continue-on-error \
+            -- ./target/profiling/memory_retention_benchmark \
+            --iterations 2000 \
+            --sample-every 1000 \
+            --history-limit 8 \
+            --live-plateau-bytes 0 \
+            --warmup-samples 1 \
+            --check-invariants-every 500 \
+            --lineage-retention none \
+            | tee benchmark-results/native-profilers-required.txt
+
+      - name: Run required Heart materialized-state memory profilers
+        run: |
+          set -o pipefail
+          uv run manyfold-native-profiler \
+            --output-dir benchmark-results/native-profilers-heart-required \
+            --profiler dhat \
+            --profiler heaptrack \
+            --continue-on-error \
+            -- ./target/profiling/memory_retention_benchmark \
+            --iterations 2000 \
+            --sample-every 1000 \
+            --history-limit 8 \
+            --live-plateau-bytes 0 \
+            --warmup-samples 1 \
+            --check-invariants-every 500 \
+            --lineage-retention retained \
+            --materialize-state \
+            | tee benchmark-results/native-profilers-heart-required.txt
+
+      - name: Verify required native profiler summaries
+        run: |
+          uv run manyfold-native-profiler-verify \
+            benchmark-results/native-profilers-required/summary.json \
+            --require-profiler dhat \
+            --require-profiler heaptrack \
+            --require-command-fragment memory_retention_benchmark
+          uv run manyfold-native-profiler-verify \
+            benchmark-results/native-profilers-heart-required/summary.json \
+            --require-profiler dhat \
+            --require-profiler heaptrack \
+            --require-command-fragment memory_retention_benchmark \
+            --require-command-fragment materialize-state
+
+      - name: Run opportunistic profilers
+        run: |
+          set -o pipefail
+          uv run manyfold-native-profiler \
+            --output-dir benchmark-results/native-profilers-opportunistic \
+            --profiler perf \
+            --profiler massif \
+            --profiler cachegrind \
+            --profiler callgrind \
+            --profiler coz \
+            --skip-missing \
+            --continue-on-error \
+            --allow-failures \
+            -- ./target/profiling/memory_retention_benchmark \
+            --iterations 2000 \
+            --sample-every 1000 \
+            --history-limit 8 \
+            --live-plateau-bytes 0 \
+            --warmup-samples 1 \
+            --check-invariants-every 500 \
+            --lineage-retention retained \
+            | tee benchmark-results/native-profilers-opportunistic.txt
+
+      - name: Write profiler summary
+        if: always()
+        run: |
+          {
+            echo "### Native profiler smoke"
+            echo
+            echo "Required profilers cover heap allocation behavior."
+            echo "Opportunistic profilers add CPU, cache, and causal profiles when the runner supports them."
+            echo
+            for file in benchmark-results/native-profilers-*.txt; do
+              echo "#### $(basename "$file" .txt)"
+              echo '```'
+              cat "$file"
+              echo '```'
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload profiler artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-profiler-results
+          path: benchmark-results/**

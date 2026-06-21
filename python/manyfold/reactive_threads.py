@@ -49,6 +49,7 @@ logger = logging.getLogger(__name__)
 FRAME_THREAD_LATENCY_STREAM = "frame_thread_handoff"
 
 DEFAULT_DELIVERY_LATENCY_HISTORY_SIZE = 2048
+DEFAULT_FRAME_THREAD_QUEUE_LIMIT = 2048
 DEFAULT_BACKGROUND_PRIORITY_QUEUE_LIMIT = 2048
 
 
@@ -246,7 +247,12 @@ def deliver_on_frame_thread(source: Observable[T]) -> Observable[T]:
                 elif kind_to_run == "completed":
                     observer.on_completed()
 
-            _enqueue_frame_thread_task(_run)
+            if not _enqueue_frame_thread_task(_run):
+                with dispose_lock:
+                    pending_kind = None
+                    pending_value = None
+                    pending_enqueued = False
+                observer.on_error(RuntimeError("frame thread queue is full"))
 
         subscription = source.subscribe(
             on_next=lambda value: _deliver("next", value),
@@ -464,10 +470,14 @@ def background_threaded_observable(
 def scheduler_diagnostics() -> dict[str, int | None]:
     """Return max-worker settings for initialized shared schedulers."""
 
+    with _FRAME_THREAD_QUEUE_LOCK:
+        frame_thread_queue_depth = len(_FRAME_THREAD_QUEUE)
     return {
         "background_max_workers": _BACKGROUND_SCHEDULER.max_workers,
         "background_priority_queue_limit": _BACKGROUND_PRIORITY_QUEUE.maxsize,
         "blocking_io_max_workers": _BLOCKING_IO_SCHEDULER.max_workers,
+        "frame_thread_queue_depth": frame_thread_queue_depth,
+        "frame_thread_queue_limit": _FRAME_THREAD_QUEUE_LIMIT,
         "input_max_workers": _INPUT_SCHEDULER.max_workers,
     }
 
@@ -475,7 +485,8 @@ def scheduler_diagnostics() -> dict[str, int | None]:
 def reset_reactive_threading_state_for_tests() -> None:
     """Reset module-level schedulers, queues, shutdown, and latency state."""
 
-    global _BACKGROUND_PRIORITY_QUEUE, _FRAME_THREAD_IDENT, shutdown
+    global _BACKGROUND_PRIORITY_QUEUE, _FRAME_THREAD_IDENT, _FRAME_THREAD_QUEUE_LIMIT
+    global shutdown
     for state in (
         _BACKGROUND_SCHEDULER,
         _BLOCKING_IO_SCHEDULER,
@@ -489,6 +500,7 @@ def reset_reactive_threading_state_for_tests() -> None:
         _dispose_scheduler(scheduler)
     with _FRAME_THREAD_QUEUE_LOCK:
         _FRAME_THREAD_QUEUE.clear()
+        _FRAME_THREAD_QUEUE_LIMIT = _frame_thread_queue_limit()
     with _BACKGROUND_PRIORITY_LOCK:
         _stop_background_priority_worker_locked()
         _BACKGROUND_PRIORITY_QUEUE = _new_background_priority_queue()
@@ -669,13 +681,16 @@ def _run_on_thread(target: StartableTarget, name: str) -> Thread:
     return Thread(target=target, daemon=False, name=_require_thread_name(name))
 
 
-def _enqueue_frame_thread_task(callback: Callable[[], None]) -> None:
+def _enqueue_frame_thread_task(callback: Callable[[], None]) -> bool:
     task = _FrameThreadTask(
         callback=callback,
         enqueued_monotonic=time.monotonic(),
     )
     with _FRAME_THREAD_QUEUE_LOCK:
+        if len(_FRAME_THREAD_QUEUE) >= _FRAME_THREAD_QUEUE_LIMIT:
+            return False
         _FRAME_THREAD_QUEUE.append(task)
+    return True
 
 
 def _enqueue_background_priority_task(
@@ -747,6 +762,14 @@ def _new_background_priority_queue() -> PriorityQueue[_BackgroundPriorityTask]:
             legacy_name="HEART_RX_BACKGROUND_PRIORITY_QUEUE_LIMIT",
             default=DEFAULT_BACKGROUND_PRIORITY_QUEUE_LIMIT,
         )
+    )
+
+
+def _frame_thread_queue_limit() -> int:
+    return _env_int(
+        "MANYFOLD_RX_FRAME_THREAD_QUEUE_LIMIT",
+        legacy_name="HEART_RX_FRAME_THREAD_QUEUE_LIMIT",
+        default=DEFAULT_FRAME_THREAD_QUEUE_LIMIT,
     )
 
 
@@ -859,6 +882,8 @@ _INTERVAL_SCHEDULER = _SchedulerState(lock=Lock())
 
 _FRAME_THREAD_QUEUE: deque[_FrameThreadTask] = deque()
 
+_FRAME_THREAD_QUEUE_LIMIT = _frame_thread_queue_limit()
+
 _FRAME_THREAD_QUEUE_LOCK = Lock()
 
 _FRAME_THREAD_IDENT: int | None = None
@@ -871,6 +896,7 @@ shutdown: Subject[Any] = Subject()
 __all__ = (
     "DEFAULT_BACKGROUND_PRIORITY_QUEUE_LIMIT",
     "DEFAULT_DELIVERY_LATENCY_HISTORY_SIZE",
+    "DEFAULT_FRAME_THREAD_QUEUE_LIMIT",
     "DeliveryLatencyStats",
     "FRAME_THREAD_LATENCY_STREAM",
     "StreamPriority",

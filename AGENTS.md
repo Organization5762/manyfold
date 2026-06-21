@@ -38,6 +38,8 @@ release work there instead of forcing the broken worktree.
 Use the smallest command that covers the changed surface:
 
 ```sh
+cargo fmt --check
+cargo clippy --all-targets --all-features -- -D warnings
 cargo test
 uv run ruff check
 uv run python -m unittest discover -s tests -p 'test_*.py'
@@ -48,16 +50,37 @@ uv run python -m examples.catalog --check-manifest
 uv run python -m examples.catalog --check-readme
 ```
 
-For a focused Python test file, use:
+For focused Python tests, use:
 
 ```sh
 uv run python -m unittest tests.test_components
+uv run python -m unittest tests.test_components.ComponentTests.test_file_store_addresses_bytes_by_nested_keyspace_prefix
 ```
 
-For a focused test case, use:
+For memory and profiler changes, also run the focused benchmark gates that match
+the touched path. Representative V1 gates:
 
 ```sh
-uv run python -m unittest tests.test_components.ComponentTests.test_file_store_addresses_bytes_by_nested_keyspace_prefix
+cargo run --release --bin memory_retention_benchmark -- --iterations 1000000 --sample-every 100000 --history-limit 8 --live-plateau-bytes 0 --peak-plateau-bytes 0 --rss-tail-plateau-kib 512 --rss-tail-min-samples 3 --project-events 1000000000 --projected-live-growth-bytes 0 --projected-live-segment-growth-bytes 0 --projected-peak-growth-bytes 0 --projected-peak-segment-growth-bytes 0 --max-elapsed-seconds 30 --max-cpu-seconds 30 --max-average-event-us 100 --max-interval-event-us 100 --max-disk-input-blocks 0 --max-disk-output-blocks 0 --warmup-samples 1 --check-invariants-every 10000 --lineage-retention none --metadata-mode none --materialize-state
+cargo run --release --bin memory_retention_benchmark -- --iterations 1000000 --sample-every 100000 --history-limit 8 --live-plateau-bytes 0 --peak-plateau-bytes 0 --rss-tail-plateau-kib 512 --rss-tail-min-samples 3 --project-events 1000000000 --projected-live-growth-bytes 0 --projected-live-segment-growth-bytes 0 --projected-peak-growth-bytes 0 --projected-peak-segment-growth-bytes 0 --max-elapsed-seconds 30 --max-cpu-seconds 30 --max-average-event-us 100 --max-interval-event-us 100 --max-disk-input-blocks 0 --max-disk-output-blocks 0 --warmup-samples 1 --check-invariants-every 10000 --lineage-retention retained --lineage-store noop --metadata-mode static --materialize-state
+uv run manyfold-memory-benchmark --iterations 75000 --sample-every 25000 --history-limit 8 --lineage-retention retained --lineage-store noop --materialize-state --publish-mode nowait --metadata-mode static --payload-schema bytes --check --max-materialized-payloads 0 --traced-plateau-bytes 65536 --traced-projected-growth-bytes 134217728 --traced-segment-projected-growth-bytes 134217728 --rss-tail-plateau-kib 512 --rss-tail-min-samples 3 --max-cpu-seconds 10 --max-average-event-us 500 --max-interval-event-us 1000 --max-disk-input-blocks 0 --max-disk-output-blocks 0
+```
+
+For long-haul native allocator proof runs, use the same stress tool at target
+event volume:
+
+```sh
+cargo run --release --bin memory_retention_benchmark -- --iterations 1000000000 --sample-every 100000000 --history-limit 8 --live-plateau-bytes 0 --rss-tail-plateau-kib 512 --rss-tail-min-samples 3 --warmup-samples 2 --check-invariants-every 100000 --lineage-retention none
+cargo run --release --bin memory_retention_benchmark -- --iterations 1000000000 --sample-every 100000000 --history-limit 8 --live-plateau-bytes 0 --rss-tail-plateau-kib 512 --rss-tail-min-samples 3 --warmup-samples 2 --check-invariants-every 100000 --lineage-retention retained
+```
+
+For Heart-on-device proof, run the real target command with tree-scoped external
+monitoring and private-memory gates. Linux targets should expose PSS/private/
+anonymous memory from `smaps_rollup`; keep RSS as a fallback signal, not the only
+acceptance criterion:
+
+```sh
+uv run manyfold-heart-benchmark --heart-root /path/to/heart --totem-command totem --duration-seconds 3600 --strict-device-memory-gates --external-min-elapsed-seconds 300 --external-min-samples 30 --external-output-max-samples 500 --external-rss-scope tree --external-pss-projected-growth-kib 0 --external-pss-segment-projected-growth-kib 0 --external-private-projected-growth-kib 0 --external-private-segment-projected-growth-kib 0 --external-anonymous-projected-growth-kib 0 --external-anonymous-segment-projected-growth-kib 0 --external-fd-plateau-count 0 --external-fd-segment-projected-growth-count 0 -- totem run --configuration lib_2026
 ```
 
 ## Repo Shape
@@ -119,6 +142,9 @@ uv run python -m unittest tests.test_components.ComponentTests.test_file_store_a
   must use a hard maximum (`deque(maxlen=...)`, retention policy, backpressure
   limit, or explicit eviction), be scoped to static graph topology, or document
   why unbounded growth is safe.
+- Lineage retention is opt-in. Default graph routes should run sparse with
+  `lineage_retention_policy="none"`; enable `retained` only for explicit
+  debugging/introspection paths and prove the retained indexes stay bounded.
 - Never add append-only `list`/`dict` structures to event, timer, observer,
   debug, audit, payload, or scheduler paths. Prefer bounded collections and
   remove all secondary indexes when the primary record expires.
@@ -138,5 +164,93 @@ uv run python -m unittest tests.test_components.ComponentTests.test_file_store_a
 - Validate suspicious memory behavior with runtime probes, not intuition. Use
   RSS/PSS/anonymous memory, `tracemalloc`, GC object counts, and domain-specific
   counters to distinguish true live retention from allocator high-water marks.
+- Rust memory leaks are merge blockers. CI must run the native benchmark under
+  jemalloc final leak profiling with `prof_leak:true`, `lg_prof_sample:0`, and
+  `prof_final:true`; upload final heap profiles when jemalloc reports leaks.
+- Native profiler smoke runs should use release-like binaries with line-table
+  debug info, frame pointers, and v0 Rust symbol mangling so DHAT, heaptrack,
+  perf, Cachegrind, Callgrind, Massif, and Coz reports resolve to useful code.
 - Record validation commands for memory/runtime changes, including focused
   stress probes and the full test suite when practical.
+
+## Recent Validation
+
+- 2026-06-21: Final V1 merge-readiness pass for memory/runtime work:
+  `/Users/lampe/.local/bin/uv sync`, `cargo fmt --check`, `cargo clippy
+  --all-targets --all-features -- -D warnings`, `cargo test`, `uv sync
+  --reinstall-package manyfold`, full `uv run ruff check`, full `uv run python
+  -m unittest discover -s tests -p 'test_*.py'` (971 tests), RFC checklist,
+  example catalog checks, a 75,000-event Python Heart noop-lineage nowait
+  benchmark artifact verification, a 300,000-event native sparse release
+  benchmark artifact verification, generated-artifact scan, and `git diff
+  --check`.
+- 2026-06-21: V1 PR-readiness validation after CI pinning and AGENTS cleanup:
+  `/Users/lampe/.local/bin/uv sync`, `cargo fmt --check`, `cargo clippy
+  --all-targets --all-features -- -D warnings`, `cargo test`, `uv sync
+  --reinstall-package manyfold`, full `uv run ruff check`, full `uv run python
+  -m unittest discover -s tests -p 'test_*.py'` (961 tests), RFC checklist,
+  example catalog checks, native sparse and Heart-style noop-lineage plateau
+  gates through 1,000,000 events, Python Heart-style noop-lineage nowait plateau
+  gate through 75,000 events, local `/Users/lampe/code/heart` focused `lib_2026`
+  integration (68 tests), and `git diff --check`.
+- 2026-06-21: Added `manyfold-native-profiler-verify` so required CI DHAT and
+  heaptrack runs are independently checked from `summary.json` plus raw profiler
+  artifacts. CI now verifies both the sparse and Heart materialized-state
+  profiler summaries. Ran focused Ruff, `uv run python -m unittest
+  tests.test_native_profilers tests.test_project_metadata`, and an installed
+  CLI smoke against a synthetic DHAT summary/artifact directory.
+- 2026-06-21: Added `manyfold-heart-benchmark --strict-device-memory-gates` for
+  real totem proof runs. The shorthand requires zero projected PSS/private/
+  anonymous growth and fd plateau/growth gates unless explicitly relaxed, so
+  Linux device runs must prove `smaps_rollup` and fd-count evidence instead of
+  relying on RSS alone. Ran focused Ruff and `uv run python -m unittest
+  tests.test_heart_benchmarks tests.test_project_metadata`.
+- 2026-06-21: CI benchmark log verification now requires native
+  `live_allocated_bytes` and `peak_allocated_bytes` to fully plateau across the
+  final three retained native benchmark samples, in addition to retained counts
+  and RSS tail checks. Ran focused Ruff, `uv run python -m unittest
+  tests.test_benchmark_artifacts tests.test_project_metadata`, and a real
+  300,000-event native sparse benchmark whose saved log passed
+  `manyfold-benchmark-log-verify` with allocator and RSS tail plateau checks.
+- 2026-06-21: Expanded `manyfold-benchmark-log-verify` CI coverage to the
+  remaining Heart-shaped native/Python benchmark logs: retained materialized
+  state, large payloads, high-sequence lineage, process-local payloads,
+  unrelated topology, and subscription churn. Ran focused Ruff,
+  `uv run python -m unittest tests.test_project_metadata
+  tests.test_benchmark_artifacts`, plus local artifact-verifier smokes for a
+  300,000-event native Heart retained-materialized run and a 75,000-event Python
+  process-local nowait run.
+- 2026-06-21: `manyfold-benchmark-log-verify` now supports numeric upper-bound
+  checks via `--require-final-max` and `--require-numeric-max`; CI uses them to
+  verify saved benchmark logs include CPU seconds, average/interval latency, and
+  zero block-I/O evidence. Ran focused Ruff, `uv run python -m unittest
+  tests.test_benchmark_artifacts tests.test_project_metadata`, and a real
+  75,000-event Python Heart noop-lineage nowait benchmark whose saved log passed
+  retained-count, RSS-tail, CPU, latency, and block-I/O artifact checks.
+- 2026-06-21: CI benchmark artifact verification now also caps final elapsed
+  wall-clock time with `--require-final-max elapsed_seconds=30`, so saved logs
+  prove benchmarks did not silently slow down while satisfying memory gates. Ran
+  focused Ruff, `uv run python -m unittest tests.test_benchmark_artifacts
+  tests.test_project_metadata`, a real 75,000-event Python Heart noop-lineage
+  nowait benchmark, and a 300,000-event native sparse release benchmark whose
+  saved logs passed retained-count/allocator, RSS-tail, CPU, elapsed-time,
+  latency, and block-I/O artifact checks.
+- 2026-06-21: V1 memory-readiness work added native sparse/retained lineage
+  stores, explicit lineage/correlation attachment modes, jemalloc leak-check
+  artifact verification, native profiler wrappers, Python/native plateau gates,
+  benchmark log verification, and Heart wrapper provenance checks. Local
+  validation covered `cargo fmt --check`, Clippy, `cargo test`, `uv sync
+  --reinstall-package manyfold`, Ruff, full unittest discovery, RFC checklist,
+  example catalog checks, representative native and Python memory plateau
+  benchmarks, and `git diff --check`.
+- 2026-06-21: Local `/Users/lampe/code/heart` focused integration passed with
+  this worktree on `PYTHONPATH` for `lib_2026` configuration, peripheral
+  runtime, multi-scene lifecycle, event streams, gamepad controller, input debug
+  tap, navigation profile, and peripheral input bus tests. Full rendered Heart
+  probes under SDL dummy can crash on OpenGL scenes; use focused headless tests
+  locally and real display/OpenGL-capable device runs for long-haul proof.
+- 2026-06-21: Local DHAT/heaptrack/jemalloc proof can skip or fail on macOS when
+  those tools are not installed. Linux CI is responsible for required profiler
+  artifacts and jemalloc leak-summary evidence. Retried totem probing from the
+  skills workspace; `michael@totem4.local` still failed DNS resolution locally,
+  so real Heart-on-totem profiling remains pending until a device is reachable.
