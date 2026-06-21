@@ -214,6 +214,10 @@ uv run manyfold-monitor-verify heart-lib_2026-monitor.json --min-samples 30 --re
   post-warmup sample for the strict three-sample RSS tail plateau. Kept the
   plateau gate unchanged, extended that churn benchmark to 75,000 events, and
   verified the exact command plus `manyfold-benchmark-log-verify` locally.
+- 2026-06-21: Added a metadata regression guard that forbids frame-stack
+  introspection in hot Python runtime/benchmark modules so caller-label helpers
+  cannot reintroduce per-event inspection overhead. Ran focused Ruff, `uv run
+  python -m unittest tests.test_project_metadata`, and `git diff --check`.
 - 2026-06-21: V1 PR-readiness validation after CI pinning and AGENTS cleanup:
   `/Users/lampe/.local/bin/uv sync`, `cargo fmt --check`, `cargo clippy
   --all-targets --all-features -- -D warnings`, `cargo test`, `uv sync

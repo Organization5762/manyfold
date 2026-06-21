@@ -27,6 +27,11 @@ RUNTIME_ASSERT_ROOTS = (
     PROJECT_ROOT / "python" / "manyfold",
     PROJECT_ROOT / "python" / "manyfold_example_catalog.py",
 )
+HOT_PATH_PYTHON_PATHS = (
+    PROJECT_ROOT / "python" / "manyfold" / "graph.py",
+    PROJECT_ROOT / "python" / "manyfold" / "memory_benchmarks.py",
+    PROJECT_ROOT / "python" / "manyfold" / "reactive_threads.py",
+)
 PACKAGE_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+")
 TYPE_ALIAS_VALUE_NAMES = frozenset(
     {
@@ -71,6 +76,15 @@ class ProjectMetadataTests(unittest.TestCase):
             violation
             for path in _runtime_python_source_paths()
             for violation in _assert_statements(path)
+        )
+
+        self.assertEqual(violations, ())
+
+    def test_hot_paths_do_not_use_frame_introspection(self) -> None:
+        violations = tuple(
+            violation
+            for path in HOT_PATH_PYTHON_PATHS
+            for violation in _frame_introspection_uses(path)
         )
 
         self.assertEqual(violations, ())
@@ -378,6 +392,63 @@ def _literal_string_sequence(node: ast.expr) -> tuple[str, ...] | None:
             return None
         values.append(item.value)
     return tuple(values)
+
+
+def _frame_introspection_uses(path: Path) -> tuple[str, ...]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    violations: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "inspect":
+                    violations.append(
+                        _hot_path_violation(path, node.lineno, "imports inspect")
+                    )
+        elif isinstance(node, ast.ImportFrom):
+            if node.module == "inspect":
+                violations.append(
+                    _hot_path_violation(path, node.lineno, "imports from inspect")
+                )
+        elif isinstance(node, ast.Call):
+            function = node.func
+            if isinstance(function, ast.Attribute) and function.attr in {
+                "_getframe",
+                "currentframe",
+                "stack",
+            }:
+                violations.append(
+                    _hot_path_violation(
+                        path,
+                        node.lineno,
+                        f"calls frame API {function.attr}",
+                    )
+                )
+            elif isinstance(function, ast.Name) and function.id in {
+                "currentframe",
+                "getframe",
+                "stack",
+            }:
+                violations.append(
+                    _hot_path_violation(
+                        path,
+                        node.lineno,
+                        f"calls frame helper {function.id}",
+                    )
+                )
+        elif isinstance(node, ast.Attribute):
+            if node.attr in {"_getframe", "currentframe", "stack"}:
+                violations.append(
+                    _hot_path_violation(
+                        path,
+                        node.lineno,
+                        f"uses frame API {node.attr}",
+                    )
+                )
+    return tuple(violations)
+
+
+def _hot_path_violation(path: Path, lineno: int, message: str) -> str:
+    return f"{path.relative_to(PROJECT_ROOT)}:{lineno} {message}"
 
 
 def _declaration_order_issues(path: Path) -> tuple[str, ...]:
