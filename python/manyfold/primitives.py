@@ -7,8 +7,9 @@ enough to deserve first-class status.
 
 from __future__ import annotations
 
+import json
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field, fields, is_dataclass
 from functools import cached_property, lru_cache
 from itertools import count
 from threading import Lock
@@ -35,6 +36,7 @@ from ._manyfold_rust import (
 from ._rx import Observable, operators as ops
 
 T = TypeVar("T")
+TAccepted = TypeVar("TAccepted")
 U = TypeVar("U")
 TRead = TypeVar("TRead")
 TWrite = TypeVar("TWrite")
@@ -351,6 +353,119 @@ class Schema(Generic[T]):
 
 
 @dataclass(frozen=True)
+class ContractAdapter(Generic[TAccepted, T]):
+    """Typed migration from an accepted upstream value into the current type."""
+
+    source_type: type[TAccepted]
+    mapper: Callable[[TAccepted], T]
+
+    def __post_init__(self) -> None:
+        _require_type(self.source_type, "adapter source_type")
+        if not callable(self.mapper):
+            raise ValueError("adapter mapper must be callable")
+
+    def accepts(self, value: object) -> bool:
+        return isinstance(value, self.source_type)
+
+    def map(self, value: object) -> T:
+        if not self.accepts(value):
+            raise ValueError(
+                f"adapter expected {self.source_type.__module__}."
+                f"{self.source_type.__qualname__}"
+            )
+        return self.mapper(cast(TAccepted, value))
+
+
+@dataclass(frozen=True)
+class CompatibilityPolicy(Generic[T]):
+    """Accepted historical or adjacent shapes for a contract."""
+
+    adapters: tuple[ContractAdapter[Any, T], ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.adapters, tuple):
+            raise ValueError("compatibility adapters must be a tuple")
+        for adapter in self.adapters:
+            if not isinstance(adapter, ContractAdapter):
+                raise ValueError("compatibility adapters must be ContractAdapter values")
+
+    @classmethod
+    def strict(cls) -> CompatibilityPolicy[T]:
+        """Return a policy that only accepts the contract's current value type."""
+        return cls()
+
+    def accepts(
+        self,
+        source_type: type[TAccepted],
+        mapper: Callable[[TAccepted], T],
+    ) -> CompatibilityPolicy[T]:
+        """Return a policy that can migrate ``source_type`` into the current type."""
+        return CompatibilityPolicy(
+            (*self.adapters, ContractAdapter(source_type, mapper))
+        )
+
+    def convert(self, value: object, target_type: type[T]) -> T:
+        """Convert ``value`` to ``target_type`` using the registered adapters."""
+        if isinstance(value, target_type):
+            return value
+        for adapter in self.adapters:
+            if adapter.accepts(value):
+                return adapter.map(value)
+        raise ValueError(
+            f"value of type {_type_display(type(value))} is not compatible with "
+            f"{_type_display(target_type)}"
+        )
+
+
+@dataclass(frozen=True)
+class Contract(Generic[T]):
+    """Type-first value contract for a Manyfold IO knob or route."""
+
+    value_type: type[T]
+    compatibility: CompatibilityPolicy[T] = field(default_factory=CompatibilityPolicy)
+
+    def __post_init__(self) -> None:
+        _require_type(self.value_type, "contract value_type")
+        if not isinstance(self.compatibility, CompatibilityPolicy):
+            raise ValueError("contract compatibility must be a CompatibilityPolicy")
+
+    @classmethod
+    def of(cls, value_type: type[T]) -> Contract[T]:
+        """Create a strict contract from a Python or protobuf value type."""
+        return cls(value_type=value_type)
+
+    @classmethod
+    def proto(cls, message_type: ProtobufMessageType[TProto]) -> Contract[TProto]:
+        """Create a strict contract for a generated protobuf message type."""
+        if not isinstance(message_type, ProtobufMessageType) or not callable(
+            getattr(message_type, "FromString", None)
+        ):
+            raise ValueError(
+                "protobuf contract message_type must provide __name__ and FromString"
+            )
+        return cls(value_type=message_type)
+
+    def accepts(
+        self,
+        source_type: type[TAccepted],
+        mapper: Callable[[TAccepted], T],
+    ) -> Contract[T]:
+        """Return a copy that can migrate ``source_type`` into this contract."""
+        return Contract(
+            value_type=self.value_type,
+            compatibility=self.compatibility.accepts(source_type, mapper),
+        )
+
+    def convert(self, value: object) -> T:
+        """Convert a current or accepted historical value into this contract."""
+        return self.compatibility.convert(value, self.value_type)
+
+    def schema(self, *, schema_id: str | None = None, version: int = 1) -> Schema[T]:
+        """Materialize a route schema from the contract's value type."""
+        return _schema_from_type(self.value_type, schema_id=schema_id, version=version)
+
+
+@dataclass(frozen=True)
 class TypedRoute(Generic[T]):
     """Fully typed route description used by the ergonomic Python API."""
 
@@ -590,6 +705,80 @@ def _require_subscription(value: object, field: str) -> None:
         raise ValueError(f"{field} must provide dispose")
 
 
+def _require_type(value: object, field: str) -> None:
+    if not isinstance(value, type):
+        raise ValueError(f"{field} must be a type")
+
+
+def _type_display(value_type: type[object]) -> str:
+    return f"{value_type.__module__}.{value_type.__qualname__}"
+
+
+def _contract_schema_id(value_type: type[object]) -> str:
+    return _type_display(value_type)
+
+
+def _schema_from_type(
+    value_type: type[T],
+    *,
+    schema_id: str | None,
+    version: int,
+) -> Schema[T]:
+    _require_type(value_type, "contract value_type")
+    resolved_schema_id = schema_id or _contract_schema_id(value_type)
+    if value_type is bytes:
+        return cast(Schema[T], Schema.bytes(name=resolved_schema_id, version=version))
+    if isinstance(value_type, ProtobufMessageType):
+        return cast(
+            Schema[T],
+            Schema.protobuf(
+                cast(ProtobufMessageType[TProto], value_type),
+                schema_id=resolved_schema_id,
+                version=version,
+            ),
+        )
+    if is_dataclass(value_type):
+        return Schema(
+            schema_id=resolved_schema_id,
+            version=version,
+            encode=lambda value: _encode_dataclass_value(value_type, value),
+            decode=lambda payload: _decode_dataclass_value(value_type, payload),
+        )
+    raise ValueError(
+        "contract value_type must be bytes, a dataclass type, or protobuf message type"
+    )
+
+
+def _encode_dataclass_value(value_type: type[T], value: object) -> bytes:
+    if not isinstance(value, value_type):
+        raise ValueError(f"dataclass contract values must be {_type_display(value_type)}")
+    payload = {
+        field_value.name: getattr(value, field_value.name)
+        for field_value in fields(value_type)
+    }
+    try:
+        return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
+    except TypeError as exc:
+        raise ValueError("dataclass contract values must be JSON-serializable") from exc
+
+
+def _decode_dataclass_value(value_type: type[T], payload: bytes) -> T:
+    try:
+        decoded = json.loads(_coerce_bytes_payload(payload).decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("dataclass contract payloads must be JSON objects") from exc
+    if not isinstance(decoded, dict):
+        raise ValueError("dataclass contract payloads must be JSON objects")
+    try:
+        return value_type(**decoded)
+    except TypeError as exc:
+        raise ValueError(
+            f"dataclass contract payload does not match {_type_display(value_type)}"
+        ) from exc
+
+
 def _encode_finite_float(value: Any) -> bytes:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError("float schema values must be finite numbers")
@@ -668,15 +857,35 @@ def _coerce_schema(
                 decode=schema.decode,
             )
         return schema
+    if isinstance(schema, Contract):
+        return schema.schema(
+            schema_id=schema_id,
+            version=1 if version is None else version,
+        )
     if schema is bytes:
         if schema_id is None:
-            raise ValueError("schema_id is required when schema=bytes")
+            return cast(
+                Schema[T],
+                Schema.bytes(
+                    name=_contract_schema_id(bytes),
+                    version=1 if version is None else version,
+                ),
+            )
         return cast(
             Schema[T],
             Schema.bytes(name=schema_id, version=1 if version is None else version),
         )
     if not isinstance(schema, ProtobufMessageType):
-        raise ValueError("schema must be a Schema, bytes, or protobuf message type")
+        if isinstance(schema, type) and is_dataclass(schema):
+            return _schema_from_type(
+                cast(type[T], schema),
+                schema_id=schema_id,
+                version=1 if version is None else version,
+            )
+        raise ValueError(
+            "schema must be a Schema, Contract, bytes, dataclass type, "
+            "or protobuf message type"
+        )
     return cast(
         Schema[T],
         Schema.protobuf(

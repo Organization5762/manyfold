@@ -386,7 +386,8 @@ for build, message in cases:
 
         with self.assertRaisesRegex(
             ValueError,
-            "schema must be a Schema, bytes, or protobuf message type",
+            "schema must be a Schema, Contract, bytes, dataclass type, "
+            "or protobuf message type",
         ):
             manyfold.route(
                 owner="sensor",
