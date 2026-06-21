@@ -26,6 +26,14 @@ class MonitorArtifactTests(unittest.TestCase):
                     "external_rss_tail_plateau_seconds",
                     "external_rss_tail_plateau_samples",
                 ),
+                required_gate_limits={
+                    "external_rss_tail_plateau_kib": 1024,
+                    "external_rss_tail_plateau_seconds": 8.0,
+                },
+                required_gate_modes={
+                    "external_rss_tail_plateau_kib": "max",
+                    "external_rss_tail_plateau_seconds": "min",
+                },
                 required_metadata={
                     "manyfold_bridge_version": "0.1.38",
                     "manyfold_source": "/tmp/manyfold/python/manyfold/__init__.py",
@@ -119,6 +127,36 @@ class MonitorArtifactTests(unittest.TestCase):
                     required_gates=("external_private_plateau_kib",),
                 )
 
+    def test_verify_rejects_wrong_required_gate_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = _write_artifact(Path(directory), _artifact())
+
+            with self.assertRaisesRegex(SystemExit, "limit expected"):
+                monitor_artifacts.verify_monitor_artifact(
+                    path,
+                    required_gate_limits={"external_rss_tail_plateau_kib": 0},
+                )
+
+    def test_verify_rejects_wrong_required_gate_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = _write_artifact(Path(directory), _artifact())
+
+            with self.assertRaisesRegex(SystemExit, "mode expected"):
+                monitor_artifacts.verify_monitor_artifact(
+                    path,
+                    required_gate_modes={"external_rss_tail_plateau_kib": "min"},
+                )
+
+    def test_verify_rejects_required_limit_for_missing_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = _write_artifact(Path(directory), _artifact())
+
+            with self.assertRaisesRegex(SystemExit, "required gate missing"):
+                monitor_artifacts.verify_monitor_artifact(
+                    path,
+                    required_gate_limits={"external_private_projected_growth_kib": 0},
+                )
+
     def test_verify_rejects_gate_record_failure_even_when_summary_is_wrong(self) -> None:
         artifact = _artifact()
         artifact["gates"][0]["passed"] = False
@@ -174,6 +212,13 @@ class MonitorArtifactTests(unittest.TestCase):
     def test_parse_rejects_malformed_required_metadata(self) -> None:
         with self.assertRaisesRegex(SystemExit, "KEY=VALUE"):
             monitor_artifacts._parse_required_metadata(("manyfold_source",))
+
+    def test_parse_rejects_malformed_required_gate_limit(self) -> None:
+        with self.assertRaisesRegex(SystemExit, "NAME=VALUE"):
+            monitor_artifacts._parse_required_gate_limits(("external_rss",))
+
+        with self.assertRaisesRegex(SystemExit, "numeric"):
+            monitor_artifacts._parse_required_gate_limits(("external_rss=flat",))
 
 
 def _artifact(

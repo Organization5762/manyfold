@@ -35,6 +35,8 @@ def verify_monitor_artifact(
     require_checks: bool = True,
     required_command_fragments: Sequence[str] = (),
     required_gates: Sequence[str] = (),
+    required_gate_limits: dict[str, float | int] | None = None,
+    required_gate_modes: dict[str, str] | None = None,
     required_metrics: Sequence[str] = (),
     required_sample_fields: Sequence[str] = (),
     required_metadata: dict[str, str] | None = None,
@@ -47,6 +49,8 @@ def verify_monitor_artifact(
         require_checks=require_checks,
         required_command_fragments=required_command_fragments,
         required_gates=required_gates,
+        required_gate_limits=required_gate_limits or {},
+        required_gate_modes=required_gate_modes or {},
         required_metrics=required_metrics,
         required_sample_fields=required_sample_fields,
         required_metadata=required_metadata or {},
@@ -64,6 +68,10 @@ def _main(argv: Sequence[str] | None = None) -> None:
         require_checks=not args.allow_unchecked,
         required_command_fragments=tuple(args.require_command_fragment or ()),
         required_gates=tuple(args.require_gate or ()),
+        required_gate_limits=_parse_required_gate_limits(
+            args.require_gate_limit or (),
+        ),
+        required_gate_modes=_parse_required_gate_modes(args.require_gate_mode or ()),
         required_metrics=tuple(args.require_metric or ()),
         required_sample_fields=tuple(args.require_sample_field or ()),
         required_metadata=_parse_required_metadata(args.require_metadata or ()),
@@ -102,6 +110,18 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Require a named gate to be present in the artifact.",
     )
     parser.add_argument(
+        "--require-gate-limit",
+        action="append",
+        metavar="NAME=NUMBER",
+        help="Require a named gate to keep an exact numeric limit.",
+    )
+    parser.add_argument(
+        "--require-gate-mode",
+        action="append",
+        metavar="NAME=MODE",
+        help="Require a named gate to keep an exact comparison mode.",
+    )
+    parser.add_argument(
         "--require-metric",
         action="append",
         help=(
@@ -133,6 +153,8 @@ def _monitor_artifact_errors(
     require_checks: bool,
     required_command_fragments: Sequence[str],
     required_gates: Sequence[str],
+    required_gate_limits: dict[str, float | int],
+    required_gate_modes: dict[str, str],
     required_metrics: Sequence[str],
     required_sample_fields: Sequence[str],
     required_metadata: dict[str, str],
@@ -174,6 +196,27 @@ def _monitor_artifact_errors(
     for gate in required_gates:
         if gate not in present_gates:
             errors.append(f"required gate missing: {gate}")
+    gates_by_name = {name: gate for name, gate in gates}
+    for gate, expected in required_gate_limits.items():
+        record = gates_by_name.get(gate)
+        if record is None:
+            errors.append(f"required gate missing: {gate}")
+            continue
+        actual = record.get("limit")
+        if not _numeric_values_equal(actual, expected):
+            errors.append(
+                f"gate {gate} limit expected {expected!r}, found {actual!r}"
+            )
+    for gate, expected in required_gate_modes.items():
+        record = gates_by_name.get(gate)
+        if record is None:
+            errors.append(f"required gate missing: {gate}")
+            continue
+        actual = record.get("mode")
+        if actual != expected:
+            errors.append(
+                f"gate {gate} mode expected {expected!r}, found {actual!r}"
+            )
     metrics = artifact.get("metrics", {})
     if not isinstance(metrics, dict):
         errors.append("artifact metrics is not an object")
@@ -248,6 +291,46 @@ def _parse_required_metadata(items: Sequence[str]) -> dict[str, str]:
             raise SystemExit("--require-metadata values must use KEY=VALUE")
         metadata[key] = value
     return metadata
+
+
+def _parse_required_gate_limits(items: Sequence[str]) -> dict[str, float | int]:
+    limits: dict[str, float | int] = {}
+    for item in items:
+        key, value = _parse_key_value(item, "--require-gate-limit")
+        limits[key] = _parse_numeric_value(value, "--require-gate-limit")
+    return limits
+
+
+def _parse_required_gate_modes(items: Sequence[str]) -> dict[str, str]:
+    modes: dict[str, str] = {}
+    for item in items:
+        key, value = _parse_key_value(item, "--require-gate-mode")
+        modes[key] = value
+    return modes
+
+
+def _parse_key_value(item: str, option: str) -> tuple[str, str]:
+    key, separator, value = item.partition("=")
+    if not separator or not key:
+        raise SystemExit(f"{option} values must use NAME=VALUE")
+    return key, value
+
+
+def _parse_numeric_value(value: str, option: str) -> float | int:
+    try:
+        return int(value)
+    except ValueError:
+        pass
+    try:
+        return float(value)
+    except ValueError as error:
+        raise SystemExit(f"{option} values must use numeric limits") from error
+
+
+def _numeric_values_equal(actual: object, expected: float | int) -> bool:
+    if isinstance(actual, bool) or not isinstance(actual, int | float):
+        return False
+    return float(actual) == float(expected)
 
 
 def _artifact_sample_count(artifact: dict[str, Any]) -> int:

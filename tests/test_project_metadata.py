@@ -263,6 +263,7 @@ class ProjectMetadataTests(unittest.TestCase):
             "--external-min-samples",
             "--external-output-max-samples",
             "--external-rss-scope tree",
+            "--output-json heart-lib_2026-monitor.json",
             "--external-pss-projected-growth-kib",
             "--external-pss-segment-projected-growth-kib",
             "--external-private-projected-growth-kib",
@@ -271,6 +272,15 @@ class ProjectMetadataTests(unittest.TestCase):
             "--external-anonymous-segment-projected-growth-kib",
             "--external-fd-plateau-count",
             "--external-fd-segment-projected-growth-count",
+            "uv run manyfold-monitor-verify heart-lib_2026-monitor.json",
+            "--require-gate-limit external_pss_projected_growth_kib=0",
+            "--require-gate-limit external_pss_segment_projected_growth_kib=0",
+            "--require-gate-limit external_private_projected_growth_kib=0",
+            "--require-gate-limit external_private_segment_projected_growth_kib=0",
+            "--require-gate-limit external_anonymous_projected_growth_kib=0",
+            "--require-gate-limit external_anonymous_segment_projected_growth_kib=0",
+            "--require-gate-limit external_fd_plateau_count=0",
+            "--require-gate-limit external_fd_segment_projected_growth_count=0",
             "smaps_rollup",
         )
 

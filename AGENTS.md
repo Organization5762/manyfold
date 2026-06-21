@@ -80,7 +80,8 @@ anonymous memory from `smaps_rollup`; keep RSS as a fallback signal, not the onl
 acceptance criterion:
 
 ```sh
-uv run manyfold-heart-benchmark --heart-root /path/to/heart --totem-command totem --duration-seconds 3600 --strict-device-memory-gates --external-min-elapsed-seconds 300 --external-min-samples 30 --external-output-max-samples 500 --external-rss-scope tree --external-pss-projected-growth-kib 0 --external-pss-segment-projected-growth-kib 0 --external-private-projected-growth-kib 0 --external-private-segment-projected-growth-kib 0 --external-anonymous-projected-growth-kib 0 --external-anonymous-segment-projected-growth-kib 0 --external-fd-plateau-count 0 --external-fd-segment-projected-growth-count 0 -- totem run --configuration lib_2026
+uv run manyfold-heart-benchmark --heart-root /path/to/heart --totem-command totem run --configuration lib_2026 --duration-seconds 3600 --strict-device-memory-gates --external-min-elapsed-seconds 300 --external-min-samples 30 --external-output-max-samples 500 --external-rss-scope tree --output-json heart-lib_2026-monitor.json --external-pss-projected-growth-kib 0 --external-pss-segment-projected-growth-kib 0 --external-private-projected-growth-kib 0 --external-private-segment-projected-growth-kib 0 --external-anonymous-projected-growth-kib 0 --external-anonymous-segment-projected-growth-kib 0 --external-fd-plateau-count 0 --external-fd-segment-projected-growth-count 0
+uv run manyfold-monitor-verify heart-lib_2026-monitor.json --min-samples 30 --require-command-fragment lib_2026 --require-metric pss --require-metric private --require-metric anonymous --require-metric fd --require-sample-field pss --require-sample-field private --require-sample-field anonymous --require-sample-field fd --require-gate-limit external_pss_projected_growth_kib=0 --require-gate-limit external_pss_segment_projected_growth_kib=0 --require-gate-limit external_private_projected_growth_kib=0 --require-gate-limit external_private_segment_projected_growth_kib=0 --require-gate-limit external_anonymous_projected_growth_kib=0 --require-gate-limit external_anonymous_segment_projected_growth_kib=0 --require-gate-limit external_fd_plateau_count=0 --require-gate-limit external_fd_segment_projected_growth_count=0
 ```
 
 ## Repo Shape
@@ -197,6 +198,12 @@ uv run manyfold-heart-benchmark --heart-root /path/to/heart --totem-command tote
   --reinstall-package manyfold`, focused Ruff, `uv run python -m unittest
   tests.test_jemalloc_leak_check tests.test_project_metadata`, and `git diff
   --check`.
+- 2026-06-21: Strengthened Heart external monitor artifact verification with
+  exact gate limit/mode assertions so device proof artifacts must preserve
+  zero-growth PSS/private/anonymous/fd gates. Ran focused Ruff, `uv run python
+  -m unittest tests.test_monitor_artifacts tests.test_project_metadata
+  tests.test_heart_benchmarks`, a temporary `uv run manyfold-monitor-verify`
+  CLI smoke with required gate limits/modes, and `git diff --check`.
 - 2026-06-21: V1 PR-readiness validation after CI pinning and AGENTS cleanup:
   `/Users/lampe/.local/bin/uv sync`, `cargo fmt --check`, `cargo clippy
   --all-targets --all-features -- -D warnings`, `cargo test`, `uv sync
