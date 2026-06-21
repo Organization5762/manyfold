@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Sequence
 
 _Sample = dict[str, int | float | str]
+_DEFAULT_MONOTONIC_FIELDS = ("step", "elapsed_seconds", "cpu_seconds")
 
 
 def verify_benchmark_log(
@@ -15,6 +16,7 @@ def verify_benchmark_log(
     min_final_step: int | None = None,
     min_samples: int | None = None,
     required_fields: Sequence[str] = (),
+    required_monotonic_fields: Sequence[str] = (),
     required_final_values: dict[str, int] | None = None,
     required_final_max_values: dict[str, float] | None = None,
     required_max_values: dict[str, int] | None = None,
@@ -32,6 +34,7 @@ def verify_benchmark_log(
         min_final_step=min_final_step,
         min_samples=min_samples,
         required_fields=required_fields,
+        required_monotonic_fields=required_monotonic_fields,
         required_final_values=required_final_values or {},
         required_final_max_values=required_final_max_values or {},
         required_max_values=required_max_values or {},
@@ -50,6 +53,7 @@ def _main(argv: Sequence[str] | None = None) -> None:
         min_final_step=args.min_final_step,
         min_samples=args.min_samples,
         required_fields=tuple(args.require_field or ()),
+        required_monotonic_fields=tuple(args.require_monotonic or ()),
         required_final_values=_parse_int_assignments(args.require_final or ()),
         required_final_max_values=_parse_float_assignments(
             args.require_final_max or ()
@@ -80,6 +84,16 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--require-field",
         action="append",
         help="Require every parsed sample to include this field.",
+    )
+    parser.add_argument(
+        "--require-monotonic",
+        action="append",
+        metavar="FIELD",
+        help=(
+            "Require this numeric field to be present in every sample and never "
+            "move backwards. step, elapsed_seconds, and cpu_seconds are checked "
+            "opportunistically by default when present."
+        ),
     )
     parser.add_argument(
         "--require-final",
@@ -123,6 +137,7 @@ def _benchmark_log_errors(
     min_final_step: int | None,
     min_samples: int | None,
     required_fields: Sequence[str],
+    required_monotonic_fields: Sequence[str],
     required_final_values: dict[str, int],
     required_final_max_values: dict[str, float],
     required_max_values: dict[str, int],
@@ -147,6 +162,14 @@ def _benchmark_log_errors(
     for field in required_fields:
         if any(field not in sample for sample in samples):
             errors.append(f"required field missing from one or more samples: {field}")
+    for field in _monotonic_fields(required_monotonic_fields):
+        errors.extend(
+            _monotonic_field_errors(
+                samples,
+                field,
+                required=field in required_monotonic_fields,
+            )
+        )
     for field, expected in required_final_values.items():
         observed = _int_field(final, field)
         if observed is None:
@@ -204,6 +227,38 @@ def _parse_sample_line(line: str) -> _Sample | None:
             continue
         sample[key] = _parse_value(value)
     return sample
+
+
+def _monotonic_fields(required_fields: Sequence[str]) -> tuple[str, ...]:
+    fields: list[str] = []
+    for field in (*_DEFAULT_MONOTONIC_FIELDS, *required_fields):
+        if field not in fields:
+            fields.append(field)
+    return tuple(fields)
+
+
+def _monotonic_field_errors(
+    samples: tuple[_Sample, ...],
+    field: str,
+    *,
+    required: bool,
+) -> tuple[str, ...]:
+    values = tuple(_numeric_field(sample, field) for sample in samples)
+    if any(value is None for value in values):
+        if required:
+            return (f"monotonic field missing from one or more samples: {field}",)
+        return ()
+    concrete_values = tuple(value for value in values if value is not None)
+    for index, (previous, current) in enumerate(
+        zip(concrete_values, concrete_values[1:]),
+        start=1,
+    ):
+        if current < previous:
+            return (
+                f"{field} moved backwards at sample {index}: "
+                f"{current:g} < {previous:g}",
+            )
+    return ()
 
 
 def _parse_value(value: str) -> int | float | str:

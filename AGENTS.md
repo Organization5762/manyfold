@@ -204,6 +204,12 @@ uv run manyfold-monitor-verify heart-lib_2026-monitor.json --min-samples 30 --re
   -m unittest tests.test_monitor_artifacts tests.test_project_metadata
   tests.test_heart_benchmarks`, a temporary `uv run manyfold-monitor-verify`
   CLI smoke with required gate limits/modes, and `git diff --check`.
+- 2026-06-21: Strengthened benchmark artifact verification with monotonic
+  progress checks for `step`, `elapsed_seconds`, and `cpu_seconds` so reordered
+  or regressing memory logs cannot pass plateau gates. Ran focused Ruff, `uv run
+  python -m unittest tests.test_benchmark_artifacts`, a 2,000-event
+  `manyfold-memory-benchmark` smoke verified by `manyfold-benchmark-log-verify`,
+  and `git diff --check`.
 - 2026-06-21: V1 PR-readiness validation after CI pinning and AGENTS cleanup:
   `/Users/lampe/.local/bin/uv sync`, `cargo fmt --check`, `cargo clippy
   --all-targets --all-features -- -D warnings`, `cargo test`, `uv sync

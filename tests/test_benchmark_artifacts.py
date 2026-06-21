@@ -116,6 +116,48 @@ class BenchmarkArtifactTests(unittest.TestCase):
                     required_final_max_values={"elapsed_seconds": 30.0},
                 )
 
+    def test_verify_rejects_step_moving_backwards(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = _write_log(
+                Path(directory),
+                (
+                    "step=16 elapsed_seconds=0.2 cpu_seconds=0.2",
+                    "step=8 elapsed_seconds=0.3 cpu_seconds=0.3",
+                ),
+            )
+
+            with self.assertRaisesRegex(SystemExit, "step moved backwards"):
+                benchmark_artifacts.verify_benchmark_log(path)
+
+    def test_verify_rejects_elapsed_time_moving_backwards(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = _write_log(
+                Path(directory),
+                (
+                    "step=8 elapsed_seconds=0.4 cpu_seconds=0.2",
+                    "step=16 elapsed_seconds=0.3 cpu_seconds=0.3",
+                ),
+            )
+
+            with self.assertRaisesRegex(SystemExit, "elapsed_seconds moved backwards"):
+                benchmark_artifacts.verify_benchmark_log(path)
+
+    def test_verify_requires_explicit_monotonic_field_in_every_sample(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = _write_log(
+                Path(directory),
+                (
+                    "step=8 elapsed_seconds=0.1",
+                    "step=16 elapsed_seconds=0.2 queue_depth=0",
+                ),
+            )
+
+            with self.assertRaisesRegex(SystemExit, "monotonic field missing"):
+                benchmark_artifacts.verify_benchmark_log(
+                    path,
+                    required_monotonic_fields=("queue_depth",),
+                )
+
     def test_verify_rejects_wrong_final_retained_count(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = _write_log(
@@ -194,6 +236,8 @@ class BenchmarkArtifactTests(unittest.TestCase):
                         "lineage=0",
                         "--require-final-max",
                         "average_event_us=100",
+                        "--require-monotonic",
+                        "current_rss_kib",
                     )
                 )
 
