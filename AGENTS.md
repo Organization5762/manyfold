@@ -210,6 +210,10 @@ uv run manyfold-monitor-verify heart-lib_2026-monitor.json --min-samples 30 --re
   python -m unittest tests.test_benchmark_artifacts`, a 2,000-event
   `manyfold-memory-benchmark` smoke verified by `manyfold-benchmark-log-verify`,
   and `git diff --check`.
+- 2026-06-21: CI memory regression run showed subscription churn needed one more
+  post-warmup sample for the strict three-sample RSS tail plateau. Kept the
+  plateau gate unchanged, extended that churn benchmark to 75,000 events, and
+  verified the exact command plus `manyfold-benchmark-log-verify` locally.
 - 2026-06-21: V1 PR-readiness validation after CI pinning and AGENTS cleanup:
   `/Users/lampe/.local/bin/uv sync`, `cargo fmt --check`, `cargo clippy
   --all-targets --all-features -- -D warnings`, `cargo test`, `uv sync

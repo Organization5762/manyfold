@@ -252,6 +252,18 @@ class ProjectMetadataTests(unittest.TestCase):
                 step = workflow.split(f"- name: {name}", 1)[1].split("\n\n", 1)[0]
                 self.assertIn("--rss-tail-plateau-kib 512", step)
                 self.assertIn("--rss-tail-min-samples 3", step)
+        subscription_step = workflow.split(
+            "- name: Python subscription churn disposal",
+            1,
+        )[1].split("| tee benchmark-results/python-subscription-churn.txt", 1)[0]
+        self.assertIn("--iterations 75000", subscription_step)
+        subscription_verify = workflow.split(
+            "uv run manyfold-benchmark-log-verify \\\n"
+            "            benchmark-results/python-subscription-churn.txt",
+            1,
+        )[1].split("uv run manyfold-benchmark-log-verify", 1)[0]
+        self.assertIn("--min-final-step 75000", subscription_verify)
+        self.assertIn("--min-samples 4", subscription_verify)
 
     def test_external_heart_monitor_documents_private_memory_gates(self) -> None:
         agents = AGENTS_PATH.read_text(encoding="utf-8")

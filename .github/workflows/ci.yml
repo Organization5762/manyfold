@@ -561,7 +561,7 @@ jobs:
         run: |
           set -o pipefail
           uv run manyfold-memory-benchmark \
-            --iterations 50000 \
+            --iterations 75000 \
             --sample-every 25000 \
             --history-limit 8 \
             --traced-plateau-bytes 131072 \
@@ -828,8 +828,8 @@ jobs:
             --require-tail-plateau current_rss_kib=512:3
           uv run manyfold-benchmark-log-verify \
             benchmark-results/python-subscription-churn.txt \
-            --min-final-step 50000 \
-            --min-samples 3 \
+            --min-final-step 75000 \
+            --min-samples 4 \
             --require-final replay=8 \
             --require-final payloads=8 \
             --require-final lineage=0 \
