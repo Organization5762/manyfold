@@ -190,10 +190,13 @@ uv run manyfold-heart-benchmark --heart-root /path/to/heart --totem-command tote
   profiler/leak wrapper latency limits separate from normal benchmark latency
   gates. CI allows only the observed two-object, 128 KiB jemalloc/runtime
   exit-time baseline while native benchmark artifacts still require flat live
-  allocation counts. Ran `cargo fmt --check`, Clippy with all targets/features
-  and `-D warnings`, `cargo test`, `uv sync --reinstall-package manyfold`,
-  focused Ruff, `uv run python -m unittest tests.test_jemalloc_leak_check
-  tests.test_project_metadata`, and `git diff --check`.
+  allocation counts. The jemalloc wrapper gets a 90-second CPU/elapsed budget
+  because full `lg_prof_sample:0` final leak profiling is much slower than the
+  normal strict 30-second benchmark gates. Ran `cargo fmt --check`, Clippy with
+  all targets/features and `-D warnings`, `cargo test`, `uv sync
+  --reinstall-package manyfold`, focused Ruff, `uv run python -m unittest
+  tests.test_jemalloc_leak_check tests.test_project_metadata`, and `git diff
+  --check`.
 - 2026-06-21: V1 PR-readiness validation after CI pinning and AGENTS cleanup:
   `/Users/lampe/.local/bin/uv sync`, `cargo fmt --check`, `cargo clippy
   --all-targets --all-features -- -D warnings`, `cargo test`, `uv sync

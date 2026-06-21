@@ -166,6 +166,8 @@ class ProjectMetadataTests(unittest.TestCase):
             "--require-numeric-max output_blocks=0",
             "--max-elapsed-seconds 30",
             "--max-cpu-seconds 30",
+            "--max-elapsed-seconds 90",
+            "--max-cpu-seconds 90",
             "--max-average-event-us",
             "--max-interval-event-us",
             "--max-disk-input-blocks 0",
