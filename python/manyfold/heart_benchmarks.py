@@ -7,7 +7,7 @@ import subprocess
 from pathlib import Path
 from typing import Sequence
 
-from manyfold import memory_benchmarks
+from manyfold import memory_benchmarks, monitor_artifacts
 
 DEFAULT_CONFIGURATION = "lib_2026"
 DEFAULT_EXTERNAL_RSS_PROJECTED_GROWTH_KIB = 0
@@ -23,6 +23,20 @@ DEFAULT_UV = shutil.which("uv") or "/Users/lampe/.local/bin/uv"
 DEFAULT_TOTEM_COMMAND = (DEFAULT_UV, "run", "totem", "run")
 DEFAULT_VERIFY_PYTHON_COMMAND = (DEFAULT_UV, "run", "python")
 LOCAL_MANYFOLD_PYTHON = Path(__file__).resolve().parents[1]
+STRICT_DEVICE_REQUIRED_FIELDS = ("pss", "private", "anonymous", "fd")
+STRICT_DEVICE_REQUIRED_GATE_LIMITS = {
+    "external_anonymous_projected_growth_kib": 0,
+    "external_anonymous_segment_projected_growth_kib": 0,
+    "external_fd_plateau_count": 0,
+    "external_fd_segment_projected_growth_count": 0,
+    "external_private_projected_growth_kib": 0,
+    "external_private_segment_projected_growth_kib": 0,
+    "external_pss_projected_growth_kib": 0,
+    "external_pss_segment_projected_growth_kib": 0,
+}
+STRICT_DEVICE_REQUIRED_GATE_MODES = {
+    gate: "max" for gate in STRICT_DEVICE_REQUIRED_GATE_LIMITS
+}
 
 
 def run_heart_benchmark(args: argparse.Namespace) -> object:
@@ -45,8 +59,40 @@ def run_heart_benchmark(args: argparse.Namespace) -> object:
     return memory_benchmarks._run_external_command_monitor(monitor_args)
 
 
+def verify_heart_monitor_artifact(
+    path: Path,
+    *,
+    configuration: str = DEFAULT_CONFIGURATION,
+    min_samples: int = 30,
+) -> dict[str, object]:
+    """Verify a Heart device monitor artifact against strict memory gates."""
+    return monitor_artifacts.verify_monitor_artifact(
+        path,
+        min_samples=min_samples,
+        required_command_fragments=(configuration,),
+        required_gate_limits=STRICT_DEVICE_REQUIRED_GATE_LIMITS,
+        required_gate_modes=STRICT_DEVICE_REQUIRED_GATE_MODES,
+        required_metrics=STRICT_DEVICE_REQUIRED_FIELDS,
+        required_sample_fields=STRICT_DEVICE_REQUIRED_FIELDS,
+    )
+
+
 def _main(argv: Sequence[str] | None = None) -> None:
     run_heart_benchmark(_parse_args(argv))
+
+
+def _verify_main(argv: Sequence[str] | None = None) -> None:
+    args = _parse_verify_args(argv)
+    artifact = verify_heart_monitor_artifact(
+        args.artifact,
+        configuration=args.configuration,
+        min_samples=args.min_samples,
+    )
+    print(
+        "heart_monitor_artifact passed=true samples={samples}".format(
+            samples=_artifact_sample_count(artifact),
+        )
+    )
 
 
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -201,6 +247,16 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--max-disk-output-blocks", type=int)
     parser.add_argument("--check", dest="check", action="store_true", default=True)
     parser.add_argument("--no-check", dest="check", action="store_false")
+    return parser.parse_args(argv)
+
+
+def _parse_verify_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Verify a Heart monitor artifact against strict device gates."
+    )
+    parser.add_argument("artifact", type=Path)
+    parser.add_argument("--configuration", default=DEFAULT_CONFIGURATION)
+    parser.add_argument("--min-samples", type=int, default=30)
     return parser.parse_args(argv)
 
 
@@ -370,6 +426,16 @@ def _manyfold_preflight_metadata(stdout: str) -> dict[str, str]:
             "Manyfold preflight output missing metadata: " + ", ".join(sorted(missing))
         )
     return metadata
+
+
+def _artifact_sample_count(artifact: dict[str, object]) -> int:
+    sample_count = artifact.get("sample_count")
+    if isinstance(sample_count, int):
+        return sample_count
+    samples = artifact.get("samples", ())
+    if isinstance(samples, list | tuple):
+        return len(samples)
+    return 0
 
 
 def _heart_env(

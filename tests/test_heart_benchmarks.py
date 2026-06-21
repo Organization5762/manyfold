@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import contextlib
+import io
+import json
 import os
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -143,6 +147,36 @@ class HeartBenchmarkTests(unittest.TestCase):
         )
         self.assertEqual(monitor_args.external_fd_plateau_count, 2)
         self.assertEqual(monitor_args.external_fd_projected_growth_count, 0)
+
+    def test_heart_monitor_verifier_requires_strict_device_gates(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = _write_artifact(Path(directory), _heart_monitor_artifact())
+
+            artifact = heart_benchmarks.verify_heart_monitor_artifact(path)
+
+        self.assertTrue(artifact["passed"])
+
+    def test_heart_monitor_verifier_rejects_relaxed_gate_limit(self) -> None:
+        artifact = _heart_monitor_artifact()
+        artifact["gates"][0]["limit"] = 1
+        with tempfile.TemporaryDirectory() as directory:
+            path = _write_artifact(Path(directory), artifact)
+
+            with self.assertRaisesRegex(SystemExit, "limit expected"):
+                heart_benchmarks.verify_heart_monitor_artifact(path)
+
+    def test_verify_main_prints_heart_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = _write_artifact(Path(directory), _heart_monitor_artifact())
+            output = io.StringIO()
+
+            with contextlib.redirect_stdout(output):
+                heart_benchmarks._verify_main((str(path),))
+
+        self.assertIn(
+            "heart_monitor_artifact passed=true samples=30",
+            output.getvalue(),
+        )
 
     def test_main_reuses_external_memory_monitor(self) -> None:
         with (
@@ -333,6 +367,101 @@ class HeartBenchmarkTests(unittest.TestCase):
             env["PYTHONPATH"].split(os.pathsep),
             ["/tmp/manyfold/python", "/tmp/heart/src", "/tmp/extra", "/existing"],
         )
+
+
+def _heart_monitor_artifact() -> dict[str, object]:
+    return {
+        "checks_enabled": True,
+        "command": ["totem", "run", "--configuration", "lib_2026"],
+        "failed_gates": [],
+        "gates": [
+            _gate("external_anonymous_projected_growth_kib", "anonymous_kib"),
+            _gate(
+                "external_anonymous_segment_projected_growth_kib",
+                "anonymous_kib",
+                field="segment_projected_growth",
+            ),
+            _gate("external_fd_plateau_count", "fd_count", field="steady_range"),
+            _gate(
+                "external_fd_segment_projected_growth_count",
+                "fd_count",
+                field="segment_projected_growth",
+            ),
+            _gate("external_private_projected_growth_kib", "private_kib"),
+            _gate(
+                "external_private_segment_projected_growth_kib",
+                "private_kib",
+                field="segment_projected_growth",
+            ),
+            _gate("external_pss_projected_growth_kib", "pss_kib"),
+            _gate(
+                "external_pss_segment_projected_growth_kib",
+                "pss_kib",
+                field="segment_projected_growth",
+            ),
+        ],
+        "metrics": {
+            "anonymous_kib": _metric_summary(40),
+            "fd_count": _metric_summary(5),
+            "private_kib": _metric_summary(60),
+            "pss_kib": _metric_summary(80),
+            "rss_kib": _metric_summary(100),
+        },
+        "metadata": {},
+        "passed": True,
+        "retained_sample_count": 1,
+        "sample_count": 30,
+        "sample_retention_limit": 512,
+        "samples": [
+            {
+                "anonymous_kib": 40,
+                "current_rss_kib": 100,
+                "elapsed_seconds": 300.0,
+                "fd_count": 5,
+                "private_kib": 60,
+                "pss_kib": 80,
+            }
+        ],
+        "status": {"returncode": 0},
+        "unavailable_gates": [],
+    }
+
+
+def _gate(
+    name: str,
+    metric: str,
+    *,
+    field: str = "projected_growth",
+) -> dict[str, object]:
+    return {
+        "available": True,
+        "field": field,
+        "limit": 0,
+        "metric": metric,
+        "mode": "max",
+        "name": name,
+        "observed": 0,
+        "passed": True,
+    }
+
+
+def _metric_summary(value: int) -> dict[str, object]:
+    return {
+        "project_seconds": 86_400.0,
+        "projected_growth": 0,
+        "sample_count": 30,
+        "segment_projected_growth": 0,
+        "steady_max": value,
+        "steady_min": value,
+        "steady_range": 0,
+        "steady_sample_count": 30,
+    }
+
+
+def _write_artifact(directory: Path, artifact: dict[str, object]) -> Path:
+    path = directory / "heart-monitor.json"
+    path.write_text(json.dumps(artifact), encoding="utf-8")
+    return path
 
 
 if __name__ == "__main__":

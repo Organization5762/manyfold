@@ -81,7 +81,7 @@ acceptance criterion:
 
 ```sh
 uv run manyfold-heart-benchmark --heart-root /path/to/heart --totem-command totem run --configuration lib_2026 --duration-seconds 3600 --strict-device-memory-gates --external-min-elapsed-seconds 300 --external-min-samples 30 --external-output-max-samples 500 --external-rss-scope tree --output-json heart-lib_2026-monitor.json --external-pss-projected-growth-kib 0 --external-pss-segment-projected-growth-kib 0 --external-private-projected-growth-kib 0 --external-private-segment-projected-growth-kib 0 --external-anonymous-projected-growth-kib 0 --external-anonymous-segment-projected-growth-kib 0 --external-fd-plateau-count 0 --external-fd-segment-projected-growth-count 0
-uv run manyfold-monitor-verify heart-lib_2026-monitor.json --min-samples 30 --require-command-fragment lib_2026 --require-metric pss --require-metric private --require-metric anonymous --require-metric fd --require-sample-field pss --require-sample-field private --require-sample-field anonymous --require-sample-field fd --require-gate-limit external_pss_projected_growth_kib=0 --require-gate-limit external_pss_segment_projected_growth_kib=0 --require-gate-limit external_private_projected_growth_kib=0 --require-gate-limit external_private_segment_projected_growth_kib=0 --require-gate-limit external_anonymous_projected_growth_kib=0 --require-gate-limit external_anonymous_segment_projected_growth_kib=0 --require-gate-limit external_fd_plateau_count=0 --require-gate-limit external_fd_segment_projected_growth_count=0
+uv run manyfold-heart-monitor-verify heart-lib_2026-monitor.json --min-samples 30 --configuration lib_2026
 ```
 
 ## Repo Shape
@@ -218,6 +218,12 @@ uv run manyfold-monitor-verify heart-lib_2026-monitor.json --min-samples 30 --re
   introspection in hot Python runtime/benchmark modules so caller-label helpers
   cannot reintroduce per-event inspection overhead. Ran focused Ruff, `uv run
   python -m unittest tests.test_project_metadata`, and `git diff --check`.
+- 2026-06-21: Added `manyfold-heart-monitor-verify` as the purpose-built
+  strict device artifact verifier for Heart, baking in PSS/private/anonymous/fd
+  metric and zero-growth gate requirements for `lib_2026` proof runs. Ran
+  focused Ruff, `uv run python -m unittest tests.test_heart_benchmarks
+  tests.test_project_metadata`, a synthetic `uv run manyfold-heart-monitor-verify`
+  CLI smoke, and `git diff --check`.
 - 2026-06-21: V1 PR-readiness validation after CI pinning and AGENTS cleanup:
   `/Users/lampe/.local/bin/uv sync`, `cargo fmt --check`, `cargo clippy
   --all-targets --all-features -- -D warnings`, `cargo test`, `uv sync
