@@ -753,25 +753,18 @@ fn sample(
             .iter()
             .map(|route| graph.retained_payload_count(route))
             .sum(),
-        lineage: graph.lineage.lineage_by_event.len(),
-        lineage_values: graph
-            .lineage
-            .lineage_values_by_id
-            .iter()
-            .filter(|lineage_value| lineage_value.is_some())
-            .count(),
-        trace_index: graph
-            .lineage
-            .lineage_events_by_trace
-            .values()
-            .map(Vec::len)
-            .sum(),
-        correlation_index: graph
-            .lineage
-            .lineage_events_by_correlation
-            .values()
-            .map(Vec::len)
-            .sum(),
+        lineage: graph.retained_lineage_event_count(),
+        lineage_values: graph.active_lineage_value_count(),
+        trace_index: graph.lineage.as_ref().map_or(0, |lineage| {
+            lineage.lineage_events_by_trace.values().map(Vec::len).sum()
+        }),
+        correlation_index: graph.lineage.as_ref().map_or(0, |lineage| {
+            lineage
+                .lineage_events_by_correlation
+                .values()
+                .map(Vec::len)
+                .sum()
+        }),
         live_allocated_bytes: LIVE_ALLOCATED_BYTES.load(Ordering::Relaxed),
         peak_allocated_bytes: PEAK_ALLOCATED_BYTES.load(Ordering::Relaxed),
         current_rss_kib: current_rss_kib(),

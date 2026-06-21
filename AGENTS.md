@@ -176,6 +176,15 @@ uv run manyfold-heart-monitor-verify heart-lib_2026-monitor.json --min-samples 3
 
 ## Recent Validation
 
+- 2026-06-21: Made native `GraphCore` lineage storage lazy so sparse routing
+  keeps no retained lineage store attached by default; retained lineage checks
+  still run when the store is explicitly attached. Extended the native
+  zero-net-allocation regression test to assert the warmed sparse write path
+  has zero net live allocations and leaves `graph.lineage` absent. Ran
+  `cargo test`, focused native zero-net allocation test, `cargo fmt --check`,
+  `cargo clippy --all-targets --all-features -- -D warnings`, `uv sync
+  --reinstall-package manyfold`, focused Ruff, and
+  `uv run python -m unittest tests.test_project_metadata`.
 - 2026-06-21: Final V1 merge-readiness pass for memory/runtime work:
   `/Users/lampe/.local/bin/uv sync`, `cargo fmt --check`, `cargo clippy
   --all-targets --all-features -- -D warnings`, `cargo test`, `uv sync

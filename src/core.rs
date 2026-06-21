@@ -860,13 +860,6 @@ type EventKeyCore = (usize, u64);
 type LineageIdCore = usize;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum LineageStoreModeCore {
-    Retained,
-    #[default]
-    Noop,
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum CorrelationStoreModeCore {
     Retained,
     #[default]
@@ -915,10 +908,8 @@ pub struct GraphCore {
     pub payloads: HashMap<String, Arc<[u8]>>,
     /// Route audit entries live only while their referenced write remains retained.
     pub route_audit: HashMap<RouteRefCore, Vec<AuditEventCore>>,
-    /// Retained lineage store is an explicit graph attachment boundary.
-    pub lineage: LineageStoreCore,
-    /// Lineage store mode controls whether route retention policies retain lineage.
-    pub lineage_store_mode: LineageStoreModeCore,
+    /// Retained lineage store is allocated only when explicitly attached.
+    pub lineage: Option<LineageStoreCore>,
     /// Correlation store mode controls optional debug/introspection correlation indexes.
     pub correlation_store_mode: CorrelationStoreModeCore,
     /// Retention policies live for the registered route and bound history/payload/audit state.
@@ -1083,7 +1074,7 @@ impl GraphCore {
     }
 
     fn retained_event_keys_for_route(&self, route: &RouteRefCore) -> Vec<EventKeyCore> {
-        let Some(route_id) = self.lineage.route_ids.get(route).copied() else {
+        let Some(route_id) = self.optional_route_id(route) else {
             return Vec::new();
         };
         let mut retained = Vec::new();
@@ -1148,22 +1139,60 @@ impl GraphCore {
             .expect("registered route display missing")
     }
 
+    fn lineage_store(&self) -> Option<&LineageStoreCore> {
+        self.lineage.as_ref()
+    }
+
+    fn lineage_store_mut(&mut self) -> Option<&mut LineageStoreCore> {
+        self.lineage.as_mut()
+    }
+
+    fn ensure_lineage_store(&mut self) -> &mut LineageStoreCore {
+        if self.lineage.is_none() {
+            self.lineage = Some(LineageStoreCore::default());
+        }
+        self.lineage
+            .as_mut()
+            .expect("retained lineage store missing")
+    }
+
+    fn ensure_lineage_route_id(&mut self, route: &RouteRefCore) -> usize {
+        if let Some(route_id) = self
+            .lineage_store()
+            .and_then(|lineage| lineage.route_ids.get(route).copied())
+        {
+            return route_id;
+        }
+        let route = route.clone();
+        let lineage = self.ensure_lineage_store();
+        let route_id = lineage.routes_by_id.len();
+        lineage.route_ids.insert(route.clone(), route_id);
+        lineage.routes_by_id.push(route);
+        route_id
+    }
+
     fn registered_route_id(&self, route: &RouteRefCore) -> usize {
-        *self
-            .lineage
-            .route_ids
-            .get(route)
+        self.lineage_store()
+            .and_then(|lineage| lineage.route_ids.get(route).copied())
             .expect("registered route id missing")
     }
 
-    fn registered_event_key(&self, route: &RouteRefCore, seq_source: u64) -> EventKeyCore {
-        (self.registered_route_id(route), seq_source)
+    fn optional_route_id(&self, route: &RouteRefCore) -> Option<usize> {
+        self.lineage_store()
+            .and_then(|lineage| lineage.route_ids.get(route).copied())
+    }
+
+    fn retained_route_id(&mut self, route: &RouteRefCore) -> usize {
+        self.ensure_lineage_route_id(route)
+    }
+
+    fn retained_event_key(&mut self, route: &RouteRefCore, seq_source: u64) -> EventKeyCore {
+        (self.retained_route_id(route), seq_source)
     }
 
     fn event_key_route(&self, event_key: &EventKeyCore) -> &RouteRefCore {
-        self.lineage
-            .routes_by_id
-            .get(event_key.0)
+        self.lineage_store()
+            .and_then(|lineage| lineage.routes_by_id.get(event_key.0))
             .expect("retained event route id missing")
     }
 
@@ -1172,47 +1201,55 @@ impl GraphCore {
     }
 
     fn intern_lineage_id(&mut self, value: &str) -> LineageIdCore {
-        if let Some(lineage_id) = self.lineage.lineage_ids_by_value.get(value) {
-            return *lineage_id;
+        if let Some(lineage_id) = self
+            .lineage_store()
+            .and_then(|lineage| lineage.lineage_ids_by_value.get(value).copied())
+        {
+            return lineage_id;
         }
-        let lineage_id = self
-            .lineage
+        let lineage = self.ensure_lineage_store();
+        let lineage_id = lineage
             .free_lineage_ids
             .pop()
-            .unwrap_or(self.lineage.lineage_values_by_id.len());
-        if lineage_id == self.lineage.lineage_values_by_id.len() {
-            self.lineage
-                .lineage_values_by_id
-                .push(Some(value.to_string()));
-            self.lineage.lineage_id_ref_counts.push(0);
+            .unwrap_or(lineage.lineage_values_by_id.len());
+        if lineage_id == lineage.lineage_values_by_id.len() {
+            lineage.lineage_values_by_id.push(Some(value.to_string()));
+            lineage.lineage_id_ref_counts.push(0);
         } else {
-            self.lineage.lineage_values_by_id[lineage_id] = Some(value.to_string());
+            lineage.lineage_values_by_id[lineage_id] = Some(value.to_string());
         }
-        self.lineage
+        lineage
             .lineage_ids_by_value
             .insert(value.to_string(), lineage_id);
         lineage_id
     }
 
     fn lineage_value(&self, lineage_id: LineageIdCore) -> String {
-        self.lineage
-            .lineage_values_by_id
-            .get(lineage_id)
+        self.lineage_store()
+            .and_then(|lineage| lineage.lineage_values_by_id.get(lineage_id))
             .and_then(Option::as_ref)
             .expect("retained lineage id missing")
             .clone()
     }
 
     pub fn lineage_id_for_value(&self, value: &str) -> Option<LineageIdCore> {
-        self.lineage.lineage_ids_by_value.get(value).copied()
+        self.lineage_store()
+            .and_then(|lineage| lineage.lineage_ids_by_value.get(value).copied())
     }
 
     pub fn active_lineage_value_count(&self) -> usize {
-        self.lineage
-            .lineage_values_by_id
-            .iter()
-            .filter(|lineage_value| lineage_value.is_some())
-            .count()
+        self.lineage_store().map_or(0, |lineage| {
+            lineage
+                .lineage_values_by_id
+                .iter()
+                .filter(|lineage_value| lineage_value.is_some())
+                .count()
+        })
+    }
+
+    pub fn retained_lineage_event_count(&self) -> usize {
+        self.lineage_store()
+            .map_or(0, |lineage| lineage.lineage_by_event.len())
     }
 
     pub fn retain_lineage_profile(
@@ -1237,15 +1274,17 @@ impl GraphCore {
     }
 
     fn lineage_id_is_active(&self, lineage_id: LineageIdCore) -> bool {
-        self.lineage
-            .lineage_values_by_id
-            .get(lineage_id)
-            .is_some_and(Option::is_some)
+        self.lineage_store().is_some_and(|lineage| {
+            lineage
+                .lineage_values_by_id
+                .get(lineage_id)
+                .is_some_and(Option::is_some)
+        })
     }
 
     fn retain_lineage_id(&mut self, lineage_id: LineageIdCore) {
         let ref_count = self
-            .lineage
+            .ensure_lineage_store()
             .lineage_id_ref_counts
             .get_mut(lineage_id)
             .expect("retained lineage refcount missing");
@@ -1253,7 +1292,10 @@ impl GraphCore {
     }
 
     fn release_lineage_id(&mut self, lineage_id: LineageIdCore) {
-        let Some(ref_count) = self.lineage.lineage_id_ref_counts.get_mut(lineage_id) else {
+        let Some(lineage) = self.lineage_store_mut() else {
+            return;
+        };
+        let Some(ref_count) = lineage.lineage_id_ref_counts.get_mut(lineage_id) else {
             return;
         };
         if *ref_count == 0 {
@@ -1263,14 +1305,13 @@ impl GraphCore {
         if *ref_count != 0 {
             return;
         }
-        if let Some(value) = self
-            .lineage
+        if let Some(value) = lineage
             .lineage_values_by_id
             .get_mut(lineage_id)
             .and_then(Option::take)
         {
-            self.lineage.lineage_ids_by_value.remove(value.as_str());
-            self.lineage.free_lineage_ids.push(lineage_id);
+            lineage.lineage_ids_by_value.remove(value.as_str());
+            lineage.free_lineage_ids.push(lineage_id);
         }
     }
 
@@ -1282,6 +1323,18 @@ impl GraphCore {
         RetainedParentEventCore::RouteId(self.registered_route_id(route), seq_source)
     }
 
+    fn retained_parent_event_list(
+        &self,
+        route: &RouteRefCore,
+        seq_source: u64,
+    ) -> Vec<RetainedParentEventCore> {
+        if self.lineage_store_retains() {
+            vec![self.registered_parent_event(route, seq_source)]
+        } else {
+            Vec::new()
+        }
+    }
+
     fn retained_parent_events_from_display(
         &self,
         parent_events: Vec<(String, u64)>,
@@ -1291,7 +1344,7 @@ impl GraphCore {
             .map(|(route_display, seq_source)| {
                 self.routes_by_display
                     .get(&route_display)
-                    .and_then(|route| self.lineage.route_ids.get(route).copied())
+                    .and_then(|route| self.optional_route_id(route))
                     .map(|route_id| RetainedParentEventCore::RouteId(route_id, seq_source))
                     .unwrap_or(RetainedParentEventCore::Display(route_display, seq_source))
             })
@@ -1307,9 +1360,8 @@ impl GraphCore {
             .map(|parent| match parent {
                 RetainedParentEventCore::RouteId(route_id, seq_source) => {
                     let route = self
-                        .lineage
-                        .routes_by_id
-                        .get(*route_id)
+                        .lineage_store()
+                        .and_then(|lineage| lineage.routes_by_id.get(*route_id))
                         .expect("retained parent route id missing");
                     (self.route_display(route), *seq_source)
                 }
@@ -1337,22 +1389,25 @@ impl GraphCore {
     }
 
     fn forget_lineage_event(&mut self, event_key: &EventKeyCore) {
-        let Some(record) = self.lineage.lineage_by_event.remove(event_key) else {
+        let Some(lineage) = self.lineage_store_mut() else {
+            return;
+        };
+        let Some(record) = lineage.lineage_by_event.remove(event_key) else {
             return;
         };
         Self::remove_lineage_index(
-            &mut self.lineage.lineage_events_by_trace,
+            &mut lineage.lineage_events_by_trace,
             &record.trace_id,
             event_key,
         );
         Self::remove_lineage_index(
-            &mut self.lineage.lineage_events_by_causality,
+            &mut lineage.lineage_events_by_causality,
             &record.causality_id,
             event_key,
         );
         if let Some(correlation_id) = &record.correlation_id {
             Self::remove_lineage_index(
-                &mut self.lineage.lineage_events_by_correlation,
+                &mut lineage.lineage_events_by_correlation,
                 correlation_id,
                 event_key,
             );
@@ -1381,7 +1436,7 @@ impl GraphCore {
             return;
         }
         self.forget_payload(&envelope.payload_ref.payload_id);
-        if let Some(route_id) = self.lineage.route_ids.get(route).copied() {
+        if let Some(route_id) = self.optional_route_id(route) {
             self.forget_lineage_event(&(route_id, envelope.seq_source));
         }
     }
@@ -1470,13 +1525,16 @@ impl GraphCore {
     }
 
     pub fn attach_retained_lineage_store(&mut self) {
-        self.lineage_store_mode = LineageStoreModeCore::Retained;
+        self.ensure_lineage_store();
+        let routes = self.descriptors.keys().cloned().collect::<Vec<_>>();
+        for route in routes {
+            self.ensure_lineage_route_id(&route);
+        }
         self.rebuild_lineage_retained_routes();
     }
 
     pub fn attach_noop_lineage_store(&mut self) {
-        self.lineage_store_mode = LineageStoreModeCore::Noop;
-        self.lineage = LineageStoreCore::default();
+        self.lineage = None;
     }
 
     pub fn attach_retained_correlation_store(&mut self) {
@@ -1485,14 +1543,16 @@ impl GraphCore {
 
     pub fn attach_noop_correlation_store(&mut self) {
         self.correlation_store_mode = CorrelationStoreModeCore::Noop;
-        self.lineage.lineage_events_by_correlation.clear();
-        for record in self.lineage.lineage_by_event.values_mut() {
-            record.correlation_id = None;
+        if let Some(lineage) = self.lineage_store_mut() {
+            lineage.lineage_events_by_correlation.clear();
+            for record in lineage.lineage_by_event.values_mut() {
+                record.correlation_id = None;
+            }
         }
     }
 
     fn lineage_store_retains(&self) -> bool {
-        matches!(self.lineage_store_mode, LineageStoreModeCore::Retained)
+        self.lineage_store().is_some()
     }
 
     fn correlation_store_retains(&self) -> bool {
@@ -1510,20 +1570,18 @@ impl GraphCore {
         }
     }
 
-    fn policy_retains_lineage(&self, policy: &RetentionPolicyCore) -> bool {
-        self.lineage_store_retains() && policy.lineage_retention_policy == "retained"
-    }
-
     fn rebuild_lineage_retained_routes(&mut self) {
-        self.lineage.lineage_retained_routes.clear();
-        if !self.lineage_store_retains() {
+        let retained_routes = self
+            .retention_policies
+            .iter()
+            .filter(|(_, policy)| policy.lineage_retention_policy == "retained")
+            .map(|(route, _)| route.clone())
+            .collect::<Vec<_>>();
+        let Some(lineage) = self.lineage_store_mut() else {
             return;
-        }
-        for (route, policy) in &self.retention_policies {
-            if policy.lineage_retention_policy == "retained" {
-                self.lineage.lineage_retained_routes.insert(route.clone());
-            }
-        }
+        };
+        lineage.lineage_retained_routes.clear();
+        lineage.lineage_retained_routes.extend(retained_routes);
     }
 
     pub fn configure_retention(
@@ -1543,10 +1601,13 @@ impl GraphCore {
         }
         self.retention_history_limits
             .insert(route.clone(), Self::native_history_limit(&policy));
-        if self.policy_retains_lineage(&policy) {
-            self.lineage.lineage_retained_routes.insert(route.clone());
-        } else {
-            self.lineage.lineage_retained_routes.remove(route);
+        if let Some(lineage) = self.lineage_store_mut() {
+            if policy.lineage_retention_policy == "retained" {
+                lineage.lineage_retained_routes.insert(route.clone());
+                self.ensure_lineage_route_id(route);
+            } else {
+                lineage.lineage_retained_routes.remove(route);
+            }
         }
         self.retention_policies
             .insert(route.clone(), policy.clone());
@@ -1618,17 +1679,17 @@ impl GraphCore {
         self.route_displays
             .entry(route.clone())
             .or_insert(route_display);
-        if !self.lineage.route_ids.contains_key(&route) {
-            let route_id = self.lineage.routes_by_id.len();
-            self.lineage.route_ids.insert(route.clone(), route_id);
-            self.lineage.routes_by_id.push(route.clone());
+        if self.lineage_store_retains() {
+            self.ensure_lineage_route_id(&route);
         }
         if !self.retention_policies.contains_key(&route) {
             let policy = RetentionPolicyCore::for_route(&route);
             self.retention_history_limits
                 .insert(route.clone(), Self::native_history_limit(&policy));
-            if self.policy_retains_lineage(&policy) {
-                self.lineage.lineage_retained_routes.insert(route.clone());
+            if let Some(lineage) = self.lineage_store_mut() {
+                if policy.lineage_retention_policy == "retained" {
+                    lineage.lineage_retained_routes.insert(route.clone());
+                }
             }
             self.retention_policies.insert(route.clone(), policy);
         }
@@ -2294,18 +2355,24 @@ impl GraphCore {
             self.retained_envelope_for_route_event(&source_route, source_seq_source)?;
         let payload = self.payload_bytes_for(&source_envelope);
         let source_display = self.registered_route_display(&source_route).to_string();
-        let source_event = self.registered_event_key(&source_route, source_seq_source);
-        let (trace_id, causality_id, correlation_id) =
-            if let Some(lineage) = self.lineage.lineage_by_event.get(&source_event) {
-                (
-                    self.lineage_value(lineage.trace_id),
-                    self.lineage_value(lineage.causality_id),
-                    lineage.correlation_id.clone(),
-                )
-            } else {
-                let event_display = format!("{source_display}@{source_seq_source}");
-                (event_display.clone(), event_display, None)
-            };
+        let source_event = self
+            .optional_route_id(&source_route)
+            .map(|route_id| (route_id, source_seq_source));
+        let (trace_id, causality_id, correlation_id) = if let Some(lineage) =
+            source_event.and_then(|event_key| {
+                self.lineage_store()
+                    .and_then(|store| store.lineage_by_event.get(&event_key))
+            }) {
+            (
+                self.lineage_value(lineage.trace_id),
+                self.lineage_value(lineage.causality_id),
+                lineage.correlation_id.clone(),
+            )
+        } else {
+            let event_display = format!("{source_display}@{source_seq_source}");
+            (event_display.clone(), event_display, None)
+        };
+        let parent_events = self.retained_parent_event_list(&source_route, source_seq_source);
         let mut envelope = self.direct_write(
             &target_route,
             payload,
@@ -2331,7 +2398,7 @@ impl GraphCore {
             trace_id,
             causality_id,
             correlation_id,
-            vec![self.registered_parent_event(&source_route, source_seq_source)],
+            parent_events,
         );
         Some(envelope)
     }
@@ -2346,18 +2413,23 @@ impl GraphCore {
         let payload = self.payload_bytes_for(source_envelope);
         let source_display = self.registered_route_display(&source_route).to_string();
         let source_seq_source = source_envelope.seq_source;
-        let source_event = self.registered_event_key(&source_route, source_seq_source);
-        let (trace_id, causality_id, correlation_id) =
-            if let Some(lineage) = self.lineage.lineage_by_event.get(&source_event) {
-                (
-                    self.lineage_value(lineage.trace_id),
-                    self.lineage_value(lineage.causality_id),
-                    lineage.correlation_id.clone(),
-                )
-            } else {
-                let event_display = format!("{source_display}@{source_seq_source}");
-                (event_display.clone(), event_display, None)
-            };
+        let source_event = self
+            .optional_route_id(&source_route)
+            .map(|route_id| (route_id, source_seq_source));
+        let (trace_id, causality_id, correlation_id) = if let Some(lineage) =
+            source_event.and_then(|event_key| {
+                self.lineage_store()
+                    .and_then(|store| store.lineage_by_event.get(&event_key))
+            }) {
+            (
+                self.lineage_value(lineage.trace_id),
+                self.lineage_value(lineage.causality_id),
+                lineage.correlation_id.clone(),
+            )
+        } else {
+            let event_display = format!("{source_display}@{source_seq_source}");
+            (event_display.clone(), event_display, None)
+        };
         let mut envelope = self.direct_write(
             &target_route,
             payload,
@@ -2386,7 +2458,7 @@ impl GraphCore {
             trace_id,
             causality_id,
             correlation_id,
-            vec![self.registered_parent_event(&source_route, source_seq_source)],
+            self.retained_parent_event_list(&source_route, source_seq_source),
         );
         envelope
     }
@@ -2419,7 +2491,7 @@ impl GraphCore {
                 trace_id,
                 causality_id,
                 correlation_id,
-                vec![self.registered_parent_event(&source_envelope.route, source_seq_source)],
+                self.retained_parent_event_list(&source_envelope.route, source_seq_source),
             );
             return;
         }
@@ -2449,7 +2521,7 @@ impl GraphCore {
             trace_id,
             causality_id,
             correlation_id,
-            vec![self.registered_parent_event(&source_envelope.route, source_seq_source)],
+            self.retained_parent_event_list(&source_envelope.route, source_seq_source),
         );
     }
 
@@ -2492,7 +2564,7 @@ impl GraphCore {
             trace_id,
             causality_id,
             correlation_id,
-            vec![self.registered_parent_event(route, source_seq_source)],
+            self.retained_parent_event_list(route, source_seq_source),
         );
         true
     }
@@ -2536,7 +2608,7 @@ impl GraphCore {
             trace_id,
             causality_id,
             correlation_id,
-            vec![self.registered_parent_event(route, source_seq_source)],
+            self.retained_parent_event_list(route, source_seq_source),
         );
         true
     }
@@ -2792,7 +2864,7 @@ impl GraphCore {
     where
         K: Eq + Hash,
     {
-        let Some(route_id) = self.lineage.route_ids.get(route).copied() else {
+        let Some(route_id) = self.optional_route_id(route) else {
             return 0;
         };
         index
@@ -2827,6 +2899,7 @@ impl GraphCore {
         let mut retained_event_keys = HashSet::new();
         for route in routes {
             let route_display = self.route_display(&route);
+            let route_id = self.optional_route_id(&route);
             let policy = self.retention_policy_for(&route);
             if let Some(history) = self.history.get(&route) {
                 if let Some(limit) = Self::native_history_limit(policy.as_ref()) {
@@ -2842,15 +2915,19 @@ impl GraphCore {
                         .iter()
                         .map(|envelope| envelope.payload_ref.payload_id.clone()),
                 );
-                retained_event_keys.extend(
-                    history
-                        .iter()
-                        .map(|envelope| self.registered_event_key(&route, envelope.seq_source)),
-                );
+                if let Some(route_id) = route_id {
+                    retained_event_keys.extend(
+                        history
+                            .iter()
+                            .map(|envelope| (route_id, envelope.seq_source)),
+                    );
+                }
             }
             if let Some(latest) = self.latest.get(&route) {
                 retained_payload_ids.insert(latest.payload_ref.payload_id.clone());
-                retained_event_keys.insert(self.registered_event_key(&route, latest.seq_source));
+                if let Some(route_id) = route_id {
+                    retained_event_keys.insert((route_id, latest.seq_source));
+                }
             }
             if let Some(audit) = self.route_audit.get(&route) {
                 let oldest_history_seq = self
@@ -2881,73 +2958,75 @@ impl GraphCore {
             }
         }
 
-        for (event_key, record) in &self.lineage.lineage_by_event {
-            if !retained_event_keys.contains(event_key) {
-                violations.push(format!(
-                    "lineage {}#{} is not retained by latest/history",
-                    self.event_key_display(event_key),
-                    event_key.1
-                ));
-            }
-            if !Self::lineage_index_contains(
-                &self.lineage.lineage_events_by_trace,
-                &record.trace_id,
-                event_key,
-            ) {
-                violations.push(format!(
-                    "lineage {}#{} is missing from trace index {}",
-                    self.event_key_display(event_key),
-                    event_key.1,
-                    self.lineage_value(record.trace_id)
-                ));
-            }
-            if !Self::lineage_index_contains(
-                &self.lineage.lineage_events_by_causality,
-                &record.causality_id,
-                event_key,
-            ) {
-                violations.push(format!(
-                    "lineage {}#{} is missing from causality index {}",
-                    self.event_key_display(event_key),
-                    event_key.1,
-                    self.lineage_value(record.causality_id)
-                ));
-            }
-            if let Some(correlation_id) = &record.correlation_id {
-                if !Self::lineage_index_contains(
-                    &self.lineage.lineage_events_by_correlation,
-                    correlation_id,
-                    event_key,
-                ) {
+        if let Some(lineage) = self.lineage_store() {
+            for (event_key, record) in &lineage.lineage_by_event {
+                if !retained_event_keys.contains(event_key) {
                     violations.push(format!(
-                        "lineage {}#{} is missing from correlation index {correlation_id}",
+                        "lineage {}#{} is not retained by latest/history",
                         self.event_key_display(event_key),
                         event_key.1
                     ));
                 }
+                if !Self::lineage_index_contains(
+                    &lineage.lineage_events_by_trace,
+                    &record.trace_id,
+                    event_key,
+                ) {
+                    violations.push(format!(
+                        "lineage {}#{} is missing from trace index {}",
+                        self.event_key_display(event_key),
+                        event_key.1,
+                        self.lineage_value(record.trace_id)
+                    ));
+                }
+                if !Self::lineage_index_contains(
+                    &lineage.lineage_events_by_causality,
+                    &record.causality_id,
+                    event_key,
+                ) {
+                    violations.push(format!(
+                        "lineage {}#{} is missing from causality index {}",
+                        self.event_key_display(event_key),
+                        event_key.1,
+                        self.lineage_value(record.causality_id)
+                    ));
+                }
+                if let Some(correlation_id) = &record.correlation_id {
+                    if !Self::lineage_index_contains(
+                        &lineage.lineage_events_by_correlation,
+                        correlation_id,
+                        event_key,
+                    ) {
+                        violations.push(format!(
+                            "lineage {}#{} is missing from correlation index {correlation_id}",
+                            self.event_key_display(event_key),
+                            event_key.1
+                        ));
+                    }
+                }
             }
+            self.lineage_index_violations(
+                "trace",
+                &lineage.lineage_events_by_trace,
+                &lineage.lineage_by_event,
+                &mut violations,
+                GraphCore::lineage_id_label,
+            );
+            self.lineage_index_violations(
+                "causality",
+                &lineage.lineage_events_by_causality,
+                &lineage.lineage_by_event,
+                &mut violations,
+                GraphCore::lineage_id_label,
+            );
+            self.lineage_index_violations(
+                "correlation",
+                &lineage.lineage_events_by_correlation,
+                &lineage.lineage_by_event,
+                &mut violations,
+                GraphCore::lineage_string_label,
+            );
         }
-        self.lineage_index_violations(
-            "trace",
-            &self.lineage.lineage_events_by_trace,
-            &self.lineage.lineage_by_event,
-            &mut violations,
-            GraphCore::lineage_id_label,
-        );
-        self.lineage_index_violations(
-            "causality",
-            &self.lineage.lineage_events_by_causality,
-            &self.lineage.lineage_by_event,
-            &mut violations,
-            GraphCore::lineage_id_label,
-        );
-        self.lineage_index_violations(
-            "correlation",
-            &self.lineage.lineage_events_by_correlation,
-            &self.lineage.lineage_by_event,
-            &mut violations,
-            GraphCore::lineage_string_label,
-        );
 
         violations.sort();
         violations
@@ -3009,19 +3088,27 @@ impl GraphCore {
                 .map_or(0, |envelope| envelope.seq_source),
             replay_count: self.history.get(route).map_or(0, VecDeque::len),
             payload_count: self.retained_payload_count(route),
-            lineage_count: self.lineage.route_ids.get(route).map_or(0, |route_id| {
-                self.lineage
-                    .lineage_by_event
-                    .keys()
-                    .filter(|(event_route_id, _)| event_route_id == route_id)
-                    .count()
+            lineage_count: self
+                .lineage_store()
+                .and_then(|lineage| {
+                    lineage.route_ids.get(route).map(|route_id| {
+                        lineage
+                            .lineage_by_event
+                            .keys()
+                            .filter(|(event_route_id, _)| event_route_id == route_id)
+                            .count()
+                    })
+                })
+                .unwrap_or(0),
+            trace_index_count: self.lineage_store().map_or(0, |lineage| {
+                self.lineage_index_count_for_route(&lineage.lineage_events_by_trace, route)
             }),
-            trace_index_count: self
-                .lineage_index_count_for_route(&self.lineage.lineage_events_by_trace, route),
-            causality_index_count: self
-                .lineage_index_count_for_route(&self.lineage.lineage_events_by_causality, route),
-            correlation_index_count: self
-                .lineage_index_count_for_route(&self.lineage.lineage_events_by_correlation, route),
+            causality_index_count: self.lineage_store().map_or(0, |lineage| {
+                self.lineage_index_count_for_route(&lineage.lineage_events_by_causality, route)
+            }),
+            correlation_index_count: self.lineage_store().map_or(0, |lineage| {
+                self.lineage_index_count_for_route(&lineage.lineage_events_by_correlation, route)
+            }),
             history_limit: Self::native_history_limit(policy.as_ref()),
         }
     }
@@ -3068,40 +3155,47 @@ impl GraphCore {
         correlation_id: Option<String>,
         parent_events: Vec<(String, u64)>,
     ) {
-        if !self.lineage.lineage_retained_routes.contains(route) {
+        if !self
+            .lineage_store()
+            .is_some_and(|lineage| lineage.lineage_retained_routes.contains(route))
+        {
             return;
         }
         if !self.route_retains_event(route, seq_source) {
             return;
         }
-        let event_key = self.registered_event_key(route, seq_source);
-        if self.lineage.lineage_by_event.contains_key(&event_key) {
+        let event_key = self.retained_event_key(route, seq_source);
+        if self
+            .lineage_store()
+            .is_some_and(|lineage| lineage.lineage_by_event.contains_key(&event_key))
+        {
             self.forget_lineage_event(&event_key);
         }
         let correlation_id = self.retained_correlation_id(correlation_id);
         let trace_id = self.intern_lineage_id(&trace_id);
         let causality_id = self.intern_lineage_id(&causality_id);
-        self.lineage
+        self.retain_lineage_id(trace_id);
+        self.retain_lineage_id(causality_id);
+        let parent_events = self.retained_parent_events_from_display(parent_events);
+        let lineage = self.ensure_lineage_store();
+        lineage
             .lineage_events_by_trace
             .entry(trace_id)
             .or_default()
             .push(event_key);
-        self.lineage
+        lineage
             .lineage_events_by_causality
             .entry(causality_id)
             .or_default()
             .push(event_key);
         if let Some(correlation_id) = &correlation_id {
-            self.lineage
+            lineage
                 .lineage_events_by_correlation
                 .entry(correlation_id.clone())
                 .or_default()
                 .push(event_key);
         }
-        self.retain_lineage_id(trace_id);
-        self.retain_lineage_id(causality_id);
-        let parent_events = self.retained_parent_events_from_display(parent_events);
-        self.lineage.lineage_by_event.insert(
+        lineage.lineage_by_event.insert(
             event_key,
             RetainedLineageCore {
                 producer_id,
@@ -3123,7 +3217,10 @@ impl GraphCore {
         correlation_id: Option<String>,
         parent_events: Vec<RetainedParentEventCore>,
     ) {
-        if !self.lineage.lineage_retained_routes.contains(route) {
+        if !self
+            .lineage_store()
+            .is_some_and(|lineage| lineage.lineage_retained_routes.contains(route))
+        {
             return;
         }
         let correlation_id = self.retained_correlation_id(correlation_id);
@@ -3150,31 +3247,35 @@ impl GraphCore {
         correlation_id: Option<String>,
         parent_events: Vec<RetainedParentEventCore>,
     ) {
-        if !self.lineage.lineage_retained_routes.contains(route) {
+        if !self
+            .lineage_store()
+            .is_some_and(|lineage| lineage.lineage_retained_routes.contains(route))
+        {
             return;
         }
         let correlation_id = self.retained_correlation_id(correlation_id);
-        let event_key = self.registered_event_key(route, seq_source);
-        self.lineage
+        let event_key = self.retained_event_key(route, seq_source);
+        self.retain_lineage_id(trace_id);
+        self.retain_lineage_id(causality_id);
+        let lineage = self.ensure_lineage_store();
+        lineage
             .lineage_events_by_trace
             .entry(trace_id)
             .or_default()
             .push(event_key);
-        self.lineage
+        lineage
             .lineage_events_by_causality
             .entry(causality_id)
             .or_default()
             .push(event_key);
         if let Some(correlation_id) = &correlation_id {
-            self.lineage
+            lineage
                 .lineage_events_by_correlation
                 .entry(correlation_id.clone())
                 .or_default()
                 .push(event_key);
         }
-        self.retain_lineage_id(trace_id);
-        self.retain_lineage_id(causality_id);
-        self.lineage.lineage_by_event.insert(
+        lineage.lineage_by_event.insert(
             event_key,
             RetainedLineageCore {
                 producer_id,
@@ -3196,32 +3297,31 @@ impl GraphCore {
         let keys = if let Some(trace_id) = trace_id {
             self.lineage_id_for_value(trace_id)
                 .and_then(|lineage_id| {
-                    self.lineage
-                        .lineage_events_by_trace
-                        .get(&lineage_id)
+                    self.lineage_store()
+                        .and_then(|lineage| lineage.lineage_events_by_trace.get(&lineage_id))
                         .cloned()
                 })
                 .unwrap_or_default()
         } else if let Some(causality_id) = causality_id {
             self.lineage_id_for_value(causality_id)
                 .and_then(|lineage_id| {
-                    self.lineage
-                        .lineage_events_by_causality
-                        .get(&lineage_id)
+                    self.lineage_store()
+                        .and_then(|lineage| lineage.lineage_events_by_causality.get(&lineage_id))
                         .cloned()
                 })
                 .unwrap_or_default()
         } else if let Some(correlation_id) = correlation_id {
-            self.lineage
-                .lineage_events_by_correlation
-                .get(correlation_id)
+            self.lineage_store()
+                .and_then(|lineage| lineage.lineage_events_by_correlation.get(correlation_id))
                 .cloned()
                 .unwrap_or_default()
         } else if let Some(route) = route {
             self.retained_event_keys_for_route(route)
         } else {
-            let mut keyed_records = self
-                .lineage
+            let Some(lineage) = self.lineage_store() else {
+                return Vec::new();
+            };
+            let mut keyed_records = lineage
                 .lineage_by_event
                 .keys()
                 .map(|key| (self.event_key_display(key), key.1, *key))
@@ -3236,7 +3336,7 @@ impl GraphCore {
         let route_display = route.map(|route| self.route_display(route));
         keys.into_iter()
             .filter_map(|key| {
-                let record = self.lineage.lineage_by_event.get(&key)?;
+                let record = self.lineage_store()?.lineage_by_event.get(&key)?;
                 let display = self.event_key_display(&key);
                 if route_display
                     .as_ref()
@@ -3262,8 +3362,8 @@ impl GraphCore {
         route: &RouteRefCore,
         seq_source: u64,
     ) -> Option<LineageRecordCore> {
-        let event_key = (self.lineage.route_ids.get(route).copied()?, seq_source);
-        let record = self.lineage.lineage_by_event.get(&event_key)?;
+        let event_key = (self.optional_route_id(route)?, seq_source);
+        let record = self.lineage_store()?.lineage_by_event.get(&event_key)?;
         Some(LineageRecordCore {
             event_route_display: self.route_display(route),
             event_seq_source: seq_source,
@@ -4511,7 +4611,7 @@ mod tests {
             graph.retained_payload_count(&route),
             DEFAULT_ROUTE_HISTORY_LIMIT
         );
-        assert_eq!(graph.lineage.lineage_by_event.len(), 0);
+        assert_eq!(graph.retained_lineage_event_count(), 0);
         assert!(graph
             .lineage_records(None, None, None, Some("request-0"))
             .is_empty());
@@ -4729,7 +4829,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["latest-trace"]
         );
-        assert_eq!(graph.lineage.lineage_by_event.len(), 1);
+        assert_eq!(graph.retained_lineage_event_count(), 1);
         assert!(graph.retention_violations().is_empty());
     }
 
@@ -4744,6 +4844,7 @@ mod tests {
             Variant::Event,
         );
         let mut graph = GraphCore::default();
+        graph.attach_retained_lineage_store();
         graph.register_port(route.clone());
         graph
             .payloads
@@ -4752,6 +4853,8 @@ mod tests {
         let orphan_trace_id = graph.intern_lineage_id("orphan-trace");
         graph
             .lineage
+            .as_mut()
+            .expect("retained lineage should be attached")
             .lineage_events_by_trace
             .entry(orphan_trace_id)
             .or_default()
@@ -4826,17 +4929,18 @@ mod tests {
             vec![9, 10]
         );
         assert!(expired_records.is_empty());
-        assert_eq!(graph.lineage.lineage_by_event.len(), 2);
+        assert_eq!(graph.retained_lineage_event_count(), 2);
         let runtime_trace_id = graph
             .lineage_id_for_value("runtime-trace")
             .expect("runtime trace id should be interned");
-        assert_eq!(
-            graph.lineage.lineage_events_by_trace[&runtime_trace_id].len(),
-            2
-        );
+        let lineage = graph
+            .lineage
+            .as_ref()
+            .expect("retained lineage should be attached");
+        assert_eq!(lineage.lineage_events_by_trace[&runtime_trace_id].len(), 2);
         let route_id = graph.registered_route_id(&route);
         assert_eq!(
-            graph.lineage.lineage_events_by_trace[&runtime_trace_id],
+            lineage.lineage_events_by_trace[&runtime_trace_id],
             vec![(route_id, 9), (route_id, 10)]
         );
     }
@@ -4928,15 +5032,23 @@ mod tests {
         assert!(graph
             .lineage_records(None, None, None, Some("request-0"))
             .is_empty());
-        let state_key = graph.registered_event_key(&state, 10);
-        let source_route_id = *graph
+        let lineage = graph
             .lineage
+            .as_ref()
+            .expect("retained lineage should be attached");
+        let state_key = (
+            *lineage
+                .route_ids
+                .get(&state)
+                .expect("state route id should be registered"),
+            10,
+        );
+        let source_route_id = *lineage
             .route_ids
             .get(&source)
             .expect("source route id should be registered");
         assert_eq!(
-            graph
-                .lineage
+            lineage
                 .lineage_by_event
                 .get(&state_key)
                 .expect("latest state lineage should be retained natively")

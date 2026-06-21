@@ -59,6 +59,7 @@ fn sparse_unrouted_write_has_zero_net_allocations_after_warmup() {
     let producer = producer();
     let payload = vec![7_u8; 32];
 
+    assert!(graph.lineage.is_none());
     for _ in 0..128 {
         assert!(graph.write_single_if_unrouted_drop(
             &route,
@@ -73,6 +74,7 @@ fn sparse_unrouted_write_has_zero_net_allocations_after_warmup() {
     let after = LIVE_BYTES.load(Ordering::Relaxed);
 
     assert_eq!(after, before);
+    assert!(graph.lineage.is_none());
 }
 
 fn run_sparse_write(
