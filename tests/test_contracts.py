@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import inspect
 import unittest
 from dataclasses import dataclass
 
+import manyfold
 from manyfold import Contract, Graph, Layer, Plane, Variant, route
 
 
@@ -23,6 +25,14 @@ class Humidity:
 
 
 class ContractTests(unittest.TestCase):
+    def test_contract_keeps_migration_internals_private(self) -> None:
+        signature = inspect.signature(Contract)
+
+        self.assertEqual(tuple(signature.parameters), ("value_type",))
+        self.assertIn("Contract", manyfold.__all__)
+        self.assertNotIn("ContractAdapter", manyfold.__all__)
+        self.assertNotIn("CompatibilityPolicy", manyfold.__all__)
+
     def test_contract_maps_accepted_upstream_type_to_current_type(self) -> None:
         contract = Contract.of(TemperatureV2).accepts(
             TemperatureV1,

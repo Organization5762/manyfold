@@ -352,82 +352,17 @@ class Schema(Generic[T]):
         )
 
 
-@dataclass(frozen=True)
-class ContractAdapter(Generic[TAccepted, T]):
-    """Typed migration from an accepted upstream value into the current type."""
-
-    source_type: type[TAccepted]
-    mapper: Callable[[TAccepted], T]
-
-    def __post_init__(self) -> None:
-        _require_type(self.source_type, "adapter source_type")
-        if not callable(self.mapper):
-            raise ValueError("adapter mapper must be callable")
-
-    def accepts(self, value: object) -> bool:
-        return isinstance(value, self.source_type)
-
-    def map(self, value: object) -> T:
-        if not self.accepts(value):
-            raise ValueError(
-                f"adapter expected {self.source_type.__module__}."
-                f"{self.source_type.__qualname__}"
-            )
-        return self.mapper(cast(TAccepted, value))
-
-
-@dataclass(frozen=True)
-class CompatibilityPolicy(Generic[T]):
-    """Accepted historical or adjacent shapes for a contract."""
-
-    adapters: tuple[ContractAdapter[Any, T], ...] = ()
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.adapters, tuple):
-            raise ValueError("compatibility adapters must be a tuple")
-        for adapter in self.adapters:
-            if not isinstance(adapter, ContractAdapter):
-                raise ValueError("compatibility adapters must be ContractAdapter values")
-
-    @classmethod
-    def strict(cls) -> CompatibilityPolicy[T]:
-        """Return a policy that only accepts the contract's current value type."""
-        return cls()
-
-    def accepts(
-        self,
-        source_type: type[TAccepted],
-        mapper: Callable[[TAccepted], T],
-    ) -> CompatibilityPolicy[T]:
-        """Return a policy that can migrate ``source_type`` into the current type."""
-        return CompatibilityPolicy(
-            (*self.adapters, ContractAdapter(source_type, mapper))
-        )
-
-    def convert(self, value: object, target_type: type[T]) -> T:
-        """Convert ``value`` to ``target_type`` using the registered adapters."""
-        if isinstance(value, target_type):
-            return value
-        for adapter in self.adapters:
-            if adapter.accepts(value):
-                return adapter.map(value)
-        raise ValueError(
-            f"value of type {_type_display(type(value))} is not compatible with "
-            f"{_type_display(target_type)}"
-        )
-
-
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class Contract(Generic[T]):
     """Type-first value contract for a Manyfold IO knob or route."""
 
     value_type: type[T]
-    compatibility: CompatibilityPolicy[T] = field(default_factory=CompatibilityPolicy)
+    _adapters: tuple[_ContractAdapter[Any, T], ...] = field(default=(), repr=False)
 
-    def __post_init__(self) -> None:
-        _require_type(self.value_type, "contract value_type")
-        if not isinstance(self.compatibility, CompatibilityPolicy):
-            raise ValueError("contract compatibility must be a CompatibilityPolicy")
+    def __init__(self, value_type: type[T]) -> None:
+        object.__setattr__(self, "value_type", value_type)
+        object.__setattr__(self, "_adapters", ())
+        self._validate()
 
     @classmethod
     def of(cls, value_type: type[T]) -> Contract[T]:
@@ -451,18 +386,45 @@ class Contract(Generic[T]):
         mapper: Callable[[TAccepted], T],
     ) -> Contract[T]:
         """Return a copy that can migrate ``source_type`` into this contract."""
-        return Contract(
-            value_type=self.value_type,
-            compatibility=self.compatibility.accepts(source_type, mapper),
+        return Contract._with_adapters(
+            self.value_type,
+            (*self._adapters, _ContractAdapter(source_type, mapper)),
         )
 
     def convert(self, value: object) -> T:
         """Convert a current or accepted historical value into this contract."""
-        return self.compatibility.convert(value, self.value_type)
+        if isinstance(value, self.value_type):
+            return value
+        for adapter in self._adapters:
+            if adapter.accepts(value):
+                return adapter.map(value)
+        raise ValueError(
+            f"value of type {_type_display(type(value))} is not compatible with "
+            f"{_type_display(self.value_type)}"
+        )
 
     def schema(self, *, schema_id: str | None = None, version: int = 1) -> Schema[T]:
         """Materialize a route schema from the contract's value type."""
         return _schema_from_type(self.value_type, schema_id=schema_id, version=version)
+
+    @classmethod
+    def _with_adapters(
+        cls,
+        value_type: type[U],
+        adapters: tuple[_ContractAdapter[Any, U], ...],
+    ) -> Contract[U]:
+        contract = cls(value_type)
+        object.__setattr__(contract, "_adapters", adapters)
+        contract._validate()
+        return contract
+
+    def _validate(self) -> None:
+        _require_type(self.value_type, "contract value_type")
+        if not isinstance(self._adapters, tuple):
+            raise ValueError("contract adapters must be a tuple")
+        for adapter in self._adapters:
+            if not isinstance(adapter, _ContractAdapter):
+                raise ValueError("contract adapters must be migration adapters")
 
 
 @dataclass(frozen=True)
@@ -914,3 +876,27 @@ def _missing_route_parts(
         ("variant", variant),
     )
     return tuple(name for name, value in parts if value is None)
+
+
+@dataclass(frozen=True)
+class _ContractAdapter(Generic[TAccepted, T]):
+    """Typed migration from an accepted upstream value into the current type."""
+
+    source_type: type[TAccepted]
+    mapper: Callable[[TAccepted], T]
+
+    def __post_init__(self) -> None:
+        _require_type(self.source_type, "adapter source_type")
+        if not callable(self.mapper):
+            raise ValueError("adapter mapper must be callable")
+
+    def accepts(self, value: object) -> bool:
+        return isinstance(value, self.source_type)
+
+    def map(self, value: object) -> T:
+        if not self.accepts(value):
+            raise ValueError(
+                f"adapter expected {self.source_type.__module__}."
+                f"{self.source_type.__qualname__}"
+            )
+        return self.mapper(cast(TAccepted, value))

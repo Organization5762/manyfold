@@ -117,9 +117,7 @@ from .lego_catalog import (
     legos_by_role as legos_by_role,
 )
 from .primitives import (
-    CompatibilityPolicy as CompatibilityPolicy,
     Contract as Contract,
-    ContractAdapter as ContractAdapter,
     OwnerName as OwnerName,
     ReadThenWriteNextEpochStep as ReadThenWriteNextEpochStep,
     RouteIdentity as RouteIdentity,
@@ -212,13 +210,11 @@ __all__ = (
     "ClosedEnvelope",
     "CoalesceLatestNode",
     "CombineLatestNode",
-    "CompatibilityPolicy",
     "CompositeSubscription",
     "Consensus",
     "ConsensusRoutes",
     "ConstantNode",
     "Contract",
-    "ContractAdapter",
     "ControlLoop",
     "ControlLoops",
     "CreditSnapshot",
