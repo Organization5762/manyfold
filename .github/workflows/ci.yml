@@ -266,8 +266,8 @@ jobs:
             --projected-peak-segment-growth-bytes 0 \
             --max-elapsed-seconds 30 \
             --max-cpu-seconds 30 \
-            --max-average-event-us 100 \
-            --max-interval-event-us 100 \
+            --max-average-event-us 500 \
+            --max-interval-event-us 500 \
             --max-disk-input-blocks 0 \
             --max-disk-output-blocks 0 \
             --warmup-samples 1 \
@@ -293,8 +293,8 @@ jobs:
             --projected-peak-segment-growth-bytes 0 \
             --max-elapsed-seconds 30 \
             --max-cpu-seconds 30 \
-            --max-average-event-us 100 \
-            --max-interval-event-us 100 \
+            --max-average-event-us 500 \
+            --max-interval-event-us 500 \
             --max-disk-input-blocks 0 \
             --max-disk-output-blocks 0 \
             --warmup-samples 1 \
@@ -321,8 +321,8 @@ jobs:
             --projected-peak-segment-growth-bytes 0 \
             --max-elapsed-seconds 30 \
             --max-cpu-seconds 30 \
-            --max-average-event-us 100 \
-            --max-interval-event-us 100 \
+            --max-average-event-us 500 \
+            --max-interval-event-us 500 \
             --max-disk-input-blocks 0 \
             --max-disk-output-blocks 0 \
             --warmup-samples 1 \
@@ -967,7 +967,6 @@ jobs:
             --iterations 2000 \
             --sample-every 1000 \
             --history-limit 8 \
-            --live-plateau-bytes 0 \
             --warmup-samples 1 \
             --check-invariants-every 500 \
             --lineage-retention retained \

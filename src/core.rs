@@ -859,28 +859,18 @@ pub enum RetainedParentEventCore {
 type EventKeyCore = (usize, u64);
 type LineageIdCore = usize;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum LineageStoreModeCore {
     Retained,
+    #[default]
     Noop,
 }
 
-impl Default for LineageStoreModeCore {
-    fn default() -> Self {
-        Self::Noop
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum CorrelationStoreModeCore {
     Retained,
+    #[default]
     Noop,
-}
-
-impl Default for CorrelationStoreModeCore {
-    fn default() -> Self {
-        Self::Noop
-    }
 }
 
 #[derive(Default)]

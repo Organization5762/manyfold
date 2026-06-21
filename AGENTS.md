@@ -184,6 +184,14 @@ uv run manyfold-heart-benchmark --heart-root /path/to/heart --totem-command tote
   benchmark artifact verification, a 300,000-event native sparse release
   benchmark artifact verification, generated-artifact scan, and `git diff
   --check`.
+- 2026-06-21: PR #257 CI follow-up fixed Ubuntu stable Clippy's derivable
+  default warnings for native store modes, taught jemalloc verification to parse
+  the `Leak approximation summary` format emitted by current jemalloc, and kept
+  profiler/leak wrapper latency limits separate from normal benchmark latency
+  gates. Ran `cargo fmt --check`, Clippy with all targets/features and
+  `-D warnings`, `cargo test`, `uv sync --reinstall-package manyfold`, focused
+  Ruff, `uv run python -m unittest tests.test_jemalloc_leak_check
+  tests.test_project_metadata`, and `git diff --check`.
 - 2026-06-21: V1 PR-readiness validation after CI pinning and AGENTS cleanup:
   `/Users/lampe/.local/bin/uv sync`, `cargo fmt --check`, `cargo clippy
   --all-targets --all-features -- -D warnings`, `cargo test`, `uv sync

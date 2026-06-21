@@ -37,6 +37,18 @@ class JemallocLeakCheckTests(unittest.TestCase):
         self.assertEqual(summary.objects, 1)
         self.assertEqual(summary.contexts, 1)
 
+    def test_parse_leak_summary_accepts_approximation_counts(self) -> None:
+        summary = jemalloc_leak_check._parse_leak_summary(
+            "<jemalloc>: Leak approximation summary: ~82560 bytes, "
+            "~2 objects, >= 2 contexts\n"
+        )
+
+        self.assertIsNotNone(summary)
+        assert summary is not None
+        self.assertEqual(summary.bytes, 82_560)
+        self.assertEqual(summary.objects, 2)
+        self.assertEqual(summary.contexts, 2)
+
     def test_run_leak_check_filters_below_threshold_summary(self) -> None:
         completed = mock.Mock(
             returncode=0,

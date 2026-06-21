@@ -10,8 +10,9 @@ import sys
 from pathlib import Path
 
 LEAK_SUMMARY_RE = re.compile(
-    r"<jemalloc>:\s+Leak summary:\s+(?P<bytes>\d+)\s+bytes?,\s+"
-    r"(?P<objects>\d+)\s+objects?,\s+(?P<contexts>\d+)\s+contexts?"
+    r"<jemalloc>:\s+Leak(?: approximation)? summary:\s+~?(?P<bytes>\d+)\s+"
+    r"bytes?,\s+~?(?P<objects>\d+)\s+objects?,\s+(?:>=\s*)?"
+    r"(?P<contexts>\d+)\s+contexts?"
 )
 DEFAULT_MALLOC_CONF = "prof_leak:true,lg_prof_sample:0,prof_final:true"
 
