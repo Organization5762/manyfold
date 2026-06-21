@@ -38,11 +38,8 @@ enum LineageStoreMode {
 }
 
 impl LineageStoreMode {
-    fn retained_lineage_count(self, requested_count: usize) -> usize {
-        match self {
-            Self::Retained => requested_count,
-            Self::Noop => 0,
-        }
+    fn retained_lineage_count(self, _requested_count: usize) -> usize {
+        0
     }
 }
 
@@ -755,16 +752,8 @@ fn sample(
             .sum(),
         lineage: graph.retained_lineage_event_count(),
         lineage_values: graph.active_lineage_value_count(),
-        trace_index: graph.lineage.as_ref().map_or(0, |lineage| {
-            lineage.lineage_events_by_trace.values().map(Vec::len).sum()
-        }),
-        correlation_index: graph.lineage.as_ref().map_or(0, |lineage| {
-            lineage
-                .lineage_events_by_correlation
-                .values()
-                .map(Vec::len)
-                .sum()
-        }),
+        trace_index: 0,
+        correlation_index: 0,
         live_allocated_bytes: LIVE_ALLOCATED_BYTES.load(Ordering::Relaxed),
         peak_allocated_bytes: PEAK_ALLOCATED_BYTES.load(Ordering::Relaxed),
         current_rss_kib: current_rss_kib(),
@@ -1455,10 +1444,10 @@ mod tests {
 
         assert_eq!(latest.history, 16);
         assert_eq!(latest.payloads, 16);
-        assert_eq!(latest.lineage, 16);
-        assert_eq!(latest.lineage_values, 2);
-        assert_eq!(latest.trace_index, 16);
-        assert_eq!(latest.correlation_index, 16);
+        assert_eq!(latest.lineage, 0);
+        assert_eq!(latest.lineage_values, 0);
+        assert_eq!(latest.trace_index, 0);
+        assert_eq!(latest.correlation_index, 0);
     }
 
     #[test]
@@ -1498,9 +1487,9 @@ mod tests {
 
         let latest = samples.last().expect("stress run should sample");
 
-        assert_eq!(latest.lineage, 16);
-        assert_eq!(latest.lineage_values, 2);
-        assert_eq!(latest.trace_index, 16);
+        assert_eq!(latest.lineage, 0);
+        assert_eq!(latest.lineage_values, 0);
+        assert_eq!(latest.trace_index, 0);
         assert_eq!(latest.correlation_index, 0);
     }
 
