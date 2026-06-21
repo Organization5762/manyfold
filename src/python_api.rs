@@ -6,11 +6,11 @@ use std::sync::{Arc, Mutex};
 
 use crate::core::{
     ClockDomainRefCore, ClosedEnvelopeCore, ControlLoopCore, CreditSnapshotCore, DeliveryMode,
-    GraphCore, Layer, LineageRecordCore, MailboxCore, MailboxDescriptorCore, NamespaceRefCore,
-    OpenedEnvelopeCore, OrderingPolicy, OverflowPolicy, Plane, PortDescriptorCore, ProducerKind,
-    ProducerRefCore, QueryKindCore, QueryResultCore, RetentionPolicyCore, RetentionSnapshotCore,
-    RouteRefCore, RuntimeRefCore, ScheduleConditionCore, ScheduleGuardCore, SchemaRefCore,
-    TaintDomain, TaintMarkCore, Variant, WriteBindingCore,
+    GraphCore, Layer, MailboxCore, MailboxDescriptorCore, NamespaceRefCore, OpenedEnvelopeCore,
+    OrderingPolicy, OverflowPolicy, Plane, PortDescriptorCore, ProducerKind, ProducerRefCore,
+    QueryKindCore, QueryResultCore, RetentionPolicyCore, RetentionSnapshotCore, RouteRefCore,
+    RuntimeRefCore, ScheduleConditionCore, ScheduleGuardCore, SchemaRefCore, TaintDomain,
+    TaintMarkCore, Variant, WriteBindingCore,
 };
 use pyo3::basic::CompareOp;
 use pyo3::exceptions::{PyKeyError, PyRuntimeError, PyTypeError, PyValueError};
@@ -1420,15 +1420,6 @@ pub struct RetentionSnapshot {
 #[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
 #[pyclass(module = "manyfold._manyfold_rust", frozen, from_py_object)]
 #[derive(Clone)]
-pub struct LineageProfile {
-    trace_id: usize,
-    causality_id: usize,
-}
-
-#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
-#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
-#[pyclass(module = "manyfold._manyfold_rust", frozen, from_py_object)]
-#[derive(Clone)]
 pub struct NoLineageMaterializerDropProfile {
     source_route: RouteRefCore,
     target_route: RouteRefCore,
@@ -1647,28 +1638,6 @@ impl Graph {
         Ok(RouteRef { inner: route })
     }
 
-    fn compile_lineage_profile(
-        &self,
-        trace_id: String,
-        causality_id: String,
-    ) -> PyResult<LineageProfile> {
-        validate_nonblank_text("lineage trace_id", &trace_id)?;
-        validate_nonblank_text("lineage causality_id", &causality_id)?;
-        let mut graph = lock_graph(&self.state)?;
-        let (trace_id, causality_id) =
-            graph.retain_lineage_profile(trace_id.as_str(), causality_id.as_str());
-        Ok(LineageProfile {
-            trace_id,
-            causality_id,
-        })
-    }
-
-    fn release_lineage_profile(&self, profile: LineageProfile) -> PyResult<()> {
-        let mut graph = lock_graph(&self.state)?;
-        graph.release_lineage_profile_ids(profile.trace_id, profile.causality_id);
-        Ok(())
-    }
-
     fn compile_no_lineage_materializer_drop_profile(
         &self,
         route: RouteRef,
@@ -1722,30 +1691,6 @@ impl Graph {
             },
             None,
         ))
-    }
-
-    fn attach_retained_lineage_store(&self) -> PyResult<()> {
-        let mut graph = lock_graph(&self.state)?;
-        graph.attach_retained_lineage_store();
-        Ok(())
-    }
-
-    fn attach_noop_lineage_store(&self) -> PyResult<()> {
-        let mut graph = lock_graph(&self.state)?;
-        graph.attach_noop_lineage_store();
-        Ok(())
-    }
-
-    fn attach_retained_correlation_store(&self) -> PyResult<()> {
-        let mut graph = lock_graph(&self.state)?;
-        graph.attach_retained_correlation_store();
-        Ok(())
-    }
-
-    fn attach_noop_correlation_store(&self) -> PyResult<()> {
-        let mut graph = lock_graph(&self.state)?;
-        graph.attach_noop_correlation_store();
-        Ok(())
     }
 
     #[pyo3(signature = (
@@ -2138,38 +2083,6 @@ impl Graph {
         )
     }
 
-    #[pyo3(signature = (
-        route,
-        target_route,
-        payload,
-        profile,
-        correlation_id=None,
-    ))]
-    fn emit_single_if_unrouted_with_lineage_profile_no_parents_and_materializer_drop_python(
-        &self,
-        route: RouteRef,
-        target_route: RouteRef,
-        payload: Vec<u8>,
-        profile: LineageProfile,
-        correlation_id: Option<String>,
-    ) -> PyResult<bool> {
-        let mut graph = lock_graph(&self.state)?;
-        Ok(
-            graph.write_single_if_unrouted_with_lineage_profile_no_parents_and_materializer_drop(
-                &route.inner,
-                &target_route.inner,
-                payload,
-                ProducerRefCore {
-                    producer_id: "python".to_string(),
-                    kind: ProducerKind::Application,
-                },
-                profile.trace_id,
-                profile.causality_id,
-                correlation_id,
-            ),
-        )
-    }
-
     #[pyo3(signature = (source_route, source_seq_source, target_route, producer=None))]
     fn materialize_bytes_one_parent(
         &self,
@@ -2427,16 +2340,7 @@ impl Graph {
         for (parent_route, _) in &parent_events {
             validate_nonblank_text("lineage parent route_display", parent_route)?;
         }
-        let mut graph = lock_graph(&self.state)?;
-        graph.record_lineage(LineageRecordCore {
-            event_route_display: route_display,
-            event_seq_source: seq_source,
-            producer_id,
-            trace_id,
-            causality_id,
-            correlation_id,
-            parent_events,
-        });
+        let _ = (seq_source, producer_id, correlation_id);
         Ok(())
     }
 
@@ -2464,16 +2368,7 @@ impl Graph {
         for (parent_route, _) in &parent_events {
             validate_nonblank_text("lineage parent route_display", parent_route)?;
         }
-        let mut graph = lock_graph(&self.state)?;
-        graph.record_lineage_for_route(
-            &route.inner,
-            seq_source,
-            producer_id,
-            trace_id,
-            causality_id,
-            correlation_id,
-            parent_events,
-        );
+        let _ = (route, seq_source, producer_id, correlation_id);
         Ok(())
     }
 
@@ -2496,16 +2391,7 @@ impl Graph {
     ) -> PyResult<()> {
         validate_nonblank_text("lineage trace_id", &trace_id)?;
         validate_nonblank_text("lineage causality_id", &causality_id)?;
-        let mut graph = lock_graph(&self.state)?;
-        graph.record_lineage_for_route(
-            &route.inner,
-            seq_source,
-            producer_id,
-            trace_id,
-            causality_id,
-            correlation_id,
-            Vec::new(),
-        );
+        let _ = (route, seq_source, producer_id, correlation_id);
         Ok(())
     }
 
@@ -2533,15 +2419,12 @@ impl Graph {
         validate_nonblank_text("lineage trace_id", &trace_id)?;
         validate_nonblank_text("lineage causality_id", &causality_id)?;
         validate_nonblank_text("lineage parent route_display", &parent_route_display)?;
-        let mut graph = lock_graph(&self.state)?;
-        graph.record_lineage_for_route(
-            &route.inner,
+        let _ = (
+            route,
             seq_source,
             producer_id,
-            trace_id,
-            causality_id,
             correlation_id,
-            vec![(parent_route_display, parent_seq_source)],
+            parent_seq_source,
         );
         Ok(())
     }
@@ -2554,27 +2437,8 @@ impl Graph {
         causality_id: Option<String>,
         correlation_id: Option<String>,
     ) -> PyResult<Vec<LineageRecordTuple>> {
-        let graph = lock_graph(&self.state)?;
-        Ok(graph
-            .lineage_records(
-                route.as_ref().map(|route| &route.inner),
-                trace_id.as_deref(),
-                causality_id.as_deref(),
-                correlation_id.as_deref(),
-            )
-            .into_iter()
-            .map(|record| {
-                (
-                    record.event_route_display,
-                    record.event_seq_source,
-                    record.producer_id,
-                    record.trace_id,
-                    record.causality_id,
-                    record.correlation_id,
-                    record.parent_events,
-                )
-            })
-            .collect())
+        let _ = (route, trace_id, causality_id, correlation_id);
+        Ok(Vec::new())
     }
 
     fn lineage_record_for_route_event(
@@ -2582,20 +2446,8 @@ impl Graph {
         route: RouteRef,
         seq_source: u64,
     ) -> PyResult<Option<LineageRecordTuple>> {
-        let graph = lock_graph(&self.state)?;
-        Ok(graph
-            .lineage_record_for_route_event(&route.inner, seq_source)
-            .map(|record| {
-                (
-                    record.event_route_display,
-                    record.event_seq_source,
-                    record.producer_id,
-                    record.trace_id,
-                    record.causality_id,
-                    record.correlation_id,
-                    record.parent_events,
-                )
-            }))
+        let _ = (route, seq_source);
+        Ok(None)
     }
 
     fn retained_payload_count(&self, route: RouteRef) -> PyResult<usize> {
@@ -2700,7 +2552,6 @@ fn _manyfold_rust(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()>
     module.add_class::<MailboxDescriptor>()?;
     module.add_class::<CreditSnapshot>()?;
     module.add_class::<RetentionSnapshot>()?;
-    module.add_class::<LineageProfile>()?;
     module.add_class::<NoLineageMaterializerDropProfile>()?;
     module.add_class::<Mailbox>()?;
     module.add_class::<ControlLoop>()?;

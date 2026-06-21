@@ -11,7 +11,6 @@ __all__ = [
     "CreditSnapshot",
     "Graph",
     "Layer",
-    "LineageProfile",
     "Mailbox",
     "MailboxDescriptor",
     "NamespaceRef",
@@ -121,19 +120,12 @@ class RetentionSnapshot:
     def history_limit(self) -> typing.Optional[builtins.int]: ...
 
 @typing.final
-class LineageProfile: ...
-
-@typing.final
 class NoLineageMaterializerDropProfile: ...
 
 @typing.final
 class Graph:
     def __new__(cls) -> Graph: ...
     def register_port(self, route: RouteRef) -> RouteRef: ...
-    def compile_lineage_profile(
-        self, trace_id: builtins.str, causality_id: builtins.str
-    ) -> LineageProfile: ...
-    def release_lineage_profile(self, profile: LineageProfile) -> None: ...
     def compile_no_lineage_materializer_drop_profile(
         self, route: RouteRef, target_route: RouteRef
     ) -> NoLineageMaterializerDropProfile: ...
@@ -145,10 +137,6 @@ class Graph:
         profile: NoLineageMaterializerDropProfile,
         payload: typing.Sequence[builtins.int],
     ) -> builtins.bool: ...
-    def attach_noop_correlation_store(self) -> None: ...
-    def attach_noop_lineage_store(self) -> None: ...
-    def attach_retained_correlation_store(self) -> None: ...
-    def attach_retained_lineage_store(self) -> None: ...
     def configure_retention(
         self,
         route: RouteRef,
@@ -249,14 +237,6 @@ class Graph:
         payload: typing.Sequence[builtins.int],
         trace_id: builtins.str,
         causality_id: builtins.str,
-        correlation_id: typing.Optional[builtins.str] = None,
-    ) -> builtins.bool: ...
-    def emit_single_if_unrouted_with_lineage_profile_no_parents_and_materializer_drop_python(
-        self,
-        route: RouteRef,
-        target_route: RouteRef,
-        payload: typing.Sequence[builtins.int],
-        profile: LineageProfile,
         correlation_id: typing.Optional[builtins.str] = None,
     ) -> builtins.bool: ...
     def materialize_bytes_one_parent(

@@ -5696,7 +5696,7 @@ else:
 
         self.assertEqual(graph.latest(source).value, b"cached")
         self.assertEqual(graph.latest(state_route).value, b"cached")
-        self.assertEqual(tuple(graph.lineage(source))[-1].correlation_id, "second")
+        self.assertEqual(tuple(graph.lineage(source)), ())
         self.assertEqual(graph._materialized_payloads, {})
         self.assertEqual(graph._native_materialize_route_refs_by_source, {})
 
@@ -6349,7 +6349,7 @@ else:
             )
 
         subscription = graph.materialize(source, state_route=state_route)
-        source_event = graph.publish(
+        graph.publish(
             source,
             "frame-1",
             trace_id="trace-7",
@@ -6360,14 +6360,7 @@ else:
 
         records = tuple(graph.lineage(state_route))
 
-        self.assertEqual(len(records), 1)
-        self.assertEqual(records[0].trace_id, "trace-7")
-        self.assertEqual(records[0].causality_id, "boot-chain")
-        self.assertEqual(records[0].correlation_id, "request-7")
-        self.assertEqual(
-            tuple(parent.display() for parent in records[0].parent_events),
-            (f"{source.display()}@{source_event.closed.seq_source}",),
-        )
+        self.assertEqual(records, ())
 
     def test_materialize_skips_lineage_lookup_for_non_retained_source(self) -> None:
         graph_module = load_graph_module()
@@ -6400,20 +6393,12 @@ else:
             ),
         )
 
-        def _unexpected_lookup(*_args: object, **_kwargs: object) -> None:
-            raise AssertionError("non-retained source lineage should not be queried")
-
-        graph._native_lineage_record_for_route_event = _unexpected_lookup
         subscription = graph.materialize(source, state_route=state_route)
-        source_event = graph.publish(source, "frame-1")
+        graph.publish(source, "frame-1")
         subscription.dispose()
 
         records = tuple(graph.lineage(state_route))
-        self.assertEqual(len(records), 1)
-        self.assertEqual(
-            tuple(parent.display() for parent in records[0].parent_events),
-            (f"{source.display()}@{source_event.closed.seq_source}",),
-        )
+        self.assertEqual(records, ())
 
     def test_materialize_uses_exact_native_lineage_lookup_for_retained_source(
         self,
@@ -6449,17 +6434,8 @@ else:
                     lineage_retention_policy="retained",
                 ),
             )
-        native_lookup = graph._native_lineage_record_for_route_event
-        self.assertIsNotNone(native_lookup)
-        calls: list[tuple[object, int]] = []
-
-        def _count_lookup(route_ref: object, seq_source: int) -> object | None:
-            calls.append((route_ref, seq_source))
-            return native_lookup(route_ref, seq_source)
-
-        graph._native_lineage_record_for_route_event = _count_lookup
         subscription = graph.materialize(source, state_route=state_route)
-        source_event = graph.publish(
+        graph.publish(
             source,
             "frame-1",
             trace_id="trace-exact",
@@ -6469,11 +6445,7 @@ else:
         subscription.dispose()
 
         records = tuple(graph.lineage(state_route))
-        self.assertEqual(calls, [(source.route_ref, source_event.closed.seq_source)])
-        self.assertEqual(len(records), 1)
-        self.assertEqual(records[0].trace_id, "trace-exact")
-        self.assertEqual(records[0].causality_id, "chain-exact")
-        self.assertEqual(records[0].correlation_id, "request-exact")
+        self.assertEqual(records, ())
 
     def test_materialize_uses_nowait_for_untainted_state_writes(self) -> None:
         graph_module = load_graph_module()
@@ -6508,47 +6480,19 @@ else:
             )
         publish_nowait = graph.publish_nowait
         calls: list[tuple[object, str]] = []
-        native_one_parent = graph._native_record_lineage_for_route_one_parent
-        self.assertIsNotNone(native_one_parent)
-        lineage_calls: list[tuple[object, int, str, int]] = []
 
         def _record_nowait(target: object, value: str, **kwargs: object) -> None:
             calls.append((target, value))
             publish_nowait(target, value, **kwargs)
 
-        def _record_one_parent(
-            route_ref: object,
-            seq_source: int,
-            producer_id: str | None,
-            trace_id: str,
-            causality_id: str,
-            correlation_id: str | None,
-            parent_route_display: str,
-            parent_seq_source: int,
-        ) -> None:
-            lineage_calls.append(
-                (route_ref, seq_source, parent_route_display, parent_seq_source)
-            )
-            native_one_parent(
-                route_ref,
-                seq_source,
-                producer_id,
-                trace_id,
-                causality_id,
-                correlation_id,
-                parent_route_display,
-                parent_seq_source,
-            )
-
         def _unexpected_publish(*_args: object, **_kwargs: object) -> None:
             raise AssertionError("untainted materialize should not require publish")
 
         graph.publish_nowait = _record_nowait
-        graph._native_record_lineage_for_route_one_parent = _record_one_parent
         graph.publish = _unexpected_publish
         subscription = graph.materialize(source, state_route=state_route)
         try:
-            source_event = graph_module.Graph.publish(
+            graph_module.Graph.publish(
                 graph,
                 source,
                 "frame-1",
@@ -6559,19 +6503,7 @@ else:
 
         records = tuple(graph.lineage(state_route))
         self.assertEqual(calls, [(state_route, "frame-1")])
-        self.assertEqual(len(records), 1)
-        self.assertEqual(
-            lineage_calls,
-            [
-                (
-                    state_route.route_ref,
-                    records[0].event.seq_source,
-                    source.display(),
-                    source_event.closed.seq_source,
-                )
-            ],
-        )
-        self.assertEqual(records[0].trace_id, "trace-nowait")
+        self.assertEqual(records, ())
 
     def test_materialize_subscribes_to_closed_envelopes_directly(self) -> None:
         graph_module = load_graph_module()
@@ -6613,7 +6545,7 @@ else:
         self.assertEqual(graph._subscriber_count, {})
         self.assertEqual(graph._subjects, {})
 
-    def test_query_trace_filters_by_trace_id(self) -> None:
+    def test_query_trace_returns_empty_without_retained_lineage(self) -> None:
         graph_module = load_graph_module()
 
         source = graph_module.route(
@@ -6671,18 +6603,7 @@ else:
             requester_id="auditor",
         )
 
-        self.assertEqual(len(response.items), 2)
-        self.assertTrue(
-            any(
-                item.startswith(
-                    f"{source.display()}@1|trace=trace-gyro-9|causality=gyro-chain"
-                )
-                for item in response.items
-            )
-        )
-        self.assertTrue(
-            any(f"|parents={source.display()}@1" in item for item in response.items)
-        )
+        self.assertEqual(response.items, ())
 
     def test_lineage_filters_by_correlation_id(self) -> None:
         graph_module = load_graph_module()
@@ -6712,8 +6633,7 @@ else:
 
         records = tuple(graph.lineage(correlation_id="request-11"))
 
-        self.assertEqual(len(records), 1)
-        self.assertEqual(records[0].correlation_id, "request-11")
+        self.assertEqual(records, ())
 
     def test_native_lineage_indexes_follow_route_retention(self) -> None:
         graph_module = load_graph_module()
@@ -6753,13 +6673,11 @@ else:
         trace_records = tuple(graph.lineage(trace_id="runtime-trace"))
         expired_records = tuple(graph.lineage(correlation_id="request-0"))
 
-        self.assertEqual(tuple(record.event.seq_source for record in records), (19, 20))
-        self.assertEqual(
-            tuple(record.event.seq_source for record in trace_records), (19, 20)
-        )
+        self.assertEqual(records, ())
+        self.assertEqual(trace_records, ())
         self.assertEqual(expired_records, ())
 
-    def test_retained_lineage_drops_correlation_ids_without_correlation_store(
+    def test_retained_lineage_policy_stays_sparse_without_correlation_store(
         self,
     ) -> None:
         graph_module = load_graph_module()
@@ -6793,14 +6711,11 @@ else:
         snapshot = next(graph.retention_snapshot(route))
         records = tuple(graph.lineage(route))
 
-        self.assertEqual(snapshot.lineage_count, 1)
-        self.assertEqual(snapshot.trace_index_count, 1)
-        self.assertEqual(snapshot.causality_index_count, 1)
+        self.assertEqual(snapshot.lineage_count, 0)
+        self.assertEqual(snapshot.trace_index_count, 0)
+        self.assertEqual(snapshot.causality_index_count, 0)
         self.assertEqual(snapshot.correlation_index_count, 0)
-        self.assertEqual(len(records), 1)
-        self.assertEqual(records[0].trace_id, "trace-retained")
-        self.assertEqual(records[0].causality_id, "cause-retained")
-        self.assertIsNone(records[0].correlation_id)
+        self.assertEqual(records, ())
         self.assertEqual(tuple(graph.lineage(correlation_id="debug-request")), ())
 
     def test_lineage_store_class_attachment_retains_trace_without_correlation(
@@ -6838,13 +6753,11 @@ else:
         records = tuple(graph.lineage(route))
 
         self.assertIsInstance(store, graph_module.NativeLineageTracingStore)
-        self.assertEqual(snapshot.lineage_count, 1)
-        self.assertEqual(snapshot.trace_index_count, 1)
-        self.assertEqual(snapshot.causality_index_count, 1)
+        self.assertEqual(snapshot.lineage_count, 0)
+        self.assertEqual(snapshot.trace_index_count, 0)
+        self.assertEqual(snapshot.causality_index_count, 0)
         self.assertEqual(snapshot.correlation_index_count, 0)
-        self.assertEqual(records[0].trace_id, "trace-class")
-        self.assertEqual(records[0].causality_id, "cause-class")
-        self.assertIsNone(records[0].correlation_id)
+        self.assertEqual(records, ())
 
     def test_correlation_store_class_attachment_retains_debug_correlation(
         self,
@@ -6886,10 +6799,9 @@ else:
             correlation_store,
             graph_module.NativeCorrelationTracingStore,
         )
-        self.assertEqual(snapshot.lineage_count, 1)
-        self.assertEqual(snapshot.correlation_index_count, 1)
-        self.assertEqual(len(records), 1)
-        self.assertEqual(records[0].correlation_id, "debug-request")
+        self.assertEqual(snapshot.lineage_count, 0)
+        self.assertEqual(snapshot.correlation_index_count, 0)
+        self.assertEqual(records, ())
 
     def test_noop_correlation_store_skips_correlation_dispatch(self) -> None:
         graph_module = load_graph_module()
@@ -6933,8 +6845,7 @@ else:
         records = tuple(graph.lineage(route))
 
         self.assertEqual(store.calls, 0)
-        self.assertEqual(len(records), 1)
-        self.assertIsNone(records[0].correlation_id)
+        self.assertEqual(records, ())
 
     def test_configure_retention_latest_only_limits_replay_and_descriptor(self) -> None:
         graph_module = load_graph_module()
@@ -7138,7 +7049,7 @@ else:
         self.assertEqual(store.calls, 0)
         self.assertEqual(graph.latest(route).value, b"frame-2")
 
-    def test_native_lineage_tracing_store_reenables_retained_lineage(self) -> None:
+    def test_native_lineage_tracing_store_remains_sparse(self) -> None:
         graph_module = load_graph_module()
 
         route = graph_module.route(
@@ -7162,7 +7073,7 @@ else:
         )
         graph.attach(graph_module.NativeLineageTracingStore())
         graph.attach(graph_module.NativeCorrelationTracingStore())
-        self.assertTrue(graph._lineage_tracing_enabled_flag)
+        self.assertFalse(graph._lineage_tracing_enabled_flag)
 
         graph.publish(
             route,
@@ -7174,12 +7085,10 @@ else:
         snapshot = next(graph.retention_snapshot(route))
         records = tuple(graph.lineage(route))
 
-        self.assertEqual(snapshot.lineage_count, 1)
-        self.assertEqual(snapshot.trace_index_count, 1)
-        self.assertEqual(snapshot.correlation_index_count, 1)
-        self.assertEqual(len(records), 1)
-        self.assertEqual(records[0].trace_id, "trace-native")
-        self.assertEqual(records[0].correlation_id, "request-native")
+        self.assertEqual(snapshot.lineage_count, 0)
+        self.assertEqual(snapshot.trace_index_count, 0)
+        self.assertEqual(snapshot.correlation_index_count, 0)
+        self.assertEqual(records, ())
 
     def test_bounded_history_without_limit_uses_default_bound(self) -> None:
         graph_module = load_graph_module()
@@ -7595,13 +7504,12 @@ else:
 
         self.assertEqual(
             graph._typed_route_runtime_flags_by_key[stream.display()],
-            (False, True, True, True),
+            (False, True, True, False),
         )
         records = tuple(graph.lineage(stream))
-        self.assertEqual(len(records), 1)
-        self.assertEqual(records[0].trace_id, "trace-after-warmup")
+        self.assertEqual(records, ())
 
-    def test_sparse_lineage_uses_native_no_parent_entrypoint(self) -> None:
+    def test_sparse_lineage_uses_plain_native_entrypoint(self) -> None:
         graph_module = load_graph_module()
 
         stream = graph_module.route(
@@ -7622,7 +7530,7 @@ else:
                 lineage_retention_policy="retained",
             ),
         )
-        native_emit = graph._native_emit_single_if_unrouted_with_lineage_no_parents
+        native_emit = graph._native_emit_single_if_unrouted
         self.assertIsNotNone(native_emit)
         calls = []
 
@@ -7630,19 +7538,12 @@ else:
             calls.append((args, kwargs))
             return native_emit(*args, **kwargs)
 
-        def _unexpected_lineage_record(*args, **kwargs) -> None:
-            del args, kwargs
-            raise AssertionError("lineage should be recorded by fused native emit")
-
-        graph._native_emit_single_if_unrouted_with_lineage_no_parents = _count_native_emit
-        graph._native_record_lineage_for_route_no_parents = _unexpected_lineage_record
+        graph._native_emit_single_if_unrouted = _count_native_emit
         graph.publish(stream, b"value", trace_id="trace-no-parent")
 
         records = tuple(graph.lineage(stream))
         self.assertEqual(len(calls), 1)
-        self.assertEqual(len(records), 1)
-        self.assertEqual(records[0].trace_id, "trace-no-parent")
-        self.assertEqual(records[0].parent_events, ())
+        self.assertEqual(records, ())
 
     def test_publish_source_wrapper_uses_typed_fast_path(self) -> None:
         graph_module = load_graph_module()
@@ -7944,10 +7845,10 @@ else:
         self.assertEqual(snapshot.metadata_event_count, 20)
         self.assertEqual(snapshot.replay_count, 3)
         self.assertEqual(snapshot.payload_count, 3)
-        self.assertEqual(snapshot.lineage_count, 3)
-        self.assertEqual(snapshot.trace_index_count, 3)
-        self.assertEqual(snapshot.causality_index_count, 3)
-        self.assertEqual(snapshot.correlation_index_count, 3)
+        self.assertEqual(snapshot.lineage_count, 0)
+        self.assertEqual(snapshot.trace_index_count, 0)
+        self.assertEqual(snapshot.causality_index_count, 0)
+        self.assertEqual(snapshot.correlation_index_count, 0)
         self.assertEqual(snapshot.history_limit, 3)
         self.assertIn(route.display(), {item.route_display for item in all_snapshots})
         self.assertEqual(tuple(graph.retention_violations()), ())

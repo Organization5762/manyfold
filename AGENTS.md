@@ -327,3 +327,10 @@ uv run manyfold-heart-monitor-verify heart-lib_2026-monitor.json --min-samples 3
   artifacts and jemalloc leak-summary evidence. Retried totem probing from the
   skills workspace; `michael@totem4.local` still failed DNS resolution locally,
   so real Heart-on-totem profiling remains pending until a device is reachable.
+- 2026-06-21: Cut retained lineage/correlation storage from the core sparse
+  runtime. Native lineage record/profile/attach hooks now no-op or disappear,
+  Python `Graph.lineage()` is intentionally empty, and benchmark/reactive tests
+  assert `lineage=0`/`correlation_index=0` even when metadata is supplied. Ran
+  `uv sync`, `cargo fmt`, `cargo test`, Clippy with `-D warnings`, `uv sync
+  --reinstall-package manyfold`, focused Ruff, `tests.test_memory_benchmarks`,
+  `tests.test_graph_reactive`, and full unittest discovery.

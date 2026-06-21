@@ -830,26 +830,6 @@ pub struct AuditEventCore {
     pub seq_source: Option<u64>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct LineageRecordCore {
-    pub event_route_display: String,
-    pub event_seq_source: u64,
-    pub producer_id: Option<String>,
-    pub trace_id: String,
-    pub causality_id: String,
-    pub correlation_id: Option<String>,
-    pub parent_events: Vec<(String, u64)>,
-}
-
-type LineageIdCore = usize;
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum CorrelationStoreModeCore {
-    Retained,
-    #[default]
-    Noop,
-}
-
 #[derive(Default)]
 pub struct GraphCore {
     /// Route descriptors live for the registered graph topology.
@@ -866,8 +846,6 @@ pub struct GraphCore {
     pub payloads: HashMap<String, Arc<[u8]>>,
     /// Route audit entries live only while their referenced write remains retained.
     pub route_audit: HashMap<RouteRefCore, Vec<AuditEventCore>>,
-    /// Correlation store mode controls optional debug/introspection correlation indexes.
-    pub correlation_store_mode: CorrelationStoreModeCore,
     /// Retention policies live for the registered route and bound history/payload/audit state.
     pub retention_policies: HashMap<RouteRefCore, RetentionPolicyCore>,
     /// History limits mirror retention policies and are copied on hot writes.
@@ -1061,35 +1039,12 @@ impl GraphCore {
             .expect("registered route display missing")
     }
 
-    pub fn lineage_id_for_value(&self, _value: &str) -> Option<LineageIdCore> {
-        None
-    }
-
     pub fn active_lineage_value_count(&self) -> usize {
         0
     }
 
     pub fn retained_lineage_event_count(&self) -> usize {
         0
-    }
-
-    pub fn retain_lineage_profile(
-        &mut self,
-        _trace_id: &str,
-        _causality_id: &str,
-    ) -> (LineageIdCore, LineageIdCore) {
-        (0, 0)
-    }
-
-    pub fn release_lineage_profile_ids(
-        &mut self,
-        _trace_id: LineageIdCore,
-        _causality_id: LineageIdCore,
-    ) {
-    }
-
-    fn retained_parent_event_list(&self, _route: &RouteRefCore, _seq_source: u64) -> Vec<()> {
-        Vec::new()
     }
 
     fn envelope_is_retained(&self, route: &RouteRefCore, envelope: &ClosedEnvelopeCore) -> bool {
@@ -1195,18 +1150,6 @@ impl GraphCore {
         } else {
             self.routed_routes.remove(route);
         }
-    }
-
-    pub fn attach_retained_lineage_store(&mut self) {}
-
-    pub fn attach_noop_lineage_store(&mut self) {}
-
-    pub fn attach_retained_correlation_store(&mut self) {
-        self.correlation_store_mode = CorrelationStoreModeCore::Retained;
-    }
-
-    pub fn attach_noop_correlation_store(&mut self) {
-        self.correlation_store_mode = CorrelationStoreModeCore::Noop;
     }
 
     pub fn configure_retention(
@@ -1916,39 +1859,11 @@ impl GraphCore {
         payload: Vec<u8>,
         producer: ProducerRefCore,
         control_epoch: Option<u64>,
-        trace_id: Option<String>,
-        causality_id: Option<String>,
-        correlation_id: Option<String>,
+        _trace_id: Option<String>,
+        _causality_id: Option<String>,
+        _correlation_id: Option<String>,
     ) -> Option<ClosedEnvelopeCore> {
-        if self.route_has_immediate_routing(route) {
-            return None;
-        }
-        let producer_id = Some(producer.producer_id.clone());
-        let envelope = self.direct_write(route, payload, producer, control_epoch);
-        let (resolved_trace_id, resolved_causality_id) = match (trace_id, causality_id) {
-            (Some(trace_id), Some(causality_id)) => (trace_id, causality_id),
-            (trace_id, causality_id) => {
-                let event_display = format!(
-                    "{}@{}",
-                    self.registered_route_display(route),
-                    envelope.seq_source
-                );
-                (
-                    trace_id.unwrap_or_else(|| event_display.clone()),
-                    causality_id.unwrap_or(event_display),
-                )
-            }
-        };
-        self.record_lineage_for_new_retained_route_event(
-            route,
-            envelope.seq_source,
-            producer_id,
-            resolved_trace_id,
-            resolved_causality_id,
-            correlation_id,
-            Vec::new(),
-        );
-        Some(envelope)
+        self.write_single_if_unrouted(route, payload, producer, control_epoch)
     }
 
     pub fn materialize_bytes_one_parent(
@@ -1963,10 +1878,6 @@ impl GraphCore {
         let source_envelope =
             self.retained_envelope_for_route_event(&source_route, source_seq_source)?;
         let payload = self.payload_bytes_for(&source_envelope);
-        let source_display = self.registered_route_display(&source_route).to_string();
-        let event_display = format!("{source_display}@{source_seq_source}");
-        let (trace_id, causality_id, correlation_id) = (event_display.clone(), event_display, None);
-        let parent_events = self.retained_parent_event_list(&source_route, source_seq_source);
         let mut envelope = self.direct_write(
             &target_route,
             payload,
@@ -1985,15 +1896,6 @@ impl GraphCore {
                 }
             }
         }
-        self.record_lineage_for_new_retained_route_event(
-            &target_route,
-            envelope.seq_source,
-            Some(envelope.producer.producer_id.clone()),
-            trace_id,
-            causality_id,
-            correlation_id,
-            parent_events,
-        );
         Some(envelope)
     }
 
@@ -2002,12 +1904,8 @@ impl GraphCore {
         source_envelope: &ClosedEnvelopeCore,
         target_route: &RouteRefCore,
     ) -> ClosedEnvelopeCore {
-        let source_route = source_envelope.route.clone();
         let target_route = self.register_port(target_route.clone());
         let payload = self.payload_bytes_for(source_envelope);
-        let source_seq_source = source_envelope.seq_source;
-        let event_display = format!("{}@{source_seq_source}", self.route_display(&source_route));
-        let (trace_id, causality_id, correlation_id) = (event_display.clone(), event_display, None);
         let mut envelope = self.direct_write(
             &target_route,
             payload,
@@ -2029,78 +1927,7 @@ impl GraphCore {
                 }
             }
         }
-        self.record_lineage_for_new_retained_route_event(
-            &target_route,
-            envelope.seq_source,
-            Some(envelope.producer.producer_id.clone()),
-            trace_id,
-            causality_id,
-            correlation_id,
-            self.retained_parent_event_list(&source_route, source_seq_source),
-        );
         envelope
-    }
-
-    fn materialize_bytes_from_source_envelope_with_payload_and_lineage_ids(
-        &mut self,
-        source_envelope: &ClosedEnvelopeCore,
-        target_route: &RouteRefCore,
-        payload: Vec<u8>,
-        trace_id: String,
-        causality_id: String,
-        correlation_id: Option<String>,
-    ) {
-        let target_route = self.register_port(target_route.clone());
-        let source_seq_source = source_envelope.seq_source;
-        if source_envelope.taints.is_empty() {
-            let target_seq_source = self.direct_write_drop(
-                &target_route,
-                payload,
-                ProducerRefCore {
-                    producer_id: "python".to_string(),
-                    kind: ProducerKind::Application,
-                },
-                source_envelope.control_epoch,
-            );
-            self.record_lineage_for_new_retained_route_event(
-                &target_route,
-                target_seq_source,
-                Some("python".to_string()),
-                trace_id,
-                causality_id,
-                correlation_id,
-                self.retained_parent_event_list(&source_envelope.route, source_seq_source),
-            );
-            return;
-        }
-        let mut envelope = self.direct_write(
-            &target_route,
-            payload,
-            ProducerRefCore {
-                producer_id: "python".to_string(),
-                kind: ProducerKind::Application,
-            },
-            source_envelope.control_epoch,
-        );
-        envelope.taints = source_envelope.taints.clone();
-        self.latest.insert(target_route.clone(), envelope.clone());
-        if let Some(history) = self.history.get_mut(&target_route) {
-            if let Some(retained) = history
-                .iter_mut()
-                .find(|candidate| candidate.seq_source == envelope.seq_source)
-            {
-                *retained = envelope.clone();
-            }
-        }
-        self.record_lineage_for_new_retained_route_event(
-            &target_route,
-            envelope.seq_source,
-            Some(envelope.producer.producer_id.clone()),
-            trace_id,
-            causality_id,
-            correlation_id,
-            self.retained_parent_event_list(&source_envelope.route, source_seq_source),
-        );
     }
 
     fn write_single_unrouted_untainted_materializer_drop_with_lineage_ids(
@@ -2109,24 +1936,13 @@ impl GraphCore {
         target_route: &RouteRefCore,
         payload: Vec<u8>,
         producer: ProducerRefCore,
-        trace_id: String,
-        causality_id: String,
-        correlation_id: Option<String>,
+        _trace_id: String,
+        _causality_id: String,
+        _correlation_id: Option<String>,
     ) -> bool {
-        let producer_id = Some(producer.producer_id.clone());
         let shared_payload: Arc<[u8]> = Arc::from(payload);
-        let source_seq_source =
-            self.direct_write_drop_shared_payload(route, shared_payload.clone(), producer, None);
-        self.record_lineage_for_new_retained_route_event(
-            route,
-            source_seq_source,
-            producer_id,
-            trace_id.clone(),
-            causality_id.clone(),
-            correlation_id.clone(),
-            Vec::new(),
-        );
-        let target_seq_source = self.direct_write_drop_shared_payload(
+        self.direct_write_drop_shared_payload(route, shared_payload.clone(), producer, None);
+        self.direct_write_drop_shared_payload(
             target_route,
             shared_payload,
             ProducerRefCore {
@@ -2134,59 +1950,6 @@ impl GraphCore {
                 kind: ProducerKind::Application,
             },
             None,
-        );
-        self.record_lineage_for_new_retained_route_event(
-            target_route,
-            target_seq_source,
-            Some("python".to_string()),
-            trace_id,
-            causality_id,
-            correlation_id,
-            self.retained_parent_event_list(route, source_seq_source),
-        );
-        true
-    }
-
-    fn write_single_unrouted_untainted_materializer_drop_with_lineage_profile_ids(
-        &mut self,
-        route: &RouteRefCore,
-        target_route: &RouteRefCore,
-        payload: Vec<u8>,
-        producer: ProducerRefCore,
-        trace_id: LineageIdCore,
-        causality_id: LineageIdCore,
-        correlation_id: Option<String>,
-    ) -> bool {
-        let producer_id = Some(producer.producer_id.clone());
-        let shared_payload: Arc<[u8]> = Arc::from(payload);
-        let source_seq_source =
-            self.direct_write_drop_shared_payload(route, shared_payload.clone(), producer, None);
-        self.record_lineage_for_new_retained_route_event_ids(
-            route,
-            source_seq_source,
-            producer_id,
-            trace_id,
-            causality_id,
-            correlation_id.clone(),
-            Vec::new(),
-        );
-        let target_seq_source = self.direct_write_drop_shared_payload(
-            target_route,
-            shared_payload,
-            ProducerRefCore {
-                producer_id: "python".to_string(),
-                kind: ProducerKind::Application,
-            },
-            None,
-        );
-        self.record_lineage_for_new_retained_route_event_ids(
-            target_route,
-            target_seq_source,
-            Some("python".to_string()),
-            trace_id,
-            causality_id,
-            correlation_id,
-            self.retained_parent_event_list(route, source_seq_source),
         );
         true
     }
@@ -2197,38 +1960,14 @@ impl GraphCore {
         payload: Vec<u8>,
         producer: ProducerRefCore,
         control_epoch: Option<u64>,
-        trace_id: Option<String>,
-        causality_id: Option<String>,
-        correlation_id: Option<String>,
+        _trace_id: Option<String>,
+        _causality_id: Option<String>,
+        _correlation_id: Option<String>,
     ) -> Option<Vec<ClosedEnvelopeCore>> {
         if self.route_has_immediate_routing(route) {
             return None;
         }
-        let producer_id = Some(producer.producer_id.clone());
         let envelope = self.direct_write(route, payload, producer, control_epoch);
-        let (resolved_trace_id, resolved_causality_id) = match (trace_id, causality_id) {
-            (Some(trace_id), Some(causality_id)) => (trace_id, causality_id),
-            (trace_id, causality_id) => {
-                let event_display = format!(
-                    "{}@{}",
-                    self.registered_route_display(route),
-                    envelope.seq_source
-                );
-                (
-                    trace_id.unwrap_or_else(|| event_display.clone()),
-                    causality_id.unwrap_or(event_display),
-                )
-            }
-        };
-        self.record_lineage_for_new_retained_route_event(
-            route,
-            envelope.seq_source,
-            producer_id,
-            resolved_trace_id,
-            resolved_causality_id,
-            correlation_id,
-            Vec::new(),
-        );
         let mut emitted = vec![envelope.clone()];
         let targets = self
             .materialize_targets_by_source
@@ -2247,38 +1986,14 @@ impl GraphCore {
         payload: Vec<u8>,
         producer: ProducerRefCore,
         control_epoch: Option<u64>,
-        trace_id: Option<String>,
-        causality_id: Option<String>,
-        correlation_id: Option<String>,
+        _trace_id: Option<String>,
+        _causality_id: Option<String>,
+        _correlation_id: Option<String>,
     ) -> bool {
         if self.route_has_immediate_routing(route) {
             return false;
         }
-        let producer_id = Some(producer.producer_id.clone());
         let envelope = self.direct_write(route, payload, producer, control_epoch);
-        let (resolved_trace_id, resolved_causality_id) = match (trace_id, causality_id) {
-            (Some(trace_id), Some(causality_id)) => (trace_id, causality_id),
-            (trace_id, causality_id) => {
-                let event_display = format!(
-                    "{}@{}",
-                    self.registered_route_display(route),
-                    envelope.seq_source
-                );
-                (
-                    trace_id.unwrap_or_else(|| event_display.clone()),
-                    causality_id.unwrap_or(event_display),
-                )
-            }
-        };
-        self.record_lineage_for_new_retained_route_event(
-            route,
-            envelope.seq_source,
-            producer_id,
-            resolved_trace_id,
-            resolved_causality_id,
-            correlation_id,
-            Vec::new(),
-        );
         let targets = self
             .materialize_targets_by_source
             .get(route)
@@ -2296,24 +2011,14 @@ impl GraphCore {
         payload: Vec<u8>,
         producer: ProducerRefCore,
         control_epoch: Option<u64>,
-        trace_id: String,
-        causality_id: String,
-        correlation_id: Option<String>,
+        _trace_id: String,
+        _causality_id: String,
+        _correlation_id: Option<String>,
     ) -> bool {
         if self.route_has_immediate_routing(route) {
             return false;
         }
-        let producer_id = Some(producer.producer_id.clone());
         let envelope = self.direct_write(route, payload, producer, control_epoch);
-        self.record_lineage_for_new_retained_route_event(
-            route,
-            envelope.seq_source,
-            producer_id,
-            trace_id,
-            causality_id,
-            correlation_id,
-            Vec::new(),
-        );
         let targets = self
             .materialize_targets_by_source
             .get(route)
@@ -2360,65 +2065,15 @@ impl GraphCore {
                 correlation_id,
             );
         }
-        let producer_id = Some(producer.producer_id.clone());
         let target_payload = payload.clone();
         let envelope = self.direct_write(route, payload, producer, control_epoch);
-        let target_trace_id = trace_id.clone();
-        let target_causality_id = causality_id.clone();
-        let target_correlation_id = correlation_id.clone();
-        self.record_lineage_for_new_retained_route_event(
-            route,
-            envelope.seq_source,
-            producer_id,
-            trace_id,
-            causality_id,
-            correlation_id,
-            Vec::new(),
-        );
-        self.materialize_bytes_from_source_envelope_with_payload_and_lineage_ids(
+        let _ = (trace_id, causality_id, correlation_id);
+        self.materialize_bytes_from_source_envelope_with_payload_drop(
             &envelope,
             target_route,
             target_payload,
-            target_trace_id,
-            target_causality_id,
-            target_correlation_id,
         );
         true
-    }
-
-    pub fn write_single_if_unrouted_with_lineage_profile_no_parents_and_materializer_drop(
-        &mut self,
-        route: &RouteRefCore,
-        target_route: &RouteRefCore,
-        payload: Vec<u8>,
-        producer: ProducerRefCore,
-        trace_id: LineageIdCore,
-        causality_id: LineageIdCore,
-        correlation_id: Option<String>,
-    ) -> bool {
-        if self.route_has_immediate_routing(route) {
-            return false;
-        }
-        if !self
-            .materialize_targets_by_source
-            .get(route)
-            .is_some_and(|targets| targets.iter().any(|target| target == target_route))
-        {
-            return false;
-        }
-        if !Self::route_has_static_taints(route) && !Self::route_has_static_taints(target_route) {
-            return self
-                .write_single_unrouted_untainted_materializer_drop_with_lineage_profile_ids(
-                    route,
-                    target_route,
-                    payload,
-                    producer,
-                    trace_id,
-                    causality_id,
-                    correlation_id,
-                );
-        }
-        false
     }
 
     pub fn credit_snapshot(&self) -> Vec<CreditSnapshotCore> {
@@ -2528,62 +2183,6 @@ impl GraphCore {
             closed,
             payload: payload.as_ref().to_vec(),
         })
-    }
-
-    pub fn record_lineage(&mut self, _record: LineageRecordCore) {}
-
-    pub fn record_lineage_for_route(
-        &mut self,
-        _route: &RouteRefCore,
-        _seq_source: u64,
-        _producer_id: Option<String>,
-        _trace_id: String,
-        _causality_id: String,
-        _correlation_id: Option<String>,
-        _parent_events: Vec<(String, u64)>,
-    ) {
-    }
-
-    fn record_lineage_for_new_retained_route_event(
-        &mut self,
-        _route: &RouteRefCore,
-        _seq_source: u64,
-        _producer_id: Option<String>,
-        _trace_id: String,
-        _causality_id: String,
-        _correlation_id: Option<String>,
-        _parent_events: Vec<()>,
-    ) {
-    }
-
-    fn record_lineage_for_new_retained_route_event_ids(
-        &mut self,
-        _route: &RouteRefCore,
-        _seq_source: u64,
-        _producer_id: Option<String>,
-        _trace_id: LineageIdCore,
-        _causality_id: LineageIdCore,
-        _correlation_id: Option<String>,
-        _parent_events: Vec<()>,
-    ) {
-    }
-
-    pub fn lineage_records(
-        &self,
-        _route: Option<&RouteRefCore>,
-        _trace_id: Option<&str>,
-        _causality_id: Option<&str>,
-        _correlation_id: Option<&str>,
-    ) -> Vec<LineageRecordCore> {
-        Vec::new()
-    }
-
-    pub fn lineage_record_for_route_event(
-        &self,
-        _route: &RouteRefCore,
-        _seq_source: u64,
-    ) -> Option<LineageRecordCore> {
-        None
     }
 
     pub fn retained_payload_count(&self, route: &RouteRefCore) -> usize {
@@ -3728,7 +3327,6 @@ mod tests {
             Variant::Event,
         );
         let mut graph = GraphCore::default();
-        graph.attach_retained_lineage_store();
         graph.configure_retention(
             &route,
             RetentionPolicyCore {
@@ -3797,21 +3395,12 @@ mod tests {
         };
 
         for value in 0..(DEFAULT_ROUTE_HISTORY_LIMIT + 5) {
-            let emitted = graph.write(
+            graph.write(
                 &route,
                 format!("sample-{value}").into_bytes(),
                 producer.clone(),
                 None,
             );
-            graph.record_lineage(LineageRecordCore {
-                event_route_display: route.display(),
-                event_seq_source: emitted[0].seq_source,
-                producer_id: Some("heart".to_string()),
-                trace_id: "default-trace".to_string(),
-                causality_id: "default-chain".to_string(),
-                correlation_id: Some(format!("request-{value}")),
-                parent_events: Vec::new(),
-            });
         }
 
         assert_eq!(
@@ -3823,9 +3412,6 @@ mod tests {
             DEFAULT_ROUTE_HISTORY_LIMIT
         );
         assert_eq!(graph.retained_lineage_event_count(), 0);
-        assert!(graph
-            .lineage_records(None, None, None, Some("request-0"))
-            .is_empty());
     }
 
     #[test]
@@ -3979,7 +3565,6 @@ mod tests {
             Variant::Event,
         );
         let mut graph = GraphCore::default();
-        graph.attach_retained_lineage_store();
         graph.configure_retention(
             &route,
             RetentionPolicyCore {
@@ -3995,26 +3580,10 @@ mod tests {
             producer_id: "heart".to_string(),
             kind: ProducerKind::Application,
         };
-        let emitted = graph.write(&route, b"sample".to_vec(), producer.clone(), None);
-        graph.record_lineage(LineageRecordCore {
-            event_route_display: route.display(),
-            event_seq_source: emitted[0].seq_source,
-            producer_id: Some("heart".to_string()),
-            trace_id: "trace".to_string(),
-            causality_id: "chain".to_string(),
-            correlation_id: Some("request".to_string()),
-            parent_events: Vec::new(),
-        });
+        graph.write(&route, b"sample".to_vec(), producer.clone(), None);
 
-        assert!(graph
-            .lineage_records(Some(&route), None, None, None)
-            .is_empty());
-        assert!(graph
-            .lineage_record_for_route_event(&route, emitted[0].seq_source)
-            .is_none());
         assert_eq!(graph.retained_lineage_event_count(), 0);
         assert_eq!(graph.active_lineage_value_count(), 0);
-        assert!(graph.lineage_id_for_value("trace").is_none());
         assert!(graph.retention_violations().is_empty());
     }
 
@@ -4060,7 +3629,6 @@ mod tests {
             Variant::State,
         );
         let mut graph = GraphCore::default();
-        graph.attach_retained_lineage_store();
         for route in [&source, &state] {
             graph.configure_retention(
                 route,
@@ -4125,11 +3693,6 @@ mod tests {
             .get(&state_latest.payload_ref.payload_id)
             .expect("state payload retained");
         assert!(Arc::ptr_eq(source_payload, state_payload));
-        assert!(graph
-            .lineage_records(None, None, None, Some("request-0"))
-            .is_empty());
-        let latest_state_lineage = graph.lineage_records(Some(&state), None, None, None);
-        assert!(latest_state_lineage.is_empty());
         assert!(graph.retention_violations().is_empty());
     }
 

@@ -1206,10 +1206,10 @@ class CorrelationTracingStore(Protocol):
 
 
 class NativeLineageTracingStore:
-    """Retain lineage records in the native graph's bounded route store."""
+    """Compatibility attachment for sparse graph runs without retained lineage."""
 
-    def lineage_retention_policy(self, requested_policy: str) -> str:
-        return requested_policy
+    def lineage_retention_policy(self, _requested_policy: str) -> str:
+        return "none"
 
 
 class NoopLineageTracingStore:
@@ -3390,21 +3390,6 @@ class Graph:
             "emit_single_if_unrouted_with_lineage_ids_no_parents_and_materializer_drop_python",
             None,
         )
-        self._native_emit_single_if_unrouted_with_lineage_profile_no_parents_and_materializer_drop_python = getattr(
-            self._graph,
-            "emit_single_if_unrouted_with_lineage_profile_no_parents_and_materializer_drop_python",
-            None,
-        )
-        self._native_compile_lineage_profile = getattr(
-            self._graph,
-            "compile_lineage_profile",
-            None,
-        )
-        self._native_release_lineage_profile = getattr(
-            self._graph,
-            "release_lineage_profile",
-            None,
-        )
         self._native_compile_no_lineage_materializer_drop_profile = getattr(
             self._graph,
             "compile_no_lineage_materializer_drop_profile",
@@ -3420,26 +3405,6 @@ class Graph:
             "emit_no_lineage_materializer_drop_profile_python",
             None,
         )
-        self._native_attach_retained_lineage_store = getattr(
-            self._graph,
-            "attach_retained_lineage_store",
-            None,
-        )
-        self._native_attach_noop_lineage_store = getattr(
-            self._graph,
-            "attach_noop_lineage_store",
-            None,
-        )
-        self._native_attach_retained_correlation_store = getattr(
-            self._graph,
-            "attach_retained_correlation_store",
-            None,
-        )
-        self._native_attach_noop_correlation_store = getattr(
-            self._graph,
-            "attach_noop_correlation_store",
-            None,
-        )
         self._native_materialize_bytes_one_parent = getattr(
             self._graph,
             "materialize_bytes_one_parent",
@@ -3453,21 +3418,6 @@ class Graph:
         self._native_unregister_materialize_bytes = getattr(
             self._graph,
             "unregister_materialize_bytes",
-            None,
-        )
-        self._native_record_lineage_for_route_no_parents = getattr(
-            self._graph,
-            "record_lineage_for_route_no_parents",
-            None,
-        )
-        self._native_record_lineage_for_route_one_parent = getattr(
-            self._graph,
-            "record_lineage_for_route_one_parent",
-            None,
-        )
-        self._native_lineage_record_for_route_event = getattr(
-            self._graph,
-            "lineage_record_for_route_event",
             None,
         )
         self._native_payload_by_id = getattr(self._graph, "payload_by_id", None)
@@ -3542,11 +3492,6 @@ class Graph:
         self._last_nowait_drop_no_lineage_profile_key: (
             tuple[str, tuple[str, ...]] | None
         ) = None
-        self._last_nowait_drop_lineage_profile: Any = None
-        self._last_nowait_drop_lineage_profile_ids: tuple[str, str] | None = None
-        self._last_nowait_drop_lineage_profile_candidate_ids: tuple[str, str] | None = (
-            None
-        )
         self._last_process_local_nowait_target: WriteTarget | None = None
         self._last_process_local_nowait_cache: ProcessLocalNowaitCache | None = None
         self._last_process_local_nowait_generation = -1
@@ -3565,12 +3510,6 @@ class Graph:
         self._stream_taint_upper_bounds: dict[str, dict[tuple[str, str], Any]] = {}
         self._taint_generation = 0
         self._route_repair_notes: dict[str, deque[str]] = {}
-        # NativeGraph owns retained lineage; these legacy mirrors stay empty for
-        # compatibility with tests/helpers that inspect private attributes.
-        self._lineage_by_event: dict[tuple[str, int], LineageRecord] = {}
-        self._lineage_events_by_trace: dict[str, list[tuple[str, int]]] = {}
-        self._lineage_events_by_causality: dict[str, list[tuple[str, int]]] = {}
-        self._lineage_events_by_correlation: dict[str, list[tuple[str, int]]] = {}
         self._mailbox_descriptors: dict[str, NativeMailboxDescriptor] = {}
         self._capacitors: dict[str, Capacitor] = {}
         self._resistors: dict[str, Resistor] = {}
@@ -3633,14 +3572,8 @@ class Graph:
             self._correlation_tracing_store = store
             if isinstance(store, NoopCorrelationTracingStore):
                 self._correlation_tracing_enabled_flag = False
-                attach_noop = self._native_attach_noop_correlation_store
-                if attach_noop is not None:
-                    attach_noop()
             else:
                 self._correlation_tracing_enabled_flag = True
-                attach_retained = self._native_attach_retained_correlation_store
-                if attach_retained is not None:
-                    attach_retained()
             self._clear_last_nowait_drop_cache()
             return store
         if not isinstance(store, LineageTracingStore):
@@ -3649,16 +3582,7 @@ class Graph:
                 "CorrelationTracingStore"
             )
         self._lineage_tracing_store = store
-        if isinstance(store, NoopLineageTracingStore):
-            self._lineage_tracing_enabled_flag = False
-            attach_noop = self._native_attach_noop_lineage_store
-            if attach_noop is not None:
-                attach_noop()
-        else:
-            self._lineage_tracing_enabled_flag = True
-            attach_retained = self._native_attach_retained_lineage_store
-            if attach_retained is not None:
-                attach_retained()
+        self._lineage_tracing_enabled_flag = False
         self._reconfigure_lineage_tracing_store()
         return store
 
@@ -4004,7 +3928,6 @@ class Graph:
                 and control_epoch is None
                 and self._native_payload_by_id is not None
             )
-            lineage_recorded_by_native_emit = False
             native_emit_with_materializers = (
                 self._native_emit_single_if_unrouted_with_lineage_no_parents_and_materializers
             )
@@ -4024,26 +3947,6 @@ class Graph:
                 )
                 single_envelope = None if emitted is None else emitted[0]
                 materialized_envelopes = () if emitted is None else tuple(emitted[1:])
-                lineage_recorded_by_native_emit = single_envelope is not None
-            elif skip_python_retention_indexes and lineage_retained and not parent_events:
-                native_emit_lineage = (
-                    self._native_emit_single_if_unrouted_with_lineage_no_parents
-                )
-                single_envelope = (
-                    None
-                    if native_emit_lineage is None
-                    else native_emit_lineage(
-                        native_target,
-                        encoded,
-                        producer=producer,
-                        control_epoch=control_epoch,
-                        trace_id=trace_id,
-                        causality_id=causality_id,
-                        correlation_id=correlation_id,
-                    )
-                )
-                materialized_envelopes = ()
-                lineage_recorded_by_native_emit = single_envelope is not None
             else:
                 native_emit_single = self._native_emit_single_if_unrouted
                 single_envelope = (
@@ -4078,17 +3981,6 @@ class Graph:
                     )
                 if skip_python_retention_indexes:
                     self._remember_writer_if_changed(target_key, producer_id)
-                    if lineage_retained and not lineage_recorded_by_native_emit:
-                        self._record_native_lineage_for_route(
-                            native_target,
-                            target_key,
-                            single_envelope,
-                            producer_id=producer_id,
-                            trace_id=trace_id,
-                            causality_id=causality_id,
-                            correlation_id=correlation_id,
-                            parent_events=parent_events,
-                        )
                 else:
                     try:
                         if observed_sparse_retention:
@@ -4101,7 +3993,7 @@ class Graph:
                                 causality_id=causality_id,
                                 correlation_id=correlation_id,
                                 parent_events=parent_events,
-                                record_lineage=not lineage_recorded_by_native_emit,
+                                record_lineage=False,
                             )
                         else:
                             self._record_envelope(
@@ -4300,48 +4192,6 @@ class Graph:
                     ):
                         return
         if (
-            target is self._last_nowait_drop_target
-            and type(payload) is bytes
-            and producer is None
-            and control_epoch is None
-            and trace_id is not None
-            and causality_id is not None
-            and not parent_events
-            and not self._context_stack
-            and "write" not in self._debug_routes
-            and self._subscriber_generation
-            == self._last_nowait_drop_generation
-            and self._taint_generation == self._last_nowait_drop_taint_generation
-            and self._last_nowait_drop_mode == "materialized"
-            and self._last_nowait_drop_lineage_profile_ids
-            == (trace_id, causality_id)
-        ):
-            cached_profile_call = (
-                self._native_emit_single_if_unrouted_with_lineage_profile_no_parents_and_materializer_drop_python
-            )
-            cached_profile = self._last_nowait_drop_lineage_profile
-            cached_native_target = self._last_nowait_drop_native_target
-            cached_materialized_target = self._last_nowait_drop_materialized_target
-            if (
-                cached_profile_call is not None
-                and cached_profile is not None
-                and cached_native_target is not None
-                and cached_materialized_target is not None
-            ):
-                retained_correlation_id = (
-                    self._retained_correlation_id(correlation_id)
-                    if correlation_id is not None
-                    else None
-                )
-                if cached_profile_call(
-                    cached_native_target,
-                    cached_materialized_target,
-                    payload,
-                    cached_profile,
-                    retained_correlation_id,
-                ):
-                    return
-        if (
             not self._lineage_tracing_enabled_flag
             and (
                 trace_id is not None
@@ -4462,11 +4312,6 @@ class Graph:
                     )
                     cached_native_call = self._last_nowait_drop_explicit_lineage_native
                     cached_call_kind = self._last_nowait_drop_native_call_kind
-                    cached_profile = self._last_nowait_drop_lineage_profile
-                    cached_profile_ids = self._last_nowait_drop_lineage_profile_ids
-                    cached_profile_call = (
-                        self._native_emit_single_if_unrouted_with_lineage_profile_no_parents_and_materializer_drop_python
-                    )
                     if (
                         cached_call_kind == "no_lineage_profile"
                         and self._last_nowait_drop_no_lineage_profile is not None
@@ -4502,55 +4347,6 @@ class Graph:
                         )
                     ):
                         return
-                    requested_profile_ids = (
-                        (trace_id, causality_id)
-                        if trace_id is not None and causality_id is not None
-                        else None
-                    )
-                    if (
-                        cached_profile_ids is not None
-                        and cached_profile_ids != requested_profile_ids
-                    ):
-                        self._release_last_nowait_drop_lineage_profile()
-                        cached_profile = None
-                        cached_profile_ids = None
-                        self._last_nowait_drop_lineage_profile_candidate_ids = (
-                            requested_profile_ids
-                        )
-                    if (
-                        cached_profile is None
-                        and requested_profile_ids is not None
-                        and self._last_nowait_drop_lineage_profile_candidate_ids
-                        == requested_profile_ids
-                        and cached_materialized_target is not None
-                        and self._native_compile_lineage_profile is not None
-                        and cached_profile_call is not None
-                    ):
-                        cached_profile = self._native_compile_lineage_profile(
-                            requested_profile_ids[0],
-                            requested_profile_ids[1],
-                        )
-                        cached_profile_ids = requested_profile_ids
-                        self._last_nowait_drop_lineage_profile = cached_profile
-                        self._last_nowait_drop_lineage_profile_ids = cached_profile_ids
-                    if (
-                        cached_profile_call is not None
-                        and cached_profile is not None
-                        and cached_profile_ids == (trace_id, causality_id)
-                        and cached_materialized_target is not None
-                        and cached_profile_call(
-                            cached_native_target,
-                            cached_materialized_target,
-                            payload,
-                            cached_profile,
-                            correlation_id,
-                        )
-                    ):
-                        return
-                    if cached_profile is None:
-                        self._last_nowait_drop_lineage_profile_candidate_ids = (
-                            requested_profile_ids
-                        )
                     if (
                         cached_native_call is not None
                         and cached_call_kind == "single_target_explicit_ids"
@@ -4947,34 +4743,6 @@ class Graph:
                 )
                 self._last_nowait_drop_generation = self._subscriber_generation
                 self._last_nowait_drop_taint_generation = self._taint_generation
-                profile_ids = (
-                    (trace_id, causality_id)
-                    if (
-                        trace_id is not None
-                        and causality_id is not None
-                        and single_materialized_target is not None
-                        and self._native_compile_lineage_profile is not None
-                        and self._native_emit_single_if_unrouted_with_lineage_profile_no_parents_and_materializer_drop_python
-                        is not None
-                    )
-                    else None
-                )
-                if self._last_nowait_drop_lineage_profile_ids != profile_ids:
-                    self._release_last_nowait_drop_lineage_profile()
-                if (
-                    profile_ids is not None
-                    and self._last_nowait_drop_lineage_profile is None
-                    and self._last_nowait_drop_lineage_profile_candidate_ids
-                    == profile_ids
-                ):
-                    self._last_nowait_drop_lineage_profile = (
-                        self._native_compile_lineage_profile(
-                            profile_ids[0],
-                            profile_ids[1],
-                        )
-                    )
-                    self._last_nowait_drop_lineage_profile_ids = profile_ids
-                self._last_nowait_drop_lineage_profile_candidate_ids = profile_ids
                 if (
                     not self._lineage_tracing_enabled_flag
                     and self._native_compile_no_lineage_materializer_drop_profile
@@ -5129,8 +4897,6 @@ class Graph:
                 self._last_nowait_drop_native_call_kind = None
                 self._last_nowait_drop_explicit_lineage_native = None
                 self._release_last_nowait_drop_no_lineage_profile()
-                self._release_last_nowait_drop_lineage_profile()
-                self._last_nowait_drop_lineage_profile_candidate_ids = None
             return
         native_emit_single = self._native_emit_single_if_unrouted
         process_local_nowait_indexes = (
@@ -5190,17 +4956,6 @@ class Graph:
                     )
             elif skip_python_retention_indexes:
                 self._remember_writer_if_changed(target_key, producer_id)
-                if lineage_retained:
-                    self._record_native_lineage_for_route(
-                        native_target,
-                        target_key,
-                        single_envelope,
-                        producer_id=producer_id,
-                        trace_id=trace_id,
-                        causality_id=causality_id,
-                        correlation_id=correlation_id,
-                        parent_events=parent_events,
-                    )
             else:
                 if (
                     target_process_local
@@ -6191,17 +5946,8 @@ class Graph:
         correlation_id: str | None = None,
     ) -> Iterator[LineageRecord]:
         """Return retained lineage records filtered by route or lineage ids."""
-        native_route = None if route_ref is None else self._coerce_route_ref(route_ref)
-        records = tuple(
-            self._lineage_record_from_native(item)
-            for item in self._graph.lineage_records(
-                native_route,
-                trace_id,
-                causality_id,
-                correlation_id,
-            )
-        )
-        return iter(records)
+        del route_ref, trace_id, causality_id, correlation_id
+        return iter(())
 
     def subscribers(self, route_ref: RouteLike) -> int:
         """Return the number of active observers on a route."""
@@ -7972,29 +7718,6 @@ class Graph:
     def _event_index_key(event: EventRef) -> tuple[str, int]:
         return (event.route_display, event.seq_source)
 
-    @staticmethod
-    def _lineage_record_from_native(record: Any) -> LineageRecord:
-        (
-            route_display,
-            seq_source,
-            producer_id,
-            trace_id,
-            causality_id,
-            correlation_id,
-            parent_events,
-        ) = record
-        return LineageRecord(
-            event=EventRef(route_display=route_display, seq_source=seq_source),
-            producer_id=producer_id,
-            trace_id=trace_id,
-            causality_id=causality_id,
-            correlation_id=correlation_id,
-            parent_events=tuple(
-                EventRef(route_display=parent_route, seq_source=parent_seq)
-                for parent_route, parent_seq in parent_events
-            ),
-        )
-
     def _next_subscriber_id(self) -> str:
         self._subscriber_sequence += 1
         return f"subscriber-{self._subscriber_sequence}"
@@ -8372,7 +8095,8 @@ class Graph:
         return self._correlation_tracing_store.retained_correlation_id(correlation_id)
 
     def _lineage_retained_for_policy(self, policy: RouteRetentionPolicy) -> bool:
-        return self._effective_lineage_retention_policy(policy) == "retained"
+        del policy
+        return False
 
     def _reconfigure_lineage_tracing_store(self) -> None:
         for key, policy in tuple(self._resolved_retention_by_key.items()):
@@ -8596,8 +8320,6 @@ class Graph:
         while len(history) > history_limit:
             expired_envelope = history.popleft()
             self._purge_envelope_payload_ref_for_key(expired_envelope, route_key)
-            if self._lineage_by_event:
-                self._forget_lineage_for((expired_envelope,))
             expired = True
         if expired and route_key in self._stream_taint_upper_bounds:
             self._rebuild_stream_taint_upper_bound(route_ref)
@@ -8641,111 +8363,6 @@ class Graph:
                 remove_process_local_order=False,
             )
 
-    def _remove_lineage_index(
-        self,
-        index: dict[str, list[tuple[str, int]]],
-        lineage_id: str,
-        event_key: tuple[str, int],
-    ) -> None:
-        events = index.get(lineage_id)
-        if events is None:
-            return
-        try:
-            events.remove(event_key)
-        except ValueError:
-            return
-        if not events:
-            del index[lineage_id]
-
-    def _forget_lineage_for(self, envelopes: Sequence[ClosedEnvelope]) -> None:
-        for envelope in envelopes:
-            event = self._event_ref(envelope)
-            event_key = self._event_index_key(event)
-            record = self._lineage_by_event.pop(event_key, None)
-            if record is None:
-                continue
-            self._remove_lineage_index(
-                self._lineage_events_by_trace,
-                record.trace_id,
-                event_key,
-            )
-            self._remove_lineage_index(
-                self._lineage_events_by_causality,
-                record.causality_id,
-                event_key,
-            )
-            if record.correlation_id is not None:
-                self._remove_lineage_index(
-                    self._lineage_events_by_correlation,
-                    record.correlation_id,
-                    event_key,
-                )
-
-    def _record_native_lineage_for_route(
-        self,
-        route_ref: RouteRef,
-        route_key: str,
-        envelope: ClosedEnvelope,
-        *,
-        producer_id: str | None,
-        trace_id: str | None,
-        causality_id: str | None,
-        correlation_id: str | None,
-        parent_events: Sequence[ParentEventLike],
-    ) -> None:
-        event_display = (
-            f"{route_key}@{envelope.seq_source}"
-            if trace_id is None or causality_id is None
-            else None
-        )
-        resolved_trace_id = trace_id or event_display
-        resolved_causality_id = causality_id or event_display
-        if resolved_trace_id is None or resolved_causality_id is None:
-            raise RuntimeError("lineage event display was not resolved")
-        correlation_id = self._retained_correlation_id(correlation_id)
-        if not parent_events:
-            native_record_no_parents = self._native_record_lineage_for_route_no_parents
-            if native_record_no_parents is not None:
-                native_record_no_parents(
-                    route_ref,
-                    envelope.seq_source,
-                    producer_id,
-                    resolved_trace_id,
-                    resolved_causality_id,
-                    correlation_id,
-                )
-                return
-        elif len(parent_events) == 1:
-            native_record_one_parent = self._native_record_lineage_for_route_one_parent
-            if native_record_one_parent is not None:
-                parent_route_display, parent_seq_source = _parent_event_parts(
-                    parent_events[0]
-                )
-                native_record_one_parent(
-                    route_ref,
-                    envelope.seq_source,
-                    producer_id,
-                    resolved_trace_id,
-                    resolved_causality_id,
-                    correlation_id,
-                    parent_route_display,
-                    parent_seq_source,
-                )
-                return
-        native_parent_events = tuple(
-            _parent_event_parts(parent)
-            for parent in parent_events
-        )
-        self._graph.record_lineage_for_route(
-            route_ref,
-            envelope.seq_source,
-            producer_id,
-            resolved_trace_id,
-            resolved_causality_id,
-            correlation_id,
-            native_parent_events,
-        )
-
     def _record_envelope(
         self,
         route_ref: RouteLike,
@@ -8778,8 +8395,6 @@ class Graph:
             while len(history) >= history_limit:
                 expired_envelope = history.popleft()
                 self._purge_envelope_payload_ref_for_key(expired_envelope, key)
-                if self._lineage_by_event:
-                    self._forget_lineage_for((expired_envelope,))
                 expired_history = True
         history.append(envelope)
         if expired_history and key in self._stream_taint_upper_bounds:
@@ -8806,17 +8421,6 @@ class Graph:
         self._remember_stream_taints_for_key(native_route, key, envelope)
         if producer_id is not None:
             self._remember_writer_if_changed(key, producer_id)
-        if self._lineage_retained_by_key.get(key, False):
-            self._record_native_lineage_for_route(
-                native_route,
-                key,
-                envelope,
-                producer_id=producer_id,
-                trace_id=trace_id,
-                causality_id=causality_id,
-                correlation_id=correlation_id,
-                parent_events=parent_events,
-            )
         self._publish_key(key, envelope)
         return envelope
 
@@ -8893,18 +8497,9 @@ class Graph:
         parent_events: Sequence[EventRef] = (),
         record_lineage: bool = True,
     ) -> None:
+        del record_lineage
         self._remember_writer_if_changed(route_key, producer_id)
-        if record_lineage and self._lineage_retained_by_key.get(route_key, False):
-            self._record_native_lineage_for_route(
-                native_route,
-                route_key,
-                envelope,
-                producer_id=producer_id,
-                trace_id=trace_id,
-                causality_id=causality_id,
-                correlation_id=correlation_id,
-                parent_events=parent_events,
-            )
+        del native_route, trace_id, causality_id, correlation_id, parent_events
         if self._route_has_delivery_subscribers(route_key):
             self._publish_key(route_key, envelope)
 
@@ -8928,15 +8523,6 @@ class Graph:
                 or route_key not in self._write_audit_event_by_route
             ):
                 self._emit_write_debug_event_for_key(route_key)
-
-    def _release_last_nowait_drop_lineage_profile(self) -> None:
-        profile = self._last_nowait_drop_lineage_profile
-        if profile is not None:
-            release_profile = self._native_release_lineage_profile
-            if release_profile is not None:
-                release_profile(profile)
-        self._last_nowait_drop_lineage_profile = None
-        self._last_nowait_drop_lineage_profile_ids = None
 
     def _release_last_nowait_drop_no_lineage_profile(self) -> None:
         profile = self._last_nowait_drop_no_lineage_profile
@@ -8962,8 +8548,6 @@ class Graph:
         self._last_nowait_drop_native_call_kind = None
         self._last_nowait_drop_explicit_lineage_native = None
         self._release_last_nowait_drop_no_lineage_profile()
-        self._release_last_nowait_drop_lineage_profile()
-        self._last_nowait_drop_lineage_profile_candidate_ids = None
 
     def _clear_nowait_materializer_cache_if_matches(
         self,
@@ -9245,26 +8829,6 @@ class Graph:
     ) -> LineageRecord:
         closed = item.closed if isinstance(item, TypedEnvelope) else item
         event = self._event_ref(closed)
-        if not self._lineage_retained_by_key.get(event.route_display, False):
-            return self._default_lineage_for_closed(closed, event)
-        native_lookup = self._native_lineage_record_for_route_event
-        native_record = (
-            None
-            if native_lookup is None
-            else native_lookup(closed.route, closed.seq_source)
-        )
-        if native_record is not None:
-            return self._lineage_record_from_native(native_record)
-        records = self._graph.lineage_records(
-            closed.route,
-            None,
-            None,
-            None,
-        )
-        for native_record in records:
-            record = self._lineage_record_from_native(native_record)
-            if record.event == event:
-                return record
         return self._default_lineage_for_closed(closed, event)
 
     def _lineage_parts_for_item(
@@ -9274,42 +8838,6 @@ class Graph:
         closed = item.closed if isinstance(item, TypedEnvelope) else item
         route_display = self._route_key_for_ref(closed.route)
         seq_source = closed.seq_source
-        if not self._lineage_retained_by_key.get(route_display, False):
-            return self._default_lineage_parts(route_display, seq_source)
-        native_lookup = self._native_lineage_record_for_route_event
-        native_record = (
-            None
-            if native_lookup is None
-            else native_lookup(closed.route, seq_source)
-        )
-        if native_record is not None:
-            return self._lineage_parts_from_native(native_record)
-        for native_record in self._graph.lineage_records(
-            closed.route,
-            None,
-            None,
-            None,
-        ):
-            (
-                native_route_display,
-                native_seq_source,
-                _producer_id,
-                trace_id,
-                causality_id,
-                correlation_id,
-                _parent_events,
-            ) = native_record
-            if (
-                native_route_display == route_display
-                and native_seq_source == seq_source
-            ):
-                return (
-                    trace_id,
-                    causality_id,
-                    correlation_id,
-                    native_route_display,
-                    native_seq_source,
-                )
         return self._default_lineage_parts(route_display, seq_source)
 
     @staticmethod
@@ -9323,19 +8851,6 @@ class Graph:
             trace_id=event.display(),
             causality_id=event.display(),
         )
-
-    @staticmethod
-    def _lineage_parts_from_native(record: Any) -> LineageParts:
-        (
-            route_display,
-            seq_source,
-            _producer_id,
-            trace_id,
-            causality_id,
-            correlation_id,
-            _parent_events,
-        ) = record
-        return (trace_id, causality_id, correlation_id, route_display, seq_source)
 
     @staticmethod
     def _default_lineage_parts(route_display: str, seq_source: int) -> LineageParts:

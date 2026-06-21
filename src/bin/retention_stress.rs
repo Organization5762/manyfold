@@ -5,8 +5,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
 use manyfold::core::{
-    GraphCore, Layer, LineageRecordCore, NamespaceRefCore, Plane, ProducerKind, ProducerRefCore,
-    RetentionPolicyCore, RouteRefCore, SchemaRefCore, Variant,
+    GraphCore, Layer, NamespaceRefCore, Plane, ProducerKind, ProducerRefCore, RetentionPolicyCore,
+    RouteRefCore, SchemaRefCore, Variant,
 };
 
 #[derive(Clone, Copy)]
@@ -22,13 +22,6 @@ impl LineageRetentionMode {
             Self::Retained => "retained",
         }
     }
-
-    fn expected_count(self, history_limit: usize) -> usize {
-        match self {
-            Self::None => 0,
-            Self::Retained => history_limit,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -37,25 +30,10 @@ enum LineageStoreMode {
     Noop,
 }
 
-impl LineageStoreMode {
-    fn retained_lineage_count(self, _requested_count: usize) -> usize {
-        0
-    }
-}
-
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum CorrelationStoreMode {
     Retained,
     Noop,
-}
-
-impl CorrelationStoreMode {
-    fn retained_correlation_count(self, requested_count: usize) -> usize {
-        match self {
-            Self::Retained => requested_count,
-            Self::Noop => 0,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -63,15 +41,6 @@ enum MetadataMode {
     None,
     Static,
     Unique,
-}
-
-impl MetadataMode {
-    fn expected_correlation_count(self, lineage_count: usize) -> usize {
-        match self {
-            Self::None => 0,
-            Self::Static | Self::Unique => lineage_count,
-        }
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -271,17 +240,7 @@ fn main() {
 fn run_stress(config: Config) -> Vec<Sample> {
     let route = stress_route();
     let state_route = stress_state_route();
-    let route_display = route.display();
     let mut graph = GraphCore::default();
-    match config.lineage_store {
-        LineageStoreMode::Retained => graph.attach_retained_lineage_store(),
-        LineageStoreMode::Noop => graph.attach_noop_lineage_store(),
-    }
-    if matches!(config.correlation_store, CorrelationStoreMode::Retained) {
-        graph.attach_retained_correlation_store();
-    } else {
-        graph.attach_noop_correlation_store();
-    }
     graph.configure_retention(
         &route,
         RetentionPolicyCore {
@@ -328,43 +287,15 @@ fn run_stress(config: Config) -> Vec<Sample> {
         #[cfg(feature = "coz-profiler")]
         coz::begin!("memory_retention_event");
         if config.materialize_state {
-            if matches!(config.lineage_store, LineageStoreMode::Noop) {
-                graph.write_single_if_unrouted_and_materializer_drop(
-                    &route,
-                    &state_route,
-                    payload.clone(),
-                    producer.clone(),
-                    None,
-                );
-            } else {
-                let metadata = lineage_metadata(config.metadata_mode, step);
-                graph.write_single_if_unrouted_with_lineage_ids_no_parents_and_materializer_drop(
-                    &route,
-                    &state_route,
-                    payload.clone(),
-                    producer.clone(),
-                    None,
-                    metadata.trace_id,
-                    metadata.causality_id,
-                    metadata.correlation_id,
-                );
-            }
-        } else if matches!(config.lineage_retention, LineageRetentionMode::None)
-            || matches!(config.lineage_store, LineageStoreMode::Noop)
-        {
-            graph.write_single_if_unrouted_drop(&route, payload.clone(), producer.clone(), None);
+            graph.write_single_if_unrouted_and_materializer_drop(
+                &route,
+                &state_route,
+                payload.clone(),
+                producer.clone(),
+                None,
+            );
         } else {
-            let metadata = lineage_metadata(config.metadata_mode, step);
-            let emitted = graph.write(&route, payload.clone(), producer.clone(), None);
-            graph.record_lineage(LineageRecordCore {
-                event_route_display: route_display.clone(),
-                event_seq_source: emitted[0].seq_source,
-                producer_id: Some("heart".to_string()),
-                trace_id: metadata.trace_id,
-                causality_id: metadata.causality_id,
-                correlation_id: metadata.correlation_id,
-                parent_events: Vec::new(),
-            });
+            graph.write_single_if_unrouted_drop(&route, payload.clone(), producer.clone(), None);
         }
         #[cfg(feature = "coz-profiler")]
         {
@@ -388,23 +319,7 @@ fn run_stress(config: Config) -> Vec<Sample> {
                 baseline_usage,
             );
             print_sample(&sample);
-            let lineage_count = config.lineage_store.retained_lineage_count(
-                config
-                    .lineage_retention
-                    .expected_count(config.history_limit)
-                    * measured_routes.len(),
-            );
-            let metadata_correlation_count = config
-                .metadata_mode
-                .expected_correlation_count(lineage_count);
-            assert_retained_counts(
-                &sample,
-                config.history_limit * measured_routes.len(),
-                lineage_count,
-                config
-                    .correlation_store
-                    .retained_correlation_count(metadata_correlation_count),
-            );
+            assert_retained_counts(&sample, config.history_limit * measured_routes.len(), 0, 0);
             assert_retention_invariants(&graph, step);
             last_sample_step = sample.step;
             last_sample_elapsed_seconds = sample.elapsed_seconds;
@@ -413,32 +328,6 @@ fn run_stress(config: Config) -> Vec<Sample> {
     }
 
     samples
-}
-
-struct LineageMetadata {
-    trace_id: String,
-    causality_id: String,
-    correlation_id: Option<String>,
-}
-
-fn lineage_metadata(mode: MetadataMode, step: u64) -> LineageMetadata {
-    match mode {
-        MetadataMode::None => LineageMetadata {
-            trace_id: "retention-stress".to_string(),
-            causality_id: "retention-stress-chain".to_string(),
-            correlation_id: None,
-        },
-        MetadataMode::Static => LineageMetadata {
-            trace_id: "retention-stress".to_string(),
-            causality_id: "retention-stress-chain".to_string(),
-            correlation_id: Some("request".to_string()),
-        },
-        MetadataMode::Unique => LineageMetadata {
-            trace_id: format!("retention-stress-{step:020}"),
-            causality_id: format!("retention-stress-chain-{step:020}"),
-            correlation_id: Some(format!("request-{step:020}")),
-        },
-    }
 }
 
 fn seed_sequence(

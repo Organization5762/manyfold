@@ -859,7 +859,9 @@ class MemoryBenchmarkTests(unittest.TestCase):
         self.assertEqual(samples[-1].payload_count, 4)
         self.assertEqual(samples[-1].materialized_payload_count, 4)
 
-    def test_run_probe_supports_materialized_state_lineage_path(self) -> None:
+    def test_run_probe_materialized_state_stays_sparse_without_lineage_store(
+        self,
+    ) -> None:
         samples = memory_benchmarks.run_probe(
             iterations=8,
             history_limit=4,
@@ -871,11 +873,11 @@ class MemoryBenchmarkTests(unittest.TestCase):
         self.assertEqual(samples[-1].step, 8)
         self.assertEqual(samples[-1].replay_count, 4)
         self.assertEqual(samples[-1].payload_count, 4)
-        self.assertEqual(samples[-1].lineage_count, 4)
+        self.assertEqual(samples[-1].lineage_count, 0)
         self.assertEqual(samples[-1].correlation_index_count, 0)
         self.assertEqual(samples[-1].materialized_payload_count, 0)
 
-    def test_run_probe_native_correlation_store_retains_correlation_index(self) -> None:
+    def test_run_probe_native_correlation_store_stays_sparse(self) -> None:
         samples = memory_benchmarks.run_probe(
             iterations=8,
             history_limit=4,
@@ -885,8 +887,8 @@ class MemoryBenchmarkTests(unittest.TestCase):
             metadata_mode="static",
         )
 
-        self.assertEqual(samples[-1].lineage_count, 4)
-        self.assertEqual(samples[-1].correlation_index_count, 4)
+        self.assertEqual(samples[-1].lineage_count, 0)
+        self.assertEqual(samples[-1].correlation_index_count, 0)
 
     def test_run_probe_noop_lineage_store_suppresses_retained_lineage(self) -> None:
         samples = memory_benchmarks.run_probe(
@@ -1084,7 +1086,7 @@ class MemoryBenchmarkTests(unittest.TestCase):
         self.assertEqual(samples[-1].step, 8)
         self.assertEqual(samples[-1].replay_count, 4)
         self.assertEqual(samples[-1].payload_count, 4)
-        self.assertEqual(samples[-1].lineage_count, 4)
+        self.assertEqual(samples[-1].lineage_count, 0)
         self.assertEqual(samples[-1].materialized_payload_count, 0)
 
     def test_run_probe_supports_unique_all_metadata_mode(self) -> None:
@@ -1101,75 +1103,8 @@ class MemoryBenchmarkTests(unittest.TestCase):
         self.assertEqual(samples[-1].step, 8)
         self.assertEqual(samples[-1].replay_count, 4)
         self.assertEqual(samples[-1].payload_count, 4)
-        self.assertEqual(samples[-1].lineage_count, 4)
+        self.assertEqual(samples[-1].lineage_count, 0)
         self.assertEqual(samples[-1].materialized_payload_count, 0)
-
-    def test_static_lineage_metadata_uses_native_profile_cache(self) -> None:
-        graph, stream, _state, subscription = _materialized_nowait_graph()
-        try:
-            for index in range(4):
-                graph.publish_nowait(
-                    stream,
-                    b"frame",
-                    trace_id="static-trace",
-                    causality_id="static-chain",
-                    correlation_id=f"request-{index:020}",
-                )
-
-            self.assertIsNotNone(graph._last_nowait_drop_lineage_profile)
-            self.assertEqual(
-                graph._last_nowait_drop_lineage_profile_ids,
-                ("static-trace", "static-chain"),
-            )
-        finally:
-            subscription.dispose()
-
-    def test_static_lineage_metadata_fast_path_uses_cached_profile(self) -> None:
-        graph, stream, state, subscription = _materialized_nowait_graph()
-        try:
-            for index in range(2):
-                graph.publish_nowait(
-                    stream,
-                    f"warm-{index}".encode("ascii"),
-                    trace_id="static-trace",
-                    causality_id="static-chain",
-                    correlation_id=f"request-warm-{index}",
-                )
-            self.assertIsNotNone(graph._last_nowait_drop_lineage_profile)
-
-            graph._last_nowait_drop_explicit_lineage_native = None
-            graph.publish_nowait(
-                stream,
-                b"cached",
-                trace_id="static-trace",
-                causality_id="static-chain",
-                correlation_id="request-cached",
-            )
-
-            self.assertEqual(graph.latest(state).value, b"cached")
-            self.assertEqual(
-                graph._last_nowait_drop_lineage_profile_ids,
-                ("static-trace", "static-chain"),
-            )
-        finally:
-            subscription.dispose()
-
-    def test_unique_lineage_metadata_avoids_native_profile_cache(self) -> None:
-        graph, stream, _state, subscription = _materialized_nowait_graph()
-        try:
-            for index in range(4):
-                graph.publish_nowait(
-                    stream,
-                    b"frame",
-                    trace_id=f"trace-{index:020}",
-                    causality_id=f"chain-{index:020}",
-                    correlation_id=f"request-{index:020}",
-                )
-
-            self.assertIsNone(graph._last_nowait_drop_lineage_profile)
-            self.assertIsNone(graph._last_nowait_drop_lineage_profile_ids)
-        finally:
-            subscription.dispose()
 
     def test_noop_lineage_store_uses_no_lineage_materializer_drop(self) -> None:
         graph, stream, state, subscription = _materialized_nowait_graph(
@@ -1191,7 +1126,6 @@ class MemoryBenchmarkTests(unittest.TestCase):
             self.assertEqual(stream_snapshot.lineage_count, 0)
             self.assertEqual(state_snapshot.lineage_count, 0)
             self.assertEqual(graph._graph.lineage_intern_value_count(), 0)
-            self.assertIsNone(graph._last_nowait_drop_lineage_profile)
             self.assertIn(
                 graph._last_nowait_drop_native_call_kind,
                 ("no_lineage", "no_lineage_profile", "no_lineage_python"),
@@ -1255,80 +1189,6 @@ class MemoryBenchmarkTests(unittest.TestCase):
             self.assertEqual(graph.latest(state).value, b"warm")
         finally:
             subscription.dispose()
-
-    def test_lineage_profile_release_follows_metadata_switch(self) -> None:
-        graph, stream, _state, subscription = _materialized_nowait_graph(
-            history_limit=1,
-        )
-        try:
-            for index in range(4):
-                graph.publish_nowait(
-                    stream,
-                    b"frame-a",
-                    trace_id="trace-a",
-                    causality_id="chain-a",
-                    correlation_id=f"request-a-{index:020}",
-                )
-            self.assertEqual(
-                graph._last_nowait_drop_lineage_profile_ids,
-                ("trace-a", "chain-a"),
-            )
-
-            for index in range(4):
-                graph.publish_nowait(
-                    stream,
-                    b"frame-b",
-                    trace_id="trace-b",
-                    causality_id="chain-b",
-                    correlation_id=f"request-b-{index:020}",
-                )
-
-            self.assertEqual(
-                graph._last_nowait_drop_lineage_profile_ids,
-                ("trace-b", "chain-b"),
-            )
-            self.assertEqual(graph._graph.lineage_intern_value_count(), 2)
-        finally:
-            subscription.dispose()
-
-    def test_lineage_profile_release_follows_materialize_dispose(self) -> None:
-        graph, stream, state, subscription = _materialized_nowait_graph(
-            history_limit=1,
-        )
-        for index in range(4):
-            graph.publish_nowait(
-                stream,
-                b"frame-a",
-                trace_id="trace-a",
-                causality_id="chain-a",
-                correlation_id=f"request-a-{index:020}",
-            )
-        self.assertEqual(
-            graph._last_nowait_drop_lineage_profile_ids,
-            ("trace-a", "chain-a"),
-        )
-
-        subscription.dispose()
-        self.assertIsNone(graph._last_nowait_drop_lineage_profile)
-        self.assertIsNone(graph._last_nowait_drop_lineage_profile_ids)
-
-        for index in range(4):
-            graph.publish_nowait(
-                stream,
-                b"source-b",
-                trace_id="trace-b",
-                causality_id="chain-b",
-                correlation_id=f"source-b-{index:020}",
-            )
-            graph.publish_nowait(
-                state,
-                b"state-b",
-                trace_id="trace-b",
-                causality_id="chain-b",
-                correlation_id=f"state-b-{index:020}",
-            )
-
-        self.assertEqual(graph._graph.lineage_intern_value_count(), 2)
 
     def test_run_probe_rejects_materialize_subscription_metadata_leak(self) -> None:
         graph_class = memory_benchmarks.Graph
