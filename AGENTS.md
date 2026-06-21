@@ -229,6 +229,13 @@ uv run manyfold-heart-monitor-verify heart-lib_2026-monitor.json --min-samples 3
   missing/non-integer final-tail fields now fail instead of letting earlier
   samples satisfy the gate. Ran focused Ruff and `uv run python -m unittest
   tests.test_benchmark_artifacts`.
+- 2026-06-21: Added a native zero-net-allocation regression test for warmed
+  sparse `GraphCore::write_single_if_unrouted_drop` and moved route-id lineage
+  bookkeeping under `LineageStoreCore` so it is no longer first-order graph
+  routing state. Ran `cargo fmt --check`, `cargo test`, `cargo clippy
+  --all-targets --all-features -- -D warnings`, `uv sync --reinstall-package
+  manyfold`, focused Ruff, `tests.test_project_metadata`, and `git diff
+  --check`.
 - 2026-06-21: Addressed V1 PR review portability/API issues by replacing
   developer-local uv fallbacks with home-relative defaults, making
   `RouteRef` equality return false for unrelated types, correcting the

@@ -875,6 +875,10 @@ pub enum CorrelationStoreModeCore {
 
 #[derive(Default)]
 pub struct LineageStoreCore {
+    /// Compact route ids let retained parent lineage avoid per-event display clones.
+    pub route_ids: HashMap<RouteRefCore, usize>,
+    /// Reverse lookup for public lineage records that expose display strings.
+    pub routes_by_id: Vec<RouteRefCore>,
     /// Lineage id lookup interns repeated retained trace/causality strings.
     pub lineage_ids_by_value: HashMap<String, LineageIdCore>,
     /// Reverse lookup for public lineage records that expose retained lineage strings.
@@ -903,10 +907,6 @@ pub struct GraphCore {
     pub routes_by_display: HashMap<String, RouteRefCore>,
     /// Route display names live with topology so hot writes avoid repeated formatting.
     pub route_displays: HashMap<RouteRefCore, String>,
-    /// Compact route ids let retained parent lineage avoid per-event display clones.
-    pub route_ids: HashMap<RouteRefCore, usize>,
-    /// Reverse lookup for public lineage records that still expose display strings.
-    pub routes_by_id: Vec<RouteRefCore>,
     /// Latest envelopes live until the route receives a newer envelope or the graph is dropped.
     pub latest: HashMap<RouteRefCore, ClosedEnvelopeCore>,
     /// Replay history lives under per-route retention and is trimmed after each write.
@@ -1083,7 +1083,7 @@ impl GraphCore {
     }
 
     fn retained_event_keys_for_route(&self, route: &RouteRefCore) -> Vec<EventKeyCore> {
-        let Some(route_id) = self.route_ids.get(route).copied() else {
+        let Some(route_id) = self.lineage.route_ids.get(route).copied() else {
             return Vec::new();
         };
         let mut retained = Vec::new();
@@ -1150,6 +1150,7 @@ impl GraphCore {
 
     fn registered_route_id(&self, route: &RouteRefCore) -> usize {
         *self
+            .lineage
             .route_ids
             .get(route)
             .expect("registered route id missing")
@@ -1160,7 +1161,8 @@ impl GraphCore {
     }
 
     fn event_key_route(&self, event_key: &EventKeyCore) -> &RouteRefCore {
-        self.routes_by_id
+        self.lineage
+            .routes_by_id
             .get(event_key.0)
             .expect("retained event route id missing")
     }
@@ -1289,7 +1291,7 @@ impl GraphCore {
             .map(|(route_display, seq_source)| {
                 self.routes_by_display
                     .get(&route_display)
-                    .and_then(|route| self.route_ids.get(route).copied())
+                    .and_then(|route| self.lineage.route_ids.get(route).copied())
                     .map(|route_id| RetainedParentEventCore::RouteId(route_id, seq_source))
                     .unwrap_or(RetainedParentEventCore::Display(route_display, seq_source))
             })
@@ -1305,6 +1307,7 @@ impl GraphCore {
             .map(|parent| match parent {
                 RetainedParentEventCore::RouteId(route_id, seq_source) => {
                     let route = self
+                        .lineage
                         .routes_by_id
                         .get(*route_id)
                         .expect("retained parent route id missing");
@@ -1378,7 +1381,7 @@ impl GraphCore {
             return;
         }
         self.forget_payload(&envelope.payload_ref.payload_id);
-        if let Some(route_id) = self.route_ids.get(route).copied() {
+        if let Some(route_id) = self.lineage.route_ids.get(route).copied() {
             self.forget_lineage_event(&(route_id, envelope.seq_source));
         }
     }
@@ -1615,10 +1618,10 @@ impl GraphCore {
         self.route_displays
             .entry(route.clone())
             .or_insert(route_display);
-        if !self.route_ids.contains_key(&route) {
-            let route_id = self.routes_by_id.len();
-            self.route_ids.insert(route.clone(), route_id);
-            self.routes_by_id.push(route.clone());
+        if !self.lineage.route_ids.contains_key(&route) {
+            let route_id = self.lineage.routes_by_id.len();
+            self.lineage.route_ids.insert(route.clone(), route_id);
+            self.lineage.routes_by_id.push(route.clone());
         }
         if !self.retention_policies.contains_key(&route) {
             let policy = RetentionPolicyCore::for_route(&route);
@@ -2789,7 +2792,7 @@ impl GraphCore {
     where
         K: Eq + Hash,
     {
-        let Some(route_id) = self.route_ids.get(route).copied() else {
+        let Some(route_id) = self.lineage.route_ids.get(route).copied() else {
             return 0;
         };
         index
@@ -3006,7 +3009,7 @@ impl GraphCore {
                 .map_or(0, |envelope| envelope.seq_source),
             replay_count: self.history.get(route).map_or(0, VecDeque::len),
             payload_count: self.retained_payload_count(route),
-            lineage_count: self.route_ids.get(route).map_or(0, |route_id| {
+            lineage_count: self.lineage.route_ids.get(route).map_or(0, |route_id| {
                 self.lineage
                     .lineage_by_event
                     .keys()
@@ -3259,7 +3262,7 @@ impl GraphCore {
         route: &RouteRefCore,
         seq_source: u64,
     ) -> Option<LineageRecordCore> {
-        let event_key = (self.route_ids.get(route).copied()?, seq_source);
+        let event_key = (self.lineage.route_ids.get(route).copied()?, seq_source);
         let record = self.lineage.lineage_by_event.get(&event_key)?;
         Some(LineageRecordCore {
             event_route_display: self.route_display(route),
@@ -4927,6 +4930,7 @@ mod tests {
             .is_empty());
         let state_key = graph.registered_event_key(&state, 10);
         let source_route_id = *graph
+            .lineage
             .route_ids
             .get(&source)
             .expect("source route id should be registered");
