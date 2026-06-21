@@ -144,6 +144,8 @@ class ProjectMetadataTests(unittest.TestCase):
             "Python Heart materialized-state nowait plateau",
             "Heart wrapper provenance smoke",
             "jemalloc leak check for native Heart materialized-state mode",
+            "--leak-bytes-threshold 131072",
+            "--leak-objects-threshold 2",
             "Verify jemalloc leak summaries",
             "Verify benchmark text artifacts",
             "Verify required native profiler summaries",

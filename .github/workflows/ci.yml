@@ -253,6 +253,8 @@ jobs:
           set -o pipefail
           uv run manyfold-jemalloc-leak-check \
             --output-dir benchmark-results/jemalloc-sparse \
+            --leak-bytes-threshold 131072 \
+            --leak-objects-threshold 2 \
             -- ./target/release/memory_retention_benchmark \
             --iterations 200000 \
             --sample-every 100000 \
@@ -280,6 +282,8 @@ jobs:
           set -o pipefail
           uv run manyfold-jemalloc-leak-check \
             --output-dir benchmark-results/jemalloc-retained-lineage \
+            --leak-bytes-threshold 131072 \
+            --leak-objects-threshold 2 \
             -- ./target/release/memory_retention_benchmark \
             --iterations 200000 \
             --sample-every 100000 \
@@ -308,6 +312,8 @@ jobs:
           set -o pipefail
           uv run manyfold-jemalloc-leak-check \
             --output-dir benchmark-results/jemalloc-heart-materialized-state \
+            --leak-bytes-threshold 131072 \
+            --leak-objects-threshold 2 \
             -- ./target/release/memory_retention_benchmark \
             --iterations 200000 \
             --sample-every 100000 \
