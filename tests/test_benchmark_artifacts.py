@@ -193,6 +193,44 @@ class BenchmarkArtifactTests(unittest.TestCase):
                     tail_plateaus=(("current_rss_kib", 64, 3),),
                 )
 
+    def test_verify_rejects_missing_final_tail_plateau_field(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = _write_log(
+                Path(directory),
+                (
+                    "step=8 current_rss_kib=32000",
+                    "step=16 current_rss_kib=32000",
+                    "step=24 current_rss_kib=32000",
+                    "step=32",
+                ),
+            )
+
+            with self.assertRaisesRegex(
+                SystemExit, "no integer samples collected for tail field"
+            ):
+                benchmark_artifacts.verify_benchmark_log(
+                    path,
+                    tail_plateaus=(("current_rss_kib", 64, 3),),
+                )
+
+    def test_verify_rejects_gap_before_final_tail_plateau(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = _write_log(
+                Path(directory),
+                (
+                    "step=8 current_rss_kib=32000",
+                    "step=16 current_rss_kib=32000",
+                    "step=24",
+                    "step=32 current_rss_kib=32000",
+                ),
+            )
+
+            with self.assertRaisesRegex(SystemExit, "tail plateau collected 1"):
+                benchmark_artifacts.verify_benchmark_log(
+                    path,
+                    tail_plateaus=(("current_rss_kib", 64, 3),),
+                )
+
     def test_verify_rejects_late_allocator_drift(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = _write_log(

@@ -1898,6 +1898,8 @@ def _terminate_external_process(
             return
         except ProcessLookupError:
             return
+        except PermissionError:
+            pass
     if sig == signal.SIGKILL:
         process.kill()
     else:

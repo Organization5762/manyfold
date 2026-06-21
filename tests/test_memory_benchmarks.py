@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from argparse import Namespace
 from pathlib import Path
+from unittest import mock
 
 from manyfold import memory_benchmarks
 
@@ -520,6 +521,35 @@ class MemoryBenchmarkTests(unittest.TestCase):
 
     def test_external_process_termination_keeps_current_session(self) -> None:
         self.assertEqual(memory_benchmarks._external_popen_kwargs("process"), {})
+
+    def test_external_tree_termination_falls_back_on_permission_error(self) -> None:
+        class Process:
+            pid = 123
+
+            def __init__(self) -> None:
+                self.terminated = False
+
+            def terminate(self) -> None:
+                self.terminated = True
+
+            def kill(self) -> None:
+                raise AssertionError("SIGTERM fallback should terminate")
+
+        process = Process()
+
+        with (
+            mock.patch.object(memory_benchmarks.os, "name", "posix"),
+            mock.patch.object(
+                memory_benchmarks.os,
+                "killpg",
+                side_effect=PermissionError,
+            ),
+        ):
+            memory_benchmarks._terminate_external_process(
+                process, scope="tree", sig=memory_benchmarks.signal.SIGTERM
+            )
+
+        self.assertTrue(process.terminated)
 
     def test_external_popen_options_include_cwd_and_env(self) -> None:
         options = memory_benchmarks._external_popen_options(

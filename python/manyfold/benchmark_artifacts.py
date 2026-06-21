@@ -332,22 +332,26 @@ def _final_tail_plateau(
     field: str,
     plateau: int,
 ) -> dict[str, int | None]:
-    observed = tuple(value for sample in samples if (value := _int_field(sample, field)) is not None)
+    observed: list[int] = []
+    for sample in reversed(samples):
+        value = _int_field(sample, field)
+        if value is None:
+            break
+        observed.append(value)
     if not observed:
         return {"range": None, "sample_count": 0}
-    first_index = len(observed) - 1
-    minimum = observed[first_index]
+    count = 1
+    minimum = observed[0]
     maximum = minimum
-    while first_index > 0:
-        previous_value = observed[first_index - 1]
+    for previous_value in observed[1:]:
         next_minimum = min(minimum, previous_value)
         next_maximum = max(maximum, previous_value)
         if next_maximum - next_minimum > plateau:
             break
-        first_index -= 1
+        count += 1
         minimum = next_minimum
         maximum = next_maximum
-    return {"range": maximum - minimum, "sample_count": len(observed) - first_index}
+    return {"range": maximum - minimum, "sample_count": count}
 
 
 if __name__ == "__main__":

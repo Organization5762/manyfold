@@ -847,9 +847,11 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p benchmark-results/fake-heart/src
+          printf '%s\n' '#!/bin/sh' 'sleep 0.2' > benchmark-results/fake-heart/totem-smoke
+          chmod +x benchmark-results/fake-heart/totem-smoke
           uv run manyfold-heart-benchmark \
             --heart-root benchmark-results/fake-heart \
-            --totem-command /bin/sh -c 'sleep 0.2' \
+            --totem-command ./totem-smoke \
             --duration-seconds 0.3 \
             --external-min-elapsed-seconds 0 \
             --external-min-samples 1 \

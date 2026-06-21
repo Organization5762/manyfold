@@ -224,14 +224,24 @@ uv run manyfold-heart-monitor-verify heart-lib_2026-monitor.json --min-samples 3
   focused Ruff, `uv run python -m unittest tests.test_heart_benchmarks
   tests.test_project_metadata`, a synthetic `uv run manyfold-heart-monitor-verify`
   CLI smoke, and `git diff --check`.
+- 2026-06-21: Tightened benchmark artifact tail plateau verification so a
+  plateau must be computed from the contiguous final suffix with integer values;
+  missing/non-integer final-tail fields now fail instead of letting earlier
+  samples satisfy the gate. Ran focused Ruff and `uv run python -m unittest
+  tests.test_benchmark_artifacts`.
 - 2026-06-21: Addressed V1 PR review portability/API issues by replacing
   developer-local uv fallbacks with home-relative defaults, making
   `RouteRef` equality return false for unrelated types, correcting the
   `ClosedEnvelope.inline_payload` stub type, and using a non-instant Heart
-  wrapper smoke command. Ran `cargo fmt --check`, `uv sync
+  wrapper smoke command. After CI showed that `-c` arguments inside
+  `--totem-command` are parsed as Manyfold options, switched the smoke to a fake
+  Heart script that ignores appended configuration arguments, and made external
+  process cleanup fall back to direct child termination when process-group
+  termination is permission-denied. Ran `cargo fmt --check`, `uv sync
   --reinstall-package manyfold`, focused Ruff, `cargo test`, focused
-  `tests.test_graph_reactive`/`tests.test_heart_benchmarks`, and
-  `tests.test_project_metadata`.
+  `tests.test_graph_reactive`/`tests.test_heart_benchmarks`,
+  `tests.test_memory_benchmarks`, `tests.test_project_metadata`, and a local
+  Heart wrapper provenance smoke.
 - 2026-06-21: V1 PR-readiness validation after CI pinning and AGENTS cleanup:
   `/Users/lampe/.local/bin/uv sync`, `cargo fmt --check`, `cargo clippy
   --all-targets --all-features -- -D warnings`, `cargo test`, `uv sync
