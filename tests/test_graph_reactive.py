@@ -668,6 +668,10 @@ other = native.RouteRef(
 
 assert left == right
 assert left != other
+assert not (left == None)
+assert left != None
+assert not (left == "sample")
+assert left != "sample"
 assert hash(left) == hash(right)
 assert {left: "cached"}[right] == "cached"
 try:

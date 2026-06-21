@@ -849,8 +849,8 @@ jobs:
           mkdir -p benchmark-results/fake-heart/src
           uv run manyfold-heart-benchmark \
             --heart-root benchmark-results/fake-heart \
-            --totem-command /usr/bin/true \
-            --duration-seconds 0.1 \
+            --totem-command /bin/sh -c 'sleep 0.2' \
+            --duration-seconds 0.3 \
             --external-min-elapsed-seconds 0 \
             --external-min-samples 1 \
             --monitor-interval 0.01 \

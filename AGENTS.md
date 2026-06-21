@@ -224,6 +224,14 @@ uv run manyfold-heart-monitor-verify heart-lib_2026-monitor.json --min-samples 3
   focused Ruff, `uv run python -m unittest tests.test_heart_benchmarks
   tests.test_project_metadata`, a synthetic `uv run manyfold-heart-monitor-verify`
   CLI smoke, and `git diff --check`.
+- 2026-06-21: Addressed V1 PR review portability/API issues by replacing
+  developer-local uv fallbacks with home-relative defaults, making
+  `RouteRef` equality return false for unrelated types, correcting the
+  `ClosedEnvelope.inline_payload` stub type, and using a non-instant Heart
+  wrapper smoke command. Ran `cargo fmt --check`, `uv sync
+  --reinstall-package manyfold`, focused Ruff, `cargo test`, focused
+  `tests.test_graph_reactive`/`tests.test_heart_benchmarks`, and
+  `tests.test_project_metadata`.
 - 2026-06-21: V1 PR-readiness validation after CI pinning and AGENTS cleanup:
   `/Users/lampe/.local/bin/uv sync`, `cargo fmt --check`, `cargo clippy
   --all-targets --all-features -- -D warnings`, `cargo test`, `uv sync

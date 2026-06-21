@@ -66,7 +66,7 @@ MODULES_TO_RESET = (
     "reactivex.operators",
 )
 _MISSING_MODULE = object()
-UV_BIN_DIR = Path("/Users/lampe/.local/bin")
+UV_BIN_DIR = Path(os.environ.get("UV_BIN_DIR", Path.home() / ".local" / "bin"))
 
 
 def subprocess_test_env() -> dict[str, str]:

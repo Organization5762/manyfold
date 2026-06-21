@@ -708,10 +708,15 @@ impl RouteRef {
     fn display(&self) -> String {
         self.inner.display()
     }
-    fn __richcmp__(&self, other: PyRef<'_, RouteRef>, op: CompareOp) -> PyResult<bool> {
+    fn __richcmp__(&self, other: &Bound<'_, PyAny>, op: CompareOp) -> PyResult<bool> {
+        let other_route = other.extract::<PyRef<'_, RouteRef>>();
         match op {
-            CompareOp::Eq => Ok(self.inner == other.inner),
-            CompareOp::Ne => Ok(self.inner != other.inner),
+            CompareOp::Eq => Ok(other_route
+                .as_ref()
+                .is_ok_and(|route| self.inner == route.inner)),
+            CompareOp::Ne => Ok(other_route
+                .as_ref()
+                .map_or(true, |route| self.inner != route.inner)),
             _ => Err(PyTypeError::new_err("RouteRef does not support ordering")),
         }
     }
