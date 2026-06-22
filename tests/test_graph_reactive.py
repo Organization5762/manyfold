@@ -5631,13 +5631,11 @@ else:
             schema=graph_module.Schema.bytes(name="NativeMaterializeDropCacheState"),
         )
         graph = graph_module.Graph()
-        graph.attach(graph_module.NativeLineageTracingStore())
         graph.attach(graph_module.NativeCorrelationTracingStore())
         graph.configure_retention(
             source,
             graph_module.RouteRetentionPolicy(
                 latest_replay_policy="bounded_history",
-                lineage_retention_policy="retained",
             ),
         )
         subscription = graph.materialize(source, state_route=state_route)
@@ -5696,7 +5694,6 @@ else:
 
         self.assertEqual(graph.latest(source).value, b"cached")
         self.assertEqual(graph.latest(state_route).value, b"cached")
-        self.assertEqual(tuple(graph.lineage(source)), ())
         self.assertEqual(graph._materialized_payloads, {})
         self.assertEqual(graph._native_materialize_route_refs_by_source, {})
 
@@ -6337,14 +6334,12 @@ else:
             schema=str_schema(graph_module, "AccelState"),
         )
         graph = graph_module.Graph()
-        graph.attach(graph_module.NativeLineageTracingStore())
         graph.attach(graph_module.NativeCorrelationTracingStore())
         for retained_route in (source, state_route):
             graph.configure_retention(
                 retained_route,
                 graph_module.RouteRetentionPolicy(
                     latest_replay_policy="bounded_history",
-                    lineage_retention_policy="retained",
                 ),
             )
 
@@ -6358,9 +6353,7 @@ else:
         )
         subscription.dispose()
 
-        records = tuple(graph.lineage(state_route))
-
-        self.assertEqual(records, ())
+        self.assertEqual(next(graph.retention_snapshot(state_route)).lineage_count, 0)
 
     def test_materialize_skips_lineage_lookup_for_non_retained_source(self) -> None:
         graph_module = load_graph_module()
@@ -6384,12 +6377,10 @@ else:
             schema=str_schema(graph_module, "LineageSkipState"),
         )
         graph = graph_module.Graph()
-        graph.attach(graph_module.NativeLineageTracingStore())
         graph.configure_retention(
             state_route,
             graph_module.RouteRetentionPolicy(
                 latest_replay_policy="bounded_history",
-                lineage_retention_policy="retained",
             ),
         )
 
@@ -6397,8 +6388,7 @@ else:
         graph.publish(source, "frame-1")
         subscription.dispose()
 
-        records = tuple(graph.lineage(state_route))
-        self.assertEqual(records, ())
+        self.assertEqual(next(graph.retention_snapshot(state_route)).lineage_count, 0)
 
     def test_materialize_uses_exact_native_lineage_lookup_for_retained_source(
         self,
@@ -6424,14 +6414,12 @@ else:
             schema=str_schema(graph_module, "LineageExactState"),
         )
         graph = graph_module.Graph()
-        graph.attach(graph_module.NativeLineageTracingStore())
         graph.attach(graph_module.NativeCorrelationTracingStore())
         for retained_route in (source, state_route):
             graph.configure_retention(
                 retained_route,
                 graph_module.RouteRetentionPolicy(
                     latest_replay_policy="bounded_history",
-                    lineage_retention_policy="retained",
                 ),
             )
         subscription = graph.materialize(source, state_route=state_route)
@@ -6444,8 +6432,7 @@ else:
         )
         subscription.dispose()
 
-        records = tuple(graph.lineage(state_route))
-        self.assertEqual(records, ())
+        self.assertEqual(next(graph.retention_snapshot(state_route)).lineage_count, 0)
 
     def test_materialize_uses_nowait_for_untainted_state_writes(self) -> None:
         graph_module = load_graph_module()
@@ -6469,13 +6456,11 @@ else:
             schema=str_schema(graph_module, "MaterializeNowaitState"),
         )
         graph = graph_module.Graph()
-        graph.attach(graph_module.NativeLineageTracingStore())
         for retained_route in (source, state_route):
             graph.configure_retention(
                 retained_route,
                 graph_module.RouteRetentionPolicy(
                     latest_replay_policy="bounded_history",
-                    lineage_retention_policy="retained",
                 ),
             )
         publish_nowait = graph.publish_nowait
@@ -6501,9 +6486,8 @@ else:
         finally:
             subscription.dispose()
 
-        records = tuple(graph.lineage(state_route))
         self.assertEqual(calls, [(state_route, "frame-1")])
-        self.assertEqual(records, ())
+        self.assertEqual(next(graph.retention_snapshot(state_route)).lineage_count, 0)
 
     def test_materialize_subscribes_to_closed_envelopes_directly(self) -> None:
         graph_module = load_graph_module()
@@ -6545,7 +6529,7 @@ else:
         self.assertEqual(graph._subscriber_count, {})
         self.assertEqual(graph._subjects, {})
 
-    def test_query_trace_returns_empty_without_retained_lineage(self) -> None:
+    def test_query_trace_returns_empty_without_lineage_storage(self) -> None:
         graph_module = load_graph_module()
 
         source = graph_module.route(
@@ -6567,13 +6551,11 @@ else:
             schema=str_schema(graph_module, "GyroState"),
         )
         graph = graph_module.Graph()
-        graph.attach(graph_module.NativeLineageTracingStore())
         for route in (source, state_route):
             graph.configure_retention(
                 route,
                 graph_module.RouteRetentionPolicy(
                     latest_replay_policy="bounded_history",
-                    lineage_retention_policy="retained",
                 ),
             )
         graph.grant_access(
@@ -6605,37 +6587,7 @@ else:
 
         self.assertEqual(response.items, ())
 
-    def test_lineage_filters_by_correlation_id(self) -> None:
-        graph_module = load_graph_module()
-
-        route = graph_module.route(
-            plane=graph_module.Plane.Read,
-            layer=graph_module.Layer.Logical,
-            owner=graph_module.OwnerName("imu"),
-            family=graph_module.StreamFamily("sensor"),
-            stream=graph_module.StreamName("mag"),
-            variant=graph_module.Variant.Meta,
-            schema=str_schema(graph_module, "Mag"),
-        )
-        graph = graph_module.Graph()
-        graph.attach(graph_module.NativeLineageTracingStore())
-        graph.attach(graph_module.NativeCorrelationTracingStore())
-        graph.configure_retention(
-            route,
-            graph_module.RouteRetentionPolicy(
-                latest_replay_policy="bounded_history",
-                lineage_retention_policy="retained",
-            ),
-        )
-
-        graph.publish(route, "frame-1", correlation_id="request-11")
-        graph.publish(route, "frame-2", correlation_id="request-12")
-
-        records = tuple(graph.lineage(correlation_id="request-11"))
-
-        self.assertEqual(records, ())
-
-    def test_native_lineage_indexes_follow_route_retention(self) -> None:
+    def test_metadata_does_not_create_lineage_indexes(self) -> None:
         graph_module = load_graph_module()
 
         route = graph_module.route(
@@ -6643,12 +6595,11 @@ else:
             layer=graph_module.Layer.Logical,
             owner=graph_module.OwnerName("heart"),
             family=graph_module.StreamFamily("runtime"),
-            stream=graph_module.StreamName("bounded_lineage"),
+            stream=graph_module.StreamName("bounded_metadata"),
             variant=graph_module.Variant.Event,
-            schema=str_schema(graph_module, "BoundedLineage"),
+            schema=str_schema(graph_module, "BoundedMetadata"),
         )
         graph = graph_module.Graph()
-        graph.attach(graph_module.NativeLineageTracingStore())
         graph.attach(graph_module.NativeCorrelationTracingStore())
         graph.configure_retention(
             route,
@@ -6656,7 +6607,6 @@ else:
                 latest_replay_policy="bounded_history",
                 replay_window="last_2",
                 history_limit=2,
-                lineage_retention_policy="retained",
             ),
         )
 
@@ -6669,15 +6619,11 @@ else:
                 correlation_id=f"request-{value}",
             )
 
-        records = tuple(graph.lineage(route))
-        trace_records = tuple(graph.lineage(trace_id="runtime-trace"))
-        expired_records = tuple(graph.lineage(correlation_id="request-0"))
+        snapshot = next(graph.retention_snapshot(route))
+        self.assertEqual(snapshot.lineage_count, 0)
+        self.assertEqual(snapshot.correlation_index_count, 0)
 
-        self.assertEqual(records, ())
-        self.assertEqual(trace_records, ())
-        self.assertEqual(expired_records, ())
-
-    def test_retained_lineage_policy_stays_sparse_without_correlation_store(
+    def test_metadata_stays_sparse_without_correlation_store(
         self,
     ) -> None:
         graph_module = load_graph_module()
@@ -6687,17 +6633,15 @@ else:
             layer=graph_module.Layer.Logical,
             owner=graph_module.OwnerName("heart"),
             family=graph_module.StreamFamily("runtime"),
-            stream=graph_module.StreamName("sparse_correlation_lineage"),
+            stream=graph_module.StreamName("sparse_correlation_metadata"),
             variant=graph_module.Variant.Event,
-            schema=str_schema(graph_module, "SparseCorrelationLineage"),
+            schema=str_schema(graph_module, "SparseCorrelationMetadata"),
         )
         graph = graph_module.Graph()
-        graph.attach(graph_module.NativeLineageTracingStore())
         graph.configure_retention(
             route,
             graph_module.RouteRetentionPolicy(
                 latest_replay_policy="bounded_history",
-                lineage_retention_policy="retained",
             ),
         )
 
@@ -6709,55 +6653,11 @@ else:
             correlation_id="debug-request",
         )
         snapshot = next(graph.retention_snapshot(route))
-        records = tuple(graph.lineage(route))
 
         self.assertEqual(snapshot.lineage_count, 0)
         self.assertEqual(snapshot.trace_index_count, 0)
         self.assertEqual(snapshot.causality_index_count, 0)
         self.assertEqual(snapshot.correlation_index_count, 0)
-        self.assertEqual(records, ())
-        self.assertEqual(tuple(graph.lineage(correlation_id="debug-request")), ())
-
-    def test_lineage_store_class_attachment_retains_trace_without_correlation(
-        self,
-    ) -> None:
-        graph_module = load_graph_module()
-
-        route = graph_module.route(
-            plane=graph_module.Plane.Read,
-            layer=graph_module.Layer.Logical,
-            owner=graph_module.OwnerName("heart"),
-            family=graph_module.StreamFamily("runtime"),
-            stream=graph_module.StreamName("class_lineage_store"),
-            variant=graph_module.Variant.Event,
-            schema=str_schema(graph_module, "ClassLineageStore"),
-        )
-        graph = graph_module.Graph()
-        store = graph.attach(graph_module.LineageTracingStore)
-        graph.configure_retention(
-            route,
-            graph_module.RouteRetentionPolicy(
-                latest_replay_policy="bounded_history",
-                lineage_retention_policy="retained",
-            ),
-        )
-
-        graph.publish(
-            route,
-            "frame-1",
-            trace_id="trace-class",
-            causality_id="cause-class",
-            correlation_id="debug-class",
-        )
-        snapshot = next(graph.retention_snapshot(route))
-        records = tuple(graph.lineage(route))
-
-        self.assertIsInstance(store, graph_module.NativeLineageTracingStore)
-        self.assertEqual(snapshot.lineage_count, 0)
-        self.assertEqual(snapshot.trace_index_count, 0)
-        self.assertEqual(snapshot.causality_index_count, 0)
-        self.assertEqual(snapshot.correlation_index_count, 0)
-        self.assertEqual(records, ())
 
     def test_correlation_store_class_attachment_retains_debug_correlation(
         self,
@@ -6774,13 +6674,11 @@ else:
             schema=str_schema(graph_module, "ClassCorrelationStore"),
         )
         graph = graph_module.Graph()
-        lineage_store = graph.attach(graph_module.LineageTracingStore)
         correlation_store = graph.attach(graph_module.CorrelationTracingStore)
         graph.configure_retention(
             route,
             graph_module.RouteRetentionPolicy(
                 latest_replay_policy="bounded_history",
-                lineage_retention_policy="retained",
             ),
         )
 
@@ -6792,16 +6690,13 @@ else:
             correlation_id="debug-request",
         )
         snapshot = next(graph.retention_snapshot(route))
-        records = tuple(graph.lineage(correlation_id="debug-request"))
 
-        self.assertIsInstance(lineage_store, graph_module.NativeLineageTracingStore)
         self.assertIsInstance(
             correlation_store,
             graph_module.NativeCorrelationTracingStore,
         )
         self.assertEqual(snapshot.lineage_count, 0)
         self.assertEqual(snapshot.correlation_index_count, 0)
-        self.assertEqual(records, ())
 
     def test_noop_correlation_store_skips_correlation_dispatch(self) -> None:
         graph_module = load_graph_module()
@@ -6825,13 +6720,11 @@ else:
         )
         graph = graph_module.Graph()
         store = CountingNoopCorrelationStore()
-        graph.attach(graph_module.LineageTracingStore)
         graph.attach(store)
         graph.configure_retention(
             route,
             graph_module.RouteRetentionPolicy(
                 latest_replay_policy="bounded_history",
-                lineage_retention_policy="retained",
             ),
         )
 
@@ -6842,10 +6735,7 @@ else:
             causality_id="cause-noop",
             correlation_id="debug-noop",
         )
-        records = tuple(graph.lineage(route))
-
         self.assertEqual(store.calls, 0)
-        self.assertEqual(records, ())
 
     def test_configure_retention_latest_only_limits_replay_and_descriptor(self) -> None:
         graph_module = load_graph_module()
@@ -6932,15 +6822,13 @@ else:
 
         snapshot = next(graph.retention_snapshot(route))
 
-        self.assertEqual(tuple(graph.lineage(route)), ())
-        self.assertEqual(tuple(graph.lineage(trace_id="trace-sparse")), ())
         self.assertEqual(snapshot.replay_count, 1)
         self.assertEqual(snapshot.payload_count, 1)
         self.assertEqual(snapshot.lineage_count, 0)
         self.assertEqual(snapshot.trace_index_count, 0)
         self.assertEqual(snapshot.correlation_index_count, 0)
 
-    def test_noop_lineage_tracing_store_suppresses_retained_lineage(self) -> None:
+    def test_lineage_storage_surface_stays_absent(self) -> None:
         graph_module = load_graph_module()
 
         route = graph_module.route(
@@ -6948,56 +6836,15 @@ else:
             layer=graph_module.Layer.Logical,
             owner=graph_module.OwnerName("heart"),
             family=graph_module.StreamFamily("runtime"),
-            stream=graph_module.StreamName("noop_lineage_store"),
+            stream=graph_module.StreamName("lineage_storage_absent"),
             variant=graph_module.Variant.Event,
-            schema=str_schema(graph_module, "NoopLineageStore"),
+            schema=str_schema(graph_module, "RetainedLineageAbsent"),
         )
         graph = graph_module.Graph()
-        store = graph.attach(graph_module.NoopLineageTracingStore())
-        self.assertFalse(graph._lineage_tracing_enabled_flag)
         graph.configure_retention(
             route,
             graph_module.RouteRetentionPolicy(
                 latest_replay_policy="bounded_history",
-                lineage_retention_policy="retained",
-            ),
-        )
-
-        graph.publish(
-            route,
-            "frame-1",
-            trace_id="trace-noop",
-            causality_id="cause-noop",
-            correlation_id="request-noop",
-        )
-        snapshot = next(graph.retention_snapshot(route))
-
-        self.assertIsInstance(store, graph_module.NoopLineageTracingStore)
-        self.assertEqual(tuple(graph.lineage(route)), ())
-        self.assertEqual(snapshot.replay_count, 1)
-        self.assertEqual(snapshot.lineage_count, 0)
-        self.assertEqual(snapshot.trace_index_count, 0)
-        self.assertEqual(snapshot.correlation_index_count, 0)
-
-    def test_default_lineage_tracing_store_is_noop(self) -> None:
-        graph_module = load_graph_module()
-
-        route = graph_module.route(
-            plane=graph_module.Plane.Read,
-            layer=graph_module.Layer.Logical,
-            owner=graph_module.OwnerName("heart"),
-            family=graph_module.StreamFamily("runtime"),
-            stream=graph_module.StreamName("default_noop_lineage_store"),
-            variant=graph_module.Variant.Event,
-            schema=str_schema(graph_module, "DefaultNoopLineageStore"),
-        )
-        graph = graph_module.Graph()
-        self.assertFalse(graph._lineage_tracing_enabled_flag)
-        graph.configure_retention(
-            route,
-            graph_module.RouteRetentionPolicy(
-                latest_replay_policy="bounded_history",
-                lineage_retention_policy="retained",
             ),
         )
 
@@ -7010,7 +6857,6 @@ else:
         )
         snapshot = next(graph.retention_snapshot(route))
 
-        self.assertEqual(tuple(graph.lineage(route)), ())
         self.assertEqual(snapshot.replay_count, 1)
         self.assertEqual(snapshot.lineage_count, 0)
         self.assertEqual(snapshot.trace_index_count, 0)
@@ -7048,47 +6894,6 @@ else:
 
         self.assertEqual(store.calls, 0)
         self.assertEqual(graph.latest(route).value, b"frame-2")
-
-    def test_native_lineage_tracing_store_remains_sparse(self) -> None:
-        graph_module = load_graph_module()
-
-        route = graph_module.route(
-            plane=graph_module.Plane.Read,
-            layer=graph_module.Layer.Logical,
-            owner=graph_module.OwnerName("heart"),
-            family=graph_module.StreamFamily("runtime"),
-            stream=graph_module.StreamName("native_lineage_store"),
-            variant=graph_module.Variant.Event,
-            schema=str_schema(graph_module, "NativeLineageStore"),
-        )
-        graph = graph_module.Graph()
-        graph.attach(graph_module.NoopLineageTracingStore())
-        self.assertFalse(graph._lineage_tracing_enabled_flag)
-        graph.configure_retention(
-            route,
-            graph_module.RouteRetentionPolicy(
-                latest_replay_policy="bounded_history",
-                lineage_retention_policy="retained",
-            ),
-        )
-        graph.attach(graph_module.NativeLineageTracingStore())
-        graph.attach(graph_module.NativeCorrelationTracingStore())
-        self.assertFalse(graph._lineage_tracing_enabled_flag)
-
-        graph.publish(
-            route,
-            "frame-1",
-            trace_id="trace-native",
-            causality_id="cause-native",
-            correlation_id="request-native",
-        )
-        snapshot = next(graph.retention_snapshot(route))
-        records = tuple(graph.lineage(route))
-
-        self.assertEqual(snapshot.lineage_count, 0)
-        self.assertEqual(snapshot.trace_index_count, 0)
-        self.assertEqual(snapshot.correlation_index_count, 0)
-        self.assertEqual(records, ())
 
     def test_bounded_history_without_limit_uses_default_bound(self) -> None:
         graph_module = load_graph_module()
@@ -7280,7 +7085,6 @@ else:
             schema=graph_module.Schema.bytes(name="PayloadHistoryExpiry"),
         )
         graph = graph_module.Graph()
-        graph.attach(graph_module.NativeLineageTracingStore())
         graph.configure_retention(
             stream,
             graph_module.RouteRetentionPolicy(
@@ -7353,7 +7157,6 @@ else:
             schema=graph_module.Schema.bytes(name="InlineHistoryExpiry"),
         )
         graph = graph_module.Graph()
-        graph.attach(graph_module.NativeLineageTracingStore())
         graph.configure_retention(
             stream,
             graph_module.RouteRetentionPolicy(
@@ -7443,7 +7246,7 @@ else:
         self.assertEqual(bytes_passthrough_checks, 1)
         self.assertEqual(
             graph._typed_route_runtime_flags_by_key[stream.display()],
-            (False, True, True, False),
+            (False, True, True),
         )
         self.assertEqual(graph._graph.retained_payload_count(stream.route_ref), 8)
 
@@ -7475,7 +7278,7 @@ else:
         with self.assertRaisesRegex(AssertionError, "exact byte payload"):
             graph.publish(stream, bytearray(b"value"))
 
-    def test_sparse_byte_publish_refreshes_lineage_runtime_flag_on_retention_change(
+    def test_sparse_byte_publish_refreshes_runtime_flags_on_retention_change(
         self,
     ) -> None:
         graph_module = load_graph_module()
@@ -7485,29 +7288,25 @@ else:
             layer=graph_module.Layer.Logical,
             owner=graph_module.OwnerName("heart"),
             family=graph_module.StreamFamily("runtime"),
-            stream=graph_module.StreamName("lineage_runtime_flag_refresh"),
+            stream=graph_module.StreamName("runtime_flag_refresh"),
             variant=graph_module.Variant.Event,
-            schema=graph_module.Schema.bytes(name="LineageRuntimeFlagRefresh"),
+            schema=graph_module.Schema.bytes(name="RuntimeFlagRefresh"),
         )
         graph = graph_module.Graph()
-        graph.attach(graph_module.NativeLineageTracingStore())
 
         graph.publish(stream, b"warmup")
         graph.configure_retention(
             stream,
             graph_module.RouteRetentionPolicy(
                 latest_replay_policy="bounded_history",
-                lineage_retention_policy="retained",
             ),
         )
         graph.publish(stream, b"value", trace_id="trace-after-warmup")
 
         self.assertEqual(
             graph._typed_route_runtime_flags_by_key[stream.display()],
-            (False, True, True, False),
+            (False, True, True),
         )
-        records = tuple(graph.lineage(stream))
-        self.assertEqual(records, ())
 
     def test_sparse_lineage_uses_plain_native_entrypoint(self) -> None:
         graph_module = load_graph_module()
@@ -7522,12 +7321,10 @@ else:
             schema=graph_module.Schema.bytes(name="LineageNoParentNativeEntrypoint"),
         )
         graph = graph_module.Graph()
-        graph.attach(graph_module.NativeLineageTracingStore())
         graph.configure_retention(
             stream,
             graph_module.RouteRetentionPolicy(
                 latest_replay_policy="bounded_history",
-                lineage_retention_policy="retained",
             ),
         )
         native_emit = graph._native_emit_single_if_unrouted
@@ -7541,9 +7338,7 @@ else:
         graph._native_emit_single_if_unrouted = _count_native_emit
         graph.publish(stream, b"value", trace_id="trace-no-parent")
 
-        records = tuple(graph.lineage(stream))
         self.assertEqual(len(calls), 1)
-        self.assertEqual(records, ())
 
     def test_publish_source_wrapper_uses_typed_fast_path(self) -> None:
         graph_module = load_graph_module()
@@ -7816,7 +7611,6 @@ else:
             schema=graph_module.Schema.bytes(name="RetentionSnapshotValue"),
         )
         graph = graph_module.Graph()
-        graph.attach(graph_module.NativeLineageTracingStore())
         graph.attach(graph_module.NativeCorrelationTracingStore())
         graph.configure_retention(
             route,
@@ -7824,7 +7618,6 @@ else:
                 latest_replay_policy="bounded_history",
                 replay_window="last_3",
                 history_limit=3,
-                lineage_retention_policy="retained",
             ),
         )
 
@@ -7882,13 +7675,6 @@ else:
             graph_module.RouteRetentionPolicy(
                 latest_replay_policy="latest_only",
                 payload_retention_policy="forever_cache",
-            )
-        with self.assertRaisesRegex(
-            ValueError, "lineage_retention_policy must be one of"
-        ):
-            graph_module.RouteRetentionPolicy(
-                latest_replay_policy="latest_only",
-                lineage_retention_policy="forever",
             )
         for kwargs, message in (
             ({"latest_replay_policy": ""}, "latest_replay_policy"),

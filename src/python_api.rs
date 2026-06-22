@@ -45,16 +45,6 @@ const OVERFLOW_POLICIES: &[&str] = &[
     "reject_write",
 ];
 
-type LineageRecordTuple = (
-    String,
-    u64,
-    Option<String>,
-    String,
-    String,
-    Option<String>,
-    Vec<(String, u64)>,
-);
-
 fn lock_graph(state: &Arc<Mutex<GraphCore>>) -> PyResult<std::sync::MutexGuard<'_, GraphCore>> {
     state
         .lock()
@@ -1699,8 +1689,7 @@ impl Graph {
         durability_class,
         replay_window,
         payload_retention_policy,
-        history_limit=None,
-        lineage_retention_policy=None
+        history_limit=None
     ))]
     fn configure_retention(
         &self,
@@ -1710,20 +1699,11 @@ impl Graph {
         replay_window: String,
         payload_retention_policy: String,
         history_limit: Option<usize>,
-        lineage_retention_policy: Option<String>,
     ) -> PyResult<()> {
         validate_nonblank_text("latest_replay_policy", &latest_replay_policy)?;
         validate_nonblank_text("durability_class", &durability_class)?;
         validate_nonblank_text("replay_window", &replay_window)?;
         validate_nonblank_text("payload_retention_policy", &payload_retention_policy)?;
-        let lineage_retention_policy =
-            lineage_retention_policy.unwrap_or_else(|| "none".to_string());
-        validate_nonblank_text("lineage_retention_policy", &lineage_retention_policy)?;
-        if !matches!(lineage_retention_policy.as_str(), "none" | "retained") {
-            return Err(PyValueError::new_err(
-                "lineage_retention_policy must be one of 'none' or 'retained'",
-            ));
-        }
         let mut graph = lock_graph(&self.state)?;
         graph.configure_retention(
             &route.inner,
@@ -1733,7 +1713,6 @@ impl Graph {
                 replay_window,
                 payload_retention_policy,
                 history_limit,
-                lineage_retention_policy,
             },
         );
         Ok(())
@@ -2313,141 +2292,6 @@ impl Graph {
             .into_iter()
             .map(|inner| ClosedEnvelope { inner })
             .collect())
-    }
-
-    #[pyo3(signature = (
-        route_display,
-        seq_source,
-        producer_id,
-        trace_id,
-        causality_id,
-        correlation_id,
-        parent_events
-    ))]
-    fn record_lineage(
-        &self,
-        route_display: String,
-        seq_source: u64,
-        producer_id: Option<String>,
-        trace_id: String,
-        causality_id: String,
-        correlation_id: Option<String>,
-        parent_events: Vec<(String, u64)>,
-    ) -> PyResult<()> {
-        validate_nonblank_text("lineage route_display", &route_display)?;
-        validate_nonblank_text("lineage trace_id", &trace_id)?;
-        validate_nonblank_text("lineage causality_id", &causality_id)?;
-        for (parent_route, _) in &parent_events {
-            validate_nonblank_text("lineage parent route_display", parent_route)?;
-        }
-        let _ = (seq_source, producer_id, correlation_id);
-        Ok(())
-    }
-
-    #[pyo3(signature = (
-        route,
-        seq_source,
-        producer_id,
-        trace_id,
-        causality_id,
-        correlation_id,
-        parent_events
-    ))]
-    fn record_lineage_for_route(
-        &self,
-        route: RouteRef,
-        seq_source: u64,
-        producer_id: Option<String>,
-        trace_id: String,
-        causality_id: String,
-        correlation_id: Option<String>,
-        parent_events: Vec<(String, u64)>,
-    ) -> PyResult<()> {
-        validate_nonblank_text("lineage trace_id", &trace_id)?;
-        validate_nonblank_text("lineage causality_id", &causality_id)?;
-        for (parent_route, _) in &parent_events {
-            validate_nonblank_text("lineage parent route_display", parent_route)?;
-        }
-        let _ = (route, seq_source, producer_id, correlation_id);
-        Ok(())
-    }
-
-    #[pyo3(signature = (
-        route,
-        seq_source,
-        producer_id,
-        trace_id,
-        causality_id,
-        correlation_id
-    ))]
-    fn record_lineage_for_route_no_parents(
-        &self,
-        route: RouteRef,
-        seq_source: u64,
-        producer_id: Option<String>,
-        trace_id: String,
-        causality_id: String,
-        correlation_id: Option<String>,
-    ) -> PyResult<()> {
-        validate_nonblank_text("lineage trace_id", &trace_id)?;
-        validate_nonblank_text("lineage causality_id", &causality_id)?;
-        let _ = (route, seq_source, producer_id, correlation_id);
-        Ok(())
-    }
-
-    #[pyo3(signature = (
-        route,
-        seq_source,
-        producer_id,
-        trace_id,
-        causality_id,
-        correlation_id,
-        parent_route_display,
-        parent_seq_source
-    ))]
-    fn record_lineage_for_route_one_parent(
-        &self,
-        route: RouteRef,
-        seq_source: u64,
-        producer_id: Option<String>,
-        trace_id: String,
-        causality_id: String,
-        correlation_id: Option<String>,
-        parent_route_display: String,
-        parent_seq_source: u64,
-    ) -> PyResult<()> {
-        validate_nonblank_text("lineage trace_id", &trace_id)?;
-        validate_nonblank_text("lineage causality_id", &causality_id)?;
-        validate_nonblank_text("lineage parent route_display", &parent_route_display)?;
-        let _ = (
-            route,
-            seq_source,
-            producer_id,
-            correlation_id,
-            parent_seq_source,
-        );
-        Ok(())
-    }
-
-    #[pyo3(signature = (route=None, trace_id=None, causality_id=None, correlation_id=None))]
-    fn lineage_records(
-        &self,
-        route: Option<RouteRef>,
-        trace_id: Option<String>,
-        causality_id: Option<String>,
-        correlation_id: Option<String>,
-    ) -> PyResult<Vec<LineageRecordTuple>> {
-        let _ = (route, trace_id, causality_id, correlation_id);
-        Ok(Vec::new())
-    }
-
-    fn lineage_record_for_route_event(
-        &self,
-        route: RouteRef,
-        seq_source: u64,
-    ) -> PyResult<Option<LineageRecordTuple>> {
-        let _ = (route, seq_source);
-        Ok(None)
     }
 
     fn retained_payload_count(&self, route: RouteRef) -> PyResult<usize> {

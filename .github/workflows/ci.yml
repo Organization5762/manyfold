@@ -111,11 +111,10 @@ jobs:
             --max-disk-output-blocks 0 \
             --warmup-samples 1 \
             --check-invariants-every 10000 \
-            --lineage-retention none \
             --metadata-mode none \
             | tee benchmark-results/native-sparse.txt
 
-      - name: Native retained-lineage plateau
+      - name: Native correlation-store plateau
         run: |
           set -o pipefail
           cargo run --release --bin memory_retention_benchmark -- \
@@ -139,11 +138,10 @@ jobs:
             --max-disk-output-blocks 0 \
             --warmup-samples 1 \
             --check-invariants-every 10000 \
-            --lineage-retention retained \
             --correlation-store retained \
-            | tee benchmark-results/native-retained-lineage.txt
+            | tee benchmark-results/native-correlation-store.txt
 
-      - name: Native Heart materialized-state retained-lineage plateau
+      - name: Native Heart materialized-state sparse plateau
         run: |
           set -o pipefail
           cargo run --release --bin memory_retention_benchmark -- \
@@ -167,12 +165,11 @@ jobs:
             --max-disk-output-blocks 0 \
             --warmup-samples 1 \
             --check-invariants-every 10000 \
-            --lineage-retention retained \
             --metadata-mode none \
             --materialize-state \
             | tee benchmark-results/native-heart-materialized-state.txt
 
-      - name: Native Heart materialized-state noop-lineage plateau
+      - name: Native Heart materialized-state sparse-metadata plateau
         run: |
           set -o pipefail
           cargo run --release --bin memory_retention_benchmark -- \
@@ -196,11 +193,9 @@ jobs:
             --max-disk-output-blocks 0 \
             --warmup-samples 1 \
             --check-invariants-every 10000 \
-            --lineage-retention retained \
-            --lineage-store noop \
             --metadata-mode static \
             --materialize-state \
-            | tee benchmark-results/native-heart-materialized-state-noop-lineage.txt
+            | tee benchmark-results/native-heart-materialized-state-sparse-metadata.txt
 
       - name: Native Heart materialized-state large-payload plateau
         run: |
@@ -227,12 +222,11 @@ jobs:
             --max-disk-output-blocks 0 \
             --warmup-samples 1 \
             --check-invariants-every 10000 \
-            --lineage-retention retained \
             --metadata-mode none \
             --materialize-state \
             | tee benchmark-results/native-heart-materialized-state-large-payload.txt
 
-      - name: Native high-sequence retained-lineage smoke
+      - name: Native high-sequence correlation-store smoke
         run: |
           set -o pipefail
           cargo run --release --bin memory_retention_benchmark -- \
@@ -244,7 +238,6 @@ jobs:
             --peak-plateau-bytes 0 \
             --warmup-samples 1 \
             --check-invariants-every 1 \
-            --lineage-retention retained \
             --correlation-store retained \
             | tee benchmark-results/native-high-sequence.txt
 
@@ -274,14 +267,13 @@ jobs:
             --max-disk-output-blocks 0 \
             --warmup-samples 1 \
             --check-invariants-every 10000 \
-            --lineage-retention none \
             | tee benchmark-results/jemalloc-sparse.txt
 
-      - name: jemalloc leak check for native retained-lineage mode
+      - name: jemalloc leak check for native correlation-store mode
         run: |
           set -o pipefail
           uv run manyfold-jemalloc-leak-check \
-            --output-dir benchmark-results/jemalloc-retained-lineage \
+            --output-dir benchmark-results/jemalloc-correlation-store \
             --leak-bytes-threshold 131072 \
             --leak-objects-threshold 2 \
             -- ./target/release/memory_retention_benchmark \
@@ -303,9 +295,8 @@ jobs:
             --max-disk-output-blocks 0 \
             --warmup-samples 1 \
             --check-invariants-every 10000 \
-            --lineage-retention retained \
             --correlation-store retained \
-            | tee benchmark-results/jemalloc-retained-lineage.txt
+            | tee benchmark-results/jemalloc-correlation-store.txt
 
       - name: jemalloc leak check for native Heart materialized-state mode
         run: |
@@ -333,7 +324,6 @@ jobs:
             --max-disk-output-blocks 0 \
             --warmup-samples 1 \
             --check-invariants-every 10000 \
-            --lineage-retention retained \
             --materialize-state \
             | tee benchmark-results/jemalloc-heart-materialized-state.txt
 
@@ -343,7 +333,7 @@ jobs:
             benchmark-results/jemalloc-sparse/summary.json \
             --require-command-fragment memory_retention_benchmark
           uv run manyfold-jemalloc-verify \
-            benchmark-results/jemalloc-retained-lineage/summary.json \
+            benchmark-results/jemalloc-correlation-store/summary.json \
             --require-command-fragment memory_retention_benchmark
           uv run manyfold-jemalloc-verify \
             benchmark-results/jemalloc-heart-materialized-state/summary.json \
@@ -369,7 +359,6 @@ jobs:
             --max-disk-input-blocks 0 \
             --max-disk-output-blocks 0 \
             --max-materialized-payloads 0 \
-            --lineage-retention none \
             --metadata-mode none \
             --check \
             | tee benchmark-results/python-sparse.txt
@@ -395,12 +384,11 @@ jobs:
             --max-disk-input-blocks 0 \
             --max-disk-output-blocks 0 \
             --max-materialized-payloads 0 \
-            --lineage-retention none \
             --metadata-mode none \
             --check \
             | tee benchmark-results/python-sparse-nowait.txt
 
-      - name: Python retained-lineage plateau
+      - name: Python native-correlation plateau
         run: |
           set -o pipefail
           uv run manyfold-memory-benchmark \
@@ -420,10 +408,9 @@ jobs:
             --max-disk-input-blocks 0 \
             --max-disk-output-blocks 0 \
             --max-materialized-payloads 0 \
-            --lineage-retention retained \
             --correlation-store native \
             --check \
-            | tee benchmark-results/python-retained-lineage.txt
+            | tee benchmark-results/python-native-correlation.txt
 
       - name: Python Heart process-local nowait plateau
         run: |
@@ -447,12 +434,11 @@ jobs:
             --max-disk-input-blocks 0 \
             --max-disk-output-blocks 0 \
             --max-materialized-payloads 8 \
-            --lineage-retention none \
             --metadata-mode none \
             --check \
             | tee benchmark-results/python-heart-process-local-nowait.txt
 
-      - name: Python Heart materialized-state retained-lineage plateau
+      - name: Python Heart materialized-state sparse plateau
         run: |
           set -o pipefail
           uv run manyfold-memory-benchmark \
@@ -473,7 +459,6 @@ jobs:
             --max-disk-input-blocks 0 \
             --max-disk-output-blocks 0 \
             --max-materialized-payloads 0 \
-            --lineage-retention retained \
             --check \
             | tee benchmark-results/python-heart-materialized-state.txt
 
@@ -499,11 +484,10 @@ jobs:
             --max-disk-input-blocks 0 \
             --max-disk-output-blocks 0 \
             --max-materialized-payloads 0 \
-            --lineage-retention retained \
             --check \
             | tee benchmark-results/python-heart-materialized-state-nowait.txt
 
-      - name: Python Heart materialized-state noop-lineage plateau
+      - name: Python Heart materialized-state sparse-metadata plateau
         run: |
           set -o pipefail
           uv run manyfold-memory-benchmark \
@@ -512,7 +496,6 @@ jobs:
             --history-limit 8 \
             --materialize-state \
             --publish-mode nowait \
-            --lineage-store noop \
             --metadata-mode static \
             --traced-plateau-bytes 0 \
             --project-events 1000000000 \
@@ -527,9 +510,8 @@ jobs:
             --max-disk-input-blocks 0 \
             --max-disk-output-blocks 0 \
             --max-materialized-payloads 0 \
-            --lineage-retention retained \
             --check \
-            | tee benchmark-results/python-heart-materialized-state-noop-lineage.txt
+            | tee benchmark-results/python-heart-materialized-state-sparse-metadata.txt
 
       - name: Python unrelated-topology no-fanout fast path
         run: |
@@ -552,7 +534,6 @@ jobs:
             --max-disk-input-blocks 0 \
             --max-disk-output-blocks 0 \
             --max-materialized-payloads 0 \
-            --lineage-retention none \
             --metadata-mode none \
             --check \
             | tee benchmark-results/python-unrelated-topology.txt
@@ -577,7 +558,6 @@ jobs:
             --max-disk-input-blocks 0 \
             --max-disk-output-blocks 0 \
             --max-materialized-payloads 0 \
-            --lineage-retention none \
             --metadata-mode none \
             --churn-subscriptions \
             --check \
@@ -622,7 +602,7 @@ jobs:
             --require-tail-plateau peak_allocated_bytes=0:3 \
             --require-tail-plateau current_rss_kib=512:3
           uv run manyfold-benchmark-log-verify \
-            benchmark-results/native-retained-lineage.txt \
+            benchmark-results/native-correlation-store.txt \
             --min-final-step 1000000 \
             --min-samples 10 \
             --require-final history=8 \
@@ -639,7 +619,7 @@ jobs:
             --require-tail-plateau peak_allocated_bytes=0:3 \
             --require-tail-plateau current_rss_kib=512:3
           uv run manyfold-benchmark-log-verify \
-            benchmark-results/native-heart-materialized-state-noop-lineage.txt \
+            benchmark-results/native-heart-materialized-state-sparse-metadata.txt \
             --min-final-step 1000000 \
             --min-samples 10 \
             --require-final history=16 \
@@ -731,7 +711,7 @@ jobs:
             --require-numeric-max output_blocks=0 \
             --require-tail-plateau current_rss_kib=512:3
           uv run manyfold-benchmark-log-verify \
-            benchmark-results/python-retained-lineage.txt \
+            benchmark-results/python-native-correlation.txt \
             --min-final-step 75000 \
             --min-samples 4 \
             --require-final replay=8 \
@@ -795,7 +775,7 @@ jobs:
             --require-numeric-max output_blocks=0 \
             --require-tail-plateau current_rss_kib=512:3
           uv run manyfold-benchmark-log-verify \
-            benchmark-results/python-heart-materialized-state-noop-lineage.txt \
+            benchmark-results/python-heart-materialized-state-sparse-metadata.txt \
             --min-final-step 75000 \
             --min-samples 4 \
             --require-final replay=8 \
@@ -960,7 +940,6 @@ jobs:
             --live-plateau-bytes 0 \
             --warmup-samples 1 \
             --check-invariants-every 500 \
-            --lineage-retention none \
             | tee benchmark-results/native-profilers-required.txt
 
       - name: Run required Heart materialized-state memory profilers
@@ -977,7 +956,6 @@ jobs:
             --history-limit 8 \
             --warmup-samples 1 \
             --check-invariants-every 500 \
-            --lineage-retention retained \
             --materialize-state \
             | tee benchmark-results/native-profilers-heart-required.txt
 
@@ -1015,7 +993,6 @@ jobs:
             --live-plateau-bytes 0 \
             --warmup-samples 1 \
             --check-invariants-every 500 \
-            --lineage-retention retained \
             | tee benchmark-results/native-profilers-opportunistic.txt
 
       - name: Write profiler summary

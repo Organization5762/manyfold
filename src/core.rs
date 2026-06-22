@@ -346,7 +346,6 @@ pub struct RetentionPolicyCore {
     pub replay_window: String,
     pub payload_retention_policy: String,
     pub history_limit: Option<usize>,
-    pub lineage_retention_policy: String,
 }
 
 impl RetentionPolicyCore {
@@ -358,7 +357,6 @@ impl RetentionPolicyCore {
                 replay_window: "none".to_string(),
                 payload_retention_policy: "non_replayable".to_string(),
                 history_limit: Some(1),
-                lineage_retention_policy: "none".to_string(),
             },
             Layer::Internal => Self {
                 latest_replay_policy: "latest_only".to_string(),
@@ -366,7 +364,6 @@ impl RetentionPolicyCore {
                 replay_window: "latest".to_string(),
                 payload_retention_policy: "separate_store".to_string(),
                 history_limit: Some(1),
-                lineage_retention_policy: "none".to_string(),
             },
             _ => Self {
                 latest_replay_policy: "bounded_history".to_string(),
@@ -378,7 +375,6 @@ impl RetentionPolicyCore {
                     "separate_store".to_string()
                 },
                 history_limit: Some(DEFAULT_ROUTE_HISTORY_LIMIT),
-                lineage_retention_policy: "none".to_string(),
             },
         }
     }
@@ -3214,7 +3210,6 @@ mod tests {
                 replay_window: "last_2".to_string(),
                 payload_retention_policy: "separate_store".to_string(),
                 history_limit: Some(2),
-                lineage_retention_policy: "none".to_string(),
             },
         );
 
@@ -3282,7 +3277,6 @@ mod tests {
                 replay_window: "latest".to_string(),
                 payload_retention_policy: "separate_store".to_string(),
                 history_limit: Some(1),
-                lineage_retention_policy: "none".to_string(),
             },
         );
 
@@ -3335,7 +3329,6 @@ mod tests {
                 replay_window: "last_2".to_string(),
                 payload_retention_policy: "separate_store".to_string(),
                 history_limit: Some(2),
-                lineage_retention_policy: "none".to_string(),
             },
         );
         let producer = ProducerRefCore {
@@ -3433,7 +3426,6 @@ mod tests {
                 replay_window: "memory".to_string(),
                 payload_retention_policy: "separate_store".to_string(),
                 history_limit: None,
-                lineage_retention_policy: "none".to_string(),
             },
         );
         let producer = ProducerRefCore {
@@ -3488,7 +3480,6 @@ mod tests {
                     replay_window: "last_2".to_string(),
                     payload_retention_policy: "separate_store".to_string(),
                     history_limit: Some(2),
-                    lineage_retention_policy: "none".to_string(),
                 },
             );
         }
@@ -3555,39 +3546,6 @@ mod tests {
     }
 
     #[test]
-    fn native_lineage_api_is_sparse_noop() {
-        let route = sample_route(
-            Plane::Read,
-            Layer::Logical,
-            "heart",
-            "runtime",
-            "lineage_noop",
-            Variant::Event,
-        );
-        let mut graph = GraphCore::default();
-        graph.configure_retention(
-            &route,
-            RetentionPolicyCore {
-                latest_replay_policy: "latest_only".to_string(),
-                durability_class: "memory".to_string(),
-                replay_window: "latest".to_string(),
-                payload_retention_policy: "separate_store".to_string(),
-                history_limit: Some(1),
-                lineage_retention_policy: "retained".to_string(),
-            },
-        );
-        let producer = ProducerRefCore {
-            producer_id: "heart".to_string(),
-            kind: ProducerKind::Application,
-        };
-        graph.write(&route, b"sample".to_vec(), producer.clone(), None);
-
-        assert_eq!(graph.retained_lineage_event_count(), 0);
-        assert_eq!(graph.active_lineage_value_count(), 0);
-        assert!(graph.retention_violations().is_empty());
-    }
-
-    #[test]
     fn retention_violations_report_orphan_payloads() {
         let route = sample_route(
             Plane::Read,
@@ -3638,7 +3596,6 @@ mod tests {
                     replay_window: "last_2".to_string(),
                     payload_retention_policy: "separate_store".to_string(),
                     history_limit: Some(2),
-                    lineage_retention_policy: "retained".to_string(),
                 },
             );
         }

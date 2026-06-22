@@ -732,11 +732,6 @@ def install_manyfold_rust_stub() -> None:
             self._latest = {}
             self._history = {}
             self._retention_limits = {}
-            self._lineage_retention_policies = {}
-            self._lineage_by_event = {}
-            self._lineage_events_by_trace = {}
-            self._lineage_events_by_causality = {}
-            self._lineage_events_by_correlation = {}
             self._sequence = {}
             self._loops = {}
             self._edges = []
@@ -767,7 +762,6 @@ def install_manyfold_rust_stub() -> None:
             replay_window,
             payload_retention_policy,
             history_limit=None,
-            lineage_retention_policy="none",
         ):
             del durability_class, replay_window, payload_retention_policy
             limit = history_limit
@@ -778,7 +772,6 @@ def install_manyfold_rust_stub() -> None:
             elif latest_replay_policy == "bounded_history" and limit is None:
                 limit = 8
             self._retention_limits[route] = limit
-            self._lineage_retention_policies[route] = lineage_retention_policy
             self._trim_retention(route)
 
         def read(self, route):
@@ -931,20 +924,7 @@ def install_manyfold_rust_stub() -> None:
             )
             if envelope is None:
                 return None
-            event_display = (
-                f"{route.display()}@{envelope.seq_source}"
-                if trace_id is None or causality_id is None
-                else None
-            )
-            self.record_lineage_for_route(
-                route,
-                envelope.seq_source,
-                None if producer is None else producer.producer_id,
-                trace_id or event_display,
-                causality_id or event_display,
-                correlation_id,
-                (),
-            )
+            del trace_id, causality_id, correlation_id
             return envelope
 
         def emit_single_if_unrouted_with_lineage_no_parents_and_materializers(
@@ -1117,151 +1097,6 @@ def install_manyfold_rust_stub() -> None:
         def replay(self, route):
             return list(self._history.get(route, ()))
 
-        def record_lineage(
-            self,
-            route_display,
-            seq_source,
-            producer_id,
-            trace_id,
-            causality_id,
-            correlation_id,
-            parent_events,
-        ):
-            event_key = (route_display, seq_source)
-            route = self._catalog.get(route_display)
-            if route is None:
-                return
-            if self._lineage_retention_policies.get(route, "none") != "retained":
-                return
-            retained = {
-                (route_display, envelope.seq_source)
-                for envelope in self._history.get(route, ())
-            }
-            latest = self._latest.get(route)
-            if latest is not None:
-                retained.add((route_display, latest.seq_source))
-            if event_key not in retained:
-                return
-            self._forget_lineage_event(event_key)
-            record = (
-                route_display,
-                seq_source,
-                producer_id,
-                trace_id,
-                causality_id,
-                correlation_id,
-                list(parent_events),
-            )
-            self._lineage_by_event[event_key] = record
-            self._lineage_events_by_trace.setdefault(trace_id, []).append(event_key)
-            self._lineage_events_by_causality.setdefault(causality_id, []).append(
-                event_key
-            )
-            if correlation_id is not None:
-                self._lineage_events_by_correlation.setdefault(
-                    correlation_id, []
-                ).append(event_key)
-
-        def record_lineage_for_route(
-            self,
-            route,
-            seq_source,
-            producer_id,
-            trace_id,
-            causality_id,
-            correlation_id,
-            parent_events,
-        ):
-            self.record_lineage(
-                route.display(),
-                seq_source,
-                producer_id,
-                trace_id,
-                causality_id,
-                correlation_id,
-                parent_events,
-            )
-
-        def record_lineage_for_route_no_parents(
-            self,
-            route,
-            seq_source,
-            producer_id,
-            trace_id,
-            causality_id,
-            correlation_id,
-        ):
-            self.record_lineage_for_route(
-                route,
-                seq_source,
-                producer_id,
-                trace_id,
-                causality_id,
-                correlation_id,
-                (),
-            )
-
-        def record_lineage_for_route_one_parent(
-            self,
-            route,
-            seq_source,
-            producer_id,
-            trace_id,
-            causality_id,
-            correlation_id,
-            parent_route_display,
-            parent_seq_source,
-        ):
-            self.record_lineage_for_route(
-                route,
-                seq_source,
-                producer_id,
-                trace_id,
-                causality_id,
-                correlation_id,
-                ((parent_route_display, parent_seq_source),),
-            )
-
-        def lineage_records(
-            self,
-            route=None,
-            trace_id=None,
-            causality_id=None,
-            correlation_id=None,
-        ):
-            if trace_id is not None:
-                keys = tuple(self._lineage_events_by_trace.get(trace_id, ()))
-            elif causality_id is not None:
-                keys = tuple(self._lineage_events_by_causality.get(causality_id, ()))
-            elif correlation_id is not None:
-                keys = tuple(
-                    self._lineage_events_by_correlation.get(correlation_id, ())
-                )
-            elif route is not None:
-                route_display = route.display()
-                keys = tuple(
-                    (route_display, envelope.seq_source)
-                    for envelope in self._history.get(route, ())
-                )
-            else:
-                keys = tuple(sorted(self._lineage_by_event))
-            route_display = None if route is None else route.display()
-            return [
-                self._lineage_by_event[key]
-                for key in keys
-                if key in self._lineage_by_event
-                and (
-                    route_display is None
-                    or self._lineage_by_event[key][0] == route_display
-                )
-            ]
-
-        def lineage_record_for_route_event(self, route, seq_source):
-            record = self._lineage_by_event.get((route.display(), seq_source))
-            if record is None:
-                return None
-            return record
-
         def retained_payload_count(self, route):
             return len(self._history.get(route, ()))
 
@@ -1290,29 +1125,10 @@ def install_manyfold_rust_stub() -> None:
                         metadata_event_count=latest_seq_source or 0,
                         replay_count=len(self._history.get(route_ref, ())),
                         payload_count=self.retained_payload_count(route_ref),
-                        lineage_count=sum(
-                            1
-                            for event_route, _ in self._lineage_by_event
-                            if event_route == route_display
-                        ),
-                        trace_index_count=sum(
-                            1
-                            for events in self._lineage_events_by_trace.values()
-                            for event_route, _ in events
-                            if event_route == route_display
-                        ),
-                        causality_index_count=sum(
-                            1
-                            for events in self._lineage_events_by_causality.values()
-                            for event_route, _ in events
-                            if event_route == route_display
-                        ),
-                        correlation_index_count=sum(
-                            1
-                            for events in self._lineage_events_by_correlation.values()
-                            for event_route, _ in events
-                            if event_route == route_display
-                        ),
+                        lineage_count=0,
+                        trace_index_count=0,
+                        causality_index_count=0,
+                        correlation_index_count=0,
                         history_limit=self._retention_limits.get(route_ref),
                     )
                 )
@@ -1329,22 +1145,6 @@ def install_manyfold_rust_stub() -> None:
                 latest = self._latest.get(route)
                 if latest is not None:
                     retained.add((route_display, latest.seq_source))
-            for event_key in self._lineage_by_event:
-                if event_key not in retained:
-                    violations.append(
-                        f"lineage {event_key[0]}#{event_key[1]} is not retained"
-                    )
-            for name, index in (
-                ("trace", self._lineage_events_by_trace),
-                ("causality", self._lineage_events_by_causality),
-                ("correlation", self._lineage_events_by_correlation),
-            ):
-                for lineage_id, events in index.items():
-                    for event_key in events:
-                        if event_key not in self._lineage_by_event:
-                            violations.append(
-                                f"{name} index {lineage_id} references missing lineage"
-                            )
             return sorted(violations)
 
         def topology(self):
@@ -1387,41 +1187,6 @@ def install_manyfold_rust_stub() -> None:
             history = self._history.get(route)
             if history is not None and len(history) > limit:
                 del history[: len(history) - limit]
-            route_display = route.display()
-            retained = {
-                (route_display, envelope.seq_source)
-                for envelope in self._history.get(route, ())
-            }
-            latest = self._latest.get(route)
-            if latest is not None:
-                retained.add((route_display, latest.seq_source))
-            for event_key in tuple(self._lineage_by_event):
-                if event_key[0] == route_display and event_key not in retained:
-                    self._forget_lineage_event(event_key)
-
-        def _remove_lineage_index(self, index, lineage_id, event_key):
-            events = index.get(lineage_id)
-            if events is None:
-                return
-            if event_key in events:
-                events.remove(event_key)
-            if not events:
-                del index[lineage_id]
-
-        def _forget_lineage_event(self, event_key):
-            record = self._lineage_by_event.pop(event_key, None)
-            if record is None:
-                return
-            self._remove_lineage_index(
-                self._lineage_events_by_trace, record[3], event_key
-            )
-            self._remove_lineage_index(
-                self._lineage_events_by_causality, record[4], event_key
-            )
-            if record[5] is not None:
-                self._remove_lineage_index(
-                    self._lineage_events_by_correlation, record[5], event_key
-                )
 
         def _event_envelope(self, route, seq_source):
             for envelope in self._history.get(route, ()):
@@ -1437,27 +1202,6 @@ def install_manyfold_rust_stub() -> None:
                 source.payload_ref.inline_bytes,
                 producer=producer,
                 control_epoch=source.control_epoch,
-            )
-            source_display = source.route.display()
-            source_event = (source_display, source.seq_source)
-            source_lineage = self._lineage_by_event.get(source_event)
-            if source_lineage is None:
-                event_display = f"{source_display}@{source.seq_source}"
-                trace_id = event_display
-                causality_id = event_display
-                correlation_id = None
-            else:
-                trace_id = source_lineage[3]
-                causality_id = source_lineage[4]
-                correlation_id = source_lineage[5]
-            self.record_lineage_for_route(
-                target,
-                envelope.seq_source,
-                envelope.producer.producer_id,
-                trace_id,
-                causality_id,
-                correlation_id,
-                (source_event,),
             )
             return envelope
 
@@ -1662,7 +1406,6 @@ def load_manyfold_package():
         "LazyPayloadSource": graph.LazyPayloadSource,
         "LifecycleBinding": graph.LifecycleBinding,
         "LineageRecord": graph.LineageRecord,
-        "LineageTracingStore": graph.LineageTracingStore,
         "LoggingNode": graph.LoggingNode,
         "LocalDurableSpool": sensor_io.LocalDurableSpool,
         "LocalSensorSource": sensor_io.LocalSensorSource,
@@ -1690,10 +1433,8 @@ def load_manyfold_package():
         "MergeNode": graph.MergeNode,
         "NamespaceRef": rust.NamespaceRef,
         "NativeCorrelationTracingStore": graph.NativeCorrelationTracingStore,
-        "NativeLineageTracingStore": graph.NativeLineageTracingStore,
         "NodeThreadPlacement": graph.NodeThreadPlacement,
         "NoopCorrelationTracingStore": graph.NoopCorrelationTracingStore,
-        "NoopLineageTracingStore": graph.NoopLineageTracingStore,
         "NoopSubscription": graph.NoopSubscription,
         "OpenedEnvelope": rust.OpenedEnvelope,
         "OwnerName": primitives.OwnerName,

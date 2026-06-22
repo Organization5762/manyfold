@@ -18,9 +18,7 @@ from pathlib import Path
 from manyfold.graph import (
     Graph,
     NativeCorrelationTracingStore,
-    NativeLineageTracingStore,
     NoopCorrelationTracingStore,
-    NoopLineageTracingStore,
     RouteRetentionPolicy,
     TaintDomain,
     TaintMark,
@@ -56,7 +54,6 @@ def run_probe(
     churn_subscriptions: bool = False,
     churn_taints: bool = False,
     live_observers: int = 0,
-    lineage_retention_policy: str = "none",
     payload_bytes: int = len(b"frame"),
     payload_schema: str = "bytes",
     publish_mode: str = "publish",
@@ -64,7 +61,6 @@ def run_probe(
     materialize_state: bool = False,
     metadata_mode: str = "unique",
     correlation_store: str = "noop",
-    lineage_store: str = "native",
 ) -> tuple[_ProbeSample, ...]:
     return _run_worker_loop(
         iterations,
@@ -73,7 +69,6 @@ def run_probe(
         churn_subscriptions=churn_subscriptions,
         churn_taints=churn_taints,
         live_observers=live_observers,
-        lineage_retention_policy=lineage_retention_policy,
         payload_bytes=payload_bytes,
         payload_schema=payload_schema,
         publish_mode=publish_mode,
@@ -81,7 +76,6 @@ def run_probe(
         materialize_state=materialize_state,
         metadata_mode=metadata_mode,
         correlation_store=correlation_store,
-        lineage_store=lineage_store,
     )
 
 
@@ -405,7 +399,6 @@ def _run_worker_loop(
     churn_subscriptions: bool,
     churn_taints: bool,
     live_observers: int,
-    lineage_retention_policy: str,
     payload_bytes: int,
     payload_schema: str,
     publish_mode: str,
@@ -413,7 +406,6 @@ def _run_worker_loop(
     materialize_state: bool,
     metadata_mode: str,
     correlation_store: str,
-    lineage_store: str,
 ) -> tuple[_ProbeSample, ...]:
     if publish_mode not in ("publish", "nowait"):
         raise ValueError("publish_mode must be one of 'publish' or 'nowait'")
@@ -421,18 +413,12 @@ def _run_worker_loop(
         raise ValueError(
             "metadata_mode must be one of 'none', 'static', 'unique', or 'unique-all'"
         )
-    if lineage_store not in ("native", "noop"):
-        raise ValueError("lineage_store must be one of 'native' or 'noop'")
     if correlation_store not in ("native", "noop"):
         raise ValueError("correlation_store must be one of 'native' or 'noop'")
     if payload_bytes <= 0:
         raise ValueError("payload_bytes must be positive")
     stream = _build_stream(payload_schema)
     graph = Graph()
-    if lineage_store == "noop":
-        graph.attach(NoopLineageTracingStore())
-    else:
-        graph.attach(NativeLineageTracingStore())
     if correlation_store == "native":
         graph.attach(NativeCorrelationTracingStore())
     else:
@@ -444,7 +430,6 @@ def _run_worker_loop(
             latest_replay_policy="bounded_history",
             replay_window=f"last_{history_limit}",
             history_limit=history_limit,
-            lineage_retention_policy=lineage_retention_policy,
         ),
     )
     sample_route = stream
@@ -457,7 +442,6 @@ def _run_worker_loop(
                 latest_replay_policy="bounded_history",
                 replay_window=f"last_{history_limit}",
                 history_limit=history_limit,
-                lineage_retention_policy=lineage_retention_policy,
             ),
         )
         materialize_subscription = graph.materialize(stream, state_route=sample_route)
@@ -481,7 +465,7 @@ def _run_worker_loop(
         if payload_schema == "bytes"
         else None
     )
-    metadata_disabled = lineage_store == "noop" or metadata_mode == "none"
+    metadata_disabled = metadata_mode == "none"
     static_metadata = (
         ("memory-probe", "memory-probe-chain", "memory-probe")
         if metadata_mode == "static" and not metadata_disabled
@@ -763,7 +747,7 @@ def _parse_probe_sample(line: str) -> _ProbeSample | None:
 
 
 def _check_retained_counts(samples: tuple[_ProbeSample, ...], history_limit: int) -> None:
-    _check_retained_counts_for_lineage(samples, history_limit, history_limit, 0, 0)
+    _check_retained_counts_for_lineage(samples, history_limit, 0, 0, 0)
 
 
 def _check_retained_counts_for_lineage(
@@ -1683,10 +1667,6 @@ def _run_external_monitor(args: argparse.Namespace) -> tuple[_ProbeSample, ...]:
         str(args.history_limit),
         "--sample-every",
         str(args.sample_every),
-        "--lineage-retention",
-        args.lineage_retention,
-        "--lineage-store",
-        args.lineage_store,
         "--correlation-store",
         args.correlation_store,
         "--payload-bytes",
@@ -1754,22 +1734,12 @@ def _run_external_monitor(args: argparse.Namespace) -> tuple[_ProbeSample, ...]:
         if args.churn_graphs:
             _check_disposed_graph_counts(probe_samples)
         else:
-            expected_lineage = (
-                args.history_limit
-                if (
-                    args.lineage_retention == "retained"
-                    and args.lineage_store == "native"
-                )
-                else 0
-            )
             _check_retained_counts_for_lineage(
                 probe_samples,
                 args.history_limit,
-                expected_lineage,
+                0,
                 _expected_correlation_index_count(
                     args.history_limit,
-                    lineage_retention=args.lineage_retention,
-                    lineage_store=args.lineage_store,
                     correlation_store=args.correlation_store,
                     metadata_mode=args.metadata_mode,
                 ),
@@ -2601,8 +2571,6 @@ def _main() -> None:
     parser.add_argument("--churn-taints", action="store_true")
     parser.add_argument("--churn-graphs", action="store_true")
     parser.add_argument("--live-observers", type=int, default=0)
-    parser.add_argument("--lineage-retention", choices=("none", "retained"), default="none")
-    parser.add_argument("--lineage-store", choices=("native", "noop"), default="native")
     parser.add_argument("--correlation-store", choices=("native", "noop"), default="noop")
     parser.add_argument("--payload-bytes", type=int, default=len(b"frame"))
     parser.add_argument("--payload-schema", choices=("bytes", "any"), default="bytes")
@@ -2655,8 +2623,6 @@ def _main() -> None:
             churn_subscriptions=args.churn_subscriptions,
             churn_taints=args.churn_taints,
             live_observers=args.live_observers,
-            lineage_retention_policy=args.lineage_retention,
-            lineage_store=args.lineage_store,
             payload_bytes=args.payload_bytes,
             payload_schema=args.payload_schema,
             publish_mode=args.publish_mode,
@@ -2669,22 +2635,12 @@ def _main() -> None:
         if args.churn_graphs:
             _check_disposed_graph_counts(samples)
         else:
-            expected_lineage = (
-                args.history_limit
-                if (
-                    args.lineage_retention == "retained"
-                    and args.lineage_store == "native"
-                )
-                else 0
-            )
             _check_retained_counts_for_lineage(
                 samples,
                 args.history_limit,
-                expected_lineage,
+                0,
                 _expected_correlation_index_count(
                     args.history_limit,
-                    lineage_retention=args.lineage_retention,
-                    lineage_store=args.lineage_store,
                     correlation_store=args.correlation_store,
                     metadata_mode=args.metadata_mode,
                 ),
@@ -2774,19 +2730,11 @@ def _expected_subscriber_metadata_count(
 def _expected_correlation_index_count(
     history_limit: int,
     *,
-    lineage_retention: str,
-    lineage_store: str,
     correlation_store: str,
     metadata_mode: str,
 ) -> int:
-    if (
-        lineage_retention != "retained"
-        or lineage_store != "native"
-        or correlation_store != "native"
-        or metadata_mode == "none"
-    ):
-        return 0
-    return history_limit
+    del history_limit, correlation_store, metadata_mode
+    return 0
 
 
 @dataclass(frozen=True, slots=True)

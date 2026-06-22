@@ -53,7 +53,6 @@ fn sparse_unrouted_write_has_zero_net_allocations_after_warmup() {
             replay_window: "latest 8".to_string(),
             payload_retention_policy: "retain_replay".to_string(),
             history_limit: Some(8),
-            lineage_retention_policy: "none".to_string(),
         },
     );
     let producer = producer();

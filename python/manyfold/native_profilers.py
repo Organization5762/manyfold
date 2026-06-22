@@ -31,8 +31,6 @@ DEFAULT_BENCHMARK_COMMAND = (
     "1",
     "--check-invariants-every",
     "1000",
-    "--lineage-retention",
-    "none",
 )
 
 

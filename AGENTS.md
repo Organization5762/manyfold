@@ -61,17 +61,17 @@ For memory and profiler changes, also run the focused benchmark gates that match
 the touched path. Representative V1 gates:
 
 ```sh
-cargo run --release --bin memory_retention_benchmark -- --iterations 1000000 --sample-every 100000 --history-limit 8 --live-plateau-bytes 0 --peak-plateau-bytes 0 --rss-tail-plateau-kib 512 --rss-tail-min-samples 3 --project-events 1000000000 --projected-live-growth-bytes 0 --projected-live-segment-growth-bytes 0 --projected-peak-growth-bytes 0 --projected-peak-segment-growth-bytes 0 --max-elapsed-seconds 30 --max-cpu-seconds 30 --max-average-event-us 100 --max-interval-event-us 100 --max-disk-input-blocks 0 --max-disk-output-blocks 0 --warmup-samples 1 --check-invariants-every 10000 --lineage-retention none --metadata-mode none --materialize-state
-cargo run --release --bin memory_retention_benchmark -- --iterations 1000000 --sample-every 100000 --history-limit 8 --live-plateau-bytes 0 --peak-plateau-bytes 0 --rss-tail-plateau-kib 512 --rss-tail-min-samples 3 --project-events 1000000000 --projected-live-growth-bytes 0 --projected-live-segment-growth-bytes 0 --projected-peak-growth-bytes 0 --projected-peak-segment-growth-bytes 0 --max-elapsed-seconds 30 --max-cpu-seconds 30 --max-average-event-us 100 --max-interval-event-us 100 --max-disk-input-blocks 0 --max-disk-output-blocks 0 --warmup-samples 1 --check-invariants-every 10000 --lineage-retention retained --lineage-store noop --metadata-mode static --materialize-state
-uv run manyfold-memory-benchmark --iterations 75000 --sample-every 25000 --history-limit 8 --lineage-retention retained --lineage-store noop --materialize-state --publish-mode nowait --metadata-mode static --payload-schema bytes --check --max-materialized-payloads 0 --traced-plateau-bytes 65536 --traced-projected-growth-bytes 134217728 --traced-segment-projected-growth-bytes 134217728 --rss-tail-plateau-kib 512 --rss-tail-min-samples 3 --max-cpu-seconds 10 --max-average-event-us 500 --max-interval-event-us 1000 --max-disk-input-blocks 0 --max-disk-output-blocks 0
+cargo run --release --bin memory_retention_benchmark -- --iterations 1000000 --sample-every 100000 --history-limit 8 --live-plateau-bytes 0 --peak-plateau-bytes 0 --rss-tail-plateau-kib 512 --rss-tail-min-samples 3 --project-events 1000000000 --projected-live-growth-bytes 0 --projected-live-segment-growth-bytes 0 --projected-peak-growth-bytes 0 --projected-peak-segment-growth-bytes 0 --max-elapsed-seconds 30 --max-cpu-seconds 30 --max-average-event-us 100 --max-interval-event-us 100 --max-disk-input-blocks 0 --max-disk-output-blocks 0 --warmup-samples 1 --check-invariants-every 10000 --metadata-mode none --materialize-state
+cargo run --release --bin memory_retention_benchmark -- --iterations 1000000 --sample-every 100000 --history-limit 8 --live-plateau-bytes 0 --peak-plateau-bytes 0 --rss-tail-plateau-kib 512 --rss-tail-min-samples 3 --project-events 1000000000 --projected-live-growth-bytes 0 --projected-live-segment-growth-bytes 0 --projected-peak-growth-bytes 0 --projected-peak-segment-growth-bytes 0 --max-elapsed-seconds 30 --max-cpu-seconds 30 --max-average-event-us 100 --max-interval-event-us 100 --max-disk-input-blocks 0 --max-disk-output-blocks 0 --warmup-samples 1 --check-invariants-every 10000 --metadata-mode static --materialize-state
+uv run manyfold-memory-benchmark --iterations 75000 --sample-every 25000 --history-limit 8 --materialize-state --publish-mode nowait --metadata-mode static --payload-schema bytes --check --max-materialized-payloads 0 --traced-plateau-bytes 65536 --traced-projected-growth-bytes 134217728 --traced-segment-projected-growth-bytes 134217728 --rss-tail-plateau-kib 512 --rss-tail-min-samples 3 --max-cpu-seconds 10 --max-average-event-us 500 --max-interval-event-us 1000 --max-disk-input-blocks 0 --max-disk-output-blocks 0
 ```
 
 For long-haul native allocator proof runs, use the same stress tool at target
 event volume:
 
 ```sh
-cargo run --release --bin memory_retention_benchmark -- --iterations 1000000000 --sample-every 100000000 --history-limit 8 --live-plateau-bytes 0 --rss-tail-plateau-kib 512 --rss-tail-min-samples 3 --warmup-samples 2 --check-invariants-every 100000 --lineage-retention none
-cargo run --release --bin memory_retention_benchmark -- --iterations 1000000000 --sample-every 100000000 --history-limit 8 --live-plateau-bytes 0 --rss-tail-plateau-kib 512 --rss-tail-min-samples 3 --warmup-samples 2 --check-invariants-every 100000 --lineage-retention retained
+cargo run --release --bin memory_retention_benchmark -- --iterations 1000000000 --sample-every 100000000 --history-limit 8 --live-plateau-bytes 0 --rss-tail-plateau-kib 512 --rss-tail-min-samples 3 --warmup-samples 2 --check-invariants-every 100000 --metadata-mode none
+cargo run --release --bin memory_retention_benchmark -- --iterations 1000000000 --sample-every 100000000 --history-limit 8 --live-plateau-bytes 0 --rss-tail-plateau-kib 512 --rss-tail-min-samples 3 --warmup-samples 2 --check-invariants-every 100000 --metadata-mode static
 ```
 
 For Heart-on-device proof, run the real target command with tree-scoped external
@@ -143,9 +143,9 @@ uv run manyfold-heart-monitor-verify heart-lib_2026-monitor.json --min-samples 3
   must use a hard maximum (`deque(maxlen=...)`, retention policy, backpressure
   limit, or explicit eviction), be scoped to static graph topology, or document
   why unbounded growth is safe.
-- Lineage retention is opt-in. Default graph routes should run sparse with
-  `lineage_retention_policy="none"`; enable `retained` only for explicit
-  debugging/introspection paths and prove the retained indexes stay bounded.
+- Lineage storage is not a route policy. Keep runtime routes sparse by default;
+  use explicit metadata/correlation modes only for debugging and prove those
+  retained indexes stay bounded.
 - Never add append-only `list`/`dict` structures to event, timer, observer,
   debug, audit, payload, or scheduler paths. Prefer bounded collections and
   remove all secondary indexes when the primary record expires.
@@ -176,7 +176,7 @@ uv run manyfold-heart-monitor-verify heart-lib_2026-monitor.json --min-samples 3
 
 ## Recent Validation
 
-- 2026-06-21: Removed native retained-lineage storage from `GraphCore`; lineage
+- 2026-06-21: Removed native lineage storage from `GraphCore`; lineage
   and correlation attach/record/query APIs are compatibility no-ops, and sparse
   routing retains no lineage route-id maps, lineage indexes, or lineage records.
   The native zero-net-allocation regression test still covers warmed sparse
@@ -189,7 +189,7 @@ uv run manyfold-heart-monitor-verify heart-lib_2026-monitor.json --min-samples 3
   --all-targets --all-features -- -D warnings`, `cargo test`, `uv sync
   --reinstall-package manyfold`, full `uv run ruff check`, full `uv run python
   -m unittest discover -s tests -p 'test_*.py'` (971 tests), RFC checklist,
-  example catalog checks, a 75,000-event Python Heart noop-lineage nowait
+  example catalog checks, a 75,000-event Python Heart sparse-metadata nowait
   benchmark artifact verification, a 300,000-event native sparse release
   benchmark artifact verification, generated-artifact scan, and `git diff
   --check`.
@@ -262,8 +262,8 @@ uv run manyfold-heart-monitor-verify heart-lib_2026-monitor.json --min-samples 3
   --all-targets --all-features -- -D warnings`, `cargo test`, `uv sync
   --reinstall-package manyfold`, full `uv run ruff check`, full `uv run python
   -m unittest discover -s tests -p 'test_*.py'` (961 tests), RFC checklist,
-  example catalog checks, native sparse and Heart-style noop-lineage plateau
-  gates through 1,000,000 events, Python Heart-style noop-lineage nowait plateau
+  example catalog checks, native sparse and Heart-style sparse-metadata plateau
+  gates through 1,000,000 events, Python Heart-style sparse-metadata nowait plateau
   gate through 75,000 events, local `/Users/lampe/code/heart` focused `lib_2026`
   integration (68 tests), and `git diff --check`.
 - 2026-06-21: Added `manyfold-native-profiler-verify` so required CI DHAT and
@@ -298,18 +298,18 @@ uv run manyfold-heart-monitor-verify heart-lib_2026-monitor.json --min-samples 3
   verify saved benchmark logs include CPU seconds, average/interval latency, and
   zero block-I/O evidence. Ran focused Ruff, `uv run python -m unittest
   tests.test_benchmark_artifacts tests.test_project_metadata`, and a real
-  75,000-event Python Heart noop-lineage nowait benchmark whose saved log passed
+  75,000-event Python Heart sparse-metadata nowait benchmark whose saved log passed
   retained-count, RSS-tail, CPU, latency, and block-I/O artifact checks.
 - 2026-06-21: CI benchmark artifact verification now also caps final elapsed
   wall-clock time with `--require-final-max elapsed_seconds=30`, so saved logs
   prove benchmarks did not silently slow down while satisfying memory gates. Ran
   focused Ruff, `uv run python -m unittest tests.test_benchmark_artifacts
-  tests.test_project_metadata`, a real 75,000-event Python Heart noop-lineage
+  tests.test_project_metadata`, a real 75,000-event Python Heart sparse-metadata
   nowait benchmark, and a 300,000-event native sparse release benchmark whose
   saved logs passed retained-count/allocator, RSS-tail, CPU, elapsed-time,
   latency, and block-I/O artifact checks.
-- 2026-06-21: V1 memory-readiness work added native sparse/retained lineage
-  stores, explicit lineage/correlation attachment modes, jemalloc leak-check
+- 2026-06-21: V1 memory-readiness work added sparse native metadata paths,
+  explicit correlation attachment modes, jemalloc leak-check
   artifact verification, native profiler wrappers, Python/native plateau gates,
   benchmark log verification, and Heart wrapper provenance checks. Local
   validation covered `cargo fmt --check`, Clippy, `cargo test`, `uv sync
@@ -327,10 +327,18 @@ uv run manyfold-heart-monitor-verify heart-lib_2026-monitor.json --min-samples 3
   artifacts and jemalloc leak-summary evidence. Retried totem probing from the
   skills workspace; `michael@totem4.local` still failed DNS resolution locally,
   so real Heart-on-totem profiling remains pending until a device is reachable.
-- 2026-06-21: Cut retained lineage/correlation storage from the core sparse
-  runtime. Native lineage record/profile/attach hooks now no-op or disappear,
-  Python `Graph.lineage()` is intentionally empty, and benchmark/reactive tests
+- 2026-06-21: Cut former lineage storage from the core sparse runtime. Native
+  lineage record/profile/attach hooks now disappear, the lineage query API is
+  removed, and benchmark/reactive tests
   assert `lineage=0`/`correlation_index=0` even when metadata is supplied. Ran
   `uv sync`, `cargo fmt`, `cargo test`, Clippy with `-D warnings`, `uv sync
   --reinstall-package manyfold`, focused Ruff, `tests.test_memory_benchmarks`,
   `tests.test_graph_reactive`, and full unittest discovery.
+- 2026-06-21: Removed compatibility-only lineage retention knobs, including
+  route policy fields, Python/native benchmark flags, Rust stress aliases, and
+  dead runtime cache state. Renamed Heart plateau artifacts to sparse-metadata
+  mode. Ran `uv sync`, `uv sync --reinstall-package manyfold`, `cargo test`,
+  Clippy with `-D warnings`, `cargo fmt --check`, `uv run ruff check`, RFC
+  checklist check, focused memory benchmark/reactive/project metadata/reference
+  unittest suites, and `git diff --check`. Full unittest discovery was attempted
+  once and timed out after 300 seconds without a reported failure.

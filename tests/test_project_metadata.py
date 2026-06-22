@@ -149,12 +149,12 @@ class ProjectMetadataTests(unittest.TestCase):
         workflow = CI_WORKFLOW_PATH.read_text(encoding="utf-8")
 
         required_fragments = (
-            "Native Heart materialized-state retained-lineage plateau",
-            "Native Heart materialized-state noop-lineage plateau",
+            "Native Heart materialized-state sparse plateau",
+            "Native Heart materialized-state sparse-metadata plateau",
             "Native Heart materialized-state large-payload plateau",
-            "Native high-sequence retained-lineage smoke",
+            "Native high-sequence correlation-store smoke",
             "Python sparse nowait plateau",
-            "Python Heart materialized-state noop-lineage plateau",
+            "Python Heart materialized-state sparse-metadata plateau",
             "Python Heart materialized-state nowait plateau",
             "Heart wrapper provenance smoke",
             "jemalloc leak check for native Heart materialized-state mode",
@@ -188,7 +188,6 @@ class ProjectMetadataTests(unittest.TestCase):
             "--max-disk-output-blocks 0",
             "--publish-mode nowait",
             "--metadata-mode none",
-            "--lineage-store noop",
             "--correlation-store native",
             "--correlation-store retained",
             "--require-metadata",
@@ -213,13 +212,13 @@ class ProjectMetadataTests(unittest.TestCase):
             "--require-sample-field rss",
             "native-heart-materialized-state-large-payload.txt",
             "native-heart-materialized-state.txt",
-            "native-heart-materialized-state-noop-lineage.txt",
+            "native-heart-materialized-state-sparse-metadata.txt",
             "native-high-sequence.txt",
             "python-heart-materialized-state.txt",
             "python-heart-materialized-state-nowait.txt",
-            "python-heart-materialized-state-noop-lineage.txt",
+            "python-heart-materialized-state-sparse-metadata.txt",
             "python-heart-process-local-nowait.txt",
-            "python-retained-lineage.txt",
+            "python-native-correlation.txt",
             "python-sparse.txt",
             "python-sparse-nowait.txt",
             "python-subscription-churn.txt",
@@ -231,7 +230,7 @@ class ProjectMetadataTests(unittest.TestCase):
                 self.assertIn(fragment, workflow)
         self.assertNotIn("--allow-missing-leak-summary", workflow)
         noop_heart_step = workflow.split(
-            "- name: Python Heart materialized-state noop-lineage plateau",
+            "- name: Python Heart materialized-state sparse-metadata plateau",
             1,
         )[1].split("| tee benchmark-results/python-heart", 1)[0]
         self.assertIn("--max-cpu-seconds 5", noop_heart_step)
@@ -252,11 +251,11 @@ class ProjectMetadataTests(unittest.TestCase):
         step_names = (
             "Python sparse retention plateau",
             "Python sparse nowait plateau",
-            "Python retained-lineage plateau",
+            "Python native-correlation plateau",
             "Python Heart process-local nowait plateau",
-            "Python Heart materialized-state retained-lineage plateau",
+            "Python Heart materialized-state sparse plateau",
             "Python Heart materialized-state nowait plateau",
-            "Python Heart materialized-state noop-lineage plateau",
+            "Python Heart materialized-state sparse-metadata plateau",
             "Python unrelated-topology no-fanout fast path",
             "Python subscription churn disposal",
         )

@@ -859,14 +859,13 @@ class MemoryBenchmarkTests(unittest.TestCase):
         self.assertEqual(samples[-1].payload_count, 4)
         self.assertEqual(samples[-1].materialized_payload_count, 4)
 
-    def test_run_probe_materialized_state_stays_sparse_without_lineage_store(
+    def test_run_probe_materialized_state_stays_sparse_without_lineage_storage(
         self,
     ) -> None:
         samples = memory_benchmarks.run_probe(
             iterations=8,
             history_limit=4,
             sample_every=4,
-            lineage_retention_policy="retained",
             materialize_state=True,
         )
 
@@ -883,20 +882,17 @@ class MemoryBenchmarkTests(unittest.TestCase):
             history_limit=4,
             sample_every=4,
             correlation_store="native",
-            lineage_retention_policy="retained",
             metadata_mode="static",
         )
 
         self.assertEqual(samples[-1].lineage_count, 0)
         self.assertEqual(samples[-1].correlation_index_count, 0)
 
-    def test_run_probe_noop_lineage_store_suppresses_retained_lineage(self) -> None:
+    def test_run_probe_metadata_mode_stays_without_lineage_storage(self) -> None:
         samples = memory_benchmarks.run_probe(
             iterations=8,
             history_limit=4,
             sample_every=4,
-            lineage_retention_policy="retained",
-            lineage_store="noop",
             materialize_state=True,
             metadata_mode="static",
             publish_mode="nowait",
@@ -920,8 +916,6 @@ class MemoryBenchmarkTests(unittest.TestCase):
                 iterations=8,
                 history_limit=4,
                 sample_every=4,
-                lineage_retention_policy="retained",
-                lineage_store="noop",
                 materialize_state=True,
                 metadata_mode="static",
                 publish_mode="nowait",
@@ -949,8 +943,6 @@ class MemoryBenchmarkTests(unittest.TestCase):
                 iterations=8,
                 history_limit=4,
                 sample_every=4,
-                lineage_retention_policy="retained",
-                lineage_store="noop",
                 materialize_state=True,
                 metadata_mode="static",
                 payload_bytes=1024,
@@ -996,16 +988,14 @@ class MemoryBenchmarkTests(unittest.TestCase):
                 history_limit=1,
                 sample_every=1,
                 correlation_store="native",
-                lineage_retention_policy="retained",
                 metadata_mode="static",
             )
         finally:
             memory_benchmarks.Graph = original_graph
 
-        self.assertIn(memory_benchmarks.NativeLineageTracingStore, attached_types)
         self.assertIn(memory_benchmarks.NativeCorrelationTracingStore, attached_types)
 
-    def test_run_probe_omits_metadata_kwargs_when_lineage_store_is_noop(self) -> None:
+    def test_run_probe_omits_metadata_kwargs_when_metadata_mode_is_none(self) -> None:
         original_graph = memory_benchmarks.Graph
         publish_kwargs: list[dict[str, object]] = []
 
@@ -1020,10 +1010,8 @@ class MemoryBenchmarkTests(unittest.TestCase):
                 iterations=8,
                 history_limit=4,
                 sample_every=4,
-                lineage_retention_policy="retained",
-                lineage_store="noop",
                 materialize_state=True,
-                metadata_mode="static",
+                metadata_mode="none",
                 publish_mode="nowait",
             )
         finally:
@@ -1060,8 +1048,6 @@ class MemoryBenchmarkTests(unittest.TestCase):
             iterations=128,
             history_limit=8,
             sample_every=8,
-            lineage_retention_policy="retained",
-            lineage_store="noop",
             materialize_state=True,
             metadata_mode="unique-all",
             publish_mode="nowait",
@@ -1078,7 +1064,6 @@ class MemoryBenchmarkTests(unittest.TestCase):
             iterations=8,
             history_limit=4,
             sample_every=4,
-            lineage_retention_policy="retained",
             materialize_state=True,
             publish_mode="nowait",
         )
@@ -1094,7 +1079,6 @@ class MemoryBenchmarkTests(unittest.TestCase):
             iterations=8,
             history_limit=4,
             sample_every=4,
-            lineage_retention_policy="retained",
             materialize_state=True,
             metadata_mode="unique-all",
             publish_mode="nowait",
@@ -1106,10 +1090,8 @@ class MemoryBenchmarkTests(unittest.TestCase):
         self.assertEqual(samples[-1].lineage_count, 0)
         self.assertEqual(samples[-1].materialized_payload_count, 0)
 
-    def test_noop_lineage_store_uses_no_lineage_materializer_drop(self) -> None:
-        graph, stream, state, subscription = _materialized_nowait_graph(
-            lineage_store="noop",
-        )
+    def test_sparse_lineage_uses_no_lineage_materializer_drop(self) -> None:
+        graph, stream, state, subscription = _materialized_nowait_graph()
         try:
             for index in range(4):
                 graph.publish_nowait(
@@ -1171,9 +1153,7 @@ class MemoryBenchmarkTests(unittest.TestCase):
             subscription.dispose()
 
     def test_no_lineage_materializer_profile_rejects_after_unregister(self) -> None:
-        graph, stream, state, subscription = _materialized_nowait_graph(
-            lineage_store="noop",
-        )
+        graph, stream, state, subscription = _materialized_nowait_graph()
         try:
             graph.publish_nowait(stream, b"warm")
             profile = graph._last_nowait_drop_no_lineage_profile
@@ -1367,22 +1347,14 @@ class MemoryBenchmarkTests(unittest.TestCase):
 def _materialized_nowait_graph(
     *,
     history_limit: int = 8,
-    lineage_store: str = "native",
 ) -> tuple[object, object, object, object]:
     stream = memory_benchmarks._build_stream("bytes")
     state = memory_benchmarks._build_state_stream("bytes")
     graph = memory_benchmarks.Graph()
-    if lineage_store == "noop":
-        graph.attach(memory_benchmarks.NoopLineageTracingStore())
-    elif lineage_store == "native":
-        graph.attach(memory_benchmarks.NativeLineageTracingStore())
-    elif lineage_store != "native":
-        raise ValueError("lineage_store must be one of 'native' or 'noop'")
     retention = memory_benchmarks.RouteRetentionPolicy(
         latest_replay_policy="bounded_history",
         replay_window=f"last_{history_limit}",
         history_limit=history_limit,
-        lineage_retention_policy="retained",
     )
     graph.configure_retention(stream, retention)
     graph.configure_retention(state, retention)

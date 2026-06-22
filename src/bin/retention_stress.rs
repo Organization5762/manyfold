@@ -9,27 +9,6 @@ use manyfold::core::{
     RouteRefCore, SchemaRefCore, Variant,
 };
 
-#[derive(Clone, Copy)]
-enum LineageRetentionMode {
-    None,
-    Retained,
-}
-
-impl LineageRetentionMode {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::None => "none",
-            Self::Retained => "retained",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Eq, PartialEq)]
-enum LineageStoreMode {
-    Retained,
-    Noop,
-}
-
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum CorrelationStoreMode {
     Retained,
@@ -69,8 +48,6 @@ struct Config {
     warmup_samples: usize,
     check_invariants_every: u64,
     seed_seq_source: Option<u64>,
-    lineage_retention: LineageRetentionMode,
-    lineage_store: LineageStoreMode,
     correlation_store: CorrelationStoreMode,
     metadata_mode: MetadataMode,
     payload_bytes: usize,
@@ -249,7 +226,6 @@ fn run_stress(config: Config) -> Vec<Sample> {
             replay_window: format!("last_{}", config.history_limit),
             payload_retention_policy: "separate_store".to_string(),
             history_limit: Some(config.history_limit),
-            lineage_retention_policy: config.lineage_retention.as_str().to_string(),
         },
     );
     let mut measured_routes = vec![route.clone()];
@@ -262,7 +238,6 @@ fn run_stress(config: Config) -> Vec<Sample> {
                 replay_window: format!("last_{}", config.history_limit),
                 payload_retention_policy: "separate_store".to_string(),
                 history_limit: Some(config.history_limit),
-                lineage_retention_policy: config.lineage_retention.as_str().to_string(),
             },
         );
         graph.register_materialize_bytes(&route, &state_route);
@@ -388,8 +363,6 @@ fn parse_args() -> Config {
         warmup_samples: 2,
         check_invariants_every: 0,
         seed_seq_source: None,
-        lineage_retention: LineageRetentionMode::None,
-        lineage_store: LineageStoreMode::Retained,
         correlation_store: CorrelationStoreMode::Noop,
         metadata_mode: MetadataMode::Static,
         payload_bytes: b"frame".len(),
@@ -483,22 +456,6 @@ fn parse_args() -> Config {
             "--seed-seq-source" => {
                 config.seed_seq_source = Some(parse_next(&mut args, "--seed-seq-source"));
             }
-            "--lineage-retention" => {
-                let value: String = parse_next(&mut args, "--lineage-retention");
-                config.lineage_retention = match value.as_str() {
-                    "none" => LineageRetentionMode::None,
-                    "retained" => LineageRetentionMode::Retained,
-                    _ => panic!("--lineage-retention must be none or retained"),
-                };
-            }
-            "--lineage-store" => {
-                let value: String = parse_next(&mut args, "--lineage-store");
-                config.lineage_store = match value.as_str() {
-                    "retained" => LineageStoreMode::Retained,
-                    "noop" => LineageStoreMode::Noop,
-                    _ => panic!("--lineage-store must be retained or noop"),
-                };
-            }
             "--correlation-store" => {
                 let value: String = parse_next(&mut args, "--correlation-store");
                 config.correlation_store = match value.as_str() {
@@ -521,9 +478,6 @@ fn parse_args() -> Config {
             }
             "--materialize-state" => {
                 config.materialize_state = true;
-            }
-            "--unique-lineage-ids" => {
-                config.metadata_mode = MetadataMode::Unique;
             }
             "--help" | "-h" => {
                 print_help();
@@ -576,10 +530,9 @@ fn print_help() {
          [--max-interval-event-us N] [--max-disk-input-blocks N] [--max-disk-output-blocks N] \
          [--warmup-samples N] \
          [--check-invariants-every N] [--seed-seq-source N] \
-         [--lineage-retention none|retained] [--lineage-store retained|noop] \
          [--correlation-store retained|noop] [--metadata-mode none|static|unique] \
          [--payload-bytes N] \
-         [--materialize-state] [--unique-lineage-ids]"
+         [--materialize-state]"
     );
 }
 
@@ -1321,8 +1274,6 @@ mod tests {
             warmup_samples: 1,
             check_invariants_every: 1,
             seed_seq_source: None,
-            lineage_retention: LineageRetentionMode::Retained,
-            lineage_store: LineageStoreMode::Retained,
             correlation_store: CorrelationStoreMode::Retained,
             metadata_mode: MetadataMode::Static,
             payload_bytes: b"frame".len(),
@@ -1366,8 +1317,6 @@ mod tests {
             warmup_samples: 1,
             check_invariants_every: 1,
             seed_seq_source: None,
-            lineage_retention: LineageRetentionMode::Retained,
-            lineage_store: LineageStoreMode::Retained,
             correlation_store: CorrelationStoreMode::Noop,
             metadata_mode: MetadataMode::None,
             payload_bytes: b"frame".len(),
@@ -1376,51 +1325,6 @@ mod tests {
 
         let latest = samples.last().expect("stress run should sample");
 
-        assert_eq!(latest.lineage, 0);
-        assert_eq!(latest.lineage_values, 0);
-        assert_eq!(latest.trace_index, 0);
-        assert_eq!(latest.correlation_index, 0);
-    }
-
-    #[test]
-    fn noop_lineage_store_suppresses_requested_retained_lineage() {
-        let samples = run_stress(Config {
-            iterations: 8,
-            history_limit: 8,
-            sample_every: 8,
-            rss_plateau_kib: None,
-            rss_tail_plateau_kib: None,
-            rss_tail_min_samples: 1,
-            live_plateau_bytes: None,
-            peak_plateau_bytes: None,
-            projected_live_growth_bytes: None,
-            projected_live_segment_growth_bytes: None,
-            projected_peak_growth_bytes: None,
-            projected_peak_segment_growth_bytes: None,
-            projected_rss_growth_kib: None,
-            projected_rss_segment_growth_kib: None,
-            max_elapsed_seconds: None,
-            max_cpu_seconds: None,
-            max_average_event_us: None,
-            max_interval_event_us: None,
-            max_disk_input_blocks: None,
-            max_disk_output_blocks: None,
-            project_events: 1_000_000_000,
-            warmup_samples: 1,
-            check_invariants_every: 1,
-            seed_seq_source: None,
-            lineage_retention: LineageRetentionMode::Retained,
-            lineage_store: LineageStoreMode::Noop,
-            correlation_store: CorrelationStoreMode::Noop,
-            metadata_mode: MetadataMode::Static,
-            payload_bytes: b"frame".len(),
-            materialize_state: true,
-        });
-
-        let latest = samples.last().expect("stress run should sample");
-
-        assert_eq!(latest.history, 16);
-        assert_eq!(latest.payloads, 16);
         assert_eq!(latest.lineage, 0);
         assert_eq!(latest.lineage_values, 0);
         assert_eq!(latest.trace_index, 0);

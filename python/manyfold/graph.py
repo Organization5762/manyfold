@@ -92,7 +92,7 @@ InspectableRoute = Union[RouteLike, NativeReadablePort, NativeWritablePort]
 EnvelopeIterator = Iterator[ClosedEnvelope]
 StateT = TypeVar("StateT")
 TRight = TypeVar("TRight")
-TypedRouteRuntimeFlags: TypeAlias = tuple[bool, bool, bool, bool]
+TypedRouteRuntimeFlags: TypeAlias = tuple[bool, bool, bool]
 ProcessLocalNowaitCache: TypeAlias = tuple[
     RouteRef,
     str,
@@ -1192,31 +1192,10 @@ class LineageRecord:
 
 
 @runtime_checkable
-class LineageTracingStore(Protocol):
-    """Attached lineage backend that decides whether route lineage is retained."""
-
-    def lineage_retention_policy(self, requested_policy: str) -> str: ...
-
-
-@runtime_checkable
 class CorrelationTracingStore(Protocol):
     """Attached backend for optional per-event correlation indexes."""
 
     def retained_correlation_id(self, correlation_id: str | None) -> str | None: ...
-
-
-class NativeLineageTracingStore:
-    """Compatibility attachment for sparse graph runs without retained lineage."""
-
-    def lineage_retention_policy(self, _requested_policy: str) -> str:
-        return "none"
-
-
-class NoopLineageTracingStore:
-    """Disable retained lineage and correlation records for sparse graph runs."""
-
-    def lineage_retention_policy(self, _requested_policy: str) -> str:
-        return "none"
 
 
 class NativeCorrelationTracingStore:
@@ -1907,7 +1886,6 @@ class RouteRetentionPolicy:
     replay_window: str = "memory"
     payload_retention_policy: str | None = None
     history_limit: int | None = None
-    lineage_retention_policy: str = "none"
 
     def __post_init__(self) -> None:
         _require_non_empty_text(
@@ -1933,11 +1911,6 @@ class RouteRetentionPolicy:
             raise ValueError(
                 "payload_retention_policy must be one of "
                 "'inline', 'separate_store', 'external_store', or 'non_replayable'"
-            )
-        allowed_lineage = {"none", "retained"}
-        if self.lineage_retention_policy not in allowed_lineage:
-            raise ValueError(
-                "lineage_retention_policy must be one of 'none' or 'retained'"
             )
         if self.history_limit is not None and (
             not isinstance(self.history_limit, int)
@@ -3300,9 +3273,7 @@ class RoutePipeline(Generic[T]):
 
 
 AttachedTracingStore: TypeAlias = Union[
-    LineageTracingStore,
     CorrelationTracingStore,
-    type[LineageTracingStore],
     type[CorrelationTracingStore],
 ]
 
@@ -3457,8 +3428,6 @@ class Graph:
         self._default_retention_policies: dict[RouteRef, RouteRetentionPolicy] = {}
         self._resolved_retention_by_key: dict[str, RouteRetentionPolicy] = {}
         self._route_refs_by_key: dict[str, RouteRef] = {}
-        self._lineage_tracing_store: LineageTracingStore = NoopLineageTracingStore()
-        self._lineage_tracing_enabled_flag = False
         self._correlation_tracing_store: CorrelationTracingStore = (
             NoopCorrelationTracingStore()
         )
@@ -3469,7 +3438,6 @@ class Graph:
         self._last_publish_route_target: RouteLike | None = None
         self._last_publish_typed_target: TypedRoute[Any] | None = None
         self._sparse_native_retention_by_key: dict[str, bool] = {}
-        self._lineage_retained_by_key: dict[str, bool] = {}
         self._last_audit_event_key: tuple[str, str, str | None] | None = None
         self._last_audit_event: DebugEvent | None = None
         self._write_audit_event_by_route: dict[str, DebugEvent] = {}
@@ -3548,16 +3516,10 @@ class Graph:
         """
         return GraphContext(self, name=name, group=group, metadata=metadata)
 
-    def attach(self, store: AttachedTracingStore) -> LineageTracingStore | CorrelationTracingStore:
-        """Attach a graph-wide tracing or correlation store."""
+    def attach(self, store: AttachedTracingStore) -> CorrelationTracingStore:
+        """Attach a graph-wide correlation store."""
         if isinstance(store, type):
-            if store is LineageTracingStore or issubclass(
-                store, NativeLineageTracingStore
-            ):
-                store = NativeLineageTracingStore()
-            elif store is NoopLineageTracingStore:
-                store = NoopLineageTracingStore()
-            elif store is CorrelationTracingStore or issubclass(
+            if store is CorrelationTracingStore or issubclass(
                 store, NativeCorrelationTracingStore
             ):
                 store = NativeCorrelationTracingStore()
@@ -3565,25 +3527,16 @@ class Graph:
                 store = NoopCorrelationTracingStore()
             else:
                 raise ValueError(
-                    "graph attachment class must be a lineage or "
-                    "correlation tracing store"
+                    "graph attachment class must be a correlation tracing store"
                 )
-        if isinstance(store, CorrelationTracingStore):
-            self._correlation_tracing_store = store
-            if isinstance(store, NoopCorrelationTracingStore):
-                self._correlation_tracing_enabled_flag = False
-            else:
-                self._correlation_tracing_enabled_flag = True
-            self._clear_last_nowait_drop_cache()
-            return store
-        if not isinstance(store, LineageTracingStore):
-            raise ValueError(
-                "graph attachment must be a LineageTracingStore or "
-                "CorrelationTracingStore"
-            )
-        self._lineage_tracing_store = store
-        self._lineage_tracing_enabled_flag = False
-        self._reconfigure_lineage_tracing_store()
+        if not isinstance(store, CorrelationTracingStore):
+            raise ValueError("graph attachment must be a CorrelationTracingStore")
+        self._correlation_tracing_store = store
+        self._correlation_tracing_enabled_flag = not isinstance(
+            store,
+            NoopCorrelationTracingStore,
+        )
+        self._clear_last_nowait_drop_cache()
         return store
 
     def register_port(self, route_ref: RouteLike) -> RouteRef:
@@ -3621,20 +3574,16 @@ class Graph:
                 )
                 else policy.history_limit
             ),
-            lineage_retention_policy=policy.lineage_retention_policy,
         )
         self._retention_policies[key] = resolved
         self._resolved_retention_by_key[key] = resolved
         self._route_refs_by_key[key] = native_route
-        lineage_retained = self._lineage_retained_for_policy(resolved)
-        self._lineage_retained_by_key[key] = lineage_retained
         runtime_flags = self._typed_route_runtime_flags_by_key.get(key)
         if runtime_flags is not None:
             runtime_flags = (
                 runtime_flags[0],
                 runtime_flags[1],
                 runtime_flags[2],
-                lineage_retained,
             )
             self._typed_route_runtime_flags_by_key[key] = runtime_flags
             if self._last_typed_route_runtime_key == key:
@@ -3646,7 +3595,6 @@ class Graph:
             resolved.replay_window,
             resolved.payload_retention_policy,
             resolved.history_limit,
-            self._effective_lineage_retention_policy(resolved),
         )
         if self._last_process_local_nowait_cache is not None:
             self._last_process_local_nowait_target = None
@@ -3785,13 +3733,10 @@ class Graph:
     ) -> TypedEnvelope[Any] | ClosedEnvelope:
         """Write one payload to a route and return the resulting envelope."""
         if (
-            not self._lineage_tracing_enabled_flag
-            and (
-                trace_id is not None
-                or causality_id is not None
-                or correlation_id is not None
-                or parent_events
-            )
+            trace_id is not None
+            or causality_id is not None
+            or correlation_id is not None
+            or parent_events
         ):
             trace_id, causality_id, correlation_id, parent_events = (
                 None,
@@ -3799,8 +3744,6 @@ class Graph:
                 None,
                 (),
             )
-        elif correlation_id is not None:
-            correlation_id = self._retained_correlation_id(correlation_id)
         if isinstance(target, LifecycleBinding):
             self._remember_active_context_route(target.request, "input")
             self._write_bindings[target.request.display()] = target.binding
@@ -3877,12 +3820,10 @@ class Graph:
                         and native_target.variant == Variant.Request
                     )
                 )
-                lineage_retained = self._lineage_retained_by_key.get(target_key, False)
                 runtime_flags = (
                     target_process_local,
                     target_bytes_passthrough,
                     sparse_native_retention,
-                    lineage_retained,
                 )
                 self._typed_route_runtime_flags_by_key[target_key] = runtime_flags
                 self._sparse_native_retention_by_key[target_key] = sparse_native_retention
@@ -3893,7 +3834,6 @@ class Graph:
                     target_process_local,
                     target_bytes_passthrough,
                     sparse_native_retention,
-                    lineage_retained,
                 ) = runtime_flags
                 self._last_typed_route_runtime_key = target_key
                 self._last_typed_route_runtime_flags = runtime_flags
@@ -3993,7 +3933,6 @@ class Graph:
                                 causality_id=causality_id,
                                 correlation_id=correlation_id,
                                 parent_events=parent_events,
-                                record_lineage=False,
                             )
                         else:
                             self._record_envelope(
@@ -4192,13 +4131,10 @@ class Graph:
                     ):
                         return
         if (
-            not self._lineage_tracing_enabled_flag
-            and (
-                trace_id is not None
-                or causality_id is not None
-                or correlation_id is not None
-                or parent_events
-            )
+            trace_id is not None
+            or causality_id is not None
+            or correlation_id is not None
+            or parent_events
         ):
             trace_id, causality_id, correlation_id, parent_events = (
                 None,
@@ -4206,8 +4142,6 @@ class Graph:
                 None,
                 (),
             )
-        elif correlation_id is not None:
-            correlation_id = self._retained_correlation_id(correlation_id)
         if isinstance(target, LifecycleBinding) or isinstance(target, WriteBinding):
             self.publish(
                 target,
@@ -4542,12 +4476,10 @@ class Graph:
                     and native_target.variant == Variant.Request
                 )
             )
-            lineage_retained = self._lineage_retained_by_key.get(target_key, False)
             runtime_flags = (
                 target_process_local,
                 target_bytes_passthrough,
                 sparse_native_retention,
-                lineage_retained,
             )
             self._typed_route_runtime_flags_by_key[target_key] = runtime_flags
             self._sparse_native_retention_by_key[target_key] = sparse_native_retention
@@ -4558,7 +4490,6 @@ class Graph:
                 target_process_local,
                 target_bytes_passthrough,
                 sparse_native_retention,
-                lineage_retained,
             ) = runtime_flags
             self._last_typed_route_runtime_key = target_key
             self._last_typed_route_runtime_flags = runtime_flags
@@ -4632,8 +4563,7 @@ class Graph:
             )
             if not delivery_subscribed:
                 if (
-                    not self._lineage_tracing_enabled_flag
-                    and producer is None
+                    producer is None
                     and control_epoch is None
                     and single_materialized_target is not None
                     and native_drop_no_lineage_single_target_python is not None
@@ -4646,8 +4576,7 @@ class Graph:
                         )
                     )
                 elif (
-                    not self._lineage_tracing_enabled_flag
-                    and single_materialized_target is not None
+                    single_materialized_target is not None
                     and native_drop_no_lineage_single_target is not None
                 ):
                     native_materialized_drop_emitted = (
@@ -4744,8 +4673,7 @@ class Graph:
                 self._last_nowait_drop_generation = self._subscriber_generation
                 self._last_nowait_drop_taint_generation = self._taint_generation
                 if (
-                    not self._lineage_tracing_enabled_flag
-                    and self._native_compile_no_lineage_materializer_drop_profile
+                    self._native_compile_no_lineage_materializer_drop_profile
                     is not None
                     and self._native_emit_no_lineage_materializer_drop_profile_python
                     is not None
@@ -4774,8 +4702,7 @@ class Graph:
                         native_drop_no_lineage_single_target_python
                     )
                 elif (
-                    not self._lineage_tracing_enabled_flag
-                    and native_drop_no_lineage_single_target is not None
+                    native_drop_no_lineage_single_target is not None
                     and single_materialized_target is not None
                 ):
                     self._release_last_nowait_drop_no_lineage_profile()
@@ -4846,7 +4773,6 @@ class Graph:
                     causality_id=causality_id,
                     correlation_id=correlation_id,
                     parent_events=parent_events,
-                    record_lineage=False,
                 )
                 self._publish_native_materialized_envelopes(
                     tuple(emitted[1:]),
@@ -4861,7 +4787,6 @@ class Graph:
         native_emit_drop = self._native_emit_single_if_unrouted_drop
         if (
             skip_python_retention_indexes
-            and not lineage_retained
             and not parent_events
             and native_emit_drop is not None
             and native_emit_drop(
@@ -4903,7 +4828,6 @@ class Graph:
             target_process_local
             and not observed_by_python
             and target_key not in self._stream_taint_upper_bounds
-            and not lineage_retained
             and not parent_events
             and control_epoch is None
         )
@@ -5020,13 +4944,10 @@ class Graph:
     ) -> ClosedEnvelope:
         """Publish metadata now and defer payload materialization until opened."""
         if (
-            not self._lineage_tracing_enabled_flag
-            and (
-                trace_id is not None
-                or causality_id is not None
-                or correlation_id is not None
-                or parent_events
-            )
+            trace_id is not None
+            or causality_id is not None
+            or correlation_id is not None
+            or parent_events
         ):
             trace_id, causality_id, correlation_id, parent_events = (
                 None,
@@ -5034,8 +4955,6 @@ class Graph:
                 None,
                 (),
             )
-        elif correlation_id is not None:
-            correlation_id = self._retained_correlation_id(correlation_id)
         native_route = self._coerce_route_ref(target)
         self._remember_active_context_route(native_route)
         emitted = self._emit_native(
@@ -5936,18 +5855,6 @@ class Graph:
         if retention.latest_replay_policy == "latest_only":
             return iter(history[-1:] if history else ())
         return iter(history)
-
-    def lineage(
-        self,
-        route_ref: RouteLike | None = None,
-        *,
-        trace_id: str | None = None,
-        causality_id: str | None = None,
-        correlation_id: str | None = None,
-    ) -> Iterator[LineageRecord]:
-        """Return retained lineage records filtered by route or lineage ids."""
-        del route_ref, trace_id, causality_id, correlation_id
-        return iter(())
 
     def subscribers(self, route_ref: RouteLike) -> int:
         """Return the number of active observers on a route."""
@@ -8028,7 +7935,6 @@ class Graph:
                 replay_window="none",
                 payload_retention_policy="non_replayable",
                 history_limit=1,
-                lineage_retention_policy="none",
             )
         elif route_ref.namespace.layer == Layer.Internal:
             policy = RouteRetentionPolicy(
@@ -8036,7 +7942,6 @@ class Graph:
                 replay_window="latest",
                 payload_retention_policy="separate_store",
                 history_limit=1,
-                lineage_retention_policy="none",
             )
         else:
             policy = RouteRetentionPolicy(
@@ -8048,7 +7953,6 @@ class Graph:
                     else "separate_store"
                 ),
                 history_limit=DEFAULT_ROUTE_HISTORY_LIMIT,
-                lineage_retention_policy="none",
             )
         self._default_retention_policies[route_ref] = policy
         return policy
@@ -8073,66 +7977,7 @@ class Graph:
             resolved = self._default_retention_policy(route_ref)
         self._resolved_retention_by_key[route_key] = resolved
         self._route_refs_by_key[route_key] = route_ref
-        self._lineage_retained_by_key[route_key] = self._lineage_retained_for_policy(
-            resolved
-        )
         return resolved
-
-    def _effective_lineage_retention_policy(
-        self,
-        policy: RouteRetentionPolicy,
-    ) -> str:
-        return self._lineage_tracing_store.lineage_retention_policy(
-            policy.lineage_retention_policy
-        )
-
-    def _lineage_tracing_enabled(self) -> bool:
-        return self._lineage_tracing_enabled_flag
-
-    def _retained_correlation_id(self, correlation_id: str | None) -> str | None:
-        if correlation_id is None or not self._correlation_tracing_enabled_flag:
-            return None
-        return self._correlation_tracing_store.retained_correlation_id(correlation_id)
-
-    def _lineage_retained_for_policy(self, policy: RouteRetentionPolicy) -> bool:
-        del policy
-        return False
-
-    def _reconfigure_lineage_tracing_store(self) -> None:
-        for key, policy in tuple(self._resolved_retention_by_key.items()):
-            native_route = self._route_refs_by_key.get(key)
-            if native_route is None:
-                continue
-            lineage_retained = self._lineage_retained_for_policy(policy)
-            self._lineage_retained_by_key[key] = lineage_retained
-            runtime_flags = self._typed_route_runtime_flags_by_key.get(key)
-            if runtime_flags is not None:
-                self._typed_route_runtime_flags_by_key[key] = (
-                    runtime_flags[0],
-                    runtime_flags[1],
-                    runtime_flags[2],
-                    lineage_retained,
-                )
-        self._clear_last_nowait_drop_cache()
-        self._last_typed_route_runtime_key = None
-        self._last_typed_route_runtime_flags = None
-        self._last_process_local_nowait_target = None
-        self._last_process_local_nowait_cache = None
-        self._last_process_local_nowait_generation = -1
-        self._last_process_local_nowait_taint_generation = -1
-        for key, policy in tuple(self._resolved_retention_by_key.items()):
-            native_route = self._route_refs_by_key.get(key)
-            if native_route is None:
-                continue
-            self._graph.configure_retention(
-                native_route,
-                policy.latest_replay_policy,
-                policy.durability_class,
-                policy.replay_window,
-                policy.payload_retention_policy,
-                policy.history_limit,
-                self._effective_lineage_retention_policy(policy),
-            )
 
     def _payload_retention_policy_for(self, route_ref: RouteLike) -> str:
         return cast(
@@ -8495,9 +8340,7 @@ class Graph:
         causality_id: str | None = None,
         correlation_id: str | None = None,
         parent_events: Sequence[EventRef] = (),
-        record_lineage: bool = True,
     ) -> None:
-        del record_lineage
         self._remember_writer_if_changed(route_key, producer_id)
         del native_route, trace_id, causality_id, correlation_id, parent_events
         if self._route_has_delivery_subscribers(route_key):
@@ -9711,15 +9554,7 @@ class Graph:
                 self._authorize(request.principal_id, route_ref, "debug_read")
             else:
                 self._authorize(request.principal_id, None, "graph_validation")
-            return tuple(
-                record.display()
-                for record in self.lineage(
-                    route_ref,
-                    trace_id=request.lineage_trace_id,
-                    causality_id=request.lineage_causality_id,
-                    correlation_id=request.lineage_correlation_id,
-                )
-            )
+            return ()
         if command == "shadow":
             if route_ref is None:
                 raise ValueError("shadow requires a write request route")

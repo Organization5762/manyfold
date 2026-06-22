@@ -145,7 +145,6 @@ class Graph:
         replay_window: builtins.str,
         payload_retention_policy: builtins.str,
         history_limit: typing.Optional[builtins.int] = None,
-        lineage_retention_policy: typing.Optional[builtins.str] = None,
     ) -> None: ...
     def read(self, route: RouteRef) -> ReadablePort: ...
     def writable_port(self, route: RouteRef) -> WritablePort: ...
@@ -266,76 +265,6 @@ class Graph:
     def describe_route(self, route: RouteRef) -> PortDescriptor: ...
     def latest(self, route: RouteRef) -> typing.Optional[ClosedEnvelope]: ...
     def replay(self, route: RouteRef) -> builtins.list[ClosedEnvelope]: ...
-    def record_lineage(
-        self,
-        route_display: builtins.str,
-        seq_source: builtins.int,
-        producer_id: typing.Optional[builtins.str],
-        trace_id: builtins.str,
-        causality_id: builtins.str,
-        correlation_id: typing.Optional[builtins.str],
-        parent_events: typing.Sequence[tuple[builtins.str, builtins.int]],
-    ) -> None: ...
-    def record_lineage_for_route(
-        self,
-        route: RouteRef,
-        seq_source: builtins.int,
-        producer_id: typing.Optional[builtins.str],
-        trace_id: builtins.str,
-        causality_id: builtins.str,
-        correlation_id: typing.Optional[builtins.str],
-        parent_events: typing.Sequence[tuple[builtins.str, builtins.int]],
-    ) -> None: ...
-    def record_lineage_for_route_no_parents(
-        self,
-        route: RouteRef,
-        seq_source: builtins.int,
-        producer_id: typing.Optional[builtins.str],
-        trace_id: builtins.str,
-        causality_id: builtins.str,
-        correlation_id: typing.Optional[builtins.str],
-    ) -> None: ...
-    def record_lineage_for_route_one_parent(
-        self,
-        route: RouteRef,
-        seq_source: builtins.int,
-        producer_id: typing.Optional[builtins.str],
-        trace_id: builtins.str,
-        causality_id: builtins.str,
-        correlation_id: typing.Optional[builtins.str],
-        parent_route_display: builtins.str,
-        parent_seq_source: builtins.int,
-    ) -> None: ...
-    def lineage_records(
-        self,
-        route: typing.Optional[RouteRef] = None,
-        trace_id: typing.Optional[builtins.str] = None,
-        causality_id: typing.Optional[builtins.str] = None,
-        correlation_id: typing.Optional[builtins.str] = None,
-    ) -> builtins.list[
-        tuple[
-            builtins.str,
-            builtins.int,
-            typing.Optional[builtins.str],
-            builtins.str,
-            builtins.str,
-            typing.Optional[builtins.str],
-            builtins.list[tuple[builtins.str, builtins.int]],
-        ]
-    ]: ...
-    def lineage_record_for_route_event(
-        self, route: RouteRef, seq_source: builtins.int
-    ) -> typing.Optional[
-        tuple[
-            builtins.str,
-            builtins.int,
-            typing.Optional[builtins.str],
-            builtins.str,
-            builtins.str,
-            typing.Optional[builtins.str],
-            builtins.list[tuple[builtins.str, builtins.int]],
-        ]
-    ]: ...
     def retained_payload_count(self, route: RouteRef) -> builtins.int: ...
     def payload_by_id(
         self, payload_id: builtins.str
