@@ -47,6 +47,7 @@ from ._manyfold_rust import (
     ProducerKind,
     ProducerRef,
     ReadablePort as NativeReadablePort,
+    RetentionSnapshot,
     RouteRef,
     SchemaRef,
     TaintDomain,
@@ -58,7 +59,7 @@ from ._manyfold_rust import (
 from ._rx import Observable, operators as ops
 from ._rx.disposable import Disposable
 from ._rx.scheduler import EventLoopScheduler, TimeoutScheduler
-from ._rx.subject import BehaviorSubject, Subject
+from ._rx.subject import BehaviorSubject, Subject as Subject
 from .primitives import (
     OwnerName,
     ReadThenWriteNextEpochStep,
@@ -69,7 +70,9 @@ from .primitives import (
     StreamName,
     TypedEnvelope,
     TypedRoute,
+    _is_any_schema_payload,
     _release_any_schema_value,
+    _release_known_any_schema_value,
     route,
     sink as sink,
     source as source,
@@ -89,6 +92,16 @@ InspectableRoute = Union[RouteLike, NativeReadablePort, NativeWritablePort]
 EnvelopeIterator = Iterator[ClosedEnvelope]
 StateT = TypeVar("StateT")
 TRight = TypeVar("TRight")
+TypedRouteRuntimeFlags: TypeAlias = tuple[bool, bool, bool]
+ProcessLocalNowaitCache: TypeAlias = tuple[
+    RouteRef,
+    str,
+    Callable[[Any], bytes],
+    int,
+]
+LineageParts: TypeAlias = tuple[str, str, str | None, str, int]
+ParentEventLike: TypeAlias = Union["EventRef", tuple[str, int]]
+EnvelopeCallback: TypeAlias = Callable[[ClosedEnvelope], None]
 
 TAINT_DOMAINS = (
     TaintDomain.Coherence,
@@ -110,7 +123,9 @@ _NO_PENDING: Any = object()
 _STATS_SCHEDULER = TimeoutScheduler()
 DEFAULT_AUDIT_HISTORY_SIZE = 2048
 DEFAULT_PENDING_WRITE_LIMIT = 2048
+DEFAULT_ROUTE_HISTORY_LIMIT = 8
 DEFAULT_ROUTE_REPAIR_NOTE_LIMIT = 128
+DEFAULT_ROUTE_WRITER_LIMIT = 128
 logger = logging.getLogger(__name__)
 
 
@@ -309,6 +324,7 @@ class EventStream(Generic[T]):
     def __init__(self) -> None:
         self._lock = Lock()
         self._subscribers: dict[int, Callable[[T], None]] = {}
+        self._subscriber_snapshot: tuple[Callable[[T], None], ...] = ()
         self._next_subscription_id = 0
 
     @property
@@ -317,7 +333,7 @@ class EventStream(Generic[T]):
 
     def emit(self, value: T) -> None:
         with self._lock:
-            subscribers = tuple(self._subscribers.values())
+            subscribers = self._subscriber_snapshot
         for subscriber in subscribers:
             subscriber(value)
 
@@ -349,13 +365,17 @@ class EventStream(Generic[T]):
             subscription_id = self._next_subscription_id
             self._next_subscription_id += 1
             self._subscribers[subscription_id] = resolved_callback
+            self._subscriber_snapshot = tuple(self._subscribers.values())
         return CallbackSubscription(
             lambda: self._remove_subscription(subscription_id)
         )
 
     def _remove_subscription(self, subscription_id: int) -> None:
         with self._lock:
-            self._subscribers.pop(subscription_id, None)
+            if subscription_id not in self._subscribers:
+                return
+            self._subscribers.pop(subscription_id)
+            self._subscriber_snapshot = tuple(self._subscribers.values())
 
 
 @dataclass(frozen=True)
@@ -1169,6 +1189,27 @@ class LineageRecord:
             f"|producer={self.producer_id}"
             f"|parents={parents}"
         )
+
+
+@runtime_checkable
+class CorrelationTracingStore(Protocol):
+    """Attached backend for optional per-event correlation indexes."""
+
+    def retained_correlation_id(self, correlation_id: str | None) -> str | None: ...
+
+
+class NativeCorrelationTracingStore:
+    """Retain correlation ids for lineage lookup and debugging."""
+
+    def retained_correlation_id(self, correlation_id: str | None) -> str | None:
+        return correlation_id
+
+
+class NoopCorrelationTracingStore:
+    """Drop correlation ids while retaining trace and causality lineage."""
+
+    def retained_correlation_id(self, _correlation_id: str | None) -> str | None:
+        return None
 
 
 @dataclass(frozen=True)
@@ -3231,6 +3272,12 @@ class RoutePipeline(Generic[T]):
         return apply
 
 
+AttachedTracingStore: TypeAlias = Union[
+    CorrelationTracingStore,
+    type[CorrelationTracingStore],
+]
+
+
 class Graph:
     """Python-facing Manyfold API.
 
@@ -3248,19 +3295,127 @@ class Graph:
     """
 
     def __init__(self) -> None:
+        self.reset_runtime_state()
+
+    def dispose(self) -> None:
+        """Release graph-owned subscriptions, payload mirrors, and native state."""
+        while self._subscriptions:
+            subscription = self._subscriptions.popleft()
+            subscription.dispose()
+        for history in tuple(self._history.values()):
+            for envelope in tuple(history):
+                self._purge_envelope_payload_ref(envelope)
+        self.reset_runtime_state()
+
+    def reset_runtime_state(self) -> None:
+        """Reset all graph-owned runtime state after explicit disposal."""
         self._graph = NativeGraph()
-        self._subjects: dict[str, Subject[ClosedEnvelope]] = {}
+        self._native_emit = getattr(self._graph, "emit", None)
+        self._native_emit_single_if_unrouted = getattr(
+            self._graph,
+            "emit_single_if_unrouted",
+            None,
+        )
+        self._native_emit_single_if_unrouted_drop = getattr(
+            self._graph,
+            "emit_single_if_unrouted_drop",
+            None,
+        )
+        self._native_emit_single_if_unrouted_and_materializer_drop = getattr(
+            self._graph,
+            "emit_single_if_unrouted_and_materializer_drop",
+            None,
+        )
+        self._native_emit_single_if_unrouted_and_materializer_drop_python = getattr(
+            self._graph,
+            "emit_single_if_unrouted_and_materializer_drop_python",
+            None,
+        )
+        self._native_emit_single_if_unrouted_with_lineage_no_parents = getattr(
+            self._graph,
+            "emit_single_if_unrouted_with_lineage_no_parents",
+            None,
+        )
+        self._native_emit_single_if_unrouted_with_lineage_no_parents_and_materializers = getattr(
+            self._graph,
+            "emit_single_if_unrouted_with_lineage_no_parents_and_materializers",
+            None,
+        )
+        self._native_emit_single_if_unrouted_with_lineage_no_parents_and_materializers_drop = getattr(
+            self._graph,
+            "emit_single_if_unrouted_with_lineage_no_parents_and_materializers_drop",
+            None,
+        )
+        self._native_emit_single_if_unrouted_with_lineage_no_parents_and_materializers_drop_python = getattr(
+            self._graph,
+            "emit_single_if_unrouted_with_lineage_no_parents_and_materializers_drop_python",
+            None,
+        )
+        self._native_emit_single_if_unrouted_with_lineage_ids_no_parents_and_materializers_drop_python = getattr(
+            self._graph,
+            "emit_single_if_unrouted_with_lineage_ids_no_parents_and_materializers_drop_python",
+            None,
+        )
+        self._native_emit_single_if_unrouted_with_lineage_ids_no_parents_and_materializer_drop_python = getattr(
+            self._graph,
+            "emit_single_if_unrouted_with_lineage_ids_no_parents_and_materializer_drop_python",
+            None,
+        )
+        self._native_compile_no_lineage_materializer_drop_profile = getattr(
+            self._graph,
+            "compile_no_lineage_materializer_drop_profile",
+            None,
+        )
+        self._native_release_no_lineage_materializer_drop_profile = getattr(
+            self._graph,
+            "release_no_lineage_materializer_drop_profile",
+            None,
+        )
+        self._native_emit_no_lineage_materializer_drop_profile_python = getattr(
+            self._graph,
+            "emit_no_lineage_materializer_drop_profile_python",
+            None,
+        )
+        self._native_materialize_bytes_one_parent = getattr(
+            self._graph,
+            "materialize_bytes_one_parent",
+            None,
+        )
+        self._native_register_materialize_bytes = getattr(
+            self._graph,
+            "register_materialize_bytes",
+            None,
+        )
+        self._native_unregister_materialize_bytes = getattr(
+            self._graph,
+            "unregister_materialize_bytes",
+            None,
+        )
+        self._native_payload_by_id = getattr(self._graph, "payload_by_id", None)
+        self._subjects: dict[str, EventStream[ClosedEnvelope]] = {}
+        self._direct_envelope_subscribers: dict[str, dict[int, EnvelopeCallback]] = {}
+        self._direct_envelope_snapshots: dict[str, tuple[EnvelopeCallback, ...]] = {}
+        self._direct_envelope_subscription_sequence = 0
+        self._native_materialize_edges_by_source: dict[str, dict[str, int]] = {}
+        self._native_materialize_route_refs_by_source: dict[str, dict[str, RouteRef]] = {}
+        self._subscriber_generation = 0
         self._subscriptions: deque[SubscriptionLike] = deque()
-        self._history: dict[str, list[ClosedEnvelope]] = {}
-        self._writers: dict[str, set[str]] = {}
+        self._history: dict[str, deque[ClosedEnvelope]] = {}
+        self._writers: dict[str, deque[str]] = {}
+        self._last_writer_by_key: dict[str, str] = {}
+        self._last_writer_cache_key: str | None = None
+        self._last_writer_cache_id: str | None = None
         self._subscriber_count: dict[str, int] = {}
         self._route_subscribers: dict[str, set[str]] = {}
+        self._route_subscriber_refs: dict[str, dict[str, int]] = {}
         self._join_plans: dict[str, JoinPlan] = {}
         self._middlewares: list[Middleware] = []
         self._links: dict[str, Link] = {}
         self._mesh_primitives: dict[str, MeshPrimitive] = {}
         self._query_services: dict[str, QueryServiceRoutes] = {}
         self._debug_routes: dict[str, RouteRef] = {}
+        self._debug_event_types: set[str] = set()
+        self._debug_event_sequence = 0
         self._diagram_nodes: dict[str, DiagramNode] = {}
         self._diagram_routes: dict[str, RouteRef] = {}
         self._context_stack: list[GraphContext] = []
@@ -3268,21 +3423,61 @@ class Graph:
         self._audit_events: deque[DebugEvent] = deque(maxlen=DEFAULT_AUDIT_HISTORY_SIZE)
         self._capability_grants: dict[tuple[str, str], CapabilityGrant] = {}
         self._route_visibility: dict[str, str] = {}
+        self._route_display_cache: dict[RouteRef, str] = {}
         self._retention_policies: dict[str, RouteRetentionPolicy] = {}
+        self._default_retention_policies: dict[RouteRef, RouteRetentionPolicy] = {}
+        self._resolved_retention_by_key: dict[str, RouteRetentionPolicy] = {}
+        self._route_refs_by_key: dict[str, RouteRef] = {}
+        self._correlation_tracing_store: CorrelationTracingStore = (
+            NoopCorrelationTracingStore()
+        )
+        self._correlation_tracing_enabled_flag = False
+        self._typed_route_runtime_flags_by_key: dict[str, TypedRouteRuntimeFlags] = {}
+        self._last_typed_route_runtime_key: str | None = None
+        self._last_typed_route_runtime_flags: TypedRouteRuntimeFlags | None = None
+        self._last_publish_route_target: RouteLike | None = None
+        self._last_publish_typed_target: TypedRoute[Any] | None = None
+        self._sparse_native_retention_by_key: dict[str, bool] = {}
+        self._last_audit_event_key: tuple[str, str, str | None] | None = None
+        self._last_audit_event: DebugEvent | None = None
+        self._write_audit_event_by_route: dict[str, DebugEvent] = {}
+        self._write_debug_detail_by_key: dict[str, str] = {}
+        self._last_native_materialized_drop_source_key: str | None = None
+        self._last_native_materialized_drop_target_keys: tuple[str, ...] = ()
+        self._last_native_materialized_drop_producer_id: str | None = None
+        self._last_nowait_drop_mode: str | None = None
+        self._last_nowait_drop_target: WriteTarget | None = None
+        self._last_nowait_drop_native_target: RouteRef | None = None
+        self._last_nowait_drop_key: str | None = None
+        self._last_nowait_drop_target_keys: tuple[str, ...] = ()
+        self._last_nowait_drop_materialized_target: RouteRef | None = None
+        self._last_nowait_drop_generation = -1
+        self._last_nowait_drop_taint_generation = -1
+        self._last_nowait_drop_native_call_kind: str | None = None
+        self._last_nowait_drop_explicit_lineage_native: Any = None
+        self._last_nowait_drop_no_lineage_profile: Any = None
+        self._last_nowait_drop_no_lineage_profile_emit: Any = None
+        self._last_nowait_drop_no_lineage_profile_key: (
+            tuple[str, tuple[str, ...]] | None
+        ) = None
+        self._last_process_local_nowait_target: WriteTarget | None = None
+        self._last_process_local_nowait_cache: ProcessLocalNowaitCache | None = None
+        self._last_process_local_nowait_generation = -1
+        self._last_process_local_nowait_taint_generation = -1
         self._write_bindings: dict[str, WriteBinding] = {}
         self._lifecycle_bindings: dict[str, LifecycleBinding] = {}
         self._lazy_payload_sources: dict[str, LazyPayloadSource] = {}
         self._materialized_payloads: dict[str, bytes] = {}
+        self._process_local_payload_ids: set[str] = set()
+        self._process_local_payload_ids_by_route: dict[str, deque[str]] = {}
         self._empty_inline_payload_ids: set[str] = set()
         self._payload_route_by_id: dict[str, str] = {}
+        self._payload_ids_by_route: dict[str, set[str]] = {}
         self._opened_payload_ids: set[str] = set()
         self._payload_demand_stats: dict[str, dict[str, int]] = {}
         self._stream_taint_upper_bounds: dict[str, dict[tuple[str, str], Any]] = {}
+        self._taint_generation = 0
         self._route_repair_notes: dict[str, deque[str]] = {}
-        self._lineage_by_event: dict[tuple[str, int], LineageRecord] = {}
-        self._lineage_events_by_trace: dict[str, list[tuple[str, int]]] = {}
-        self._lineage_events_by_causality: dict[str, list[tuple[str, int]]] = {}
-        self._lineage_events_by_correlation: dict[str, list[tuple[str, int]]] = {}
         self._mailbox_descriptors: dict[str, NativeMailboxDescriptor] = {}
         self._capacitors: dict[str, Capacitor] = {}
         self._resistors: dict[str, Resistor] = {}
@@ -3321,9 +3516,33 @@ class Graph:
         """
         return GraphContext(self, name=name, group=group, metadata=metadata)
 
+    def attach(self, store: AttachedTracingStore) -> CorrelationTracingStore:
+        """Attach a graph-wide correlation store."""
+        if isinstance(store, type):
+            if store is CorrelationTracingStore or issubclass(
+                store, NativeCorrelationTracingStore
+            ):
+                store = NativeCorrelationTracingStore()
+            elif store is NoopCorrelationTracingStore:
+                store = NoopCorrelationTracingStore()
+            else:
+                raise ValueError(
+                    "graph attachment class must be a correlation tracing store"
+                )
+        if not isinstance(store, CorrelationTracingStore):
+            raise ValueError("graph attachment must be a CorrelationTracingStore")
+        self._correlation_tracing_store = store
+        self._correlation_tracing_enabled_flag = not isinstance(
+            store,
+            NoopCorrelationTracingStore,
+        )
+        self._clear_last_nowait_drop_cache()
+        return store
+
     def register_port(self, route_ref: RouteLike) -> RouteRef:
         """Register a route in the native graph and return its concrete ref."""
         registered = self._graph.register_port(self._coerce_route_ref(route_ref))
+        self._route_key_for_ref(registered)
         self._remember_active_context_route(registered)
         return registered
 
@@ -3347,17 +3566,46 @@ class Graph:
                 if policy.payload_retention_policy is None
                 else policy.payload_retention_policy
             ),
-            history_limit=policy.history_limit,
+            history_limit=(
+                DEFAULT_ROUTE_HISTORY_LIMIT
+                if (
+                    policy.latest_replay_policy == "bounded_history"
+                    and policy.history_limit is None
+                )
+                else policy.history_limit
+            ),
         )
         self._retention_policies[key] = resolved
-        history = self._history.get(key)
-        if history is not None and resolved.history_limit is not None:
-            expired = tuple(history[: max(0, len(history) - resolved.history_limit)])
-            del history[: max(0, len(history) - resolved.history_limit)]
-            for expired_envelope in expired:
-                self._purge_envelope_payload_ref(expired_envelope)
-            self._forget_lineage_for(expired)
+        self._resolved_retention_by_key[key] = resolved
+        self._route_refs_by_key[key] = native_route
+        runtime_flags = self._typed_route_runtime_flags_by_key.get(key)
+        if runtime_flags is not None:
+            runtime_flags = (
+                runtime_flags[0],
+                runtime_flags[1],
+                runtime_flags[2],
+            )
+            self._typed_route_runtime_flags_by_key[key] = runtime_flags
+            if self._last_typed_route_runtime_key == key:
+                self._last_typed_route_runtime_flags = runtime_flags
+        self._graph.configure_retention(
+            native_route,
+            resolved.latest_replay_policy,
+            resolved.durability_class,
+            resolved.replay_window,
+            resolved.payload_retention_policy,
+            resolved.history_limit,
+        )
+        if self._last_process_local_nowait_cache is not None:
+            self._last_process_local_nowait_target = None
+            self._last_process_local_nowait_cache = None
+            self._last_process_local_nowait_generation = -1
+            self._last_process_local_nowait_taint_generation = -1
+        self._expire_python_history(native_route, resolved.history_limit)
+        self._expire_process_local_payload_ids_for_key(key, resolved)
         self._enforce_payload_retention(native_route)
+        if key in self._stream_taint_upper_bounds:
+            self._rebuild_stream_taint_upper_bound(native_route)
         return resolved
 
     @overload
@@ -3415,7 +3663,12 @@ class Graph:
         control_epoch: int | None = None,
     ) -> SubscriptionLike:
         """Bind an observable source into a route."""
-        typed_target = self._typed_route(target)
+        if isinstance(target, TypedRoute):
+            typed_target = target
+        elif isinstance(target, (Source, Sink)) and isinstance(target.route, TypedRoute):
+            typed_target = target.route
+        else:
+            typed_target = None
         if typed_target is not None:
 
             class _Observer:
@@ -3479,6 +3732,18 @@ class Graph:
         parent_events: Sequence[EventRef] = (),
     ) -> TypedEnvelope[Any] | ClosedEnvelope:
         """Write one payload to a route and return the resulting envelope."""
+        if (
+            trace_id is not None
+            or causality_id is not None
+            or correlation_id is not None
+            or parent_events
+        ):
+            trace_id, causality_id, correlation_id, parent_events = (
+                None,
+                None,
+                None,
+                (),
+            )
         if isinstance(target, LifecycleBinding):
             self._remember_active_context_route(target.request, "input")
             self._write_bindings[target.request.display()] = target.binding
@@ -3520,56 +3785,1150 @@ class Graph:
                 "write", f"published {binding.request.display()}", binding.request
             )
             return emitted[0]
-        typed_target = self._typed_route(target)
+        if target is self._last_publish_route_target:
+            typed_target = self._last_publish_typed_target
+        else:
+            if isinstance(target, TypedRoute):
+                typed_target = target
+            elif isinstance(target, (Source, Sink)) and isinstance(target.route, TypedRoute):
+                typed_target = target.route
+            else:
+                typed_target = None
+            self._last_publish_route_target = target
+            self._last_publish_typed_target = typed_target
         if typed_target is not None:
-            self._remember_active_context_route(typed_target.route_ref)
-            encoded = typed_target.schema.encode(payload)
+            native_target = typed_target.route_ref
+            target_key = typed_target.route_display
+            if self._context_stack:
+                self._remember_active_context_route(native_target)
+            if (
+                self._last_typed_route_runtime_key == target_key
+                and self._last_typed_route_runtime_flags is not None
+            ):
+                runtime_flags = self._last_typed_route_runtime_flags
+            else:
+                runtime_flags = self._typed_route_runtime_flags_by_key.get(target_key)
+            if runtime_flags is None:
+                target_process_local = typed_target.schema.process_local
+                target_bytes_passthrough = typed_target.schema.is_bytes_passthrough()
+                sparse_native_retention = (
+                    target_bytes_passthrough
+                    and not target_process_local
+                    and native_target.namespace.layer != Layer.Ephemeral
+                    and not (
+                        native_target.namespace.plane == Plane.Write
+                        and native_target.variant == Variant.Request
+                    )
+                )
+                runtime_flags = (
+                    target_process_local,
+                    target_bytes_passthrough,
+                    sparse_native_retention,
+                )
+                self._typed_route_runtime_flags_by_key[target_key] = runtime_flags
+                self._sparse_native_retention_by_key[target_key] = sparse_native_retention
+                self._last_typed_route_runtime_key = target_key
+                self._last_typed_route_runtime_flags = runtime_flags
+            else:
+                (
+                    target_process_local,
+                    target_bytes_passthrough,
+                    sparse_native_retention,
+                ) = runtime_flags
+                self._last_typed_route_runtime_key = target_key
+                self._last_typed_route_runtime_flags = runtime_flags
+            encoded = (
+                payload
+                if target_bytes_passthrough and type(payload) is bytes
+                else typed_target.schema.encode(payload)
+            )
+            if control_epoch is not None:
+                _validate_control_epoch(control_epoch)
+            observed_by_python = self._route_has_python_subscribers(target_key)
+            skip_python_retention_indexes = (
+                sparse_native_retention
+                and not observed_by_python
+                and target_key not in self._stream_taint_upper_bounds
+                and len(encoded) > 0
+                and control_epoch is None
+            )
+            observed_sparse_retention = (
+                sparse_native_retention
+                and observed_by_python
+                and target_key not in self._stream_taint_upper_bounds
+                and len(encoded) > 0
+                and control_epoch is None
+                and self._native_payload_by_id is not None
+            )
+            native_materialize_retention = (
+                sparse_native_retention
+                and observed_by_python
+                and target_key in self._native_materialize_edges_by_source
+                and len(encoded) > 0
+                and control_epoch is None
+                and self._native_payload_by_id is not None
+            )
+            native_emit_with_materializers = (
+                self._native_emit_single_if_unrouted_with_lineage_no_parents_and_materializers
+            )
+            if (
+                native_materialize_retention
+                and not parent_events
+                and native_emit_with_materializers is not None
+            ):
+                emitted = native_emit_with_materializers(
+                    native_target,
+                    encoded,
+                    producer=producer,
+                    control_epoch=control_epoch,
+                    trace_id=trace_id,
+                    causality_id=causality_id,
+                    correlation_id=correlation_id,
+                )
+                single_envelope = None if emitted is None else emitted[0]
+                materialized_envelopes = () if emitted is None else tuple(emitted[1:])
+            else:
+                native_emit_single = self._native_emit_single_if_unrouted
+                single_envelope = (
+                    None
+                    if native_emit_single is None
+                    else native_emit_single(
+                        native_target,
+                        encoded,
+                        producer=producer,
+                        control_epoch=control_epoch,
+                    )
+                )
+                materialized_envelopes = ()
+            producer_id = "python" if producer is None else producer.producer_id
+            if single_envelope is not None:
+                temporary_payload = (
+                    not target_process_local
+                    and self._native_payload_by_id is not None
+                    and observed_by_python
+                )
+                if temporary_payload or (
+                    target_process_local
+                    or (
+                        self._native_payload_by_id is None
+                        and (not target_bytes_passthrough or observed_by_python)
+                    )
+                ):
+                    self._remember_eager_payload(
+                        single_envelope,
+                        encoded,
+                        process_local=target_process_local,
+                    )
+                if skip_python_retention_indexes:
+                    self._remember_writer_if_changed(target_key, producer_id)
+                else:
+                    try:
+                        if observed_sparse_retention:
+                            self._record_observed_sparse_envelope(
+                                native_target,
+                                target_key,
+                                single_envelope,
+                                producer_id=producer_id,
+                                trace_id=trace_id,
+                                causality_id=causality_id,
+                                correlation_id=correlation_id,
+                                parent_events=parent_events,
+                            )
+                        else:
+                            self._record_envelope(
+                                native_target,
+                                single_envelope,
+                                route_key=target_key,
+                                producer_id=producer_id,
+                                trace_id=trace_id,
+                                causality_id=causality_id,
+                                correlation_id=correlation_id,
+                                parent_events=parent_events,
+                            )
+                    finally:
+                        if temporary_payload:
+                            self._materialized_payloads.pop(
+                                single_envelope.payload_id,
+                                None,
+                            )
+                if materialized_envelopes:
+                    self._publish_native_materialized_envelopes(
+                        materialized_envelopes,
+                        tuple(
+                            self._native_materialize_edges_by_source.get(
+                                target_key,
+                                (),
+                            )
+                        ),
+                    )
+                if (
+                    "write" in self._debug_routes
+                    or target_key not in self._write_audit_event_by_route
+                ):
+                    self._emit_write_debug_event_for_key(target_key)
+                if target_bytes_passthrough:
+                    return TypedEnvelope._trusted(typed_target, single_envelope, encoded)
+                return self._decode_envelope(typed_target, single_envelope)
             emitted = self._emit_native(
-                typed_target.route_ref,
+                native_target,
                 encoded,
                 producer=producer,
                 control_epoch=control_epoch,
             )
-            self._remember_eager_payloads(emitted, encoded)
+            if target_process_local or self._native_payload_by_id is None:
+                self._remember_eager_payloads(
+                    emitted,
+                    encoded,
+                    process_local=target_process_local,
+                )
             envelope = emitted[0]
-            producer_id = "python" if producer is None else producer.producer_id
             for emitted_envelope in emitted:
                 self._record_envelope(
                     emitted_envelope.route,
                     emitted_envelope,
+                    route_key=(
+                        target_key if emitted_envelope.route == native_target else None
+                    ),
                     producer_id=producer_id,
                     trace_id=trace_id,
                     causality_id=causality_id,
                     correlation_id=correlation_id,
                     parent_events=parent_events,
                 )
-            self._emit_debug_event(
-                "write", f"published {typed_target.display()}", typed_target
-            )
+            self._emit_write_debug_event_for_key(target_key)
+            if target_bytes_passthrough:
+                return TypedEnvelope._trusted(typed_target, envelope, encoded)
             return self._decode_envelope(typed_target, envelope)
         native_target = self._coerce_route_ref(target)
-        self._remember_active_context_route(native_target)
-        emitted = self._emit_native(
-            native_target,
-            payload,
-            producer=producer,
-            control_epoch=control_epoch,
+        target_key = self._route_key_for_ref(native_target)
+        if self._context_stack:
+            self._remember_active_context_route(native_target)
+        payload_bytes = bytes(payload)
+        if control_epoch is not None:
+            _validate_control_epoch(control_epoch)
+        native_emit_single = self._native_emit_single_if_unrouted
+        single_envelope = (
+            None
+            if native_emit_single is None
+            else native_emit_single(
+                native_target,
+                payload_bytes,
+                producer=producer,
+                control_epoch=control_epoch,
+            )
         )
-        self._remember_eager_payloads(emitted, bytes(payload))
-        envelope = emitted[0]
         producer_id = "python" if producer is None else producer.producer_id
-        for emitted_envelope in emitted:
+        if single_envelope is not None:
+            self._remember_eager_payload(single_envelope, payload_bytes)
             self._record_envelope(
-                emitted_envelope.route,
-                emitted_envelope,
+                native_target,
+                single_envelope,
+                route_key=target_key,
                 producer_id=producer_id,
                 trace_id=trace_id,
                 causality_id=causality_id,
                 correlation_id=correlation_id,
                 parent_events=parent_events,
             )
-        self._emit_debug_event("write", f"published {self._route_key(target)}", target)
+            self._emit_write_debug_event_for_key(target_key)
+            return single_envelope
+        emitted = self._emit_native(
+            native_target,
+            payload_bytes,
+            producer=producer,
+            control_epoch=control_epoch,
+        )
+        self._remember_eager_payloads(emitted, payload_bytes)
+        envelope = emitted[0]
+        for emitted_envelope in emitted:
+            self._record_envelope(
+                emitted_envelope.route,
+                emitted_envelope,
+                route_key=target_key if emitted_envelope.route == native_target else None,
+                producer_id=producer_id,
+                trace_id=trace_id,
+                causality_id=causality_id,
+                correlation_id=correlation_id,
+                parent_events=parent_events,
+            )
+        self._emit_write_debug_event_for_key(target_key)
         return envelope
+
+    def publish_nowait(
+        self,
+        target: WriteTarget,
+        payload: Any,
+        *,
+        producer: ProducerRef | None = None,
+        control_epoch: int | None = None,
+        trace_id: str | None = None,
+        causality_id: str | None = None,
+        correlation_id: str | None = None,
+        parent_events: Sequence[EventRef] = (),
+    ) -> None:
+        """Write one payload without materializing a return envelope when safe."""
+        if (
+            target is self._last_nowait_drop_target
+            and type(payload) is bytes
+            and producer is None
+            and control_epoch is None
+            and trace_id is None
+            and causality_id is None
+            and correlation_id is None
+            and not parent_events
+            and not self._context_stack
+            and "write" not in self._debug_routes
+            and self._subscriber_generation
+            == self._last_nowait_drop_generation
+            and self._taint_generation == self._last_nowait_drop_taint_generation
+        ):
+            if self._last_nowait_drop_native_call_kind == "no_lineage_profile":
+                cached_profile_emit = (
+                    self._last_nowait_drop_no_lineage_profile_emit
+                )
+                cached_profile = self._last_nowait_drop_no_lineage_profile
+                if (
+                    cached_profile is not None
+                    and cached_profile_emit is not None
+                    and cached_profile_emit(cached_profile, payload)
+                ):
+                    return
+            if self._last_nowait_drop_native_call_kind in (
+                "no_lineage_profile",
+                "no_lineage_python",
+            ):
+                cached_native_call = self._last_nowait_drop_explicit_lineage_native
+                cached_native_target = self._last_nowait_drop_native_target
+                cached_materialized_target = (
+                    self._last_nowait_drop_materialized_target
+                )
+                if (
+                    cached_native_call is not None
+                    and cached_native_target is not None
+                    and cached_materialized_target is not None
+                    and cached_native_call(
+                        cached_native_target,
+                        cached_materialized_target,
+                        payload,
+                    )
+                ):
+                    return
+            if self._last_nowait_drop_native_call_kind == "rust_kwargs":
+                cached_native_call = self._last_nowait_drop_explicit_lineage_native
+                cached_native_target = self._last_nowait_drop_native_target
+                if (
+                    cached_native_call is not None
+                    and cached_native_target is not None
+                    and cached_native_call(
+                        cached_native_target,
+                        payload,
+                        producer=None,
+                        control_epoch=None,
+                        trace_id=None,
+                        causality_id=None,
+                        correlation_id=None,
+                    )
+                    ):
+                        return
+        if (
+            trace_id is not None
+            or causality_id is not None
+            or correlation_id is not None
+            or parent_events
+        ):
+            trace_id, causality_id, correlation_id, parent_events = (
+                None,
+                None,
+                None,
+                (),
+            )
+        if isinstance(target, LifecycleBinding) or isinstance(target, WriteBinding):
+            self.publish(
+                target,
+                payload,
+                producer=producer,
+                control_epoch=control_epoch,
+                trace_id=trace_id,
+                causality_id=causality_id,
+                correlation_id=correlation_id,
+                parent_events=parent_events,
+            )
+            return
+        if (
+            target is self._last_nowait_drop_target
+            and type(payload) is bytes
+            and producer is None
+            and control_epoch is None
+            and not parent_events
+            and not self._context_stack
+            and "write" not in self._debug_routes
+            and self._subscriber_generation
+            == self._last_nowait_drop_generation
+            and self._taint_generation == self._last_nowait_drop_taint_generation
+        ):
+            if (
+                self._last_nowait_drop_native_call_kind == "no_lineage_profile"
+                and trace_id is None
+                and causality_id is None
+                and correlation_id is None
+            ):
+                cached_profile_emit = (
+                    self._last_nowait_drop_no_lineage_profile_emit
+                )
+                cached_profile = self._last_nowait_drop_no_lineage_profile
+                if (
+                    cached_profile is not None
+                    and cached_profile_emit is not None
+                    and cached_profile_emit(cached_profile, payload)
+                ):
+                    return
+            if (
+                self._last_nowait_drop_native_call_kind
+                in ("no_lineage_profile", "no_lineage_python")
+                and trace_id is None
+                and causality_id is None
+                and correlation_id is None
+            ):
+                cached_native_call = self._last_nowait_drop_explicit_lineage_native
+                cached_native_target = self._last_nowait_drop_native_target
+                cached_materialized_target = (
+                    self._last_nowait_drop_materialized_target
+                )
+                if (
+                    cached_native_call is not None
+                    and cached_native_target is not None
+                    and cached_materialized_target is not None
+                    and cached_native_call(
+                        cached_native_target,
+                        cached_materialized_target,
+                        payload,
+                    )
+                ):
+                    return
+            if (
+                self._last_nowait_drop_native_call_kind == "rust_kwargs"
+                and trace_id is None
+                and causality_id is None
+                and correlation_id is None
+            ):
+                cached_native_call = self._last_nowait_drop_explicit_lineage_native
+                cached_native_target = self._last_nowait_drop_native_target
+                if (
+                    cached_native_call is not None
+                    and cached_native_target is not None
+                    and cached_native_call(
+                        cached_native_target,
+                        payload,
+                        producer=None,
+                        control_epoch=None,
+                        trace_id=None,
+                        causality_id=None,
+                        correlation_id=None,
+                    )
+                ):
+                    return
+            cached_mode = self._last_nowait_drop_mode
+            cached_native_target = self._last_nowait_drop_native_target
+            cached_target_key = self._last_nowait_drop_key
+            if cached_native_target is not None and cached_target_key is not None:
+                if cached_mode == "sparse":
+                    native_emit_drop = self._native_emit_single_if_unrouted_drop
+                    if (
+                        native_emit_drop is not None
+                        and cached_target_key not in self._stream_taint_upper_bounds
+                        and native_emit_drop(cached_native_target, payload)
+                    ):
+                        return
+                elif cached_mode == "materialized":
+                    cached_target_keys = self._last_nowait_drop_target_keys
+                    cached_materialized_target = (
+                        self._last_nowait_drop_materialized_target
+                    )
+                    cached_native_call = self._last_nowait_drop_explicit_lineage_native
+                    cached_call_kind = self._last_nowait_drop_native_call_kind
+                    if (
+                        cached_call_kind == "no_lineage_profile"
+                        and self._last_nowait_drop_no_lineage_profile is not None
+                        and self._last_nowait_drop_no_lineage_profile_emit is not None
+                        and self._last_nowait_drop_no_lineage_profile_emit(
+                            self._last_nowait_drop_no_lineage_profile,
+                            payload,
+                        )
+                    ):
+                        return
+                    if (
+                        cached_call_kind
+                        in ("no_lineage_profile", "no_lineage_python")
+                        and cached_materialized_target is not None
+                        and cached_native_call is not None
+                        and cached_native_call(
+                            cached_native_target,
+                            cached_materialized_target,
+                            payload,
+                        )
+                    ):
+                        return
+                    if (
+                        cached_call_kind == "no_lineage"
+                        and cached_materialized_target is not None
+                        and cached_native_call is not None
+                        and cached_native_call(
+                            cached_native_target,
+                            cached_materialized_target,
+                            payload,
+                            producer=None,
+                            control_epoch=None,
+                        )
+                    ):
+                        return
+                    if (
+                        cached_native_call is not None
+                        and cached_call_kind == "single_target_explicit_ids"
+                        and cached_materialized_target is not None
+                        and trace_id is not None
+                        and causality_id is not None
+                        and cached_native_call(
+                            cached_native_target,
+                            cached_materialized_target,
+                            payload,
+                            trace_id,
+                            causality_id,
+                            correlation_id,
+                        )
+                    ):
+                        return
+                    if (
+                        cached_native_call is not None
+                        and cached_call_kind == "explicit_ids"
+                        and trace_id is not None
+                        and causality_id is not None
+                        and cached_native_call(
+                            cached_native_target,
+                            payload,
+                            trace_id,
+                            causality_id,
+                            correlation_id,
+                        )
+                    ):
+                        return
+                    if (
+                        cached_native_call is not None
+                        and cached_call_kind == "python_ids"
+                        and cached_native_call(
+                            cached_native_target,
+                            payload,
+                            trace_id,
+                            causality_id,
+                            correlation_id,
+                        )
+                    ):
+                        return
+                    if (
+                        cached_native_call is not None
+                        and cached_call_kind == "rust_kwargs"
+                        and cached_native_call(
+                            cached_native_target,
+                            payload,
+                            producer=None,
+                            control_epoch=None,
+                            trace_id=trace_id,
+                            causality_id=causality_id,
+                            correlation_id=correlation_id,
+                        )
+                    ):
+                        return
+                    native_drop_ids = (
+                        self._native_emit_single_if_unrouted_with_lineage_ids_no_parents_and_materializers_drop_python
+                    )
+                    native_emit_with_materializers_drop_python = (
+                        self._native_emit_single_if_unrouted_with_lineage_no_parents_and_materializers_drop_python
+                    )
+                    native_emit_with_materializers_drop = (
+                        self._native_emit_single_if_unrouted_with_lineage_no_parents_and_materializers_drop
+                    )
+                    if (
+                        (
+                            native_emit_with_materializers_drop_python is not None
+                            or native_emit_with_materializers_drop is not None
+                        )
+                        and cached_target_key
+                        in self._native_materialize_edges_by_source
+                        and (
+                            not self._stream_taint_upper_bounds
+                            or (
+                                cached_target_key not in self._stream_taint_upper_bounds
+                                and not any(
+                                    target_key in self._stream_taint_upper_bounds
+                                    for target_key in cached_target_keys
+                                )
+                            )
+                        )
+                        and (
+                            native_drop_ids(
+                                cached_native_target,
+                                payload,
+                                trace_id,
+                                causality_id,
+                                correlation_id,
+                            )
+                            if (
+                                native_drop_ids is not None
+                                and trace_id is not None
+                                and causality_id is not None
+                            )
+                            else native_emit_with_materializers_drop_python(
+                                cached_native_target,
+                                payload,
+                                trace_id,
+                                causality_id,
+                                correlation_id,
+                            )
+                            if native_emit_with_materializers_drop_python is not None
+                            else native_emit_with_materializers_drop(
+                                cached_native_target,
+                                payload,
+                                producer=None,
+                                control_epoch=None,
+                                trace_id=trace_id,
+                                causality_id=causality_id,
+                                correlation_id=correlation_id,
+                            )
+                        )
+                    ):
+                        return
+        if (
+            target is self._last_process_local_nowait_target
+            and producer is None
+            and control_epoch is None
+            and trace_id is None
+            and causality_id is None
+            and correlation_id is None
+            and not parent_events
+            and not self._context_stack
+            and "write" not in self._debug_routes
+            and self._subscriber_generation
+            == self._last_process_local_nowait_generation
+            and self._taint_generation == self._last_process_local_nowait_taint_generation
+        ):
+            cache = self._last_process_local_nowait_cache
+            native_emit_single = self._native_emit_single_if_unrouted
+            if cache is not None and native_emit_single is not None:
+                (
+                    cached_native_target,
+                    cached_target_key,
+                    cached_encode,
+                    cached_history_limit,
+                ) = cache
+                encoded = cached_encode(payload)
+                single_envelope = native_emit_single(cached_native_target, encoded)
+                if single_envelope is not None:
+                    self._record_cached_process_local_nowait_envelope(
+                        cached_target_key,
+                        single_envelope,
+                        encoded,
+                        history_limit=cached_history_limit,
+                    )
+                    return
+                _release_known_any_schema_value(encoded)
+        if target is self._last_publish_route_target:
+            typed_target = self._last_publish_typed_target
+        else:
+            if isinstance(target, TypedRoute):
+                typed_target = target
+            elif isinstance(target, (Source, Sink)) and isinstance(target.route, TypedRoute):
+                typed_target = target.route
+            else:
+                typed_target = None
+            self._last_publish_route_target = target
+            self._last_publish_typed_target = typed_target
+        if typed_target is None:
+            self.publish(
+                target,
+                payload,
+                producer=producer,
+                control_epoch=control_epoch,
+                trace_id=trace_id,
+                causality_id=causality_id,
+                correlation_id=correlation_id,
+                parent_events=parent_events,
+            )
+            return
+        native_target = typed_target.route_ref
+        target_key = typed_target.route_display
+        if self._context_stack:
+            self._remember_active_context_route(native_target)
+        if (
+            self._last_typed_route_runtime_key == target_key
+            and self._last_typed_route_runtime_flags is not None
+        ):
+            runtime_flags = self._last_typed_route_runtime_flags
+        else:
+            runtime_flags = self._typed_route_runtime_flags_by_key.get(target_key)
+        if runtime_flags is None:
+            target_process_local = typed_target.schema.process_local
+            target_bytes_passthrough = typed_target.schema.is_bytes_passthrough()
+            sparse_native_retention = (
+                target_bytes_passthrough
+                and not target_process_local
+                and native_target.namespace.layer != Layer.Ephemeral
+                and not (
+                    native_target.namespace.plane == Plane.Write
+                    and native_target.variant == Variant.Request
+                )
+            )
+            runtime_flags = (
+                target_process_local,
+                target_bytes_passthrough,
+                sparse_native_retention,
+            )
+            self._typed_route_runtime_flags_by_key[target_key] = runtime_flags
+            self._sparse_native_retention_by_key[target_key] = sparse_native_retention
+            self._last_typed_route_runtime_key = target_key
+            self._last_typed_route_runtime_flags = runtime_flags
+        else:
+            (
+                target_process_local,
+                target_bytes_passthrough,
+                sparse_native_retention,
+            ) = runtime_flags
+            self._last_typed_route_runtime_key = target_key
+            self._last_typed_route_runtime_flags = runtime_flags
+        encoded = (
+            payload
+            if target_bytes_passthrough and type(payload) is bytes
+            else typed_target.schema.encode(payload)
+        )
+        if control_epoch is not None:
+            _validate_control_epoch(control_epoch)
+        observed_by_python = self._route_has_python_subscribers(target_key)
+        skip_python_retention_indexes = (
+            sparse_native_retention
+            and not observed_by_python
+            and target_key not in self._stream_taint_upper_bounds
+            and len(encoded) > 0
+            and control_epoch is None
+        )
+        observed_sparse_retention = (
+            sparse_native_retention
+            and observed_by_python
+            and target_key not in self._stream_taint_upper_bounds
+            and len(encoded) > 0
+            and control_epoch is None
+            and self._native_payload_by_id is not None
+        )
+        native_materialize_retention = (
+            sparse_native_retention
+            and observed_by_python
+            and target_key in self._native_materialize_edges_by_source
+            and len(encoded) > 0
+            and control_epoch is None
+            and self._native_payload_by_id is not None
+        )
+        materialized_target_keys: tuple[str, ...] = ()
+        single_materialized_target: RouteRef | None = None
+        native_materialized_drop_emitted = False
+        native_drop_no_lineage_single_target = (
+            self._native_emit_single_if_unrouted_and_materializer_drop
+        )
+        native_drop_no_lineage_single_target_python = (
+            self._native_emit_single_if_unrouted_and_materializer_drop_python
+        )
+        native_emit_with_materializers_drop = (
+            self._native_emit_single_if_unrouted_with_lineage_no_parents_and_materializers_drop
+        )
+        native_emit_with_materializers_drop_python = (
+            self._native_emit_single_if_unrouted_with_lineage_no_parents_and_materializers_drop_python
+        )
+        native_drop_ids = (
+            self._native_emit_single_if_unrouted_with_lineage_ids_no_parents_and_materializers_drop_python
+        )
+        native_drop_single_target_ids = (
+            self._native_emit_single_if_unrouted_with_lineage_ids_no_parents_and_materializer_drop_python
+        )
+        if native_materialize_retention and not parent_events:
+            materialized_target_keys = tuple(
+                self._native_materialize_edges_by_source.get(target_key, ())
+            )
+            materialized_target_refs = self._native_materialize_route_refs_by_source.get(
+                target_key, {}
+            )
+            single_materialized_target = (
+                materialized_target_refs.get(materialized_target_keys[0])
+                if len(materialized_target_keys) == 1
+                else None
+            )
+            delivery_subscribed = (
+                self._route_has_delivery_subscribers(target_key)
+                or self._routes_have_delivery_subscribers(materialized_target_keys)
+            )
+            if not delivery_subscribed:
+                if (
+                    producer is None
+                    and control_epoch is None
+                    and single_materialized_target is not None
+                    and native_drop_no_lineage_single_target_python is not None
+                ):
+                    native_materialized_drop_emitted = (
+                        native_drop_no_lineage_single_target_python(
+                            native_target,
+                            single_materialized_target,
+                            encoded,
+                        )
+                    )
+                elif (
+                    single_materialized_target is not None
+                    and native_drop_no_lineage_single_target is not None
+                ):
+                    native_materialized_drop_emitted = (
+                        native_drop_no_lineage_single_target(
+                            native_target,
+                            single_materialized_target,
+                            encoded,
+                            producer=producer,
+                            control_epoch=control_epoch,
+                        )
+                    )
+                elif (
+                    producer is None
+                    and control_epoch is None
+                    and trace_id is not None
+                    and causality_id is not None
+                    and native_drop_single_target_ids is not None
+                    and single_materialized_target is not None
+                ):
+                    native_materialized_drop_emitted = native_drop_single_target_ids(
+                        native_target,
+                        single_materialized_target,
+                        encoded,
+                        trace_id,
+                        causality_id,
+                        correlation_id,
+                    )
+                elif (
+                    producer is None
+                    and control_epoch is None
+                    and trace_id is not None
+                    and causality_id is not None
+                    and native_drop_ids is not None
+                ):
+                    native_materialized_drop_emitted = native_drop_ids(
+                        native_target,
+                        encoded,
+                        trace_id,
+                        causality_id,
+                        correlation_id,
+                    )
+                elif (
+                    producer is None
+                    and control_epoch is None
+                    and native_emit_with_materializers_drop_python is not None
+                ):
+                    native_materialized_drop_emitted = (
+                        native_emit_with_materializers_drop_python(
+                            native_target,
+                            encoded,
+                            trace_id,
+                            causality_id,
+                            correlation_id,
+                        )
+                    )
+                elif native_emit_with_materializers_drop is not None:
+                    native_materialized_drop_emitted = (
+                        native_emit_with_materializers_drop(
+                            native_target,
+                            encoded,
+                            producer=producer,
+                            control_epoch=control_epoch,
+                            trace_id=trace_id,
+                            causality_id=causality_id,
+                            correlation_id=correlation_id,
+                        )
+                    )
+        if (
+            native_materialize_retention
+            and native_materialized_drop_emitted
+        ):
+            producer_id = "python" if producer is None else producer.producer_id
+            self._record_native_materialized_drop(
+                target_key,
+                materialized_target_keys,
+                producer_id,
+            )
+            if (
+                producer is None
+                and control_epoch is None
+                and not parent_events
+                and not self._context_stack
+                and "write" not in self._debug_routes
+                and type(payload) is bytes
+            ):
+                self._last_nowait_drop_mode = "materialized"
+                self._last_nowait_drop_target = target
+                self._last_nowait_drop_native_target = native_target
+                self._last_nowait_drop_key = target_key
+                self._last_nowait_drop_target_keys = materialized_target_keys
+                self._last_nowait_drop_materialized_target = (
+                    single_materialized_target
+                )
+                self._last_nowait_drop_generation = self._subscriber_generation
+                self._last_nowait_drop_taint_generation = self._taint_generation
+                if (
+                    self._native_compile_no_lineage_materializer_drop_profile
+                    is not None
+                    and self._native_emit_no_lineage_materializer_drop_profile_python
+                    is not None
+                    and native_drop_no_lineage_single_target_python is not None
+                    and single_materialized_target is not None
+                ):
+                    profile_key = (target_key, materialized_target_keys)
+                    if (
+                        self._last_nowait_drop_no_lineage_profile_key
+                        != profile_key
+                    ):
+                        self._release_last_nowait_drop_no_lineage_profile()
+                    if self._last_nowait_drop_no_lineage_profile is None:
+                        self._last_nowait_drop_no_lineage_profile = (
+                            self._native_compile_no_lineage_materializer_drop_profile(
+                                native_target,
+                                single_materialized_target,
+                            )
+                        )
+                        self._last_nowait_drop_no_lineage_profile_emit = (
+                            self._native_emit_no_lineage_materializer_drop_profile_python
+                        )
+                        self._last_nowait_drop_no_lineage_profile_key = profile_key
+                    self._last_nowait_drop_native_call_kind = "no_lineage_profile"
+                    self._last_nowait_drop_explicit_lineage_native = (
+                        native_drop_no_lineage_single_target_python
+                    )
+                elif (
+                    native_drop_no_lineage_single_target is not None
+                    and single_materialized_target is not None
+                ):
+                    self._release_last_nowait_drop_no_lineage_profile()
+                    self._last_nowait_drop_native_call_kind = "no_lineage"
+                    self._last_nowait_drop_explicit_lineage_native = (
+                        native_drop_no_lineage_single_target
+                    )
+                elif (
+                    native_drop_single_target_ids is not None
+                    and single_materialized_target is not None
+                    and trace_id is not None
+                    and causality_id is not None
+                ):
+                    self._release_last_nowait_drop_no_lineage_profile()
+                    self._last_nowait_drop_native_call_kind = (
+                        "single_target_explicit_ids"
+                    )
+                    self._last_nowait_drop_explicit_lineage_native = (
+                        native_drop_single_target_ids
+                    )
+                elif (
+                    native_drop_ids is not None
+                    and trace_id is not None
+                    and causality_id is not None
+                ):
+                    self._release_last_nowait_drop_no_lineage_profile()
+                    self._last_nowait_drop_native_call_kind = "explicit_ids"
+                    self._last_nowait_drop_explicit_lineage_native = native_drop_ids
+                elif native_emit_with_materializers_drop_python is not None:
+                    self._release_last_nowait_drop_no_lineage_profile()
+                    self._last_nowait_drop_native_call_kind = "python_ids"
+                    self._last_nowait_drop_explicit_lineage_native = (
+                        native_emit_with_materializers_drop_python
+                    )
+                else:
+                    self._release_last_nowait_drop_no_lineage_profile()
+                    self._last_nowait_drop_native_call_kind = "rust_kwargs"
+                    self._last_nowait_drop_explicit_lineage_native = (
+                        native_emit_with_materializers_drop
+                    )
+            return
+        native_emit_with_materializers = (
+            self._native_emit_single_if_unrouted_with_lineage_no_parents_and_materializers
+        )
+        if (
+            native_materialize_retention
+            and not parent_events
+            and native_emit_with_materializers is not None
+        ):
+            emitted = native_emit_with_materializers(
+                native_target,
+                encoded,
+                producer=producer,
+                control_epoch=control_epoch,
+                trace_id=trace_id,
+                causality_id=causality_id,
+                correlation_id=correlation_id,
+            )
+            if emitted is not None:
+                source_envelope = emitted[0]
+                producer_id = "python" if producer is None else producer.producer_id
+                self._record_observed_sparse_envelope(
+                    native_target,
+                    target_key,
+                    source_envelope,
+                    producer_id=producer_id,
+                    trace_id=trace_id,
+                    causality_id=causality_id,
+                    correlation_id=correlation_id,
+                    parent_events=parent_events,
+                )
+                self._publish_native_materialized_envelopes(
+                    tuple(emitted[1:]),
+                    materialized_target_keys,
+                )
+                if (
+                    "write" in self._debug_routes
+                    or target_key not in self._write_audit_event_by_route
+                ):
+                    self._emit_write_debug_event_for_key(target_key)
+                return
+        native_emit_drop = self._native_emit_single_if_unrouted_drop
+        if (
+            skip_python_retention_indexes
+            and not parent_events
+            and native_emit_drop is not None
+            and native_emit_drop(
+                native_target,
+                encoded,
+                producer=producer,
+                control_epoch=control_epoch,
+            )
+        ):
+            producer_id = "python" if producer is None else producer.producer_id
+            self._remember_writer_if_changed(target_key, producer_id)
+            if (
+                "write" in self._debug_routes
+                or target_key not in self._write_audit_event_by_route
+            ):
+                self._emit_write_debug_event_for_key(target_key)
+            if (
+                producer is None
+                and control_epoch is None
+                and not parent_events
+                and not self._context_stack
+                and "write" not in self._debug_routes
+                and type(payload) is bytes
+            ):
+                self._last_nowait_drop_mode = "sparse"
+                self._last_nowait_drop_target = target
+                self._last_nowait_drop_native_target = native_target
+                self._last_nowait_drop_key = target_key
+                self._last_nowait_drop_target_keys = ()
+                self._last_nowait_drop_materialized_target = None
+                self._last_nowait_drop_generation = self._subscriber_generation
+                self._last_nowait_drop_taint_generation = self._taint_generation
+                self._last_nowait_drop_native_call_kind = None
+                self._last_nowait_drop_explicit_lineage_native = None
+                self._release_last_nowait_drop_no_lineage_profile()
+            return
+        native_emit_single = self._native_emit_single_if_unrouted
+        process_local_nowait_indexes = (
+            target_process_local
+            and not observed_by_python
+            and target_key not in self._stream_taint_upper_bounds
+            and not parent_events
+            and control_epoch is None
+        )
+        single_envelope = (
+            None
+            if native_emit_single is None
+            else native_emit_single(
+                native_target,
+                encoded,
+                producer=producer,
+                control_epoch=control_epoch,
+            )
+        )
+        if single_envelope is not None:
+            producer_id = "python" if producer is None else producer.producer_id
+            if process_local_nowait_indexes:
+                self._record_process_local_nowait_envelope(
+                    native_target,
+                    target_key,
+                    single_envelope,
+                    encoded,
+                    producer_id=producer_id,
+                )
+                if (
+                    producer is None
+                    and trace_id is None
+                    and causality_id is None
+                    and correlation_id is None
+                    and not self._context_stack
+                    and "write" not in self._debug_routes
+                ):
+                    retention = self._resolved_retention_by_key.get(target_key)
+                    if retention is None:
+                        retention = self._retention_policy_for_key(
+                            native_target,
+                            target_key,
+                        )
+                    self._last_process_local_nowait_target = target
+                    self._last_process_local_nowait_cache = (
+                        native_target,
+                        target_key,
+                        typed_target.schema.encode,
+                        self._process_local_payload_retention_limit(retention),
+                    )
+                    self._last_process_local_nowait_generation = (
+                        self._subscriber_generation
+                    )
+                    self._last_process_local_nowait_taint_generation = (
+                        self._taint_generation
+                    )
+            elif skip_python_retention_indexes:
+                self._remember_writer_if_changed(target_key, producer_id)
+            else:
+                if (
+                    target_process_local
+                    or not target_bytes_passthrough
+                    or target_key in self._subjects
+                ):
+                    self._remember_eager_payload(
+                        single_envelope,
+                        encoded,
+                        process_local=target_process_local,
+                    )
+                if observed_sparse_retention:
+                    self._record_observed_sparse_envelope(
+                        native_target,
+                        target_key,
+                        single_envelope,
+                        producer_id=producer_id,
+                        trace_id=trace_id,
+                        causality_id=causality_id,
+                        correlation_id=correlation_id,
+                        parent_events=parent_events,
+                    )
+                else:
+                    self._record_envelope(
+                        native_target,
+                        single_envelope,
+                        route_key=target_key,
+                        producer_id=producer_id,
+                        trace_id=trace_id,
+                        causality_id=causality_id,
+                        correlation_id=correlation_id,
+                        parent_events=parent_events,
+                    )
+            if (
+                "write" in self._debug_routes
+                or target_key not in self._write_audit_event_by_route
+            ):
+                self._emit_write_debug_event_for_key(target_key)
+            return
+        self.publish(
+            typed_target,
+            payload,
+            producer=producer,
+            control_epoch=control_epoch,
+            trace_id=trace_id,
+            causality_id=causality_id,
+            correlation_id=correlation_id,
+            parent_events=parent_events,
+        )
 
     def publish_lazy(
         self,
@@ -3584,6 +4943,18 @@ class Graph:
         parent_events: Sequence[EventRef] = (),
     ) -> ClosedEnvelope:
         """Publish metadata now and defer payload materialization until opened."""
+        if (
+            trace_id is not None
+            or causality_id is not None
+            or correlation_id is not None
+            or parent_events
+        ):
+            trace_id, causality_id, correlation_id, parent_events = (
+                None,
+                None,
+                None,
+                (),
+            )
         native_route = self._coerce_route_ref(target)
         self._remember_active_context_route(native_route)
         emitted = self._emit_native(
@@ -3591,7 +4962,7 @@ class Graph:
         )
         producer_id = "python" if producer is None else producer.producer_id
         for envelope in emitted:
-            self._lazy_payload_sources[envelope.payload_ref.payload_id] = payload_source
+            self._lazy_payload_sources[envelope.payload_id] = payload_source
             self._record_envelope(
                 envelope.route,
                 envelope,
@@ -3677,6 +5048,7 @@ class Graph:
             ] = flow_policy
         if not connected:
             return
+        self._clear_last_nowait_drop_cache()
         self._emit_debug_event(
             "topology",
             f"connected {self._connectable_key(source, edge_role='source')} -> {self._connectable_key(sink, edge_role='sink')}",
@@ -3702,6 +5074,7 @@ class Graph:
         )
         removed = self._graph.disconnect(native_source, native_sink)
         if removed:
+            self._clear_last_nowait_drop_cache()
             self._emit_debug_event(
                 "topology",
                 f"disconnected {self._connectable_key(source, edge_role='source')} -> {self._connectable_key(sink, edge_role='sink')}",
@@ -4159,23 +5532,24 @@ class Graph:
         """Return metadata-versus-payload demand accounting for one route."""
         native_route = self._coerce_route_ref(route_ref)
         key = self._route_key(native_route)
-        stats = self._payload_stats(native_route)
+        stats = self._payload_demand_stats.get(key)
         unopened_lazy_payloads = 0
-        for payload_id, payload_route in self._payload_route_by_id.items():
-            if payload_route != key:
-                continue
+        for payload_id in self._payload_ids_by_route.get(key, ()):
             if (
                 payload_id in self._lazy_payload_sources
                 and payload_id not in self._opened_payload_ids
             ):
                 unopened_lazy_payloads += 1
+        retention = next(self.retention_snapshot(native_route), None)
         return PayloadDemandSnapshot(
             route_display=key,
-            metadata_events=stats["metadata_events"],
-            payload_open_requests=stats["payload_open_requests"],
-            lazy_source_opens=stats["lazy_source_opens"],
-            materialized_payload_bytes=stats["materialized_payload_bytes"],
-            cache_hits=stats["cache_hits"],
+            metadata_events=0 if retention is None else retention.metadata_event_count,
+            payload_open_requests=0 if stats is None else stats["payload_open_requests"],
+            lazy_source_opens=0 if stats is None else stats["lazy_source_opens"],
+            materialized_payload_bytes=(
+                0 if stats is None else stats["materialized_payload_bytes"]
+            ),
+            cache_hits=0 if stats is None else stats["cache_hits"],
             unopened_lazy_payloads=unopened_lazy_payloads,
         )
 
@@ -4399,6 +5773,18 @@ class Graph:
         """Expose the current credit/backpressure view for registered routes."""
         return iter(tuple(self._graph.credit_snapshot()))
 
+    def retention_snapshot(
+        self,
+        route_ref: RouteLike | None = None,
+    ) -> Iterator[RetentionSnapshot]:
+        """Expose native retained history, payload, and lineage counts."""
+        native_route = None if route_ref is None else self._coerce_route_ref(route_ref)
+        return iter(tuple(self._graph.retention_snapshot(native_route)))
+
+    def retention_violations(self) -> Iterator[str]:
+        """Return native retention lifecycle invariant violations."""
+        return iter(tuple(self._graph.retention_violations()))
+
     def flow_snapshot(self, route_ref: InspectableRoute) -> FlowSnapshot:
         """Return one enriched credit snapshot for a route."""
         if isinstance(route_ref, (NativeReadablePort, NativeWritablePort)):
@@ -4461,44 +5847,14 @@ class Graph:
         retention = self._retention_policy_for(route_ref)
         if retention.latest_replay_policy == "none":
             return iter(())
-        history = tuple(self._history.get(self._route_key(route_ref), ()))
+        native_route = self._coerce_route_ref(route_ref)
+        history = tuple(
+            self._recorded_envelope_for(envelope)
+            for envelope in self._graph.replay(native_route)
+        )
         if retention.latest_replay_policy == "latest_only":
             return iter(history[-1:] if history else ())
         return iter(history)
-
-    def lineage(
-        self,
-        route_ref: RouteLike | None = None,
-        *,
-        trace_id: str | None = None,
-        causality_id: str | None = None,
-        correlation_id: str | None = None,
-    ) -> Iterator[LineageRecord]:
-        """Return retained lineage records filtered by route or lineage ids."""
-        if trace_id is not None:
-            keys = tuple(self._lineage_events_by_trace.get(trace_id, ()))
-        elif causality_id is not None:
-            keys = tuple(self._lineage_events_by_causality.get(causality_id, ()))
-        elif correlation_id is not None:
-            keys = tuple(self._lineage_events_by_correlation.get(correlation_id, ()))
-        elif route_ref is not None:
-            keys = tuple(
-                self._event_index_key(self._event_ref(envelope))
-                for envelope in self.replay(route_ref)
-            )
-        else:
-            keys = tuple(self._lineage_by_event)
-        records = tuple(
-            self._lineage_by_event[key]
-            for key in keys
-            if key in self._lineage_by_event
-            and (
-                route_ref is None
-                or self._lineage_by_event[key].event.route_display
-                == self._route_key(route_ref)
-            )
-        )
-        return iter(records)
 
     def subscribers(self, route_ref: RouteLike) -> int:
         """Return the number of active observers on a route."""
@@ -4516,7 +5872,7 @@ class Graph:
 
         for scope_route in scope_routes:
             route_display = scope_route.display()
-            producers.update(self._writers.get(route_display, ()))
+            producers.update(self._recent_writers_for_key(route_display))
             active_subscribers.update(self._route_subscribers.get(route_display, ()))
             for item in self._taint_query_items(scope_route):
                 if item.startswith("stream:"):
@@ -4549,7 +5905,7 @@ class Graph:
 
     def writers(self, route_ref: RouteLike) -> Iterator[str]:
         """Return distinct producer ids that have written to a route."""
-        return iter(tuple(sorted(self._writers.get(self._route_key(route_ref), ()))))
+        return iter(tuple(sorted(self._recent_writers_for_key(self._route_key(route_ref)))))
 
     def export_route(
         self, route_ref: RouteLike, *, visibility: str = "exported"
@@ -5393,9 +6749,77 @@ class Graph:
     ) -> SubscriptionLike:
         """Mirror source updates into a state route owned by the topology."""
         source_route = self._coerce_route_ref(source)
+        if isinstance(source, TypedRoute) and isinstance(state_route, TypedRoute):
+            source_key = source.route_display
+            state_key = state_route.route_display
+            if (
+                source.schema.is_bytes_passthrough()
+                and not source.schema.process_local
+                and state_route.schema.is_bytes_passthrough()
+                and not state_route.schema.process_local
+                and source.route_ref.namespace.layer != Layer.Ephemeral
+                and not (
+                    source.route_ref.namespace.plane == Plane.Write
+                    and source.route_ref.variant == Variant.Request
+                )
+                and source_key not in self._stream_taint_upper_bounds
+                and state_key not in self._stream_taint_upper_bounds
+                and self._graph.latest(source_route) is None
+            ):
+                native_subscription = (
+                    self._register_native_materialize_bytes_subscription(
+                        source.route_ref,
+                        source_key,
+                        state_route.route_ref,
+                        state_key,
+                    )
+                )
+                if native_subscription is not None:
+                    return native_subscription
 
         def on_next(item: TypedEnvelope[T] | ClosedEnvelope) -> None:
             if isinstance(state_route, TypedRoute):
+                state_key = state_route.route_display
+                source_taints = self._item_taints(item)
+                if (
+                    not source_taints
+                    and state_route.schema.is_bytes_passthrough()
+                    and not state_route.schema.process_local
+                    and state_key not in self._stream_taint_upper_bounds
+                    and isinstance(source, TypedRoute)
+                    and (
+                        source.schema.is_bytes_passthrough()
+                        and not source.schema.process_local
+                    )
+                ):
+                    native_materialize = self._native_materialize_bytes_one_parent
+                    closed = item.closed if isinstance(item, TypedEnvelope) else item
+                    state_envelope = (
+                        None
+                        if native_materialize is None
+                        else native_materialize(
+                            closed.route,
+                            closed.seq_source,
+                            state_route.route_ref,
+                        )
+                    )
+                    if state_envelope is not None:
+                        producer_id = getattr(
+                            getattr(state_envelope, "producer", None),
+                            "producer_id",
+                            "python",
+                        )
+                        self._remember_writer_if_changed(state_key, producer_id)
+                        if self._route_has_python_subscribers(state_key):
+                            self._publish_key(state_key, state_envelope)
+                        if (
+                            "write" in self._debug_routes
+                            or state_key not in self._write_audit_event_by_route
+                        ):
+                            self._emit_write_debug_event_for_key(state_key)
+                        if self._route_key_for_ref(closed.route) not in self._subjects:
+                            self._materialized_payloads.pop(closed.payload_id, None)
+                        return
                 if isinstance(source, TypedRoute):
                     value = cast(T, self._operator_value(source, source_route, item))
                 else:
@@ -5404,17 +6828,34 @@ class Graph:
                             source_route, item, record_open=False
                         )
                     )
-                lineage = self._lineage_for_item(item)
+                (
+                    trace_id,
+                    causality_id,
+                    correlation_id,
+                    parent_route_display,
+                    parent_seq_source,
+                ) = self._lineage_parts_for_item(item)
+                parent_event = (parent_route_display, parent_seq_source)
+                if not source_taints:
+                    self.publish_nowait(
+                        state_route,
+                        value,
+                        trace_id=trace_id,
+                        causality_id=causality_id,
+                        correlation_id=correlation_id,
+                        parent_events=(parent_event,),
+                    )
+                    return
                 self._extend_taints(
                     self.publish(
                         state_route,
                         value,
-                        trace_id=lineage.trace_id,
-                        causality_id=lineage.causality_id,
-                        correlation_id=lineage.correlation_id,
-                        parent_events=(lineage.event,),
+                        trace_id=trace_id,
+                        causality_id=causality_id,
+                        correlation_id=correlation_id,
+                        parent_events=(parent_event,),
                     ),
-                    self._item_taints(item),
+                    source_taints,
                 )
             else:
                 payload = (
@@ -5425,20 +6866,38 @@ class Graph:
                         source_route, item, record_open=False
                     )
                 )
-                lineage = self._lineage_for_item(item)
+                (
+                    trace_id,
+                    causality_id,
+                    correlation_id,
+                    parent_route_display,
+                    parent_seq_source,
+                ) = self._lineage_parts_for_item(item)
+                parent_event = (parent_route_display, parent_seq_source)
+                source_taints = self._item_taints(item)
+                if not source_taints:
+                    self.publish_nowait(
+                        state_route,
+                        payload,
+                        trace_id=trace_id,
+                        causality_id=causality_id,
+                        correlation_id=correlation_id,
+                        parent_events=(parent_event,),
+                    )
+                    return
                 self._extend_taints(
                     self.publish(
                         state_route,
                         payload,
-                        trace_id=lineage.trace_id,
-                        causality_id=lineage.causality_id,
-                        correlation_id=lineage.correlation_id,
-                        parent_events=(lineage.event,),
+                        trace_id=trace_id,
+                        causality_id=causality_id,
+                        correlation_id=correlation_id,
+                        parent_events=(parent_event,),
                     ),
-                    self._item_taints(item),
+                    source_taints,
                 )
 
-        return self.observe(source).subscribe(on_next)  # type: ignore[arg-type]
+        return self._observe_closed_envelopes(source, on_next)
 
     def repair_taints(
         self,
@@ -5813,6 +7272,8 @@ class Graph:
 
     def debug_routes(self) -> Iterator[RouteRef]:
         """Return the well-known debug routes created so far."""
+        for event_type in sorted(self._debug_event_types):
+            self._debug_route(event_type)
         return iter(
             tuple(
                 self._debug_routes[event_type]
@@ -5861,8 +7322,20 @@ class Graph:
             return target.ingress.describe().route_display
         return self._route_key(target)
 
+    def _route_display(self, route_ref: RouteLike) -> str:
+        native_route = self._coerce_route_ref(route_ref)
+        return self._route_key_for_ref(native_route)
+
+    def _route_key_for_ref(self, native_route: RouteRef) -> str:
+        cached = self._route_display_cache.get(native_route)
+        if cached is None:
+            cached = native_route.display()
+            self._route_display_cache[native_route] = cached
+        self._route_refs_by_key[cached] = native_route
+        return cached
+
     def _route_key(self, route_ref: RouteLike) -> str:
-        return self._coerce_route_ref(route_ref).display()
+        return self._route_display(route_ref)
 
     @staticmethod
     def _manifest_mapping_key(key: Any) -> tuple[str, str, str]:
@@ -6156,23 +7629,237 @@ class Graph:
         self._subscriber_sequence += 1
         return f"subscriber-{self._subscriber_sequence}"
 
+    def _remember_subscriber(self, route_display: str, subscriber_id: str) -> None:
+        self._subscriber_generation += 1
+        self._subscriber_count[route_display] = (
+            self._subscriber_count.get(route_display, 0) + 1
+        )
+        refs = self._route_subscriber_refs.setdefault(route_display, {})
+        refs[subscriber_id] = refs.get(subscriber_id, 0) + 1
+        self._route_subscribers.setdefault(route_display, set()).add(subscriber_id)
+
+    def _forget_subscriber(self, route_display: str, subscriber_id: str) -> None:
+        self._subscriber_generation += 1
+        count = self._subscriber_count.get(route_display, 0)
+        if count <= 1:
+            self._subscriber_count.pop(route_display, None)
+            self._subjects.pop(route_display, None)
+        else:
+            self._subscriber_count[route_display] = count - 1
+
+        refs = self._route_subscriber_refs.get(route_display)
+        if refs is None:
+            return
+        ref_count = refs.get(subscriber_id, 0)
+        if ref_count <= 1:
+            refs.pop(subscriber_id, None)
+            subscribers = self._route_subscribers.get(route_display)
+            if subscribers is not None:
+                subscribers.discard(subscriber_id)
+                if not subscribers:
+                    self._route_subscribers.pop(route_display, None)
+        else:
+            refs[subscriber_id] = ref_count - 1
+        if not refs:
+            self._route_subscriber_refs.pop(route_display, None)
+
+    def _route_has_python_subscribers(self, route_display: str) -> bool:
+        return (
+            self._route_has_delivery_subscribers(route_display)
+            or route_display in self._native_materialize_edges_by_source
+        )
+
+    def _route_has_delivery_subscribers(self, route_display: str) -> bool:
+        return (
+            route_display in self._subjects
+            or route_display in self._direct_envelope_subscribers
+        )
+
+    def _routes_have_delivery_subscribers(self, route_displays: Sequence[str]) -> bool:
+        for route_display in route_displays:
+            if self._route_has_delivery_subscribers(route_display):
+                return True
+        return False
+
+    def _register_native_materialize_bytes_subscription(
+        self,
+        source_route: RouteRef,
+        source_key: str,
+        target_route: RouteRef,
+        target_key: str,
+    ) -> SubscriptionLike | None:
+        register = self._native_register_materialize_bytes
+        unregister = self._native_unregister_materialize_bytes
+        if register is None or unregister is None:
+            return None
+        targets = self._native_materialize_edges_by_source.setdefault(source_key, {})
+        current_count = targets.get(target_key, 0)
+        if current_count == 0:
+            if not register(source_route, target_route):
+                if not targets:
+                    self._native_materialize_edges_by_source.pop(source_key, None)
+                return None
+            self._native_materialize_route_refs_by_source.setdefault(source_key, {})[
+                target_key
+            ] = target_route
+        targets[target_key] = current_count + 1
+        subscriber_id = self._next_subscriber_id()
+        self._remember_subscriber(source_key, subscriber_id)
+
+        def dispose() -> None:
+            self._unregister_native_materialize_bytes_subscription(
+                source_route,
+                source_key,
+                target_route,
+                target_key,
+                subscriber_id,
+            )
+
+        return CallbackSubscription(dispose)
+
+    def _unregister_native_materialize_bytes_subscription(
+        self,
+        source_route: RouteRef,
+        source_key: str,
+        target_route: RouteRef,
+        target_key: str,
+        subscriber_id: str,
+    ) -> None:
+        try:
+            targets = self._native_materialize_edges_by_source.get(source_key)
+            if targets is None:
+                return
+            current_count = targets.get(target_key, 0)
+            if current_count <= 1:
+                self._clear_nowait_materializer_cache_if_matches(
+                    source_key,
+                    target_key,
+                )
+                targets.pop(target_key, None)
+                target_refs = self._native_materialize_route_refs_by_source.get(
+                    source_key
+                )
+                if target_refs is not None:
+                    target_refs.pop(target_key, None)
+                    if not target_refs:
+                        self._native_materialize_route_refs_by_source.pop(
+                            source_key, None
+                        )
+                unregister = self._native_unregister_materialize_bytes
+                if unregister is not None:
+                    unregister(source_route, target_route)
+            else:
+                targets[target_key] = current_count - 1
+            if not targets:
+                self._native_materialize_edges_by_source.pop(source_key, None)
+        finally:
+            self._forget_subscriber(source_key, subscriber_id)
+
     @staticmethod
     def _mailbox_value(mailbox: NativeMailbox, name: str) -> Any:
         value = getattr(mailbox, name)
         return value() if callable(value) else value
 
-    def _subject_for(self, route_ref: RouteLike) -> Subject[ClosedEnvelope]:
+    def _remember_writer(self, route_display: str, producer_id: str) -> None:
+        self._last_writer_cache_key = route_display
+        self._last_writer_cache_id = producer_id
+        writers = self._writers.get(route_display)
+        if writers is None:
+            writers = deque(maxlen=DEFAULT_ROUTE_WRITER_LIMIT)
+            self._writers[route_display] = writers
+        if writers and writers[-1] == producer_id:
+            self._last_writer_by_key[route_display] = producer_id
+            return
+        try:
+            writers.remove(producer_id)
+        except ValueError:
+            pass
+        writers.append(producer_id)
+        self._last_writer_by_key[route_display] = producer_id
+
+    def _remember_writer_if_changed(
+        self,
+        route_display: str,
+        producer_id: str,
+    ) -> None:
+        if (
+            self._last_writer_cache_key == route_display
+            and self._last_writer_cache_id == producer_id
+        ):
+            return
+        if self._last_writer_by_key.get(route_display) == producer_id:
+            self._last_writer_cache_key = route_display
+            self._last_writer_cache_id = producer_id
+            return
+        self._remember_writer(route_display, producer_id)
+
+    def _recent_writers_for_key(self, route_display: str) -> tuple[str, ...]:
+        return tuple(dict.fromkeys(self._writers.get(route_display, ())))
+
+    def _subject_for(self, route_ref: RouteLike) -> EventStream[ClosedEnvelope]:
         key = self._route_key(route_ref)
         if key not in self._subjects:
-            self._subjects[key] = Subject()
+            self._subjects[key] = EventStream()
         return self._subjects[key]
+
+    def _direct_envelope_subscription(
+        self,
+        route_display: str,
+        on_next: EnvelopeCallback,
+    ) -> SubscriptionLike:
+        self._direct_envelope_subscription_sequence += 1
+        subscription_id = self._direct_envelope_subscription_sequence
+        subscribers = self._direct_envelope_subscribers.setdefault(route_display, {})
+        subscribers[subscription_id] = on_next
+        self._direct_envelope_snapshots[route_display] = tuple(subscribers.values())
+        return CallbackSubscription(
+            lambda: self._remove_direct_envelope_subscription(
+                route_display,
+                subscription_id,
+            )
+        )
+
+    def _remove_direct_envelope_subscription(
+        self,
+        route_display: str,
+        subscription_id: int,
+    ) -> None:
+        subscribers = self._direct_envelope_subscribers.get(route_display)
+        if subscribers is None or subscription_id not in subscribers:
+            return
+        subscribers.pop(subscription_id)
+        if subscribers:
+            self._direct_envelope_snapshots[route_display] = tuple(subscribers.values())
+            return
+        self._direct_envelope_subscribers.pop(route_display, None)
+        self._direct_envelope_snapshots.pop(route_display, None)
+
+    def _write_debug_detail_for_key(self, route_key: str) -> str:
+        detail = self._write_debug_detail_by_key.get(route_key)
+        if detail is None:
+            detail = f"published {route_key}"
+            self._write_debug_detail_by_key[route_key] = detail
+        return detail
+
+    def _emit_write_debug_event_for_key(self, route_key: str) -> DebugEvent:
+        if "write" not in self._debug_routes:
+            event = self._write_audit_event_by_route.get(route_key)
+            if event is not None:
+                return event
+        event = self._emit_debug_event_for_key(
+            "write",
+            self._write_debug_detail_for_key(route_key),
+            route_key,
+        )
+        if "write" not in self._debug_routes:
+            self._write_audit_event_by_route[route_key] = event
+        return event
 
     def _payload_stats(self, route_ref: RouteLike) -> dict[str, int]:
         key = self._route_key(route_ref)
         return self._payload_demand_stats.setdefault(
             key,
             {
-                "metadata_events": 0,
                 "payload_open_requests": 0,
                 "lazy_source_opens": 0,
                 "materialized_payload_bytes": 0,
@@ -6239,36 +7926,58 @@ class Graph:
         return policy.resolve()
 
     def _default_retention_policy(self, route_ref: RouteRef) -> RouteRetentionPolicy:
+        cached = self._default_retention_policies.get(route_ref)
+        if cached is not None:
+            return cached
         if route_ref.namespace.layer == Layer.Ephemeral:
-            return RouteRetentionPolicy(
+            policy = RouteRetentionPolicy(
                 latest_replay_policy="none",
                 replay_window="none",
                 payload_retention_policy="non_replayable",
                 history_limit=1,
             )
-        if route_ref.namespace.layer == Layer.Internal:
-            return RouteRetentionPolicy(
+        elif route_ref.namespace.layer == Layer.Internal:
+            policy = RouteRetentionPolicy(
                 latest_replay_policy="latest_only",
                 replay_window="latest",
                 payload_retention_policy="separate_store",
                 history_limit=1,
             )
-        return RouteRetentionPolicy(
-            latest_replay_policy="bounded_history",
-            replay_window="memory",
-            payload_retention_policy=(
-                "external_store"
-                if route_ref.namespace.layer == Layer.Bulk
-                else "separate_store"
-            ),
-        )
+        else:
+            policy = RouteRetentionPolicy(
+                latest_replay_policy="bounded_history",
+                replay_window=f"last_{DEFAULT_ROUTE_HISTORY_LIMIT}",
+                payload_retention_policy=(
+                    "external_store"
+                    if route_ref.namespace.layer == Layer.Bulk
+                    else "separate_store"
+                ),
+                history_limit=DEFAULT_ROUTE_HISTORY_LIMIT,
+            )
+        self._default_retention_policies[route_ref] = policy
+        return policy
 
     def _retention_policy_for(self, route_ref: RouteLike) -> RouteRetentionPolicy:
         native_route = self._coerce_route_ref(route_ref)
-        key = native_route.display()
-        return self._retention_policies.get(
-            key, self._default_retention_policy(native_route)
+        return self._retention_policy_for_key(
+            native_route,
+            self._route_key_for_ref(native_route),
         )
+
+    def _retention_policy_for_key(
+        self,
+        route_ref: RouteRef,
+        route_key: str,
+    ) -> RouteRetentionPolicy:
+        resolved = self._resolved_retention_by_key.get(route_key)
+        if resolved is not None:
+            return resolved
+        resolved = self._retention_policies.get(route_key)
+        if resolved is None:
+            resolved = self._default_retention_policy(route_ref)
+        self._resolved_retention_by_key[route_key] = resolved
+        self._route_refs_by_key[route_key] = route_ref
+        return resolved
 
     def _payload_retention_policy_for(self, route_ref: RouteLike) -> str:
         return cast(
@@ -6293,83 +8002,218 @@ class Graph:
         if note not in notes:
             notes.append(note)
 
+    def _forget_payload_route_index(
+        self,
+        payload_id: str,
+        route_key: str,
+        *,
+        remove_process_local_order: bool = True,
+    ) -> None:
+        route_payloads = self._payload_ids_by_route.get(route_key)
+        if route_payloads is not None:
+            route_payloads.discard(payload_id)
+            if not route_payloads:
+                self._payload_ids_by_route.pop(route_key, None)
+        if not remove_process_local_order:
+            return
+        route_process_local_payloads = self._process_local_payload_ids_by_route.get(
+            route_key
+        )
+        if route_process_local_payloads is None:
+            return
+        try:
+            route_process_local_payloads.remove(payload_id)
+        except ValueError:
+            pass
+        if not route_process_local_payloads:
+            self._process_local_payload_ids_by_route.pop(route_key, None)
+
     def _purge_payload_ref(self, payload_id: str) -> None:
         self._lazy_payload_sources.pop(payload_id, None)
-        self._materialized_payloads.pop(payload_id, None)
+        route_key = self._payload_route_by_id.pop(payload_id, None)
+        materialized = self._materialized_payloads.pop(payload_id, None)
+        if materialized is not None:
+            if payload_id in self._process_local_payload_ids:
+                _release_any_schema_value(materialized)
+            elif route_key is None and _is_any_schema_payload(materialized):
+                _release_any_schema_value(materialized)
+        self._process_local_payload_ids.discard(payload_id)
         self._empty_inline_payload_ids.discard(payload_id)
-        self._payload_route_by_id.pop(payload_id, None)
+        if route_key is not None:
+            self._forget_payload_route_index(payload_id, route_key)
         self._opened_payload_ids.discard(payload_id)
 
     def _purge_envelope_payload_ref(self, envelope: ClosedEnvelope) -> None:
-        inline_payload = getattr(envelope.payload_ref, "inline_bytes", b"")
-        if inline_payload:
-            _release_any_schema_value(bytes(inline_payload))
-        self._purge_payload_ref(envelope.payload_ref.payload_id)
+        payload_id = envelope.payload_id
+        if (
+            envelope.has_inline_payload
+            and payload_id in self._process_local_payload_ids
+            and payload_id not in self._materialized_payloads
+        ):
+            _release_any_schema_value(bytes(envelope.inline_payload))
+        self._purge_payload_ref(payload_id)
 
-    def _enforce_payload_retention(self, route_ref: RouteLike) -> None:
-        key = self._route_key(route_ref)
-        retained_payload_ids = {
-            envelope.payload_ref.payload_id for envelope in self._history.get(key, ())
-        }
-        payload_policy = self._payload_retention_policy_for(route_ref)
-        if payload_policy == "non_replayable" and retained_payload_ids:
-            latest_payload_id = self._history[key][-1].payload_ref.payload_id
-            retained_payload_ids = {latest_payload_id}
-        for payload_id, payload_route in tuple(self._payload_route_by_id.items()):
-            if payload_route != key:
+    def _purge_envelope_payload_ref_for_key(
+        self,
+        envelope: ClosedEnvelope,
+        route_key: str,
+    ) -> None:
+        payload_id = envelope.payload_id
+        if (
+            payload_id not in self._lazy_payload_sources
+            and payload_id not in self._materialized_payloads
+            and payload_id not in self._process_local_payload_ids
+            and payload_id not in self._empty_inline_payload_ids
+            and payload_id not in self._opened_payload_ids
+        ):
+            self._payload_route_by_id.pop(payload_id, None)
+            self._forget_payload_route_index(payload_id, route_key)
+            return
+        self._purge_envelope_payload_ref(envelope)
+
+    def _purge_process_local_payload_ref_for_key(
+        self,
+        payload_id: str,
+        route_key: str,
+        *,
+        remove_process_local_order: bool = True,
+    ) -> None:
+        self._payload_route_by_id.pop(payload_id, None)
+        materialized = self._materialized_payloads.pop(payload_id, None)
+        if materialized is not None:
+            _release_known_any_schema_value(materialized)
+        self._process_local_payload_ids.discard(payload_id)
+        self._forget_payload_route_index(
+            payload_id,
+            route_key,
+            remove_process_local_order=remove_process_local_order,
+        )
+        self._opened_payload_ids.discard(payload_id)
+
+    def _purge_cached_process_local_payload_ref(
+        self,
+        payload_id: str,
+        route_key: str,
+        route_payload_ids: set[str],
+    ) -> None:
+        self._payload_route_by_id.pop(payload_id, None)
+        materialized = self._materialized_payloads.pop(payload_id, None)
+        if materialized is not None:
+            _release_known_any_schema_value(materialized)
+        self._process_local_payload_ids.discard(payload_id)
+        route_payload_ids.discard(payload_id)
+        self._opened_payload_ids.discard(payload_id)
+
+    @staticmethod
+    def _retained_history_snapshot(
+        history: deque[ClosedEnvelope] | None,
+    ) -> tuple[ClosedEnvelope, ...]:
+        if history is None:
+            return ()
+        while True:
+            try:
+                return tuple(history)
+            except RuntimeError:
                 continue
+
+    def _enforce_payload_retention_for_key(
+        self,
+        route_ref: RouteRef,
+        key: str,
+        payload_policy: str,
+    ) -> None:
+        history_snapshot = self._retained_history_snapshot(self._history.get(key))
+        route_payload_order = self._process_local_payload_ids_by_route.get(key)
+        if payload_policy == "non_replayable" and history_snapshot:
+            retained_payload_ids = {history_snapshot[-1].payload_id}
+        elif history_snapshot:
+            retained_payload_ids = {envelope.payload_id for envelope in history_snapshot}
+        elif route_payload_order is not None:
+            retained_payload_ids = set(route_payload_order)
+        else:
+            retained_payload_ids = set()
+        route_payload_ids = self._payload_ids_by_route.get(key, ())
+        for payload_id in tuple(route_payload_ids):
             if payload_id not in retained_payload_ids:
                 self._purge_payload_ref(payload_id)
         if payload_policy in {"external_store", "non_replayable"}:
-            for payload_id in tuple(self._materialized_payloads):
-                if self._payload_route_by_id.get(payload_id) == key:
-                    del self._materialized_payloads[payload_id]
+            for payload_id in tuple(self._payload_ids_by_route.get(key, ())):
+                if payload_id not in self._process_local_payload_ids:
+                    self._materialized_payloads.pop(payload_id, None)
 
-    def _remove_lineage_index(
+    def _enforce_payload_retention(self, route_ref: RouteLike) -> None:
+        native_route = self._coerce_route_ref(route_ref)
+        key = self._route_key(native_route)
+        self._enforce_payload_retention_for_key(
+            native_route,
+            key,
+            self._payload_retention_policy_for(native_route),
+        )
+
+    def _expire_python_history_for_key(
         self,
-        index: dict[str, list[tuple[str, int]]],
-        lineage_id: str,
-        event_key: tuple[str, int],
+        route_ref: RouteRef,
+        route_key: str,
+        history_limit: int | None,
     ) -> None:
-        events = index.get(lineage_id)
-        if events is None:
+        if history_limit is None:
             return
-        try:
-            events.remove(event_key)
-        except ValueError:
+        history = self._history.get(route_key)
+        if history is None:
             return
-        if not events:
-            del index[lineage_id]
+        expired = False
+        while len(history) > history_limit:
+            expired_envelope = history.popleft()
+            self._purge_envelope_payload_ref_for_key(expired_envelope, route_key)
+            expired = True
+        if expired and route_key in self._stream_taint_upper_bounds:
+            self._rebuild_stream_taint_upper_bound(route_ref)
 
-    def _forget_lineage_for(self, envelopes: Sequence[ClosedEnvelope]) -> None:
-        for envelope in envelopes:
-            event = self._event_ref(envelope)
-            event_key = self._event_index_key(event)
-            record = self._lineage_by_event.pop(event_key, None)
-            if record is None:
-                continue
-            self._remove_lineage_index(
-                self._lineage_events_by_trace,
-                record.trace_id,
-                event_key,
+    def _expire_python_history(
+        self,
+        route_ref: RouteLike,
+        history_limit: int | None,
+    ) -> None:
+        native_route = self._coerce_route_ref(route_ref)
+        self._expire_python_history_for_key(
+            native_route,
+            self._route_key(native_route),
+            history_limit,
+        )
+
+    def _process_local_payload_retention_limit(
+        self,
+        retention: RouteRetentionPolicy,
+    ) -> int:
+        if retention.history_limit is not None:
+            return retention.history_limit
+        if retention.latest_replay_policy == "bounded_history":
+            return DEFAULT_ROUTE_HISTORY_LIMIT
+        return 1
+
+    def _expire_process_local_payload_ids_for_key(
+        self,
+        route_key: str,
+        retention: RouteRetentionPolicy,
+    ) -> None:
+        route_payload_order = self._process_local_payload_ids_by_route.get(route_key)
+        if route_payload_order is None:
+            return
+        history_limit = self._process_local_payload_retention_limit(retention)
+        while len(route_payload_order) > history_limit:
+            expired_payload_id = route_payload_order.popleft()
+            self._purge_process_local_payload_ref_for_key(
+                expired_payload_id,
+                route_key,
+                remove_process_local_order=False,
             )
-            self._remove_lineage_index(
-                self._lineage_events_by_causality,
-                record.causality_id,
-                event_key,
-            )
-            if record.correlation_id is not None:
-                self._remove_lineage_index(
-                    self._lineage_events_by_correlation,
-                    record.correlation_id,
-                    event_key,
-                )
 
     def _record_envelope(
         self,
         route_ref: RouteLike,
         envelope: ClosedEnvelope,
         *,
+        route_key: str | None = None,
         producer_id: str | None = None,
         trace_id: str | None = None,
         causality_id: str | None = None,
@@ -6377,68 +8221,278 @@ class Graph:
         parent_events: Sequence[EventRef] = (),
     ) -> ClosedEnvelope:
         """Persist envelope-derived bookkeeping before notifying observers."""
-        key = self._route_key(route_ref)
-        history = self._history.setdefault(key, [])
+        native_route = (
+            route_ref if isinstance(route_ref, RouteRef) else self._coerce_route_ref(route_ref)
+        )
+        key = route_key if route_key is not None else self._route_key_for_ref(native_route)
+        retention = self._resolved_retention_by_key.get(key)
+        if retention is None:
+            retention = self._retention_policy_for_key(native_route, key)
+        history = self._history.get(key)
+        if history is None:
+            history = deque()
+            self._history[key] = history
+        expired_history = False
+        history_limit = retention.history_limit
+        if history_limit == 0:
+            return
+        if history_limit is not None:
+            while len(history) >= history_limit:
+                expired_envelope = history.popleft()
+                self._purge_envelope_payload_ref_for_key(expired_envelope, key)
+                expired_history = True
         history.append(envelope)
-        retention = self._retention_policy_for(route_ref)
+        if expired_history and key in self._stream_taint_upper_bounds:
+            self._rebuild_stream_taint_upper_bound(native_route)
+        payload_id = envelope.payload_id
+        self._payload_route_by_id[payload_id] = key
+        route_payload_ids = self._payload_ids_by_route.get(key)
+        if route_payload_ids is None:
+            route_payload_ids = set()
+            self._payload_ids_by_route[key] = route_payload_ids
+        route_payload_ids.add(payload_id)
         if (
-            retention.history_limit is not None
-            and len(history) > retention.history_limit
+            not envelope.has_inline_payload
+            and payload_id not in self._lazy_payload_sources
+            and getattr(envelope.payload_ref, "logical_length_bytes", 0) == 0
         ):
-            expired = tuple(history[: len(history) - retention.history_limit])
-            del history[: len(history) - retention.history_limit]
-            for expired_envelope in expired:
-                self._purge_envelope_payload_ref(expired_envelope)
-            self._forget_lineage_for(expired)
-        self._payload_route_by_id[envelope.payload_ref.payload_id] = key
-        inline_payload = bytes(envelope.payload_ref.inline_bytes)
+            self._empty_inline_payload_ids.add(payload_id)
+        payload_policy = cast(str, retention.payload_retention_policy)
         if (
-            not inline_payload
-            and envelope.payload_ref.payload_id not in self._lazy_payload_sources
+            payload_policy in {"external_store", "non_replayable"}
+            and payload_id not in self._process_local_payload_ids
         ):
-            self._empty_inline_payload_ids.add(envelope.payload_ref.payload_id)
-        self._payload_stats(route_ref)["metadata_events"] += 1
-        self._enforce_payload_retention(route_ref)
-        self._remember_stream_taints(route_ref, envelope)
+            self._materialized_payloads.pop(payload_id, None)
+        self._remember_stream_taints_for_key(native_route, key, envelope)
         if producer_id is not None:
-            self._writers.setdefault(key, set()).add(producer_id)
-        event = self._event_ref(envelope)
-        resolved_trace_id = trace_id or event.display()
-        resolved_causality_id = causality_id or event.display()
-        record = LineageRecord(
-            event=event,
-            producer_id=producer_id,
-            trace_id=resolved_trace_id,
-            causality_id=resolved_causality_id,
-            correlation_id=correlation_id,
-            parent_events=tuple(parent_events),
-        )
-        self._lineage_by_event[self._event_index_key(event)] = record
-        self._lineage_events_by_trace.setdefault(resolved_trace_id, []).append(
-            self._event_index_key(event)
-        )
-        self._lineage_events_by_causality.setdefault(resolved_causality_id, []).append(
-            self._event_index_key(event)
-        )
-        if correlation_id is not None:
-            self._lineage_events_by_correlation.setdefault(correlation_id, []).append(
-                self._event_index_key(event)
-            )
-        self._publish(route_ref, envelope)
+            self._remember_writer_if_changed(key, producer_id)
+        self._publish_key(key, envelope)
         return envelope
+
+    def _record_process_local_nowait_envelope(
+        self,
+        native_route: RouteRef,
+        route_key: str,
+        envelope: ClosedEnvelope,
+        payload: bytes,
+        *,
+        producer_id: str,
+    ) -> None:
+        retention = self._resolved_retention_by_key.get(route_key)
+        if retention is None:
+            retention = self._retention_policy_for_key(native_route, route_key)
+        route_payload_order = self._process_local_payload_ids_by_route.get(route_key)
+        if route_payload_order is None:
+            route_payload_order = deque()
+            self._process_local_payload_ids_by_route[route_key] = route_payload_order
+        history_limit = self._process_local_payload_retention_limit(retention)
+        while len(route_payload_order) >= history_limit:
+            expired_payload_id = route_payload_order.popleft()
+            self._purge_process_local_payload_ref_for_key(
+                expired_payload_id,
+                route_key,
+                remove_process_local_order=False,
+            )
+        payload_id = envelope.payload_id
+        route_payload_order.append(payload_id)
+        self._materialized_payloads[payload_id] = payload
+        self._process_local_payload_ids.add(payload_id)
+        self._payload_route_by_id[payload_id] = route_key
+        route_payload_ids = self._payload_ids_by_route.get(route_key)
+        if route_payload_ids is None:
+            route_payload_ids = set()
+            self._payload_ids_by_route[route_key] = route_payload_ids
+        route_payload_ids.add(payload_id)
+        self._remember_writer_if_changed(route_key, producer_id)
+
+    def _record_cached_process_local_nowait_envelope(
+        self,
+        route_key: str,
+        envelope: ClosedEnvelope,
+        payload: bytes,
+        *,
+        history_limit: int,
+    ) -> None:
+        route_payload_order = self._process_local_payload_ids_by_route[route_key]
+        route_payload_ids = self._payload_ids_by_route[route_key]
+        while len(route_payload_order) >= history_limit:
+            expired_payload_id = route_payload_order.popleft()
+            self._purge_cached_process_local_payload_ref(
+                expired_payload_id,
+                route_key,
+                route_payload_ids,
+            )
+        payload_id = envelope.payload_id
+        route_payload_order.append(payload_id)
+        self._materialized_payloads[payload_id] = payload
+        self._process_local_payload_ids.add(payload_id)
+        self._payload_route_by_id[payload_id] = route_key
+        route_payload_ids.add(payload_id)
+
+    def _record_observed_sparse_envelope(
+        self,
+        native_route: RouteRef,
+        route_key: str,
+        envelope: ClosedEnvelope,
+        *,
+        producer_id: str,
+        trace_id: str | None = None,
+        causality_id: str | None = None,
+        correlation_id: str | None = None,
+        parent_events: Sequence[EventRef] = (),
+    ) -> None:
+        self._remember_writer_if_changed(route_key, producer_id)
+        del native_route, trace_id, causality_id, correlation_id, parent_events
+        if self._route_has_delivery_subscribers(route_key):
+            self._publish_key(route_key, envelope)
+
+    def _publish_native_materialized_envelopes(
+        self,
+        envelopes: Sequence[ClosedEnvelope],
+        route_keys: Sequence[str] = (),
+    ) -> None:
+        for index, envelope in enumerate(envelopes):
+            route_key = (
+                route_keys[index]
+                if index < len(route_keys)
+                else self._route_key_for_ref(envelope.route)
+            )
+            producer_id = "python"
+            self._remember_writer_if_changed(route_key, producer_id)
+            if self._route_has_delivery_subscribers(route_key):
+                self._publish_key(route_key, envelope)
+            if (
+                "write" in self._debug_routes
+                or route_key not in self._write_audit_event_by_route
+            ):
+                self._emit_write_debug_event_for_key(route_key)
+
+    def _release_last_nowait_drop_no_lineage_profile(self) -> None:
+        profile = self._last_nowait_drop_no_lineage_profile
+        if profile is not None:
+            release_profile = (
+                self._native_release_no_lineage_materializer_drop_profile
+            )
+            if release_profile is not None:
+                release_profile(profile)
+        self._last_nowait_drop_no_lineage_profile = None
+        self._last_nowait_drop_no_lineage_profile_emit = None
+        self._last_nowait_drop_no_lineage_profile_key = None
+
+    def _clear_last_nowait_drop_cache(self) -> None:
+        self._last_nowait_drop_mode = None
+        self._last_nowait_drop_target = None
+        self._last_nowait_drop_native_target = None
+        self._last_nowait_drop_key = None
+        self._last_nowait_drop_target_keys = ()
+        self._last_nowait_drop_materialized_target = None
+        self._last_nowait_drop_generation = -1
+        self._last_nowait_drop_taint_generation = -1
+        self._last_nowait_drop_native_call_kind = None
+        self._last_nowait_drop_explicit_lineage_native = None
+        self._release_last_nowait_drop_no_lineage_profile()
+
+    def _clear_nowait_materializer_cache_if_matches(
+        self,
+        source_key: str,
+        target_key: str,
+    ) -> None:
+        materialized_cache_matches = (
+            self._last_nowait_drop_mode == "materialized"
+            and self._last_nowait_drop_key == source_key
+            and target_key in self._last_nowait_drop_target_keys
+        )
+        no_lineage_profile_matches = (
+            self._last_nowait_drop_no_lineage_profile_key is not None
+            and self._last_nowait_drop_no_lineage_profile_key[0] == source_key
+            and target_key in self._last_nowait_drop_no_lineage_profile_key[1]
+        )
+        if materialized_cache_matches or no_lineage_profile_matches:
+            self._clear_last_nowait_drop_cache()
+
+    def _record_native_materialized_drop(
+        self,
+        source_key: str,
+        target_keys: Sequence[str],
+        producer_id: str,
+    ) -> None:
+        target_key_tuple = (
+            target_keys if isinstance(target_keys, tuple) else tuple(target_keys)
+        )
+        if (
+            "write" not in self._debug_routes
+            and self._last_native_materialized_drop_source_key == source_key
+            and self._last_native_materialized_drop_target_keys == target_key_tuple
+            and self._last_native_materialized_drop_producer_id == producer_id
+        ):
+            return
+        self._record_native_materialized_route_drop(source_key, producer_id)
+        for route_key in target_key_tuple:
+            self._record_native_materialized_route_drop(route_key, producer_id)
+        self._last_native_materialized_drop_source_key = source_key
+        self._last_native_materialized_drop_target_keys = target_key_tuple
+        self._last_native_materialized_drop_producer_id = producer_id
+
+    def _record_native_materialized_route_drop(
+        self,
+        route_key: str,
+        producer_id: str,
+    ) -> None:
+        self._remember_writer_if_changed(route_key, producer_id)
+        if (
+            "write" in self._debug_routes
+            or route_key not in self._write_audit_event_by_route
+        ):
+            self._emit_write_debug_event_for_key(route_key)
 
     def _remember_eager_payloads(
         self,
         envelopes: Sequence[ClosedEnvelope],
         payload: bytes,
+        *,
+        process_local: bool | None = None,
     ) -> None:
+        resolved_process_local = (
+            _is_any_schema_payload(payload) if process_local is None else process_local
+        )
         for envelope in envelopes:
-            self._materialized_payloads[envelope.payload_ref.payload_id] = payload
+            self._remember_eager_payload(
+                envelope,
+                payload,
+                process_local=resolved_process_local,
+            )
+
+    def _remember_eager_payload(
+        self,
+        envelope: ClosedEnvelope,
+        payload: bytes,
+        *,
+        process_local: bool | None = None,
+    ) -> None:
+        payload_id = envelope.payload_id
+        self._materialized_payloads[payload_id] = payload
+        resolved_process_local = (
+            _is_any_schema_payload(payload) if process_local is None else process_local
+        )
+        if resolved_process_local:
+            self._process_local_payload_ids.add(payload_id)
 
     def _publish(
         self, route_ref: RouteLike, envelope: ClosedEnvelope
     ) -> ClosedEnvelope:
-        self._subject_for(route_ref).on_next(envelope)
+        return self._publish_key(self._route_key(route_ref), envelope)
+
+    def _publish_key(
+        self,
+        route_key: str,
+        envelope: ClosedEnvelope,
+    ) -> ClosedEnvelope:
+        direct_subscribers = self._direct_envelope_snapshots.get(route_key, ())
+        for subscriber in direct_subscribers:
+            subscriber(envelope)
+        subject = self._subjects.get(route_key)
+        if subject is not None:
+            subject.on_next(envelope)
         return envelope
 
     @staticmethod
@@ -6459,17 +8513,20 @@ class Graph:
         *,
         record_open: bool,
     ) -> bytes | None:
-        payload_id = envelope.payload_ref.payload_id
-        stats = self._payload_stats(route_ref)
+        payload_id = envelope.payload_id
+        stats: dict[str, int] | None = None
         if record_open:
+            stats = self._payload_stats(route_ref)
             stats["payload_open_requests"] += 1
         if payload_id in self._materialized_payloads:
             payload = self._materialized_payloads[payload_id]
-            if record_open:
+            if stats is not None:
                 stats["cache_hits"] += 1
         elif payload_id in self._empty_inline_payload_ids:
             payload = b""
         elif payload_id in self._lazy_payload_sources:
+            if stats is None:
+                stats = self._payload_stats(route_ref)
             payload = self._normalize_payload_chunks(
                 self._lazy_payload_sources[payload_id].open()
             )
@@ -6478,12 +8535,20 @@ class Graph:
                 "separate_store",
             }:
                 self._materialized_payloads[payload_id] = payload
+                typed_route = self._typed_route(route_ref)
+                if typed_route is not None and typed_route.schema.process_local:
+                    self._process_local_payload_ids.add(payload_id)
             stats["lazy_source_opens"] += 1
             stats["materialized_payload_bytes"] += len(payload)
         else:
-            inline_payload = bytes(envelope.payload_ref.inline_bytes)
-            if inline_payload:
-                payload = inline_payload
+            native_payload_by_id = self._native_payload_by_id
+            native_payload = (
+                None if native_payload_by_id is None else native_payload_by_id(payload_id)
+            )
+            if native_payload is not None:
+                payload = bytes(native_payload)
+            elif envelope.has_inline_payload:
+                payload = bytes(envelope.inline_payload)
             else:
                 payload = None
         if record_open:
@@ -6516,10 +8581,26 @@ class Graph:
     def _decode_envelope(
         self, route_ref: TypedRoute[T], envelope: ClosedEnvelope
     ) -> TypedEnvelope[T]:
+        if route_ref.schema.is_bytes_passthrough():
+            payload = self._known_bytes_passthrough_payload(envelope)
+            if payload is not None:
+                return TypedEnvelope._trusted(route_ref, envelope, cast(T, payload))
         payload = self._payload_bytes(route_ref, envelope)
-        return TypedEnvelope(
-            route=route_ref, closed=envelope, value=route_ref.schema.decode(payload)
-        )
+        return TypedEnvelope._trusted(route_ref, envelope, route_ref.schema.decode(payload))
+
+    def _known_bytes_passthrough_payload(
+        self,
+        envelope: ClosedEnvelope,
+    ) -> bytes | None:
+        payload_id = envelope.payload_id
+        payload = self._materialized_payloads.get(payload_id)
+        if payload is not None:
+            return payload
+        if payload_id in self._empty_inline_payload_ids:
+            return b""
+        if envelope.has_inline_payload:
+            return bytes(envelope.inline_payload)
+        return None
 
     def _payload_bytes(
         self, route_ref: TypedRoute[T], envelope: ClosedEnvelope
@@ -6591,9 +8672,22 @@ class Graph:
     ) -> LineageRecord:
         closed = item.closed if isinstance(item, TypedEnvelope) else item
         event = self._event_ref(closed)
-        record = self._lineage_by_event.get(self._event_index_key(event))
-        if record is not None:
-            return record
+        return self._default_lineage_for_closed(closed, event)
+
+    def _lineage_parts_for_item(
+        self,
+        item: TypedEnvelope[Any] | ClosedEnvelope,
+    ) -> LineageParts:
+        closed = item.closed if isinstance(item, TypedEnvelope) else item
+        route_display = self._route_key_for_ref(closed.route)
+        seq_source = closed.seq_source
+        return self._default_lineage_parts(route_display, seq_source)
+
+    @staticmethod
+    def _default_lineage_for_closed(
+        closed: ClosedEnvelope,
+        event: EventRef,
+    ) -> LineageRecord:
         return LineageRecord(
             event=event,
             producer_id=getattr(getattr(closed, "producer", None), "producer_id", None),
@@ -6601,19 +8695,64 @@ class Graph:
             causality_id=event.display(),
         )
 
+    @staticmethod
+    def _default_lineage_parts(route_display: str, seq_source: int) -> LineageParts:
+        event_display = f"{route_display}@{seq_source}"
+        return (event_display, event_display, None, route_display, seq_source)
+
+
     def _remember_stream_taints(
         self,
         route_ref: RouteLike,
         envelope: ClosedEnvelope,
     ) -> None:
+        native_route = self._coerce_route_ref(route_ref)
+        self._remember_stream_taints_for_key(
+            native_route,
+            self._route_key(native_route),
+            envelope,
+        )
+
+    def _remember_stream_taints_for_key(
+        self,
+        route_ref: RouteRef,
+        key: str,
+        envelope: ClosedEnvelope,
+    ) -> None:
+        if (
+            not getattr(envelope, "taints", ())
+            and key not in self._stream_taint_upper_bounds
+        ):
+            return
+        self._rebuild_stream_taint_upper_bound(route_ref)
+
+    def _rebuild_stream_taint_upper_bound(self, route_ref: RouteLike) -> None:
         key = self._route_key(route_ref)
-        remembered = self._stream_taint_upper_bounds.setdefault(key, {})
-        for taint in getattr(envelope, "taints", ()):
-            domain_name = self._taint_domain_name(getattr(taint, "domain", None))
-            value_id = getattr(taint, "value_id", None)
-            if value_id is None:
+        remembered: dict[tuple[str, str], Any] = {}
+        seen_events: set[tuple[int | None, str]] = set()
+        retained = list(self._retained_history_snapshot(self._history.get(key)))
+        latest = self._graph.latest(self._coerce_route_ref(route_ref))
+        if latest is not None:
+            retained.append(latest)
+        for envelope in retained:
+            event_key = (
+                getattr(envelope, "seq_source", None),
+                getattr(getattr(envelope, "payload_ref", None), "payload_id", ""),
+            )
+            if event_key in seen_events:
                 continue
-            remembered.setdefault((domain_name, value_id), taint)
+            seen_events.add(event_key)
+            for taint in getattr(envelope, "taints", ()):
+                domain_name = self._taint_domain_name(getattr(taint, "domain", None))
+                value_id = getattr(taint, "value_id", None)
+                if value_id is None:
+                    continue
+                remembered.setdefault((domain_name, value_id), taint)
+        if remembered:
+            self._stream_taint_upper_bounds[key] = remembered
+        else:
+            self._stream_taint_upper_bounds.pop(key, None)
+        self._taint_generation += 1
 
     def _closed_with_taints(
         self,
@@ -6641,12 +8780,19 @@ class Graph:
         key = envelope.route.display()
         history = self._history.get(key)
         if history is None:
+            retention = self._retention_policy_for_key(envelope.route, key)
+            history_limit = retention.history_limit
+            if history_limit is None:
+                return
+            history = deque(maxlen=history_limit)
+            self._history[key] = history
+            history.append(envelope)
             return
         for index in range(len(history) - 1, -1, -1):
             candidate = history[index]
             if (
                 candidate.seq_source == envelope.seq_source
-                and candidate.payload_ref.payload_id == envelope.payload_ref.payload_id
+                and candidate.payload_id == envelope.payload_id
             ):
                 history[index] = envelope
                 break
@@ -6658,7 +8804,7 @@ class Graph:
         for candidate in reversed(history):
             if (
                 candidate.seq_source == envelope.seq_source
-                and candidate.payload_ref.payload_id == envelope.payload_ref.payload_id
+                and candidate.payload_id == envelope.payload_id
             ):
                 return candidate
         return envelope
@@ -7197,27 +9343,54 @@ class Graph:
     def _emit_debug_event(
         self, event_type: str, detail: str, route_ref: RouteLike | None = None
     ) -> DebugEvent:
-        """Emit a debug event on both the in-memory audit log and a debug route."""
-        debug_route = self._debug_route(event_type)
-        payload = json.dumps(
-            {
-                "event_type": event_type,
-                "detail": detail,
-                "route_display": None
-                if route_ref is None
-                else self._route_key(route_ref),
-            },
-            sort_keys=True,
-        ).encode()
-        envelope = self._graph.writable_port(debug_route).write(payload)
-        self._record_envelope(debug_route, envelope, producer_id="debug")
+        """Emit a bounded audit event and publish to materialized debug streams."""
+        route_display = None if route_ref is None else self._route_key(route_ref)
+        return self._emit_debug_event_for_key(event_type, detail, route_display)
+
+    def _emit_debug_event_for_key(
+        self,
+        event_type: str,
+        detail: str,
+        route_display: str | None,
+    ) -> DebugEvent:
+        """Emit a bounded audit event when the caller already has a route key."""
+        self._debug_event_types.add(event_type)
+        audit_key = (event_type, detail, route_display)
+        debug_route = self._debug_routes.get(event_type)
+        seq_source: int
+        if debug_route is None:
+            if audit_key == self._last_audit_event_key:
+                if self._last_audit_event is None:
+                    raise RuntimeError("audit event coalescing lost last event")
+                return self._last_audit_event
+            self._debug_event_sequence += 1
+            seq_source = self._debug_event_sequence
+        else:
+            payload = json.dumps(
+                {
+                    "event_type": event_type,
+                    "detail": detail,
+                    "route_display": route_display,
+                },
+                sort_keys=True,
+            ).encode()
+            envelope = self._graph.writable_port(debug_route).write(payload)
+            self._record_envelope(debug_route, envelope, producer_id="debug")
+            seq_source = envelope.seq_source
         event = DebugEvent(
             event_type=event_type,
             detail=detail,
-            route_display=None if route_ref is None else self._route_key(route_ref),
-            seq_source=envelope.seq_source,
+            route_display=route_display,
+            seq_source=seq_source,
         )
-        self._audit_events.append(event)
+        if audit_key != self._last_audit_event_key:
+            self._audit_events.append(event)
+            self._last_audit_event_key = audit_key
+            self._last_audit_event = event
+        else:
+            if self._last_audit_event is None:
+                raise RuntimeError("audit event coalescing lost last event")
+            event = self._last_audit_event
         return event
 
     def _correlation_id(self) -> str:
@@ -7282,7 +9455,7 @@ class Graph:
             return (
                 latest.route.display(),
                 str(latest.seq_source),
-                latest.payload_ref.payload_id,
+                latest.payload_id,
             )
         if command == "topology":
             return tuple(f"{left}->{right}" for left, right in self.topology())
@@ -7381,15 +9554,7 @@ class Graph:
                 self._authorize(request.principal_id, route_ref, "debug_read")
             else:
                 self._authorize(request.principal_id, None, "graph_validation")
-            return tuple(
-                record.display()
-                for record in self.lineage(
-                    route_ref,
-                    trace_id=request.lineage_trace_id,
-                    causality_id=request.lineage_causality_id,
-                    correlation_id=request.lineage_correlation_id,
-                )
-            )
+            return ()
         if command == "shadow":
             if route_ref is None:
                 raise ValueError("shadow requires a write request route")
@@ -7494,12 +9659,11 @@ class Graph:
         control_epoch: int | None = None,
     ) -> list[ClosedEnvelope]:
         _validate_control_epoch(control_epoch)
-        if hasattr(self._graph, "emit"):
+        native_emit = self._native_emit
+        if native_emit is not None:
             return cast(
                 list[ClosedEnvelope],
-                self._graph.emit(
-                    route_ref, payload, producer=producer, control_epoch=control_epoch
-                ),
+                native_emit(route_ref, payload, producer=producer, control_epoch=control_epoch),
             )
         envelope = self._graph.writable_port(route_ref).write(
             payload,
@@ -7507,6 +9671,28 @@ class Graph:
             control_epoch=control_epoch,
         )
         return [envelope]
+
+    def _emit_native_single_if_unrouted(
+        self,
+        route_ref: RouteRef,
+        payload: bytes,
+        *,
+        producer: ProducerRef | None = None,
+        control_epoch: int | None = None,
+    ) -> ClosedEnvelope | None:
+        _validate_control_epoch(control_epoch)
+        native_emit_single = self._native_emit_single_if_unrouted
+        if native_emit_single is None:
+            return None
+        return cast(
+            ClosedEnvelope | None,
+            native_emit_single(
+                route_ref,
+                payload,
+                producer=producer,
+                control_epoch=control_epoch,
+            ),
+        )
 
     def _observe_observable(
         self,
@@ -7530,21 +9716,41 @@ class Graph:
         ) -> SubscriptionLike:
             key = self._route_key(native_route)
             resolved_subscriber_id = subscriber_id or self._next_subscriber_id()
-            self._subscriber_count[key] = self._subscriber_count.get(key, 0) + 1
-            self._route_subscribers.setdefault(key, set()).add(resolved_subscriber_id)
+            self._remember_subscriber(key, resolved_subscriber_id)
 
             if typed_route is not None:
                 # Typed observers see decoded values, but the graph internally
                 # continues to fan out closed envelopes on one shared subject.
-                class _Observer:
-                    def on_next(_, envelope) -> None:
-                        observer.on_next(self._decode_envelope(typed_route, envelope))
+                if typed_route.schema.is_bytes_passthrough():
 
-                    def on_error(_, error: Exception) -> None:
-                        observer.on_error(error)
+                    class _Observer:
+                        def on_next(_, envelope) -> None:
+                            payload = self._known_bytes_passthrough_payload(envelope)
+                            if payload is None:
+                                payload = self._payload_bytes(typed_route, envelope)
+                            observer.on_next(
+                                TypedEnvelope._trusted(typed_route, envelope, payload)
+                            )
 
-                    def on_completed(_) -> None:
-                        observer.on_completed()
+                        def on_error(_, error: Exception) -> None:
+                            observer.on_error(error)
+
+                        def on_completed(_) -> None:
+                            observer.on_completed()
+
+                else:
+
+                    class _Observer:
+                        def on_next(_, envelope) -> None:
+                            observer.on_next(
+                                self._decode_envelope(typed_route, envelope)
+                            )
+
+                        def on_error(_, error: Exception) -> None:
+                            observer.on_error(error)
+
+                        def on_completed(_) -> None:
+                            observer.on_completed()
 
                 inner = self._subject_for(native_route).subscribe(
                     _Observer(), scheduler=scheduler
@@ -7559,11 +9765,8 @@ class Graph:
                     if latest is not None:
                         observer.on_next(latest)
             except Exception:
-                self._subscriber_count[key] -= 1
-                subscribers = self._route_subscribers.get(key)
-                if subscribers is not None:
-                    subscribers.discard(resolved_subscriber_id)
                 inner.dispose()
+                self._forget_subscriber(key, resolved_subscriber_id)
                 raise
             return _TrackedSubscription(
                 self,
@@ -7575,6 +9778,36 @@ class Graph:
         return self._thread_placed_observable(
             rx.create(subscribe),
             thread_placement,
+        )
+
+    def _observe_closed_envelopes(
+        self,
+        route_ref: RouteLike,
+        on_next: Callable[[ClosedEnvelope], None],
+        *,
+        replay_latest: bool = True,
+        subscriber_id: str | None = None,
+    ) -> SubscriptionLike:
+        """Subscribe to raw retained envelopes without typed observable wrapping."""
+        native_route = self._coerce_route_ref(route_ref)
+        key = self._route_key_for_ref(native_route)
+        resolved_subscriber_id = subscriber_id or self._next_subscriber_id()
+        self._remember_subscriber(key, resolved_subscriber_id)
+        inner = self._direct_envelope_subscription(key, on_next)
+        try:
+            if replay_latest:
+                latest = self._graph.latest(native_route)
+                if latest is not None:
+                    on_next(self._recorded_envelope_for(latest))
+        except Exception:
+            inner.dispose()
+            self._forget_subscriber(key, resolved_subscriber_id)
+            raise
+        return _TrackedSubscription(
+            self,
+            native_route,
+            inner,
+            resolved_subscriber_id,
         )
 
     def _pipeline_value_observable(
@@ -8319,6 +10552,13 @@ def _validate_control_epoch(control_epoch: int | None) -> None:
         raise ValueError("control_epoch must be a non-negative integer or None")
 
 
+def _parent_event_parts(parent: ParentEventLike) -> tuple[str, int]:
+    if isinstance(parent, EventRef):
+        return (parent.route_display, parent.seq_source)
+    route_display, seq_source = parent
+    return (route_display, seq_source)
+
+
 class _TrackedSubscription:
     def __init__(
         self,
@@ -8338,11 +10578,10 @@ class _TrackedSubscription:
             return
         self._disposed = True
         route_key = self._graph._route_key(self._route_ref)
-        self._graph._subscriber_count[route_key] -= 1
-        subscribers = self._graph._route_subscribers.get(route_key)
-        if subscribers is not None:
-            subscribers.discard(self._subscriber_id)
-        self._inner.dispose()
+        try:
+            self._inner.dispose()
+        finally:
+            self._graph._forget_subscriber(route_key, self._subscriber_id)
 
 
 class _ThreadPlacementSubscription:

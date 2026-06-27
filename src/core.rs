@@ -1,5 +1,11 @@
+#![allow(clippy::too_many_arguments)]
+
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::hash::Hash;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+const DEFAULT_ROUTE_HISTORY_LIMIT: usize = 8;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum Plane {
@@ -334,6 +340,61 @@ pub struct RetentionBlockCore {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RetentionPolicyCore {
+    pub latest_replay_policy: String,
+    pub durability_class: String,
+    pub replay_window: String,
+    pub payload_retention_policy: String,
+    pub history_limit: Option<usize>,
+}
+
+impl RetentionPolicyCore {
+    fn for_route(route: &RouteRefCore) -> Self {
+        match route.namespace.layer {
+            Layer::Ephemeral => Self {
+                latest_replay_policy: "none".to_string(),
+                durability_class: "memory".to_string(),
+                replay_window: "none".to_string(),
+                payload_retention_policy: "non_replayable".to_string(),
+                history_limit: Some(1),
+            },
+            Layer::Internal => Self {
+                latest_replay_policy: "latest_only".to_string(),
+                durability_class: "memory".to_string(),
+                replay_window: "latest".to_string(),
+                payload_retention_policy: "separate_store".to_string(),
+                history_limit: Some(1),
+            },
+            _ => Self {
+                latest_replay_policy: "bounded_history".to_string(),
+                durability_class: "memory".to_string(),
+                replay_window: format!("last_{DEFAULT_ROUTE_HISTORY_LIMIT}"),
+                payload_retention_policy: if route.namespace.layer == Layer::Bulk {
+                    "external_store".to_string()
+                } else {
+                    "separate_store".to_string()
+                },
+                history_limit: Some(DEFAULT_ROUTE_HISTORY_LIMIT),
+            },
+        }
+    }
+}
+
+enum RetentionPolicyRef<'policy> {
+    Borrowed(&'policy RetentionPolicyCore),
+    Owned(RetentionPolicyCore),
+}
+
+impl<'policy> RetentionPolicyRef<'policy> {
+    fn as_ref(&'policy self) -> &'policy RetentionPolicyCore {
+        match self {
+            Self::Borrowed(policy) => policy,
+            Self::Owned(policy) => policy,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SecurityBlockCore {
     pub read_capabilities: Vec<String>,
     pub write_capabilities: Vec<String>,
@@ -652,6 +713,20 @@ pub struct CreditSnapshotCore {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RetentionSnapshotCore {
+    pub route_display: String,
+    pub latest_seq_source: Option<u64>,
+    pub metadata_event_count: u64,
+    pub replay_count: usize,
+    pub payload_count: usize,
+    pub lineage_count: usize,
+    pub trace_index_count: usize,
+    pub causality_index_count: usize,
+    pub correlation_index_count: usize,
+    pub history_limit: Option<usize>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ControlLoopCore {
     pub name: String,
     pub read_routes: Vec<RouteRefCore>,
@@ -662,6 +737,7 @@ pub struct ControlLoopCore {
 impl ControlLoopCore {
     pub fn tick(&mut self) -> ClosedEnvelopeCore {
         self.epoch += 1;
+        let epoch_id = fixed_width_sequence(self.epoch);
         let now = GraphCore::now_unix_ms();
         ClosedEnvelopeCore {
             route: self.write_route.clone(),
@@ -681,9 +757,9 @@ impl ControlLoopCore {
                 clock_domain_id: "control_epoch".to_string(),
             },
             partition_key: None,
-            causality_id: Some(format!("{}#{}", self.name, self.epoch)),
-            correlation_id: Some(format!("control-epoch-{}", self.epoch)),
-            trace_id: Some(format!("trace:{}:{}", self.name, self.epoch)),
+            causality_id: Some(format!("{}#{}", self.name, epoch_id)),
+            correlation_id: Some(format!("control-epoch-{}", epoch_id)),
+            trace_id: Some(format!("trace:{}:{}", self.name, epoch_id)),
             control_epoch: Some(self.epoch),
             taints: vec![TaintMarkCore {
                 domain: TaintDomain::Scheduling,
@@ -695,7 +771,7 @@ impl ControlLoopCore {
                 expires_at_epoch: None,
             }],
             payload_ref: PayloadRefCore {
-                payload_id: format!("control-loop-{}", self.epoch),
+                payload_id: format!("control-loop-{}", epoch_id),
                 logical_length_bytes: 0,
                 codec_id: "identity".to_string(),
                 inline_bytes: Vec::new(),
@@ -704,6 +780,18 @@ impl ControlLoopCore {
             security_labels: vec!["write".to_string()],
         }
     }
+}
+
+fn fixed_width_sequence(value: u64) -> String {
+    format!("{value:020}")
+}
+
+fn event_payload_id(route_display: &str, seq_source: u64) -> String {
+    format!("{route_display}:{seq_source:020}")
+}
+
+fn control_epoch_correlation_id(epoch: u64) -> String {
+    format!("control-epoch-{epoch:020}")
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -718,6 +806,7 @@ pub enum QueryKindCore {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[allow(clippy::large_enum_variant)]
 pub enum QueryResultCore {
     Catalog(Vec<RouteRefCore>),
     DescribeRoute(PortDescriptorCore),
@@ -739,15 +828,41 @@ pub struct AuditEventCore {
 
 #[derive(Default)]
 pub struct GraphCore {
+    /// Route descriptors live for the registered graph topology.
     pub descriptors: HashMap<RouteRefCore, PortDescriptorCore>,
+    /// Display-name lookup lives with topology and avoids per-event descriptor scans.
+    pub routes_by_display: HashMap<String, RouteRefCore>,
+    /// Route display names live with topology so hot writes avoid repeated formatting.
+    pub route_displays: HashMap<RouteRefCore, String>,
+    /// Latest envelopes live until the route receives a newer envelope or the graph is dropped.
     pub latest: HashMap<RouteRefCore, ClosedEnvelopeCore>,
-    pub history: HashMap<RouteRefCore, Vec<ClosedEnvelopeCore>>,
-    pub payloads: HashMap<String, Vec<u8>>,
+    /// Replay history lives under per-route retention and is trimmed after each write.
+    pub history: HashMap<RouteRefCore, VecDeque<ClosedEnvelopeCore>>,
+    /// Payload bytes live only while their envelope remains retained for the owning route.
+    pub payloads: HashMap<String, Arc<[u8]>>,
+    /// Route audit entries live only while their referenced write remains retained.
     pub route_audit: HashMap<RouteRefCore, Vec<AuditEventCore>>,
+    /// Retention policies live for the registered route and bound history/payload/audit state.
+    pub retention_policies: HashMap<RouteRefCore, RetentionPolicyCore>,
+    /// History limits mirror retention policies and are copied on hot writes.
+    pub retention_history_limits: HashMap<RouteRefCore, Option<usize>>,
+    /// Edges live for explicit topology connections until disconnect.
     pub edges: Vec<(RouteRefCore, RouteRefCore)>,
+    /// Outgoing edge indexes mirror `edges` so hot writes avoid topology scans.
+    pub outgoing_edges_by_source: HashMap<RouteRefCore, Vec<RouteRefCore>>,
+    /// Routed route membership mirrors topology so sparse writes use one hot lookup.
+    pub routed_routes: HashSet<RouteRefCore>,
+    /// Native materialize edges live only while their owning Python subscription lives.
+    pub materialize_targets_by_source: HashMap<RouteRefCore, Vec<RouteRefCore>>,
+    /// Materializer generation invalidates compiled route-pair profiles on topology change.
+    pub materialize_generation: u64,
     pub bindings: BTreeMap<String, WriteBindingCore>,
     pub request_bindings: HashMap<RouteRefCore, WriteBindingCore>,
     pub mailboxes: BTreeMap<String, MailboxCore>,
+    /// Mailbox ingress lookup lives with mailbox topology for O(1) route checks.
+    pub mailbox_egress_by_ingress: HashMap<RouteRefCore, RouteRefCore>,
+    /// Mailbox egress lookup lets demand-shaped drain find its queue without scans.
+    pub mailbox_name_by_egress: HashMap<RouteRefCore, String>,
     pub loops: BTreeMap<String, ControlLoopCore>,
 }
 
@@ -814,122 +929,318 @@ impl GraphCore {
         payload_id: Option<String>,
         seq_source: Option<u64>,
     ) {
-        self.route_audit
-            .entry(route.clone())
-            .or_default()
-            .push(AuditEventCore {
+        let audit = self.route_audit.entry(route.clone()).or_default();
+        if let Some(event) = audit
+            .iter_mut()
+            .find(|event| event.action == action && event.actor_id == actor_id)
+        {
+            event.payload_id = payload_id;
+            event.seq_source = seq_source;
+            if audit.len() == 1 {
+                return;
+            }
+        } else {
+            audit.push(AuditEventCore {
                 route: route.clone(),
                 action: action.to_string(),
                 payload_id,
                 actor_id: actor_id.to_string(),
                 seq_source,
             });
+        }
+        if audit.len() > 1 {
+            self.enforce_route_audit_retention(route);
+        }
     }
 
-    fn native_history_limit(descriptor: &PortDescriptorCore) -> Option<usize> {
-        match descriptor.retention.latest_replay_policy.as_str() {
+    fn append_write_audit(&mut self, route: &RouteRefCore, actor_id: &str, seq_source: u64) {
+        let audit = self.route_audit.entry(route.clone()).or_default();
+        let mut updated = false;
+        if let Some(event) = audit.first_mut() {
+            if event.action == "write" && event.actor_id == actor_id {
+                event.payload_id = None;
+                event.seq_source = Some(seq_source);
+                updated = true;
+            }
+        }
+        if !updated {
+            if let Some(event) = audit
+                .iter_mut()
+                .find(|event| event.action == "write" && event.actor_id == actor_id)
+            {
+                event.payload_id = None;
+                event.seq_source = Some(seq_source);
+                updated = true;
+            }
+        }
+        if !updated {
+            audit.push(AuditEventCore {
+                route: route.clone(),
+                action: "write".to_string(),
+                payload_id: None,
+                actor_id: actor_id.to_string(),
+                seq_source: Some(seq_source),
+            });
+        }
+        if audit.len() == 1 {
+            return;
+        }
+        if self
+            .route_audit
+            .get(route)
+            .is_some_and(|audit| audit.len() > 1)
+        {
+            self.enforce_route_audit_retention(route);
+        }
+    }
+
+    fn native_history_limit(policy: &RetentionPolicyCore) -> Option<usize> {
+        match policy.latest_replay_policy.as_str() {
             "none" => Some(0),
             "latest_only" => Some(1),
+            "bounded_history" => policy.history_limit,
             _ => None,
         }
     }
 
-    fn retained_payload_ids_for_route(&self, route: &RouteRefCore) -> HashSet<String> {
-        let mut retained = HashSet::new();
+    fn retained_envelope_for_route_event(
+        &self,
+        route: &RouteRefCore,
+        seq_source: u64,
+    ) -> Option<ClosedEnvelopeCore> {
         if let Some(latest) = self.latest.get(route) {
-            retained.insert(latest.payload_ref.payload_id.clone());
-        }
-        if let Some(history) = self.history.get(route) {
-            for envelope in history {
-                retained.insert(envelope.payload_ref.payload_id.clone());
+            if latest.seq_source == seq_source {
+                return Some(latest.clone());
             }
         }
-        retained
+        self.history.get(route).and_then(|history| {
+            history
+                .iter()
+                .find(|envelope| envelope.seq_source == seq_source)
+                .cloned()
+        })
     }
 
-    fn enforce_route_retention(
+    fn route_display(&self, route: &RouteRefCore) -> String {
+        self.route_displays
+            .get(route)
+            .cloned()
+            .unwrap_or_else(|| route.display())
+    }
+
+    fn registered_route_display<'a>(&'a self, route: &'a RouteRefCore) -> &'a str {
+        self.route_displays
+            .get(route)
+            .map(String::as_str)
+            .expect("registered route display missing")
+    }
+
+    pub fn active_lineage_value_count(&self) -> usize {
+        0
+    }
+
+    pub fn retained_lineage_event_count(&self) -> usize {
+        0
+    }
+
+    fn envelope_is_retained(&self, route: &RouteRefCore, envelope: &ClosedEnvelopeCore) -> bool {
+        if self
+            .latest
+            .get(route)
+            .is_some_and(|latest| latest.payload_ref.payload_id == envelope.payload_ref.payload_id)
+        {
+            return true;
+        }
+        self.history.get(route).is_some_and(|history| {
+            history
+                .iter()
+                .any(|retained| retained.payload_ref.payload_id == envelope.payload_ref.payload_id)
+        })
+    }
+
+    fn forget_unretained_envelope(&mut self, route: &RouteRefCore, envelope: ClosedEnvelopeCore) {
+        if self.envelope_is_retained(route, &envelope) {
+            return;
+        }
+        self.forget_payload(&envelope.payload_ref.payload_id);
+    }
+
+    fn enforce_route_audit_retention(&mut self, route: &RouteRefCore) {
+        let oldest_history_seq = self
+            .history
+            .get(route)
+            .and_then(|history| history.front())
+            .map(|envelope| envelope.seq_source);
+        let latest_seq_source = self.latest.get(route).map(|envelope| envelope.seq_source);
+        let Some(audit) = self.route_audit.get_mut(route) else {
+            return;
+        };
+        audit.retain(|event| match event.seq_source {
+            Some(seq_source) => {
+                Some(seq_source) == latest_seq_source
+                    || oldest_history_seq.is_some_and(|oldest| seq_source >= oldest)
+            }
+            None => true,
+        });
+        if audit.is_empty() {
+            self.route_audit.remove(route);
+        }
+    }
+
+    fn enforce_route_retention(&mut self, route: &RouteRefCore, policy: &RetentionPolicyCore) {
+        self.enforce_route_retention_limit(route, Self::native_history_limit(policy));
+    }
+
+    fn enforce_route_retention_limit(&mut self, route: &RouteRefCore, limit: Option<usize>) {
+        if let Some(limit) = limit {
+            loop {
+                let expired = {
+                    let Some(history) = self.history.get_mut(route) else {
+                        break;
+                    };
+                    if history.len() <= limit {
+                        break;
+                    }
+                    history.pop_front()
+                };
+                if let Some(envelope) = expired {
+                    self.forget_unretained_envelope(route, envelope);
+                }
+            }
+        }
+        if self
+            .route_audit
+            .get(route)
+            .is_some_and(|audit| audit.len() > 1)
+        {
+            self.enforce_route_audit_retention(route);
+        }
+    }
+
+    fn retention_policy_for<'a>(&'a self, route: &RouteRefCore) -> RetentionPolicyRef<'a> {
+        self.retention_policies
+            .get(route)
+            .map(RetentionPolicyRef::Borrowed)
+            .unwrap_or_else(|| RetentionPolicyRef::Owned(RetentionPolicyCore::for_route(route)))
+    }
+
+    fn retention_history_limit_for(&self, route: &RouteRefCore) -> Option<usize> {
+        self.retention_history_limits
+            .get(route)
+            .copied()
+            .unwrap_or_else(|| Self::native_history_limit(&RetentionPolicyCore::for_route(route)))
+    }
+
+    fn route_has_immediate_routing_uncached(&self, route: &RouteRefCore) -> bool {
+        self.request_bindings.contains_key(route)
+            || self
+                .outgoing_edges_by_source
+                .get(route)
+                .is_some_and(|sinks| !sinks.is_empty())
+            || self.mailbox_egress_by_ingress.contains_key(route)
+    }
+
+    fn refresh_routed_route(&mut self, route: &RouteRefCore) {
+        if self.route_has_immediate_routing_uncached(route) {
+            self.routed_routes.insert(route.clone());
+        } else {
+            self.routed_routes.remove(route);
+        }
+    }
+
+    pub fn configure_retention(
         &mut self,
         route: &RouteRefCore,
-        descriptor: &PortDescriptorCore,
-    ) {
-        if let Some(limit) = Self::native_history_limit(descriptor) {
-            if let Some(history) = self.history.get_mut(route) {
-                if history.len() > limit {
-                    let expired_count = history.len() - limit;
-                    history.drain(..expired_count);
-                }
-            }
+        mut policy: RetentionPolicyCore,
+    ) -> RetentionPolicyCore {
+        self.register_port(route.clone());
+        if policy.latest_replay_policy == "bounded_history" && policy.history_limit.is_none() {
+            policy.history_limit = Some(DEFAULT_ROUTE_HISTORY_LIMIT);
         }
-
-        let retained_payload_ids = self.retained_payload_ids_for_route(route);
-        let route_payload_prefix = format!("{}:", route.display());
-        self.payloads.retain(|payload_id, _| {
-            !payload_id.starts_with(&route_payload_prefix)
-                || retained_payload_ids.contains(payload_id)
-        });
-
-        if let Some(audit) = self.route_audit.get_mut(route) {
-            let retained_seq_sources = self
-                .history
-                .get(route)
-                .map(|history| {
-                    history
-                        .iter()
-                        .map(|envelope| envelope.seq_source)
-                        .collect::<HashSet<_>>()
-                })
-                .unwrap_or_default();
-            let latest_seq_source = self.latest.get(route).map(|envelope| envelope.seq_source);
-            audit.retain(|event| match event.seq_source {
-                Some(seq_source) => {
-                    retained_seq_sources.contains(&seq_source)
-                        || Some(seq_source) == latest_seq_source
-                }
-                None => true,
-            });
+        if let Some(descriptor) = self.descriptors.get_mut(route) {
+            descriptor.retention.latest_replay_policy = policy.latest_replay_policy.clone();
+            descriptor.retention.durability_class = policy.durability_class.clone();
+            descriptor.retention.replay_window = policy.replay_window.clone();
+            descriptor.retention.payload_retention_policy = policy.payload_retention_policy.clone();
         }
+        self.retention_history_limits
+            .insert(route.clone(), Self::native_history_limit(&policy));
+        self.retention_policies
+            .insert(route.clone(), policy.clone());
+        self.enforce_route_retention(route, &policy);
+        policy
     }
 
-    fn event_taints(route: &RouteRefCore, control_epoch: Option<u64>) -> Vec<TaintMarkCore> {
+    fn event_taints(
+        route: &RouteRefCore,
+        route_display: &str,
+        control_epoch: Option<u64>,
+    ) -> Vec<TaintMarkCore> {
         let mut taints = Vec::new();
         if route.namespace.plane == Plane::Write && route.variant == Variant::Request {
             taints.push(TaintMarkCore {
                 domain: TaintDomain::Coherence,
                 value_id: "COHERENCE_WRITE_PENDING".to_string(),
-                origin_id: route.display(),
+                origin_id: route_display.to_string(),
             });
         }
         if route.namespace.layer == Layer::Ephemeral {
             taints.push(TaintMarkCore {
                 domain: TaintDomain::Determinism,
                 value_id: "DET_NONREPLAYABLE".to_string(),
-                origin_id: route.display(),
+                origin_id: route_display.to_string(),
             });
         }
         if control_epoch.is_some() {
             taints.push(TaintMarkCore {
                 domain: TaintDomain::Scheduling,
                 value_id: "SCHED_READY".to_string(),
-                origin_id: route.display(),
+                origin_id: route_display.to_string(),
             });
         }
         taints
     }
 
+    fn route_has_static_taints(route: &RouteRefCore) -> bool {
+        (route.namespace.plane == Plane::Write && route.variant == Variant::Request)
+            || route.namespace.layer == Layer::Ephemeral
+    }
+
     fn payload_bytes_for(&self, envelope: &ClosedEnvelopeCore) -> Vec<u8> {
         self.payloads
             .get(&envelope.payload_ref.payload_id)
-            .cloned()
+            .map(|payload| payload.as_ref().to_vec())
             .unwrap_or_else(|| envelope.payload_ref.inline_bytes.clone())
+    }
+
+    fn remember_payload(&mut self, payload_id: &str, payload: Arc<[u8]>) {
+        self.payloads.insert(payload_id.to_string(), payload);
+    }
+
+    fn forget_payload(&mut self, payload_id: &str) {
+        self.payloads.remove(payload_id);
     }
 
     pub fn register_port(&mut self, route: RouteRefCore) -> RouteRefCore {
         if let Err(message) = Self::validate_route(&route) {
             panic!("invalid route registered: {message}");
         }
+        let route_display = route.display();
         self.descriptors
             .entry(route.clone())
             .or_insert_with(|| PortDescriptorCore::for_route(&route));
+        self.routes_by_display
+            .entry(route_display.clone())
+            .or_insert_with(|| route.clone());
+        self.route_displays
+            .entry(route.clone())
+            .or_insert(route_display);
+        if !self.retention_policies.contains_key(&route) {
+            let policy = RetentionPolicyCore::for_route(&route);
+            self.retention_history_limits
+                .insert(route.clone(), Self::native_history_limit(&policy));
+            self.retention_policies.insert(route.clone(), policy);
+        }
         route
     }
 
@@ -950,12 +1261,18 @@ impl GraphCore {
         }
         self.request_bindings
             .insert(binding.request.clone(), binding.clone());
+        self.routed_routes.insert(binding.request.clone());
         self.bindings.insert(name, binding);
     }
 
     pub fn register_mailbox(&mut self, name: String, mailbox: MailboxCore) {
         self.register_port(mailbox.ingress.clone());
         self.register_port(mailbox.egress.clone());
+        self.mailbox_egress_by_ingress
+            .insert(mailbox.ingress.clone(), mailbox.egress.clone());
+        self.mailbox_name_by_egress
+            .insert(mailbox.egress.clone(), name.clone());
+        self.routed_routes.insert(mailbox.ingress.clone());
         self.mailboxes.insert(name, mailbox);
     }
 
@@ -967,6 +1284,11 @@ impl GraphCore {
             return false;
         }
         self.edges.push(edge);
+        self.outgoing_edges_by_source
+            .entry(source.clone())
+            .or_default()
+            .push(sink.clone());
+        self.routed_routes.insert(source.clone());
         self.try_drain_mailbox_for_source(source);
         true
     }
@@ -980,7 +1302,149 @@ impl GraphCore {
             return false;
         };
         self.edges.remove(index);
+        if let Some(sinks) = self.outgoing_edges_by_source.get_mut(source) {
+            sinks.retain(|candidate| candidate != sink);
+            if sinks.is_empty() {
+                self.outgoing_edges_by_source.remove(source);
+            }
+        }
+        self.refresh_routed_route(source);
         true
+    }
+
+    pub fn register_materialize_bytes(
+        &mut self,
+        source: &RouteRefCore,
+        target: &RouteRefCore,
+    ) -> bool {
+        let source = self.register_port(source.clone());
+        let target = self.register_port(target.clone());
+        let targets = self
+            .materialize_targets_by_source
+            .entry(source)
+            .or_default();
+        if targets.contains(&target) {
+            return false;
+        }
+        targets.push(target);
+        self.materialize_generation = self.materialize_generation.wrapping_add(1);
+        true
+    }
+
+    pub fn unregister_materialize_bytes(
+        &mut self,
+        source: &RouteRefCore,
+        target: &RouteRefCore,
+    ) -> bool {
+        let Some(targets) = self.materialize_targets_by_source.get_mut(source) else {
+            return false;
+        };
+        let Some(index) = targets.iter().position(|candidate| candidate == target) else {
+            return false;
+        };
+        targets.remove(index);
+        if targets.is_empty() {
+            self.materialize_targets_by_source.remove(source);
+        }
+        self.materialize_generation = self.materialize_generation.wrapping_add(1);
+        true
+    }
+
+    pub fn materializer_pair_is_registered(
+        &self,
+        route: &RouteRefCore,
+        target_route: &RouteRefCore,
+    ) -> bool {
+        self.materialize_targets_by_source
+            .get(route)
+            .is_some_and(|targets| targets.iter().any(|target| target == target_route))
+    }
+
+    fn prepare_direct_envelope_with_shared_payload(
+        &mut self,
+        route: &RouteRefCore,
+        payload: Arc<[u8]>,
+        producer: ProducerRefCore,
+        control_epoch: Option<u64>,
+    ) -> ClosedEnvelopeCore {
+        if !self.descriptors.contains_key(route) {
+            self.register_port(route.clone());
+        }
+        let (clock_domain, credit_class, read_capabilities) = {
+            let descriptor = self
+                .descriptors
+                .get(route)
+                .expect("registered route descriptor missing");
+            (
+                descriptor.time.clock_domain.clone(),
+                descriptor.flow.credit_class.clone(),
+                descriptor.security.read_capabilities.clone(),
+            )
+        };
+        let seq_source = self
+            .latest
+            .get(route)
+            .map(|envelope| {
+                envelope
+                    .seq_source
+                    .checked_add(1)
+                    .expect("route sequence overflowed u64")
+            })
+            .unwrap_or(1);
+        let (payload_id, correlation_id, taints) = {
+            let route_display = self.registered_route_display(route);
+            (
+                event_payload_id(route_display, seq_source),
+                control_epoch.map(control_epoch_correlation_id),
+                Self::event_taints(route, route_display, control_epoch),
+            )
+        };
+        let payload_len = payload.len() as u64;
+        let now = Self::now_unix_ms();
+        self.remember_payload(&payload_id, payload);
+        ClosedEnvelopeCore {
+            route: route.clone(),
+            producer,
+            emitter: RuntimeRefCore {
+                runtime_id: "runtime:in_memory".to_string(),
+            },
+            seq_source,
+            link_seq: None,
+            device_time_unix_ms: None,
+            ingest_time_unix_ms: now,
+            logical_time_unix_ms: now,
+            logical_clock_domain: clock_domain,
+            partition_key: None,
+            causality_id: None,
+            correlation_id,
+            trace_id: None,
+            control_epoch,
+            taints,
+            guards: Vec::new(),
+            payload_ref: PayloadRefCore {
+                payload_id,
+                logical_length_bytes: payload_len,
+                codec_id: "identity".to_string(),
+                inline_bytes: Vec::new(),
+            },
+            qos_class: credit_class,
+            security_labels: read_capabilities,
+        }
+    }
+
+    fn prepare_direct_envelope(
+        &mut self,
+        route: &RouteRefCore,
+        payload: Vec<u8>,
+        producer: ProducerRefCore,
+        control_epoch: Option<u64>,
+    ) -> ClosedEnvelopeCore {
+        self.prepare_direct_envelope_with_shared_payload(
+            route,
+            Arc::from(payload),
+            producer,
+            control_epoch,
+        )
     }
 
     fn direct_write(
@@ -990,64 +1454,57 @@ impl GraphCore {
         producer: ProducerRefCore,
         control_epoch: Option<u64>,
     ) -> ClosedEnvelopeCore {
-        self.register_port(route.clone());
-        let descriptor = self
-            .descriptors
-            .get(route)
-            .cloned()
-            .unwrap_or_else(|| PortDescriptorCore::for_route(route));
-        let seq_source = self
-            .latest
-            .get(route)
-            .map(|envelope| envelope.seq_source + 1)
-            .unwrap_or(1);
-        let route_display = route.display();
-        let payload_id = format!("{route_display}:{seq_source}");
-        let payload_len = payload.len() as u64;
-        let now = Self::now_unix_ms();
-        self.payloads.insert(payload_id.clone(), payload);
-        let envelope = ClosedEnvelopeCore {
-            route: route.clone(),
-            producer: producer.clone(),
-            emitter: RuntimeRefCore {
-                runtime_id: "runtime:in_memory".to_string(),
-            },
-            seq_source,
-            link_seq: None,
-            device_time_unix_ms: None,
-            ingest_time_unix_ms: now,
-            logical_time_unix_ms: now,
-            logical_clock_domain: descriptor.time.clock_domain.clone(),
-            partition_key: None,
-            causality_id: Some(format!("{route_display}#{seq_source}")),
-            correlation_id: control_epoch.map(|epoch| format!("control-epoch-{epoch}")),
-            trace_id: Some(format!("trace:{route_display}:{seq_source}")),
-            control_epoch,
-            taints: Self::event_taints(route, control_epoch),
-            guards: Vec::new(),
-            payload_ref: PayloadRefCore {
-                payload_id: payload_id.clone(),
-                logical_length_bytes: payload_len,
-                codec_id: "identity".to_string(),
-                inline_bytes: Vec::new(),
-            },
-            qos_class: descriptor.flow.credit_class.clone(),
-            security_labels: descriptor.security.read_capabilities.clone(),
-        };
-        self.latest.insert(route.clone(), envelope.clone());
+        let envelope = self.prepare_direct_envelope(route, payload, producer, control_epoch);
+        let seq_source = envelope.seq_source;
+        let replaced_latest = self.latest.insert(route.clone(), envelope.clone());
         self.history
             .entry(route.clone())
             .or_default()
-            .push(envelope.clone());
-        self.append_audit(
-            route,
-            "write",
-            &producer.producer_id,
-            Some(payload_id),
-            Some(seq_source),
-        );
-        self.enforce_route_retention(route, &descriptor);
+            .push_back(envelope.clone());
+        self.append_write_audit(route, &envelope.producer.producer_id, seq_source);
+        self.enforce_route_retention_limit(route, self.retention_history_limit_for(route));
+        if let Some(replaced) = replaced_latest {
+            self.forget_unretained_envelope(route, replaced);
+        }
         envelope
+    }
+
+    fn direct_write_drop(
+        &mut self,
+        route: &RouteRefCore,
+        payload: Vec<u8>,
+        producer: ProducerRefCore,
+        control_epoch: Option<u64>,
+    ) -> u64 {
+        self.direct_write_drop_shared_payload(route, Arc::from(payload), producer, control_epoch)
+    }
+
+    fn direct_write_drop_shared_payload(
+        &mut self,
+        route: &RouteRefCore,
+        payload: Arc<[u8]>,
+        producer: ProducerRefCore,
+        control_epoch: Option<u64>,
+    ) -> u64 {
+        let envelope = self.prepare_direct_envelope_with_shared_payload(
+            route,
+            payload,
+            producer,
+            control_epoch,
+        );
+        let seq_source = envelope.seq_source;
+        self.append_write_audit(route, &envelope.producer.producer_id, seq_source);
+        let history_envelope = envelope.clone();
+        let replaced_latest = self.latest.insert(route.clone(), envelope);
+        self.history
+            .entry(route.clone())
+            .or_default()
+            .push_back(history_envelope);
+        self.enforce_route_retention_limit(route, self.retention_history_limit_for(route));
+        if let Some(replaced) = replaced_latest {
+            self.forget_unretained_envelope(route, replaced);
+        }
+        seq_source
     }
 
     fn route_credit_snapshot(&self, route: &RouteRefCore) -> CreditSnapshotCore {
@@ -1056,6 +1513,7 @@ impl GraphCore {
             .get(route)
             .cloned()
             .unwrap_or_else(|| PortDescriptorCore::for_route(route));
+        let route_display = self.route_display(route);
         let maybe_mailbox = self
             .mailboxes
             .values()
@@ -1063,7 +1521,7 @@ impl GraphCore {
 
         match maybe_mailbox {
             Some(mailbox) => CreditSnapshotCore {
-                route_display: route.display(),
+                route_display,
                 credit_class: descriptor.flow.credit_class,
                 available: mailbox
                     .descriptor
@@ -1074,12 +1532,12 @@ impl GraphCore {
                 largest_queue_depth: mailbox.largest_queue_depth,
             },
             None => CreditSnapshotCore {
-                route_display: route.display(),
+                route_display,
                 credit_class: descriptor.flow.credit_class,
                 available: u64::MAX,
                 blocked_senders: 0,
                 dropped_messages: 0,
-                largest_queue_depth: self.history.get(route).map_or(0, Vec::len),
+                largest_queue_depth: self.history.get(route).map_or(0, VecDeque::len),
             },
         }
     }
@@ -1092,13 +1550,10 @@ impl GraphCore {
         // Mailbox ingress is the explicit async boundary. Once a route resolves to
         // mailbox ingress, delivery semantics are owned by the mailbox descriptor
         // rather than by normal edge fanout.
-        let Some(mailbox) = self
+        let mailbox = self
             .mailboxes
             .values_mut()
-            .find(|mailbox| mailbox.ingress == *route)
-        else {
-            return None;
-        };
+            .find(|mailbox| mailbox.ingress == *route)?;
         let capacity = mailbox.descriptor.capacity;
         let full = mailbox.queue.len() >= capacity;
 
@@ -1136,16 +1591,14 @@ impl GraphCore {
     fn try_drain_mailbox_for_source(&mut self, source: &RouteRefCore) -> Vec<ClosedEnvelopeCore> {
         // Draining is demand-shaped by graph topology: if nothing consumes the
         // egress route, items stay queued and consume credit.
-        let Some(name) = self
-            .mailboxes
-            .iter()
-            .find(|(_, mailbox)| mailbox.egress == *source)
-            .map(|(name, _)| name.clone())
-        else {
+        let Some(name) = self.mailbox_name_by_egress.get(source).cloned() else {
             return Vec::new();
         };
 
-        let has_consumer = self.edges.iter().any(|(left, _)| left == source);
+        let has_consumer = self
+            .outgoing_edges_by_source
+            .get(source)
+            .is_some_and(|sinks| !sinks.is_empty());
         if !has_consumer {
             return Vec::new();
         }
@@ -1184,11 +1637,10 @@ impl GraphCore {
         if fanout {
             let binding = self.request_bindings.get(&route).cloned();
             let downstream = self
-                .edges
-                .iter()
-                .filter(|(source, _)| *source == route)
-                .map(|(_, sink)| sink.clone())
-                .collect::<Vec<_>>();
+                .outgoing_edges_by_source
+                .get(&route)
+                .cloned()
+                .unwrap_or_default();
 
             // A request write projects into shadow state before any downstream fanout
             // so desired-state observability exists even when the device has not yet
@@ -1200,7 +1652,7 @@ impl GraphCore {
                         &binding.desired,
                         payload.clone(),
                         ProducerRefCore {
-                            producer_id: binding.request.display(),
+                            producer_id: self.route_display(&binding.request),
                             kind: ProducerKind::Reconciler,
                         },
                         envelope.control_epoch,
@@ -1227,12 +1679,8 @@ impl GraphCore {
         emitted
     }
 
-    fn route_display_key(route: &RouteRefCore) -> String {
-        route.display()
-    }
-
-    fn envelope_trace_key(envelope: &ClosedEnvelopeCore) -> (u64, String) {
-        (envelope.seq_source, envelope.route.display())
+    fn route_has_immediate_routing(&self, route: &RouteRefCore) -> bool {
+        self.routed_routes.contains(route)
     }
 
     pub fn write(
@@ -1242,9 +1690,386 @@ impl GraphCore {
         producer: ProducerRefCore,
         control_epoch: Option<u64>,
     ) -> Vec<ClosedEnvelopeCore> {
-        self.register_port(route.clone());
         let envelope = self.direct_write(route, payload, producer, control_epoch);
+        if !self.route_has_immediate_routing(route) {
+            return vec![envelope];
+        }
         self.route_envelope(envelope, true)
+    }
+
+    pub fn write_single_if_unrouted(
+        &mut self,
+        route: &RouteRefCore,
+        payload: Vec<u8>,
+        producer: ProducerRefCore,
+        control_epoch: Option<u64>,
+    ) -> Option<ClosedEnvelopeCore> {
+        if self.route_has_immediate_routing(route) {
+            return None;
+        }
+        Some(self.direct_write(route, payload, producer, control_epoch))
+    }
+
+    pub fn write_single_if_unrouted_drop(
+        &mut self,
+        route: &RouteRefCore,
+        payload: Vec<u8>,
+        producer: ProducerRefCore,
+        control_epoch: Option<u64>,
+    ) -> bool {
+        if self.route_has_immediate_routing(route) {
+            return false;
+        }
+        self.direct_write_drop(route, payload, producer, control_epoch);
+        true
+    }
+
+    fn materialize_bytes_from_source_envelope_with_payload_drop(
+        &mut self,
+        source_envelope: &ClosedEnvelopeCore,
+        target_route: &RouteRefCore,
+        payload: Vec<u8>,
+    ) {
+        let target_route = self.register_port(target_route.clone());
+        if source_envelope.taints.is_empty() {
+            self.direct_write_drop(
+                &target_route,
+                payload,
+                ProducerRefCore {
+                    producer_id: "python".to_string(),
+                    kind: ProducerKind::Application,
+                },
+                source_envelope.control_epoch,
+            );
+            return;
+        }
+        let mut envelope = self.direct_write(
+            &target_route,
+            payload,
+            ProducerRefCore {
+                producer_id: "python".to_string(),
+                kind: ProducerKind::Application,
+            },
+            source_envelope.control_epoch,
+        );
+        envelope.taints = source_envelope.taints.clone();
+        self.latest.insert(target_route.clone(), envelope.clone());
+        if let Some(history) = self.history.get_mut(&target_route) {
+            if let Some(retained) = history
+                .iter_mut()
+                .find(|candidate| candidate.seq_source == envelope.seq_source)
+            {
+                *retained = envelope;
+            }
+        }
+    }
+
+    pub fn write_single_if_unrouted_and_materializer_drop(
+        &mut self,
+        route: &RouteRefCore,
+        target_route: &RouteRefCore,
+        payload: Vec<u8>,
+        producer: ProducerRefCore,
+        control_epoch: Option<u64>,
+    ) -> bool {
+        if self.route_has_immediate_routing(route) {
+            return false;
+        }
+        if !self
+            .materialize_targets_by_source
+            .get(route)
+            .is_some_and(|targets| targets.iter().any(|target| target == target_route))
+        {
+            return false;
+        }
+        let shared_payload: Arc<[u8]> = Arc::from(payload);
+        if control_epoch.is_none()
+            && !Self::route_has_static_taints(route)
+            && !Self::route_has_static_taints(target_route)
+        {
+            self.direct_write_drop_shared_payload(route, shared_payload.clone(), producer, None);
+            self.direct_write_drop_shared_payload(
+                target_route,
+                shared_payload,
+                ProducerRefCore {
+                    producer_id: "python".to_string(),
+                    kind: ProducerKind::Application,
+                },
+                None,
+            );
+            return true;
+        }
+        let target_payload = shared_payload.as_ref().to_vec();
+        let payload = shared_payload.as_ref().to_vec();
+        let envelope = self.direct_write(route, payload, producer, control_epoch);
+        self.materialize_bytes_from_source_envelope_with_payload_drop(
+            &envelope,
+            target_route,
+            target_payload,
+        );
+        true
+    }
+
+    pub fn write_single_if_unrouted_known_materializer_drop(
+        &mut self,
+        route: &RouteRefCore,
+        target_route: &RouteRefCore,
+        payload: Vec<u8>,
+        producer: ProducerRefCore,
+        control_epoch: Option<u64>,
+    ) -> bool {
+        if self.route_has_immediate_routing(route) {
+            return false;
+        }
+        let shared_payload: Arc<[u8]> = Arc::from(payload);
+        if control_epoch.is_none()
+            && !Self::route_has_static_taints(route)
+            && !Self::route_has_static_taints(target_route)
+        {
+            self.direct_write_drop_shared_payload(route, shared_payload.clone(), producer, None);
+            self.direct_write_drop_shared_payload(
+                target_route,
+                shared_payload,
+                ProducerRefCore {
+                    producer_id: "python".to_string(),
+                    kind: ProducerKind::Application,
+                },
+                None,
+            );
+            return true;
+        }
+        let target_payload = shared_payload.as_ref().to_vec();
+        let payload = shared_payload.as_ref().to_vec();
+        let envelope = self.direct_write(route, payload, producer, control_epoch);
+        self.materialize_bytes_from_source_envelope_with_payload_drop(
+            &envelope,
+            target_route,
+            target_payload,
+        );
+        true
+    }
+
+    pub fn write_single_if_unrouted_with_lineage_no_parents(
+        &mut self,
+        route: &RouteRefCore,
+        payload: Vec<u8>,
+        producer: ProducerRefCore,
+        control_epoch: Option<u64>,
+        _trace_id: Option<String>,
+        _causality_id: Option<String>,
+        _correlation_id: Option<String>,
+    ) -> Option<ClosedEnvelopeCore> {
+        self.write_single_if_unrouted(route, payload, producer, control_epoch)
+    }
+
+    pub fn materialize_bytes_one_parent(
+        &mut self,
+        source_route: &RouteRefCore,
+        source_seq_source: u64,
+        target_route: &RouteRefCore,
+        producer: ProducerRefCore,
+    ) -> Option<ClosedEnvelopeCore> {
+        let source_route = self.register_port(source_route.clone());
+        let target_route = self.register_port(target_route.clone());
+        let source_envelope =
+            self.retained_envelope_for_route_event(&source_route, source_seq_source)?;
+        let payload = self.payload_bytes_for(&source_envelope);
+        let mut envelope = self.direct_write(
+            &target_route,
+            payload,
+            producer,
+            source_envelope.control_epoch,
+        );
+        if !source_envelope.taints.is_empty() {
+            envelope.taints = source_envelope.taints.clone();
+            self.latest.insert(target_route.clone(), envelope.clone());
+            if let Some(history) = self.history.get_mut(&target_route) {
+                if let Some(retained) = history
+                    .iter_mut()
+                    .find(|candidate| candidate.seq_source == envelope.seq_source)
+                {
+                    *retained = envelope.clone();
+                }
+            }
+        }
+        Some(envelope)
+    }
+
+    fn materialize_bytes_from_source_envelope(
+        &mut self,
+        source_envelope: &ClosedEnvelopeCore,
+        target_route: &RouteRefCore,
+    ) -> ClosedEnvelopeCore {
+        let target_route = self.register_port(target_route.clone());
+        let payload = self.payload_bytes_for(source_envelope);
+        let mut envelope = self.direct_write(
+            &target_route,
+            payload,
+            ProducerRefCore {
+                producer_id: "python".to_string(),
+                kind: ProducerKind::Application,
+            },
+            source_envelope.control_epoch,
+        );
+        if !source_envelope.taints.is_empty() {
+            envelope.taints = source_envelope.taints.clone();
+            self.latest.insert(target_route.clone(), envelope.clone());
+            if let Some(history) = self.history.get_mut(&target_route) {
+                if let Some(retained) = history
+                    .iter_mut()
+                    .find(|candidate| candidate.seq_source == envelope.seq_source)
+                {
+                    *retained = envelope.clone();
+                }
+            }
+        }
+        envelope
+    }
+
+    fn write_single_unrouted_untainted_materializer_drop_with_lineage_ids(
+        &mut self,
+        route: &RouteRefCore,
+        target_route: &RouteRefCore,
+        payload: Vec<u8>,
+        producer: ProducerRefCore,
+        _trace_id: String,
+        _causality_id: String,
+        _correlation_id: Option<String>,
+    ) -> bool {
+        let shared_payload: Arc<[u8]> = Arc::from(payload);
+        self.direct_write_drop_shared_payload(route, shared_payload.clone(), producer, None);
+        self.direct_write_drop_shared_payload(
+            target_route,
+            shared_payload,
+            ProducerRefCore {
+                producer_id: "python".to_string(),
+                kind: ProducerKind::Application,
+            },
+            None,
+        );
+        true
+    }
+
+    pub fn write_single_if_unrouted_with_lineage_no_parents_and_materializers(
+        &mut self,
+        route: &RouteRefCore,
+        payload: Vec<u8>,
+        producer: ProducerRefCore,
+        control_epoch: Option<u64>,
+        _trace_id: Option<String>,
+        _causality_id: Option<String>,
+        _correlation_id: Option<String>,
+    ) -> Option<Vec<ClosedEnvelopeCore>> {
+        if self.route_has_immediate_routing(route) {
+            return None;
+        }
+        let envelope = self.direct_write(route, payload, producer, control_epoch);
+        let mut emitted = vec![envelope.clone()];
+        let targets = self
+            .materialize_targets_by_source
+            .get(route)
+            .cloned()
+            .unwrap_or_default();
+        for target in targets {
+            emitted.push(self.materialize_bytes_from_source_envelope(&envelope, &target));
+        }
+        Some(emitted)
+    }
+
+    pub fn write_single_if_unrouted_with_lineage_no_parents_and_materializers_drop(
+        &mut self,
+        route: &RouteRefCore,
+        payload: Vec<u8>,
+        producer: ProducerRefCore,
+        control_epoch: Option<u64>,
+        _trace_id: Option<String>,
+        _causality_id: Option<String>,
+        _correlation_id: Option<String>,
+    ) -> bool {
+        if self.route_has_immediate_routing(route) {
+            return false;
+        }
+        let envelope = self.direct_write(route, payload, producer, control_epoch);
+        let targets = self
+            .materialize_targets_by_source
+            .get(route)
+            .cloned()
+            .unwrap_or_default();
+        for target in targets {
+            self.materialize_bytes_from_source_envelope(&envelope, &target);
+        }
+        true
+    }
+
+    pub fn write_single_if_unrouted_with_lineage_ids_no_parents_and_materializers_drop(
+        &mut self,
+        route: &RouteRefCore,
+        payload: Vec<u8>,
+        producer: ProducerRefCore,
+        control_epoch: Option<u64>,
+        _trace_id: String,
+        _causality_id: String,
+        _correlation_id: Option<String>,
+    ) -> bool {
+        if self.route_has_immediate_routing(route) {
+            return false;
+        }
+        let envelope = self.direct_write(route, payload, producer, control_epoch);
+        let targets = self
+            .materialize_targets_by_source
+            .get(route)
+            .cloned()
+            .unwrap_or_default();
+        for target in targets {
+            self.materialize_bytes_from_source_envelope(&envelope, &target);
+        }
+        true
+    }
+
+    pub fn write_single_if_unrouted_with_lineage_ids_no_parents_and_materializer_drop(
+        &mut self,
+        route: &RouteRefCore,
+        target_route: &RouteRefCore,
+        payload: Vec<u8>,
+        producer: ProducerRefCore,
+        control_epoch: Option<u64>,
+        trace_id: String,
+        causality_id: String,
+        correlation_id: Option<String>,
+    ) -> bool {
+        if self.route_has_immediate_routing(route) {
+            return false;
+        }
+        if !self
+            .materialize_targets_by_source
+            .get(route)
+            .is_some_and(|targets| targets.iter().any(|target| target == target_route))
+        {
+            return false;
+        }
+        if control_epoch.is_none()
+            && !Self::route_has_static_taints(route)
+            && !Self::route_has_static_taints(target_route)
+        {
+            return self.write_single_unrouted_untainted_materializer_drop_with_lineage_ids(
+                route,
+                target_route,
+                payload,
+                producer,
+                trace_id,
+                causality_id,
+                correlation_id,
+            );
+        }
+        let target_payload = payload.clone();
+        let envelope = self.direct_write(route, payload, producer, control_epoch);
+        let _ = (trace_id, causality_id, correlation_id);
+        self.materialize_bytes_from_source_envelope_with_payload_drop(
+            &envelope,
+            target_route,
+            target_payload,
+        );
+        true
     }
 
     pub fn credit_snapshot(&self) -> Vec<CreditSnapshotCore> {
@@ -1257,6 +2082,89 @@ impl GraphCore {
         snapshots
     }
 
+    pub fn retention_violations(&self) -> Vec<String> {
+        let mut violations = Vec::new();
+        let mut routes = self.descriptors.keys().cloned().collect::<HashSet<_>>();
+        routes.extend(self.latest.keys().cloned());
+        routes.extend(self.history.keys().cloned());
+        routes.extend(self.route_audit.keys().cloned());
+        routes.extend(self.retention_policies.keys().cloned());
+
+        let mut retained_payload_ids = HashSet::new();
+        for route in routes {
+            let route_display = self.route_display(&route);
+            let policy = self.retention_policy_for(&route);
+            if let Some(history) = self.history.get(&route) {
+                if let Some(limit) = Self::native_history_limit(policy.as_ref()) {
+                    if history.len() > limit {
+                        violations.push(format!(
+                            "{route_display} replay retained {} events beyond limit {limit}",
+                            history.len()
+                        ));
+                    }
+                }
+                retained_payload_ids.extend(
+                    history
+                        .iter()
+                        .map(|envelope| envelope.payload_ref.payload_id.clone()),
+                );
+            }
+            if let Some(latest) = self.latest.get(&route) {
+                retained_payload_ids.insert(latest.payload_ref.payload_id.clone());
+            }
+            if let Some(audit) = self.route_audit.get(&route) {
+                let oldest_history_seq = self
+                    .history
+                    .get(&route)
+                    .and_then(|history| history.front())
+                    .map(|envelope| envelope.seq_source);
+                let latest_seq_source = self.latest.get(&route).map(|envelope| envelope.seq_source);
+                for event in audit {
+                    if let Some(seq_source) = event.seq_source {
+                        let retained = Some(seq_source) == latest_seq_source
+                            || oldest_history_seq.is_some_and(|oldest| seq_source >= oldest);
+                        if !retained {
+                            violations.push(format!(
+                                "{route_display} audit retained expired seq_source {seq_source}"
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
+        for payload_id in self.payloads.keys() {
+            if !retained_payload_ids.contains(payload_id) {
+                violations.push(format!(
+                    "payload {payload_id} is not retained by latest/history"
+                ));
+            }
+        }
+
+        violations.sort();
+        violations
+    }
+
+    pub fn retention_snapshot(&self, route: &RouteRefCore) -> RetentionSnapshotCore {
+        let route_display = self.route_display(route);
+        let policy = self.retention_policy_for(route);
+        RetentionSnapshotCore {
+            route_display,
+            latest_seq_source: self.latest.get(route).map(|envelope| envelope.seq_source),
+            metadata_event_count: self
+                .latest
+                .get(route)
+                .map_or(0, |envelope| envelope.seq_source),
+            replay_count: self.history.get(route).map_or(0, VecDeque::len),
+            payload_count: self.retained_payload_count(route),
+            lineage_count: 0,
+            trace_index_count: 0,
+            causality_index_count: 0,
+            correlation_index_count: 0,
+            history_limit: Self::native_history_limit(policy.as_ref()),
+        }
+    }
+
     pub fn open_latest(&mut self, route: &RouteRefCore) -> Option<OpenedEnvelopeCore> {
         let closed = self.latest.get(route).cloned()?;
         let payload = self.payloads.get(&closed.payload_ref.payload_id).cloned()?;
@@ -1267,14 +2175,39 @@ impl GraphCore {
             Some(closed.payload_ref.payload_id.clone()),
             Some(closed.seq_source),
         );
-        Some(OpenedEnvelopeCore { closed, payload })
+        Some(OpenedEnvelopeCore {
+            closed,
+            payload: payload.as_ref().to_vec(),
+        })
+    }
+
+    pub fn retained_payload_count(&self, route: &RouteRefCore) -> usize {
+        let mut retained = HashSet::new();
+        if let Some(latest) = self.latest.get(route) {
+            retained.insert(latest.payload_ref.payload_id.as_str());
+        }
+        if let Some(history) = self.history.get(route) {
+            for envelope in history {
+                retained.insert(envelope.payload_ref.payload_id.as_str());
+            }
+        }
+        retained
+            .into_iter()
+            .filter(|payload_id| self.payloads.contains_key(*payload_id))
+            .count()
+    }
+
+    pub fn payload_by_id(&self, payload_id: &str) -> Option<Vec<u8>> {
+        self.payloads
+            .get(payload_id)
+            .map(|payload| payload.as_ref().to_vec())
     }
 
     pub fn query(&self, query: QueryKindCore) -> QueryResultCore {
         match query {
             QueryKindCore::Catalog => {
                 let mut routes = self.descriptors.keys().cloned().collect::<Vec<_>>();
-                routes.sort_by_cached_key(Self::route_display_key);
+                routes.sort_by_cached_key(|route| self.route_display(route));
                 QueryResultCore::Catalog(routes)
             }
             QueryKindCore::DescribeRoute(route) => QueryResultCore::DescribeRoute(
@@ -1290,19 +2223,24 @@ impl GraphCore {
                 let mut edges = self
                     .edges
                     .iter()
-                    .map(|(left, right)| (left.display(), right.display()))
+                    .map(|(left, right)| (self.route_display(left), self.route_display(right)))
                     .collect::<Vec<_>>();
                 edges.sort();
                 QueryResultCore::Topology(edges)
             }
             QueryKindCore::Trace => {
                 let mut items = self.latest.values().cloned().collect::<Vec<_>>();
-                items.sort_by_cached_key(Self::envelope_trace_key);
+                items.sort_by_cached_key(|envelope| {
+                    (envelope.seq_source, self.route_display(&envelope.route))
+                });
                 QueryResultCore::Trace(items)
             }
-            QueryKindCore::Replay(route) => {
-                QueryResultCore::Replay(self.history.get(&route).cloned().unwrap_or_default())
-            }
+            QueryKindCore::Replay(route) => QueryResultCore::Replay(
+                self.history
+                    .get(&route)
+                    .map(|history| history.iter().cloned().collect())
+                    .unwrap_or_default(),
+            ),
             QueryKindCore::ValidateGraph => {
                 let mut issues = Vec::new();
                 let mut schema_mismatches = self
@@ -1310,8 +2248,8 @@ impl GraphCore {
                     .iter()
                     .filter(|(source, sink)| source.schema != sink.schema)
                     .map(|(source, sink)| {
-                        let source_display = source.display();
-                        let sink_display = sink.display();
+                        let source_display = self.route_display(source);
+                        let sink_display = self.route_display(sink);
                         (
                             source_display.clone(),
                             sink_display.clone(),
@@ -1390,6 +2328,8 @@ mod tests {
 
         assert_eq!(first[0].seq_source, 1);
         assert_eq!(second[0].seq_source, 2);
+        assert!(first[0].trace_id.is_none());
+        assert!(first[0].causality_id.is_none());
         assert_eq!(
             graph.query(QueryKindCore::Latest(route.clone())),
             QueryResultCore::Latest(Some(second[0].clone()))
@@ -1592,6 +2532,10 @@ mod tests {
 
         assert!(graph.connect(&source, &sink));
         assert!(!graph.connect(&source, &sink));
+        assert_eq!(
+            graph.outgoing_edges_by_source.get(&source),
+            Some(&vec![sink.clone()])
+        );
         let emitted = graph.write(&source, b"sample".to_vec(), producer, None);
 
         assert_eq!(emitted.len(), 2);
@@ -1603,6 +2547,152 @@ mod tests {
             panic!("unexpected latest response");
         };
         assert_eq!(latest.seq_source, 1);
+    }
+
+    #[test]
+    fn disconnect_clears_core_fanout_index() {
+        let source = sample_route(
+            Plane::Read,
+            Layer::Logical,
+            "sensor",
+            "telemetry",
+            "disconnect_source",
+            Variant::Event,
+        );
+        let sink = sample_route(
+            Plane::Read,
+            Layer::Logical,
+            "sensor",
+            "telemetry",
+            "disconnect_sink",
+            Variant::Event,
+        );
+        let mut graph = GraphCore::default();
+        let producer = ProducerRefCore {
+            producer_id: "app".to_string(),
+            kind: ProducerKind::Application,
+        };
+
+        assert!(graph.connect(&source, &sink));
+        assert!(graph.disconnect(&source, &sink));
+        assert!(!graph.disconnect(&source, &sink));
+        assert!(!graph.outgoing_edges_by_source.contains_key(&source));
+
+        let emitted = graph
+            .write_single_if_unrouted(&source, b"sample".to_vec(), producer, None)
+            .expect("disconnected source should use no-fanout write path");
+
+        assert_eq!(emitted.route, source);
+        assert!(!graph.latest.contains_key(&sink));
+    }
+
+    #[test]
+    fn routed_route_cache_tracks_topology_mutations() {
+        let source = sample_route(
+            Plane::Read,
+            Layer::Logical,
+            "sensor",
+            "telemetry",
+            "cache_source",
+            Variant::Event,
+        );
+        let sink = sample_route(
+            Plane::Read,
+            Layer::Logical,
+            "sensor",
+            "telemetry",
+            "cache_sink",
+            Variant::Event,
+        );
+        let mailbox_ingress = sample_route(
+            Plane::Write,
+            Layer::Internal,
+            "mailbox",
+            "mailbox",
+            "cache_mailbox",
+            Variant::Request,
+        );
+        let mailbox_egress = sample_route(
+            Plane::Read,
+            Layer::Internal,
+            "mailbox",
+            "mailbox",
+            "cache_mailbox",
+            Variant::Meta,
+        );
+        let request = sample_route(
+            Plane::Write,
+            Layer::Logical,
+            "counter",
+            "counter",
+            "cache_request",
+            Variant::Request,
+        );
+        let desired = sample_route(
+            Plane::Write,
+            Layer::Shadow,
+            "counter",
+            "counter",
+            "cache_request",
+            Variant::Desired,
+        );
+        let reported = sample_route(
+            Plane::Write,
+            Layer::Shadow,
+            "counter",
+            "counter",
+            "cache_request",
+            Variant::Reported,
+        );
+        let effective = sample_route(
+            Plane::Write,
+            Layer::Shadow,
+            "counter",
+            "counter",
+            "cache_request",
+            Variant::Effective,
+        );
+        let mut graph = GraphCore::default();
+
+        graph.register_port(source.clone());
+        assert!(!graph.routed_routes.contains(&source));
+        assert!(graph.connect(&source, &sink));
+        assert!(graph.routed_routes.contains(&source));
+        assert!(graph.disconnect(&source, &sink));
+        assert!(!graph.routed_routes.contains(&source));
+
+        graph.register_mailbox(
+            "cache_mailbox".to_string(),
+            MailboxCore {
+                ingress: mailbox_ingress.clone(),
+                egress: mailbox_egress,
+                descriptor: MailboxDescriptorCore {
+                    delivery_mode: DeliveryMode::MpscSerial,
+                    ordering_policy: OrderingPolicy::Fifo,
+                    overflow_policy: OverflowPolicy::Block,
+                    capacity: 1,
+                },
+                queue: VecDeque::new(),
+                blocked_writes: 0,
+                dropped_messages: 0,
+                coalesced_messages: 0,
+                delivered_messages: 0,
+                largest_queue_depth: 0,
+            },
+        );
+        assert!(graph.routed_routes.contains(&mailbox_ingress));
+
+        graph.register_binding(
+            "counter".to_string(),
+            WriteBindingCore {
+                request: request.clone(),
+                desired,
+                reported,
+                effective,
+                ack: None,
+            },
+        );
+        assert!(graph.routed_routes.contains(&request));
     }
 
     #[test]
@@ -1847,6 +2937,11 @@ mod tests {
                 largest_queue_depth: 0,
             },
         );
+        assert_eq!(graph.mailbox_egress_by_ingress.get(&ingress), Some(&egress));
+        assert_eq!(
+            graph.mailbox_name_by_egress.get(&egress),
+            Some(&"work".to_string())
+        );
         let producer = ProducerRefCore {
             producer_id: "p1".to_string(),
             kind: ProducerKind::Application,
@@ -2034,18 +3129,129 @@ mod tests {
             kind: ProducerKind::Device,
         };
 
-        let closed = graph
-            .write(&route, b"point-cloud".to_vec(), producer, None)
+        let emitted = graph.write(&route, b"point-cloud".to_vec(), producer, None);
+        assert_eq!(emitted.len(), 1);
+        let closed = emitted
             .into_iter()
             .next()
             .expect("write should emit a closed envelope");
         assert!(closed.payload_ref.inline_bytes.is_empty());
+        assert_eq!(graph.retained_payload_count(&route), 1);
+        assert!(graph.retention_violations().is_empty());
 
         let opened = graph
             .open_latest(&route)
             .expect("payload should open from store");
         assert_eq!(opened.payload, b"point-cloud".to_vec());
         assert_eq!(graph.route_audit.get(&route).expect("audit trail").len(), 2);
+    }
+
+    #[test]
+    fn single_write_fast_path_refuses_routed_routes() {
+        let source = sample_route(
+            Plane::Read,
+            Layer::Logical,
+            "heart",
+            "runtime",
+            "source",
+            Variant::Event,
+        );
+        let sink = sample_route(
+            Plane::Read,
+            Layer::Logical,
+            "heart",
+            "runtime",
+            "sink",
+            Variant::Event,
+        );
+        let mut graph = GraphCore::default();
+        graph.connect(&source, &sink);
+        let producer = ProducerRefCore {
+            producer_id: "heart".to_string(),
+            kind: ProducerKind::Application,
+        };
+
+        assert!(graph
+            .write_single_if_unrouted(&source, b"frame".to_vec(), producer.clone(), None)
+            .is_none());
+        let emitted = graph.write(&source, b"frame".to_vec(), producer, None);
+        assert_eq!(emitted.len(), 2);
+        assert!(graph.latest.contains_key(&sink));
+    }
+
+    #[test]
+    fn single_write_drop_fast_path_keeps_bounded_native_retention() {
+        let route = sample_route(
+            Plane::Read,
+            Layer::Logical,
+            "heart",
+            "runtime",
+            "drop_fast_path",
+            Variant::Event,
+        );
+        let sink = sample_route(
+            Plane::Read,
+            Layer::Logical,
+            "heart",
+            "runtime",
+            "drop_fast_path_sink",
+            Variant::Event,
+        );
+        let mut graph = GraphCore::default();
+        let producer = ProducerRefCore {
+            producer_id: "heart".to_string(),
+            kind: ProducerKind::Application,
+        };
+        graph.configure_retention(
+            &route,
+            RetentionPolicyCore {
+                latest_replay_policy: "bounded_history".to_string(),
+                durability_class: "memory".to_string(),
+                replay_window: "last_2".to_string(),
+                payload_retention_policy: "separate_store".to_string(),
+                history_limit: Some(2),
+            },
+        );
+
+        for value in 0..10 {
+            assert!(graph.write_single_if_unrouted_drop(
+                &route,
+                format!("frame-{value}").into_bytes(),
+                producer.clone(),
+                None,
+            ));
+        }
+
+        let replay = graph.query(QueryKindCore::Replay(route.clone()));
+        let QueryResultCore::Replay(history) = replay else {
+            panic!("unexpected query result");
+        };
+        assert_eq!(history.len(), 2);
+        assert_eq!(
+            history
+                .iter()
+                .map(|envelope| envelope.seq_source)
+                .collect::<Vec<_>>(),
+            vec![9, 10]
+        );
+        assert_eq!(
+            graph.latest.get(&route).map(|envelope| envelope.seq_source),
+            Some(10)
+        );
+        assert_eq!(graph.retained_payload_count(&route), 2);
+        assert!(graph.retention_violations().is_empty());
+
+        graph.connect(&route, &sink);
+        assert!(!graph.write_single_if_unrouted_drop(
+            &route,
+            b"routed-frame".to_vec(),
+            producer,
+            None,
+        ));
+        assert_eq!(
+            graph.latest.get(&route).map(|envelope| envelope.seq_source),
+            Some(10)
+        );
     }
 
     #[test]
@@ -2063,6 +3269,16 @@ mod tests {
             producer_id: "imu".to_string(),
             kind: ProducerKind::Device,
         };
+        graph.configure_retention(
+            &route,
+            RetentionPolicyCore {
+                latest_replay_policy: "latest_only".to_string(),
+                durability_class: "memory".to_string(),
+                replay_window: "latest".to_string(),
+                payload_retention_policy: "separate_store".to_string(),
+                history_limit: Some(1),
+            },
+        );
 
         for value in 0..10 {
             graph.write(
@@ -2078,6 +3294,10 @@ mod tests {
 
         assert_eq!(history.len(), 1);
         assert_eq!(history[0].seq_source, 10);
+        assert_eq!(
+            history[0].payload_ref.payload_id,
+            event_payload_id(&route.display(), 10)
+        );
         assert_eq!(graph.payloads.len(), 1);
         assert_eq!(audit.len(), 1);
         assert_eq!(audit[0].seq_source, Some(10));
@@ -2088,6 +3308,205 @@ mod tests {
                 .payload,
             b"sample-9".to_vec()
         );
+    }
+
+    #[test]
+    fn native_payload_open_audit_is_coalesced_and_retained() {
+        let route = sample_route(
+            Plane::Read,
+            Layer::Logical,
+            "heart",
+            "runtime",
+            "payload_open_audit",
+            Variant::Event,
+        );
+        let mut graph = GraphCore::default();
+        graph.configure_retention(
+            &route,
+            RetentionPolicyCore {
+                latest_replay_policy: "bounded_history".to_string(),
+                durability_class: "memory".to_string(),
+                replay_window: "last_2".to_string(),
+                payload_retention_policy: "separate_store".to_string(),
+                history_limit: Some(2),
+            },
+        );
+        let producer = ProducerRefCore {
+            producer_id: "heart".to_string(),
+            kind: ProducerKind::Application,
+        };
+
+        graph.write(&route, b"first".to_vec(), producer.clone(), None);
+        for _ in 0..100 {
+            assert!(graph.open_latest(&route).is_some());
+        }
+        let audit = graph.route_audit.get(&route).expect("retained audit");
+        assert_eq!(audit.len(), 2);
+        assert_eq!(
+            audit
+                .iter()
+                .filter(|event| event.action == "payload_open")
+                .count(),
+            1
+        );
+
+        for value in 0..10 {
+            graph.write(
+                &route,
+                format!("sample-{value}").into_bytes(),
+                producer.clone(),
+                None,
+            );
+            assert!(graph.open_latest(&route).is_some());
+        }
+        let audit = graph.route_audit.get(&route).expect("retained audit");
+        assert_eq!(audit.len(), 2);
+        assert_eq!(
+            audit
+                .iter()
+                .map(|event| (event.action.as_str(), event.seq_source))
+                .collect::<Vec<_>>(),
+            vec![("write", Some(11)), ("payload_open", Some(11))]
+        );
+        assert!(graph.retention_violations().is_empty());
+    }
+
+    #[test]
+    fn default_routes_bound_native_history_payloads_without_lineage() {
+        let route = sample_route(
+            Plane::Read,
+            Layer::Logical,
+            "heart",
+            "runtime",
+            "default_bounded",
+            Variant::Event,
+        );
+        let mut graph = GraphCore::default();
+        let producer = ProducerRefCore {
+            producer_id: "heart".to_string(),
+            kind: ProducerKind::Application,
+        };
+
+        for value in 0..(DEFAULT_ROUTE_HISTORY_LIMIT + 5) {
+            graph.write(
+                &route,
+                format!("sample-{value}").into_bytes(),
+                producer.clone(),
+                None,
+            );
+        }
+
+        assert_eq!(
+            graph.history.get(&route).map_or(0, VecDeque::len),
+            DEFAULT_ROUTE_HISTORY_LIMIT
+        );
+        assert_eq!(
+            graph.retained_payload_count(&route),
+            DEFAULT_ROUTE_HISTORY_LIMIT
+        );
+        assert_eq!(graph.retained_lineage_event_count(), 0);
+    }
+
+    #[test]
+    fn bounded_history_without_limit_uses_default_native_bound() {
+        let route = sample_route(
+            Plane::Read,
+            Layer::Logical,
+            "heart",
+            "runtime",
+            "implicit_bounded",
+            Variant::Event,
+        );
+        let mut graph = GraphCore::default();
+        graph.configure_retention(
+            &route,
+            RetentionPolicyCore {
+                latest_replay_policy: "bounded_history".to_string(),
+                durability_class: "memory".to_string(),
+                replay_window: "memory".to_string(),
+                payload_retention_policy: "separate_store".to_string(),
+                history_limit: None,
+            },
+        );
+        let producer = ProducerRefCore {
+            producer_id: "heart".to_string(),
+            kind: ProducerKind::Application,
+        };
+
+        for value in 0..(DEFAULT_ROUTE_HISTORY_LIMIT + 2) {
+            graph.write(
+                &route,
+                format!("sample-{value}").into_bytes(),
+                producer.clone(),
+                None,
+            );
+        }
+
+        assert_eq!(
+            graph.history.get(&route).map_or(0, VecDeque::len),
+            DEFAULT_ROUTE_HISTORY_LIMIT
+        );
+        assert_eq!(
+            graph.retained_payload_count(&route),
+            DEFAULT_ROUTE_HISTORY_LIMIT
+        );
+    }
+
+    #[test]
+    fn retained_payload_count_tracks_each_route_lifecycle() {
+        let first = sample_route(
+            Plane::Read,
+            Layer::Logical,
+            "heart",
+            "runtime",
+            "payload_index_first",
+            Variant::Event,
+        );
+        let second = sample_route(
+            Plane::Read,
+            Layer::Logical,
+            "heart",
+            "runtime",
+            "payload_index_second",
+            Variant::Event,
+        );
+        let mut graph = GraphCore::default();
+        for route in [&first, &second] {
+            graph.configure_retention(
+                route,
+                RetentionPolicyCore {
+                    latest_replay_policy: "bounded_history".to_string(),
+                    durability_class: "memory".to_string(),
+                    replay_window: "last_2".to_string(),
+                    payload_retention_policy: "separate_store".to_string(),
+                    history_limit: Some(2),
+                },
+            );
+        }
+        let producer = ProducerRefCore {
+            producer_id: "heart".to_string(),
+            kind: ProducerKind::Application,
+        };
+
+        for value in 0..50 {
+            graph.write(
+                &first,
+                format!("first-{value}").into_bytes(),
+                producer.clone(),
+                None,
+            );
+            graph.write(
+                &second,
+                format!("second-{value}").into_bytes(),
+                producer.clone(),
+                None,
+            );
+        }
+
+        assert_eq!(graph.retained_payload_count(&first), 2);
+        assert_eq!(graph.retained_payload_count(&second), 2);
+        assert_eq!(graph.payloads.len(), 4);
+        assert!(graph.retention_violations().is_empty());
     }
 
     #[test]
@@ -2115,7 +3534,7 @@ mod tests {
             );
         }
 
-        assert_eq!(graph.history.get(&route).map_or(0, Vec::len), 0);
+        assert_eq!(graph.history.get(&route).map_or(0, VecDeque::len), 0);
         assert_eq!(graph.payloads.len(), 1);
         assert_eq!(
             graph
@@ -2123,6 +3542,172 @@ mod tests {
                 .expect("latest payload should remain")
                 .payload,
             b"nonce-9".to_vec()
+        );
+    }
+
+    #[test]
+    fn retention_violations_report_orphan_payloads() {
+        let route = sample_route(
+            Plane::Read,
+            Layer::Logical,
+            "heart",
+            "runtime",
+            "retention_violation",
+            Variant::Event,
+        );
+        let mut graph = GraphCore::default();
+        graph.register_port(route.clone());
+        graph
+            .payloads
+            .insert("orphan-payload".to_string(), Arc::from(&b"leaked"[..]));
+
+        let violations = graph.retention_violations();
+
+        assert!(violations
+            .iter()
+            .any(|violation| violation.contains("payload orphan-payload")));
+    }
+
+    #[test]
+    fn explicit_materializer_drop_path_bounds_source_and_state_retention() {
+        let source = sample_route(
+            Plane::Read,
+            Layer::Logical,
+            "heart",
+            "runtime",
+            "materialize_drop_source",
+            Variant::Event,
+        );
+        let state = sample_route(
+            Plane::State,
+            Layer::Logical,
+            "heart",
+            "runtime",
+            "materialize_drop_state",
+            Variant::State,
+        );
+        let mut graph = GraphCore::default();
+        for route in [&source, &state] {
+            graph.configure_retention(
+                route,
+                RetentionPolicyCore {
+                    latest_replay_policy: "bounded_history".to_string(),
+                    durability_class: "memory".to_string(),
+                    replay_window: "last_2".to_string(),
+                    payload_retention_policy: "separate_store".to_string(),
+                    history_limit: Some(2),
+                },
+            );
+        }
+        assert!(graph.register_materialize_bytes(&source, &state));
+        let producer = ProducerRefCore {
+            producer_id: "heart".to_string(),
+            kind: ProducerKind::Application,
+        };
+
+        for value in 0..10 {
+            assert!(graph
+                .write_single_if_unrouted_with_lineage_ids_no_parents_and_materializer_drop(
+                    &source,
+                    &state,
+                    format!("frame-{value}").into_bytes(),
+                    producer.clone(),
+                    None,
+                    "runtime-trace".to_string(),
+                    "runtime-chain".to_string(),
+                    Some(format!("request-{value}")),
+                ));
+        }
+
+        for route in [&source, &state] {
+            let QueryResultCore::Replay(history) =
+                graph.query(QueryKindCore::Replay(route.clone()))
+            else {
+                panic!("unexpected query result");
+            };
+            assert_eq!(
+                history
+                    .iter()
+                    .map(|envelope| envelope.seq_source)
+                    .collect::<Vec<_>>(),
+                vec![9, 10]
+            );
+            assert_eq!(graph.retained_payload_count(route), 2);
+            assert_eq!(graph.retention_snapshot(route).lineage_count, 0);
+        }
+        let source_latest = graph.latest.get(&source).expect("source latest retained");
+        let state_latest = graph.latest.get(&state).expect("state latest retained");
+        assert_ne!(
+            source_latest.payload_ref.payload_id,
+            state_latest.payload_ref.payload_id
+        );
+        let source_payload = graph
+            .payloads
+            .get(&source_latest.payload_ref.payload_id)
+            .expect("source payload retained");
+        let state_payload = graph
+            .payloads
+            .get(&state_latest.payload_ref.payload_id)
+            .expect("state payload retained");
+        assert!(Arc::ptr_eq(source_payload, state_payload));
+        assert!(graph.retention_violations().is_empty());
+    }
+
+    #[test]
+    fn materializer_generation_invalidates_known_pair_fast_path() {
+        let source = sample_route(
+            Plane::Read,
+            Layer::Logical,
+            "heart",
+            "runtime",
+            "materialize_generation_source",
+            Variant::Event,
+        );
+        let state = sample_route(
+            Plane::State,
+            Layer::Logical,
+            "heart",
+            "runtime",
+            "materialize_generation_state",
+            Variant::State,
+        );
+        let mut graph = GraphCore::default();
+        let producer = ProducerRefCore {
+            producer_id: "heart".to_string(),
+            kind: ProducerKind::Application,
+        };
+
+        assert_eq!(graph.materialize_generation, 0);
+        assert!(graph.register_materialize_bytes(&source, &state));
+        let compiled_generation = graph.materialize_generation;
+        assert_eq!(compiled_generation, 1);
+        assert!(!graph.register_materialize_bytes(&source, &state));
+        assert_eq!(graph.materialize_generation, compiled_generation);
+
+        assert!(graph.write_single_if_unrouted_known_materializer_drop(
+            &source,
+            &state,
+            b"frame".to_vec(),
+            producer.clone(),
+            None,
+        ));
+        let state_payload_id = graph.latest[&state].payload_ref.payload_id.clone();
+        assert_eq!(
+            graph.payloads[&state_payload_id].as_ref(),
+            b"frame".as_slice()
+        );
+        assert!(graph.unregister_materialize_bytes(&source, &state));
+        assert!(graph.materialize_generation > compiled_generation);
+        assert!(!graph.write_single_if_unrouted_and_materializer_drop(
+            &source,
+            &state,
+            b"stale".to_vec(),
+            producer,
+            None,
+        ));
+        assert_eq!(
+            graph.latest[&state].payload_ref.payload_id,
+            state_payload_id
         );
     }
 

@@ -66,11 +66,14 @@ MODULES_TO_RESET = (
     "reactivex.operators",
 )
 _MISSING_MODULE = object()
+UV_BIN_DIR = Path(os.environ.get("UV_BIN_DIR", Path.home() / ".local" / "bin"))
 
 
 def subprocess_test_env() -> dict[str, str]:
     env = dict(os.environ)
     env["PYTHONPATH"] = _pythonpath_with_repo_python_first(env.get("PYTHONPATH"))
+    if (UV_BIN_DIR / "uv").exists():
+        env["PATH"] = f"{UV_BIN_DIR}{os.pathsep}{env.get('PATH', '')}"
     env.setdefault("UV_CACHE_DIR", str(REPO_ROOT / ".cache" / "uv"))
     return env
 
@@ -527,6 +530,18 @@ def install_manyfold_rust_stub() -> None:
             object.__setattr__(self, "taints", tuple(self.taints or ()))
             object.__setattr__(self, "guards", tuple(self.guards or ()))
 
+        @property
+        def payload_id(self) -> str:
+            return self.payload_ref.payload_id
+
+        @property
+        def has_inline_payload(self) -> bool:
+            return bool(self.payload_ref.inline_bytes)
+
+        @property
+        def inline_payload(self) -> bytes:
+            return self.payload_ref.inline_bytes
+
         def with_taints(self, taints) -> "ClosedEnvelope":
             return ClosedEnvelope(
                 route=self.route,
@@ -631,6 +646,7 @@ def install_manyfold_rust_stub() -> None:
                 taints=taints,
             )
             self._graph._latest[self._route] = envelope
+            self._graph._record_native_envelope(envelope)
             return envelope
 
         def describe(self):
@@ -652,6 +668,19 @@ def install_manyfold_rust_stub() -> None:
         blocked_senders: int = 0
         dropped_messages: int = 0
         largest_queue_depth: int = 0
+
+    @dataclass
+    class RetentionSnapshot:
+        route_display: str
+        latest_seq_source: Optional[int]
+        metadata_event_count: int
+        replay_count: int
+        payload_count: int
+        lineage_count: int
+        trace_index_count: int
+        causality_index_count: int
+        correlation_index_count: int
+        history_limit: Optional[int]
 
     @dataclass
     class MailboxDescriptor:
@@ -692,19 +721,58 @@ def install_manyfold_rust_stub() -> None:
         write_request: RouteRef
         epoch: int = 0
 
+    @dataclass
+    class NoLineageMaterializerDropProfile:
+        source_route: RouteRef
+        target_route: RouteRef
+        materialize_generation: int
+
     class Graph:
         def __init__(self):
             self._latest = {}
+            self._history = {}
+            self._retention_limits = {}
             self._sequence = {}
             self._loops = {}
             self._edges = []
+            self._materialize_targets_by_source = {}
+            self._materialize_generation = 0
             self._bindings = {}
             self._catalog = {}
             self._mailboxes = {}
 
         def register_port(self, route):
             self._catalog[route.display()] = route
+            limit = 8
+            if route.namespace.layer == Layer.Ephemeral:
+                limit = 0
+            elif route.namespace.layer == Layer.Internal:
+                limit = 1
+            self._retention_limits.setdefault(
+                route,
+                limit,
+            )
             return route
+
+        def configure_retention(
+            self,
+            route,
+            latest_replay_policy,
+            durability_class,
+            replay_window,
+            payload_retention_policy,
+            history_limit=None,
+        ):
+            del durability_class, replay_window, payload_retention_policy
+            limit = history_limit
+            if latest_replay_policy == "none":
+                limit = 0
+            elif latest_replay_policy == "latest_only":
+                limit = 1
+            elif latest_replay_policy == "bounded_history" and limit is None:
+                limit = 8
+            self._retention_limits[route] = limit
+            self._trim_retention(route)
 
         def read(self, route):
             self.register_port(route)
@@ -744,6 +812,199 @@ def install_manyfold_rust_stub() -> None:
                 fanout.extend(self._fanout(envelope))
             emitted.extend(fanout)
             return emitted
+
+        def emit_single_if_unrouted(
+            self, route, payload, producer=None, control_epoch=None
+        ):
+            if self._bindings.get(route) is not None:
+                return None
+            if any(source == route.display() for source, _ in self._edges):
+                return None
+            if any(mailbox.ingress._route == route for mailbox in self._mailboxes.values()):
+                return None
+            return self.writable_port(route).write(
+                payload,
+                producer=producer,
+                control_epoch=control_epoch,
+            )
+
+        def emit_single_if_unrouted_drop(
+            self, route, payload, producer=None, control_epoch=None
+        ):
+            return (
+                self.emit_single_if_unrouted(
+                    route,
+                    payload,
+                    producer=producer,
+                    control_epoch=control_epoch,
+                )
+                is not None
+            )
+
+        def emit_single_if_unrouted_and_materializer_drop(
+            self,
+            route,
+            target_route,
+            payload,
+            producer=None,
+            control_epoch=None,
+        ):
+            if target_route not in self._materialize_targets_by_source.get(route, ()):
+                return False
+            envelope = self.emit_single_if_unrouted(
+                route,
+                payload,
+                producer=producer,
+                control_epoch=control_epoch,
+            )
+            if envelope is None:
+                return False
+            self._materialize_bytes_from_source(envelope, target_route)
+            return True
+
+        def emit_single_if_unrouted_and_materializer_drop_python(
+            self,
+            route,
+            target_route,
+            payload,
+        ):
+            return self.emit_single_if_unrouted_and_materializer_drop(
+                route,
+                target_route,
+                payload,
+            )
+
+        def compile_no_lineage_materializer_drop_profile(
+            self,
+            route,
+            target_route,
+        ):
+            if target_route not in self._materialize_targets_by_source.get(route, ()):
+                raise RuntimeError("materializer profile route pair is not registered")
+            return NoLineageMaterializerDropProfile(
+                source_route=route,
+                target_route=target_route,
+                materialize_generation=self._materialize_generation,
+            )
+
+        def release_no_lineage_materializer_drop_profile(self, profile):
+            del profile
+
+        def emit_no_lineage_materializer_drop_profile_python(self, profile, payload):
+            if profile.materialize_generation != self._materialize_generation:
+                return self.emit_single_if_unrouted_and_materializer_drop_python(
+                    profile.source_route,
+                    profile.target_route,
+                    payload,
+                )
+            envelope = self.emit_single_if_unrouted(
+                profile.source_route,
+                payload,
+            )
+            if envelope is None:
+                return False
+            self._materialize_bytes_from_source(envelope, profile.target_route)
+            return True
+
+        def emit_single_if_unrouted_with_lineage_no_parents(
+            self,
+            route,
+            payload,
+            producer=None,
+            control_epoch=None,
+            trace_id=None,
+            causality_id=None,
+            correlation_id=None,
+        ):
+            envelope = self.emit_single_if_unrouted(
+                route,
+                payload,
+                producer=producer,
+                control_epoch=control_epoch,
+            )
+            if envelope is None:
+                return None
+            del trace_id, causality_id, correlation_id
+            return envelope
+
+        def emit_single_if_unrouted_with_lineage_no_parents_and_materializers(
+            self,
+            route,
+            payload,
+            producer=None,
+            control_epoch=None,
+            trace_id=None,
+            causality_id=None,
+            correlation_id=None,
+        ):
+            envelope = self.emit_single_if_unrouted_with_lineage_no_parents(
+                route,
+                payload,
+                producer=producer,
+                control_epoch=control_epoch,
+                trace_id=trace_id,
+                causality_id=causality_id,
+                correlation_id=correlation_id,
+            )
+            if envelope is None:
+                return None
+            emitted = [envelope]
+            for target in tuple(self._materialize_targets_by_source.get(route, ())):
+                emitted.append(self._materialize_bytes_from_source(envelope, target))
+            return emitted
+
+        def emit_single_if_unrouted_with_lineage_no_parents_and_materializers_drop(
+            self,
+            route,
+            payload,
+            producer=None,
+            control_epoch=None,
+            trace_id=None,
+            causality_id=None,
+            correlation_id=None,
+        ):
+            emitted = self.emit_single_if_unrouted_with_lineage_no_parents_and_materializers(
+                route,
+                payload,
+                producer=producer,
+                control_epoch=control_epoch,
+                trace_id=trace_id,
+                causality_id=causality_id,
+                correlation_id=correlation_id,
+            )
+            return emitted is not None
+
+        def materialize_bytes_one_parent(
+            self,
+            source_route,
+            source_seq_source,
+            target_route,
+            producer=None,
+        ):
+            source = self._event_envelope(source_route, source_seq_source)
+            if source is None:
+                return None
+            return self._materialize_bytes_from_source(source, target_route, producer)
+
+        def register_materialize_bytes(self, source_route, target_route):
+            self.register_port(source_route)
+            self.register_port(target_route)
+            targets = self._materialize_targets_by_source.setdefault(source_route, [])
+            if target_route in targets:
+                return False
+            targets.append(target_route)
+            self._materialize_generation += 1
+            return True
+
+        def unregister_materialize_bytes(self, source_route, target_route):
+            targets = self._materialize_targets_by_source.get(source_route)
+            if targets is None or target_route not in targets:
+                return False
+            targets.remove(target_route)
+            if not targets:
+                self._materialize_targets_by_source.pop(source_route, None)
+            self._materialize_generation += 1
+            return True
 
         def mailbox(self, name, descriptor=None):
             descriptor = descriptor or MailboxDescriptor()
@@ -833,6 +1094,59 @@ def install_manyfold_rust_stub() -> None:
         def latest(self, route):
             return self._latest.get(route)
 
+        def replay(self, route):
+            return list(self._history.get(route, ()))
+
+        def retained_payload_count(self, route):
+            return len(self._history.get(route, ()))
+
+        def payload_by_id(self, payload_id):
+            for envelope in self._latest.values():
+                if envelope.payload_id == payload_id:
+                    return bytes(envelope.inline_payload)
+            for history in self._history.values():
+                for envelope in history:
+                    if envelope.payload_id == payload_id:
+                        return bytes(envelope.inline_payload)
+            return None
+
+        def retention_snapshot(self, route=None):
+            routes = [route] if route is not None else self.catalog()
+            snapshots = []
+            for route_ref in routes:
+                route_display = route_ref.display()
+                latest_seq_source = getattr(
+                    self._latest.get(route_ref), "seq_source", None
+                )
+                snapshots.append(
+                    RetentionSnapshot(
+                        route_display=route_display,
+                        latest_seq_source=latest_seq_source,
+                        metadata_event_count=latest_seq_source or 0,
+                        replay_count=len(self._history.get(route_ref, ())),
+                        payload_count=self.retained_payload_count(route_ref),
+                        lineage_count=0,
+                        trace_index_count=0,
+                        causality_index_count=0,
+                        correlation_index_count=0,
+                        history_limit=self._retention_limits.get(route_ref),
+                    )
+                )
+            return snapshots
+
+        def retention_violations(self):
+            violations = []
+            retained = set()
+            for route, history in self._history.items():
+                route_display = route.display()
+                retained.update(
+                    (route_display, envelope.seq_source) for envelope in history
+                )
+                latest = self._latest.get(route)
+                if latest is not None:
+                    retained.add((route_display, latest.seq_source))
+            return sorted(violations)
+
         def topology(self):
             return sorted(self._edges)
 
@@ -860,6 +1174,36 @@ def install_manyfold_rust_stub() -> None:
                         )
                     )
             return sorted(snapshots, key=lambda snapshot: snapshot.route_display)
+
+        def _record_native_envelope(self, envelope):
+            history = self._history.setdefault(envelope.route, [])
+            history.append(envelope)
+            self._trim_retention(envelope.route)
+
+        def _trim_retention(self, route):
+            limit = self._retention_limits.get(route)
+            if limit is None:
+                return
+            history = self._history.get(route)
+            if history is not None and len(history) > limit:
+                del history[: len(history) - limit]
+
+        def _event_envelope(self, route, seq_source):
+            for envelope in self._history.get(route, ()):
+                if envelope.seq_source == seq_source:
+                    return envelope
+            latest = self._latest.get(route)
+            if latest is not None and latest.seq_source == seq_source:
+                return latest
+            return None
+
+        def _materialize_bytes_from_source(self, source, target, producer=None):
+            envelope = self.writable_port(target).write(
+                source.payload_ref.inline_bytes,
+                producer=producer,
+                control_epoch=source.control_epoch,
+            )
+            return envelope
 
         def _fanout(self, envelope):
             emitted = []
@@ -949,6 +1293,7 @@ def install_manyfold_rust_stub() -> None:
     rust_module.Mailbox = Mailbox
     rust_module.MailboxDescriptor = MailboxDescriptor
     rust_module.NamespaceRef = NamespaceRef
+    rust_module.NoLineageMaterializerDropProfile = NoLineageMaterializerDropProfile
     rust_module.OpenedEnvelope = OpenedEnvelope
     rust_module.PayloadRef = PayloadRef
     rust_module.Plane = Plane
@@ -956,6 +1301,7 @@ def install_manyfold_rust_stub() -> None:
     rust_module.ProducerKind = ProducerKind
     rust_module.ProducerRef = ProducerRef
     rust_module.ReadablePort = ReadablePort
+    rust_module.RetentionSnapshot = RetentionSnapshot
     rust_module.RouteRef = RouteRef
     rust_module.RuntimeRef = RuntimeRef
     rust_module.ScheduleGuard = ScheduleGuard
@@ -1016,7 +1362,9 @@ def load_manyfold_package():
         "ConsensusRoutes": components.ConsensusRoutes,
         "ControlLoop": rust.ControlLoop,
         "ControlLoops": graph.ControlLoops,
+        "CorrelationTracingStore": graph.CorrelationTracingStore,
         "CreditSnapshot": rust.CreditSnapshot,
+        "RetentionSnapshot": rust.RetentionSnapshot,
         "EmbeddedBulkSensor": embedded.EmbeddedBulkSensor,
         "EmbeddedDeviceProfile": embedded.EmbeddedDeviceProfile,
         "EmbeddedRuntimeRules": embedded.EmbeddedRuntimeRules,
@@ -1084,7 +1432,9 @@ def load_manyfold_package():
         "MemoryRecord": components.MemoryRecord,
         "MergeNode": graph.MergeNode,
         "NamespaceRef": rust.NamespaceRef,
+        "NativeCorrelationTracingStore": graph.NativeCorrelationTracingStore,
         "NodeThreadPlacement": graph.NodeThreadPlacement,
+        "NoopCorrelationTracingStore": graph.NoopCorrelationTracingStore,
         "NoopSubscription": graph.NoopSubscription,
         "OpenedEnvelope": rust.OpenedEnvelope,
         "OwnerName": primitives.OwnerName,

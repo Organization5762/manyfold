@@ -45,10 +45,12 @@ class ReactiveThreadsTests(unittest.TestCase):
     def test_shared_schedulers_record_configured_worker_counts(self) -> None:
         env = {
             "MANYFOLD_RX_BACKGROUND_MAX_WORKERS": "7",
+            "MANYFOLD_RX_FRAME_THREAD_QUEUE_LIMIT": "11",
             "MANYFOLD_RX_BLOCKING_IO_MAX_WORKERS": "3",
             "MANYFOLD_RX_INPUT_MAX_WORKERS": "5",
         }
         with patch.dict(os.environ, env, clear=False):
+            self.reactive_threads.reset_reactive_threading_state_for_tests()
             self.reactive_threads.background_scheduler()
             self.reactive_threads.blocking_io_scheduler()
             self.reactive_threads.input_scheduler()
@@ -59,6 +61,8 @@ class ReactiveThreadsTests(unittest.TestCase):
                 "background_max_workers": 7,
                 "background_priority_queue_limit": 2048,
                 "blocking_io_max_workers": 3,
+                "frame_thread_queue_depth": 0,
+                "frame_thread_queue_limit": 11,
                 "input_max_workers": 5,
             },
         )
@@ -69,10 +73,12 @@ class ReactiveThreadsTests(unittest.TestCase):
             {
                 "HEART_RX_BACKGROUND_MAX_WORKERS": "6",
                 "HEART_RX_BLOCKING_IO_MAX_WORKERS": "4",
+                "HEART_RX_FRAME_THREAD_QUEUE_LIMIT": "13",
                 "HEART_RX_INPUT_MAX_WORKERS": "2",
             },
             clear=False,
         ):
+            self.reactive_threads.reset_reactive_threading_state_for_tests()
             self.reactive_threads.background_scheduler()
             self.reactive_threads.blocking_io_scheduler()
             self.reactive_threads.input_scheduler()
@@ -83,6 +89,8 @@ class ReactiveThreadsTests(unittest.TestCase):
                 "background_max_workers": 6,
                 "background_priority_queue_limit": 2048,
                 "blocking_io_max_workers": 4,
+                "frame_thread_queue_depth": 0,
+                "frame_thread_queue_limit": 13,
                 "input_max_workers": 2,
             },
         )
@@ -223,6 +231,43 @@ class ReactiveThreadsTests(unittest.TestCase):
         self.assertEqual(values, [])
         self.assertEqual(self.reactive_threads.drain_frame_thread_queue(), 1)
         self.assertEqual(values, [1])
+
+    def test_frame_thread_queue_rejects_work_after_limit(self) -> None:
+        first = self.rx.Subject()
+        second = self.rx.Subject()
+        first_values: list[int] = []
+        second_values: list[int] = []
+        errors: list[Exception] = []
+        old_limit = self.reactive_threads._FRAME_THREAD_QUEUE_LIMIT
+        self.reactive_threads._FRAME_THREAD_QUEUE_LIMIT = 1
+        try:
+            first_subscription = self.reactive_threads.deliver_on_frame_thread(
+                first
+            ).subscribe(first_values.append, on_error=errors.append)
+            second_subscription = self.reactive_threads.deliver_on_frame_thread(
+                second
+            ).subscribe(second_values.append, on_error=errors.append)
+            try:
+                first.on_next(1)
+                second.on_next(2)
+
+                self.assertEqual(
+                    self.reactive_threads.scheduler_diagnostics()[
+                        "frame_thread_queue_depth"
+                    ],
+                    1,
+                )
+                self.assertEqual(len(errors), 1)
+                self.assertRegex(str(errors[0]), "frame thread queue is full")
+                self.assertEqual(self.reactive_threads.drain_frame_thread_queue(), 1)
+                self.assertEqual(first_values, [1])
+                self.assertEqual(second_values, [])
+            finally:
+                first_subscription.dispose()
+                second_subscription.dispose()
+        finally:
+            self.reactive_threads._FRAME_THREAD_QUEUE_LIMIT = old_limit
+            self.reactive_threads.reset_reactive_threading_state_for_tests()
 
     def test_drain_frame_thread_queue_rejects_non_integer_limit(self) -> None:
         for max_items in (True, 1.5, "1"):
