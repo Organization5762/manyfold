@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version-file: .python-version
+
+      - name: Sync dependencies
+        run: uv sync --locked
+
+      - name: Run Rust tests
+        run: cargo test
+
+      - name: Run Ruff
+        run: uv run ruff check
+
+      - name: Run Python tests
+        run: uv run python -m unittest discover -s tests -p 'test_*.py'
+
+      - name: Check RFC checklist
+        run: uv run python -m manyfold.rfc_checklist_gen --check
+
+      - name: Check example catalog
+        run: uv run manyfold-example-catalog --check
+
+      - name: List reference examples
+        run: uv run manyfold-example-catalog --list reference
+
+      - name: Check example manifest
+        run: uv run python -m examples.catalog --check-manifest
+
+      - name: Check README examples
+        run: uv run python -m examples.catalog --check-readme
