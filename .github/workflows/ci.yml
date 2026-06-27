@@ -607,8 +607,8 @@ jobs:
             --min-samples 10 \
             --require-final history=8 \
             --require-final payloads=8 \
-            --require-final lineage=8 \
-            --require-final correlation_index=8 \
+            --require-final lineage=0 \
+            --require-max correlation_index=0 \
             --require-final-max cpu_seconds=30 \
             --require-final-max elapsed_seconds=30 \
             --require-final-max average_event_us=100 \
@@ -641,7 +641,7 @@ jobs:
             --min-samples 10 \
             --require-final history=16 \
             --require-final payloads=16 \
-            --require-final lineage=16 \
+            --require-final lineage=0 \
             --require-max correlation_index=0 \
             --require-final-max cpu_seconds=30 \
             --require-final-max elapsed_seconds=30 \
@@ -658,7 +658,7 @@ jobs:
             --min-samples 5 \
             --require-final history=16 \
             --require-final payloads=16 \
-            --require-final lineage=16 \
+            --require-final lineage=0 \
             --require-max correlation_index=0 \
             --require-final-max cpu_seconds=30 \
             --require-final-max elapsed_seconds=30 \
@@ -675,8 +675,8 @@ jobs:
             --min-samples 4 \
             --require-final history=8 \
             --require-final payloads=8 \
-            --require-final lineage=8 \
-            --require-final correlation_index=8 \
+            --require-final lineage=0 \
+            --require-max correlation_index=0 \
             --require-final-max elapsed_seconds=30 \
             --require-final-max average_event_us=100
           uv run manyfold-benchmark-log-verify \
@@ -716,9 +716,9 @@ jobs:
             --min-samples 4 \
             --require-final replay=8 \
             --require-final payloads=8 \
-            --require-final lineage=8 \
+            --require-final lineage=0 \
             --require-final materialized_payloads=0 \
-            --require-final correlation_index=8 \
+            --require-max correlation_index=0 \
             --require-final-max cpu_seconds=30 \
             --require-final-max elapsed_seconds=30 \
             --require-final-max average_event_us=500 \
@@ -748,7 +748,7 @@ jobs:
             --min-samples 4 \
             --require-final replay=8 \
             --require-final payloads=8 \
-            --require-final lineage=8 \
+            --require-final lineage=0 \
             --require-final materialized_payloads=0 \
             --require-max correlation_index=0 \
             --require-final-max cpu_seconds=30 \
@@ -764,7 +764,7 @@ jobs:
             --min-samples 4 \
             --require-final replay=8 \
             --require-final payloads=8 \
-            --require-final lineage=8 \
+            --require-final lineage=0 \
             --require-final materialized_payloads=0 \
             --require-max correlation_index=0 \
             --require-final-max cpu_seconds=5 \

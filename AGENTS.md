@@ -342,3 +342,8 @@ uv run manyfold-heart-monitor-verify heart-lib_2026-monitor.json --min-samples 3
   checklist check, focused memory benchmark/reactive/project metadata/reference
   unittest suites, and `git diff --check`. Full unittest discovery was attempted
   once and timed out after 300 seconds without a reported failure.
+- 2026-06-27: CI log verification must match the sparse lineage runtime: saved
+  benchmark artifacts should require `lineage=0` and `correlation_index=0` even
+  for correlation-store runs. Ran `uv sync`, GitHub check inspection through
+  `gh`, stale verifier grep, `uv run python -m unittest tests.test_project_metadata`,
+  and `git diff --check`.
