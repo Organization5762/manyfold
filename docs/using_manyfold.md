@@ -216,7 +216,6 @@ graph.flow_snapshot(route_or_port)
 graph.scheduler_snapshot(route=None)
 graph.mailbox_snapshot(mailbox)
 graph.route_audit(route)
-graph.lineage(route=None, causality_id=...)
 ```
 
 Use these surfaces when debugging behavior that would otherwise live in logs,

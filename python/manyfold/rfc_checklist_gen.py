@@ -39,7 +39,7 @@ CHECKLIST_STATUS = {
     ),
     "8": (
         " ",
-        "Closed/opened envelope scaffolding exists, lazy payload open-on-demand and route-level payload-demand accounting now work, replay retention now follows explicit per-route policy, payload-store eviction now honors route-level retention policy in the Python layer, route-local audit snapshots now summarize producers, subscribers, related writes, and taint repairs, and retained lineage now tracks trace/causality/correlation ids with trace-query support, but broader envelope semantics remain partial.",
+        "Closed/opened envelope scaffolding exists, lazy payload open-on-demand and route-level payload-demand accounting now work, replay retention now follows explicit per-route policy, payload-store eviction now honors route-level retention policy in the Python layer, route-local audit snapshots now summarize producers, subscribers, related writes, and taint repairs, and sparse trace queries return bounded empty results, but broader envelope semantics remain partial.",
     ),
     "9": (
         " ",
@@ -150,7 +150,7 @@ APPENDIX_STATUS = {
     ),
     "Metadata/payload split with lazy payload opening": (
         " ",
-        "Envelope split exists, lazy payload open-on-demand now works, route-level payload-demand accounting is available, both replay retention and payload-store eviction now follow explicit per-route policy in the Python layer, route-local audit snapshots now summarize producers, subscribers, related writes, and taint repairs, and retained lineage now tracks trace/causality/correlation ids with trace-query support, but broader envelope semantics are still pending.",
+        "Envelope split exists, lazy payload open-on-demand now works, route-level payload-demand accounting is available, both replay retention and payload-store eviction now follow explicit per-route policy in the Python layer, route-local audit snapshots now summarize producers, subscribers, related writes, and taint repairs, and sparse trace queries return bounded empty results, but broader envelope semantics are still pending.",
     ),
     "Query plane modeled as streams": (
         "x",

@@ -46,7 +46,8 @@ SchemaLike = Any
 _ANY_SCHEMA_IDS = count(1)
 _ANY_SCHEMA_LOCK = Lock()
 _ANY_SCHEMA_PREFIX = "any:"
-_ANY_SCHEMA_VALUES: dict[str, Any] = {}
+_ANY_SCHEMA_PREFIX_BYTES = _ANY_SCHEMA_PREFIX.encode("ascii")
+_ANY_SCHEMA_VALUES: dict[bytes, Any] = {}
 
 
 def source(route: TypedRoute[T] | RouteRef, *, replay_latest: bool = True) -> Source[T]:
@@ -255,6 +256,7 @@ class Schema(Generic[T]):
     version: int
     encode: Callable[[T], bytes]
     decode: Callable[[bytes], T]
+    process_local: bool = False
 
     def __post_init__(self) -> None:
         _require_non_empty_string(self.schema_id, "schema_id")
@@ -263,6 +265,15 @@ class Schema(Generic[T]):
             raise ValueError("schema encode must be callable")
         if not callable(self.decode):
             raise ValueError("schema decode must be callable")
+        if not isinstance(self.process_local, bool):
+            raise ValueError("schema process_local must be a boolean")
+
+    def is_bytes_passthrough(self) -> bool:
+        """Return true when this schema preserves byte payloads unchanged."""
+        return (
+            self.encode is _coerce_bytes_payload
+            and self.decode is _coerce_bytes_payload
+        )
 
     @classmethod
     def any(cls, schema_id: str = "Any", version: int = 1) -> Schema[Any]:
@@ -273,6 +284,7 @@ class Schema(Generic[T]):
         local handles or rich Python objects; do not use it for durable storage
         or cross-process transport.
         """
+        schema_prefix = f"{_ANY_SCHEMA_PREFIX}{schema_id}:{version}:".encode("ascii")
 
         def encode(value: Any) -> bytes:
             # Tokens are intentionally tiny because the process-local table owns
@@ -280,18 +292,18 @@ class Schema(Generic[T]):
             # the lookup key with the version so unrelated local schemas cannot
             # decode each other's opaque references by accident.
             with _ANY_SCHEMA_LOCK:
-                key = f"{_ANY_SCHEMA_PREFIX}{schema_id}:{version}:{next(_ANY_SCHEMA_IDS)}"
+                key = schema_prefix + str(next(_ANY_SCHEMA_IDS)).encode("ascii")
                 _ANY_SCHEMA_VALUES[key] = value
-            return key.encode("ascii")
+            return key
 
         def decode(payload: bytes) -> Any:
             try:
-                key = _coerce_bytes_payload(payload).decode("ascii")
-            except (UnicodeDecodeError, ValueError) as exc:
+                key = _coerce_bytes_payload(payload)
+            except ValueError as exc:
                 raise ValueError(
                     f"unknown process-local object token for schema {schema_id!r}"
                 ) from exc
-            if not key.startswith(f"{_ANY_SCHEMA_PREFIX}{schema_id}:{version}:"):
+            if not key.startswith(schema_prefix):
                 raise ValueError(
                     f"unknown process-local object token for schema {schema_id!r}"
                 )
@@ -308,6 +320,7 @@ class Schema(Generic[T]):
             version=version,
             encode=encode,
             decode=decode,
+            process_local=True,
         )
 
     @classmethod
@@ -465,8 +478,13 @@ class TypedRoute(Generic[T]):
             ),
         )
 
-    def display(self) -> str:
+    @cached_property
+    def route_display(self) -> str:
+        """Materialize the stable route display label once when needed."""
         return self.route_ref.display()
+
+    def display(self) -> str:
+        return self.route_display
 
     def derivative_route(
         self,
@@ -535,7 +553,7 @@ class Sink(Generic[T]):
         return self.route.display()
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class TypedEnvelope(Generic[T]):
     """Decoded view of a closed envelope plus its typed payload value."""
 
@@ -552,6 +570,19 @@ class TypedEnvelope(Generic[T]):
     def close(self) -> ClosedEnvelope:
         """Return the immutable closed envelope carried by this decoded view."""
         return self.closed
+
+    @classmethod
+    def _trusted(
+        cls: type[TypedEnvelope[T]],
+        route: TypedRoute[T],
+        closed: ClosedEnvelope,
+        value: T,
+    ) -> TypedEnvelope[T]:
+        envelope = cls.__new__(cls)
+        object.__setattr__(envelope, "route", route)
+        object.__setattr__(envelope, "closed", closed)
+        object.__setattr__(envelope, "value", value)
+        return envelope
 
 
 @dataclass
@@ -614,14 +645,18 @@ def _any_schema_value_count() -> int:
 
 
 def _release_any_schema_value(payload: bytes) -> None:
-    try:
-        key = payload.decode("ascii")
-    except UnicodeDecodeError:
+    if not _is_any_schema_payload(payload):
         return
-    if not key.startswith(_ANY_SCHEMA_PREFIX):
-        return
+    _release_known_any_schema_value(payload)
+
+
+def _release_known_any_schema_value(payload: bytes) -> None:
     with _ANY_SCHEMA_LOCK:
-        _ANY_SCHEMA_VALUES.pop(key, None)
+        _ANY_SCHEMA_VALUES.pop(payload, None)
+
+
+def _is_any_schema_payload(payload: bytes) -> bool:
+    return payload.startswith(_ANY_SCHEMA_PREFIX_BYTES)
 
 
 def _require_non_empty_string(value: str, field: str) -> None:

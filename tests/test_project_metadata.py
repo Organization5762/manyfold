@@ -11,7 +11,9 @@ except ModuleNotFoundError:
     import tomli as tomllib
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+AGENTS_PATH = PROJECT_ROOT / "AGENTS.md"
 CARGO_TOML_PATH = PROJECT_ROOT / "Cargo.toml"
+CI_WORKFLOW_PATH = PROJECT_ROOT / ".github" / "workflows" / "ci.yml"
 NATIVE_STUB_PATH = (
     PROJECT_ROOT / "python" / "manyfold" / "_manyfold_rust" / "__init__.pyi"
 )
@@ -24,6 +26,11 @@ PYTHON_SOURCE_ROOTS = (
 RUNTIME_ASSERT_ROOTS = (
     PROJECT_ROOT / "python" / "manyfold",
     PROJECT_ROOT / "python" / "manyfold_example_catalog.py",
+)
+HOT_PATH_PYTHON_PATHS = (
+    PROJECT_ROOT / "python" / "manyfold" / "graph.py",
+    PROJECT_ROOT / "python" / "manyfold" / "memory_benchmarks.py",
+    PROJECT_ROOT / "python" / "manyfold" / "reactive_threads.py",
 )
 PACKAGE_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+")
 TYPE_ALIAS_VALUE_NAMES = frozenset(
@@ -69,6 +76,15 @@ class ProjectMetadataTests(unittest.TestCase):
             violation
             for path in _runtime_python_source_paths()
             for violation in _assert_statements(path)
+        )
+
+        self.assertEqual(violations, ())
+
+    def test_hot_paths_do_not_use_frame_introspection(self) -> None:
+        violations = tuple(
+            violation
+            for path in HOT_PATH_PYTHON_PATHS
+            for violation in _frame_introspection_uses(path)
         )
 
         self.assertEqual(violations, ())
@@ -120,6 +136,175 @@ class ProjectMetadataTests(unittest.TestCase):
 
         self.assertEqual(exports, tuple(sorted(exports)))
         self.assertEqual(len(exports), len(set(exports)))
+
+    def test_ci_runs_rust_quality_merge_gates(self) -> None:
+        workflow = CI_WORKFLOW_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("Check Rust formatting", workflow)
+        self.assertIn("cargo fmt --check", workflow)
+        self.assertIn("Run Clippy", workflow)
+        self.assertIn("cargo clippy --all-targets --all-features -- -D warnings", workflow)
+
+    def test_ci_gates_heart_nowait_memory_paths(self) -> None:
+        workflow = CI_WORKFLOW_PATH.read_text(encoding="utf-8")
+
+        required_fragments = (
+            "Native Heart materialized-state sparse plateau",
+            "Native Heart materialized-state sparse-metadata plateau",
+            "Native Heart materialized-state large-payload plateau",
+            "Native high-sequence correlation-store smoke",
+            "Python sparse nowait plateau",
+            "Python Heart materialized-state sparse-metadata plateau",
+            "Python Heart materialized-state nowait plateau",
+            "Heart wrapper provenance smoke",
+            "jemalloc leak check for native Heart materialized-state mode",
+            "--leak-bytes-threshold 131072",
+            "--leak-objects-threshold 2",
+            "Verify jemalloc leak summaries",
+            "Verify benchmark text artifacts",
+            "Verify required native profiler summaries",
+            "manyfold-benchmark-log-verify",
+            "manyfold-native-profiler-verify",
+            "--materialize-state",
+            "--peak-plateau-bytes 0",
+            "--rss-tail-min-samples 3",
+            "--rss-tail-plateau-kib 512",
+            "--require-tail-plateau current_rss_kib=512:3",
+            "--require-tail-plateau live_allocated_bytes=0:3",
+            "--require-tail-plateau peak_allocated_bytes=0:3",
+            "--require-final-max cpu_seconds=",
+            "--require-final-max elapsed_seconds=30",
+            "--require-final-max average_event_us=",
+            "--require-numeric-max interval_event_us=",
+            "--require-numeric-max input_blocks=0",
+            "--require-numeric-max output_blocks=0",
+            "--max-elapsed-seconds 30",
+            "--max-cpu-seconds 30",
+            "--max-elapsed-seconds 90",
+            "--max-cpu-seconds 90",
+            "--max-average-event-us",
+            "--max-interval-event-us",
+            "--max-disk-input-blocks 0",
+            "--max-disk-output-blocks 0",
+            "--publish-mode nowait",
+            "--metadata-mode none",
+            "--correlation-store native",
+            "--correlation-store retained",
+            "--require-metadata",
+            "--seed-seq-source 999999990",
+            "--payload-bytes 65536",
+            "--max-cpu-seconds 5",
+            "--max-materialized-payloads 0",
+            "--projected-live-segment-growth-bytes",
+            "--projected-peak-growth-bytes",
+            "--projected-peak-segment-growth-bytes",
+            "--traced-plateau-bytes 0",
+            "--traced-projected-growth-bytes 0",
+            "--traced-segment-projected-growth-bytes",
+            "jemalloc-heart-materialized-state.txt",
+            "manyfold-jemalloc-verify",
+            "heart-wrapper-provenance.json",
+            "heart-wrapper-provenance.txt",
+            "manyfold-monitor-verify",
+            "manyfold_source",
+            "manyfold_bridge_version",
+            "--require-metric rss",
+            "--require-sample-field rss",
+            "native-heart-materialized-state-large-payload.txt",
+            "native-heart-materialized-state.txt",
+            "native-heart-materialized-state-sparse-metadata.txt",
+            "native-high-sequence.txt",
+            "python-heart-materialized-state.txt",
+            "python-heart-materialized-state-nowait.txt",
+            "python-heart-materialized-state-sparse-metadata.txt",
+            "python-heart-process-local-nowait.txt",
+            "python-native-correlation.txt",
+            "python-sparse.txt",
+            "python-sparse-nowait.txt",
+            "python-subscription-churn.txt",
+            "python-unrelated-topology.txt",
+        )
+
+        for fragment in required_fragments:
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, workflow)
+        self.assertNotIn("--allow-missing-leak-summary", workflow)
+        noop_heart_step = workflow.split(
+            "- name: Python Heart materialized-state sparse-metadata plateau",
+            1,
+        )[1].split("| tee benchmark-results/python-heart", 1)[0]
+        self.assertIn("--max-cpu-seconds 5", noop_heart_step)
+        self.assertNotIn("--max-cpu-seconds 10", noop_heart_step)
+        self.assertIn("--max-average-event-us 100", noop_heart_step)
+        self.assertNotIn("--max-average-event-us 500", noop_heart_step)
+        retained_heart_nowait_step = workflow.split(
+            "- name: Python Heart materialized-state nowait plateau",
+            1,
+        )[1].split("| tee benchmark-results/python-heart", 1)[0]
+        self.assertIn("--max-cpu-seconds 5", retained_heart_nowait_step)
+        self.assertNotIn("--max-cpu-seconds 10", retained_heart_nowait_step)
+        self.assertIn("--max-average-event-us 100", retained_heart_nowait_step)
+        self.assertNotIn("--max-average-event-us 500", retained_heart_nowait_step)
+
+    def test_ci_python_memory_paths_require_rss_tail_plateau(self) -> None:
+        workflow = CI_WORKFLOW_PATH.read_text(encoding="utf-8")
+        step_names = (
+            "Python sparse retention plateau",
+            "Python sparse nowait plateau",
+            "Python native-correlation plateau",
+            "Python Heart process-local nowait plateau",
+            "Python Heart materialized-state sparse plateau",
+            "Python Heart materialized-state nowait plateau",
+            "Python Heart materialized-state sparse-metadata plateau",
+            "Python unrelated-topology no-fanout fast path",
+            "Python subscription churn disposal",
+        )
+
+        for name in step_names:
+            with self.subTest(step=name):
+                step = workflow.split(f"- name: {name}", 1)[1].split("\n\n", 1)[0]
+                self.assertIn("--rss-tail-plateau-kib 512", step)
+                self.assertIn("--rss-tail-min-samples 3", step)
+        subscription_step = workflow.split(
+            "- name: Python subscription churn disposal",
+            1,
+        )[1].split("| tee benchmark-results/python-subscription-churn.txt", 1)[0]
+        self.assertIn("--iterations 75000", subscription_step)
+        subscription_verify = workflow.split(
+            "uv run manyfold-benchmark-log-verify \\\n"
+            "            benchmark-results/python-subscription-churn.txt",
+            1,
+        )[1].split("uv run manyfold-benchmark-log-verify", 1)[0]
+        self.assertIn("--min-final-step 75000", subscription_verify)
+        self.assertIn("--min-samples 4", subscription_verify)
+
+    def test_external_heart_monitor_documents_private_memory_gates(self) -> None:
+        agents = AGENTS_PATH.read_text(encoding="utf-8")
+
+        required_fragments = (
+            "totem run --configuration lib_2026",
+            "--strict-device-memory-gates",
+            "--external-min-elapsed-seconds",
+            "--external-min-samples",
+            "--external-output-max-samples",
+            "--external-rss-scope tree",
+            "--output-json heart-lib_2026-monitor.json",
+            "--external-pss-projected-growth-kib",
+            "--external-pss-segment-projected-growth-kib",
+            "--external-private-projected-growth-kib",
+            "--external-private-segment-projected-growth-kib",
+            "--external-anonymous-projected-growth-kib",
+            "--external-anonymous-segment-projected-growth-kib",
+            "--external-fd-plateau-count",
+            "--external-fd-segment-projected-growth-count",
+            "uv run manyfold-heart-monitor-verify heart-lib_2026-monitor.json",
+            "--configuration lib_2026",
+            "smaps_rollup",
+        )
+
+        for fragment in required_fragments:
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, agents)
 
     def test_literal_module_exports_stay_sorted(self) -> None:
         failures: list[str] = []
@@ -199,6 +384,63 @@ def _literal_string_sequence(node: ast.expr) -> tuple[str, ...] | None:
             return None
         values.append(item.value)
     return tuple(values)
+
+
+def _frame_introspection_uses(path: Path) -> tuple[str, ...]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    violations: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "inspect":
+                    violations.append(
+                        _hot_path_violation(path, node.lineno, "imports inspect")
+                    )
+        elif isinstance(node, ast.ImportFrom):
+            if node.module == "inspect":
+                violations.append(
+                    _hot_path_violation(path, node.lineno, "imports from inspect")
+                )
+        elif isinstance(node, ast.Call):
+            function = node.func
+            if isinstance(function, ast.Attribute) and function.attr in {
+                "_getframe",
+                "currentframe",
+                "stack",
+            }:
+                violations.append(
+                    _hot_path_violation(
+                        path,
+                        node.lineno,
+                        f"calls frame API {function.attr}",
+                    )
+                )
+            elif isinstance(function, ast.Name) and function.id in {
+                "currentframe",
+                "getframe",
+                "stack",
+            }:
+                violations.append(
+                    _hot_path_violation(
+                        path,
+                        node.lineno,
+                        f"calls frame helper {function.id}",
+                    )
+                )
+        elif isinstance(node, ast.Attribute):
+            if node.attr in {"_getframe", "currentframe", "stack"}:
+                violations.append(
+                    _hot_path_violation(
+                        path,
+                        node.lineno,
+                        f"uses frame API {node.attr}",
+                    )
+                )
+    return tuple(violations)
+
+
+def _hot_path_violation(path: Path, lineno: int, message: str) -> str:
+    return f"{path.relative_to(PROJECT_ROOT)}:{lineno} {message}"
 
 
 def _declaration_order_issues(path: Path) -> tuple[str, ...]:

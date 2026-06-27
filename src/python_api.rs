@@ -1,12 +1,18 @@
+#![allow(clippy::too_many_arguments)]
+
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
 
 use crate::core::{
     ClockDomainRefCore, ClosedEnvelopeCore, ControlLoopCore, CreditSnapshotCore, DeliveryMode,
     GraphCore, Layer, MailboxCore, MailboxDescriptorCore, NamespaceRefCore, OpenedEnvelopeCore,
     OrderingPolicy, OverflowPolicy, Plane, PortDescriptorCore, ProducerKind, ProducerRefCore,
-    QueryKindCore, QueryResultCore, RouteRefCore, RuntimeRefCore, ScheduleConditionCore,
-    ScheduleGuardCore, SchemaRefCore, TaintDomain, TaintMarkCore, Variant, WriteBindingCore,
+    QueryKindCore, QueryResultCore, RetentionPolicyCore, RetentionSnapshotCore, RouteRefCore,
+    RuntimeRefCore, ScheduleConditionCore, ScheduleGuardCore, SchemaRefCore, TaintDomain,
+    TaintMarkCore, Variant, WriteBindingCore,
 };
+use pyo3::basic::CompareOp;
 use pyo3::exceptions::{PyKeyError, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyBool;
@@ -39,9 +45,7 @@ const OVERFLOW_POLICIES: &[&str] = &[
     "reject_write",
 ];
 
-fn lock_graph<'a>(
-    state: &'a Arc<Mutex<GraphCore>>,
-) -> PyResult<std::sync::MutexGuard<'a, GraphCore>> {
+fn lock_graph(state: &Arc<Mutex<GraphCore>>) -> PyResult<std::sync::MutexGuard<'_, GraphCore>> {
     state
         .lock()
         .map_err(|_| PyRuntimeError::new_err("graph mutex poisoned"))
@@ -694,6 +698,28 @@ impl RouteRef {
     fn display(&self) -> String {
         self.inner.display()
     }
+    fn __richcmp__(&self, other: &Bound<'_, PyAny>, op: CompareOp) -> PyResult<bool> {
+        let other_route = other.extract::<PyRef<'_, RouteRef>>();
+        match op {
+            CompareOp::Eq => Ok(other_route
+                .as_ref()
+                .is_ok_and(|route| self.inner == route.inner)),
+            CompareOp::Ne => Ok(other_route
+                .as_ref()
+                .map_or(true, |route| self.inner != route.inner)),
+            _ => Err(PyTypeError::new_err("RouteRef does not support ordering")),
+        }
+    }
+    fn __hash__(&self) -> isize {
+        let mut hasher = DefaultHasher::new();
+        self.inner.hash(&mut hasher);
+        let value = hasher.finish() as isize;
+        if value == -1 {
+            -2
+        } else {
+            value
+        }
+    }
     fn __repr__(&self) -> String {
         format!("RouteRef({})", self.inner.display())
     }
@@ -969,6 +995,18 @@ impl ClosedEnvelope {
         PayloadRef {
             inner: self.inner.payload_ref.clone(),
         }
+    }
+    #[getter]
+    fn payload_id(&self) -> String {
+        self.inner.payload_ref.payload_id.clone()
+    }
+    #[getter]
+    fn has_inline_payload(&self) -> bool {
+        !self.inner.payload_ref.inline_bytes.is_empty()
+    }
+    #[getter]
+    fn inline_payload(&self) -> Vec<u8> {
+        self.inner.payload_ref.inline_bytes.clone()
     }
     fn with_taints(&self, taints: Vec<TaintMark>) -> Self {
         let mut inner = self.inner.clone();
@@ -1362,6 +1400,79 @@ impl CreditSnapshot {
 
 #[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
 #[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust", frozen, from_py_object)]
+#[derive(Clone)]
+pub struct RetentionSnapshot {
+    inner: RetentionSnapshotCore,
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust", frozen, from_py_object)]
+#[derive(Clone)]
+pub struct NoLineageMaterializerDropProfile {
+    source_route: RouteRefCore,
+    target_route: RouteRefCore,
+    materialize_generation: u64,
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pymethods]
+impl RetentionSnapshot {
+    #[getter]
+    fn route_display(&self) -> String {
+        self.inner.route_display.clone()
+    }
+
+    #[getter]
+    fn latest_seq_source(&self) -> Option<u64> {
+        self.inner.latest_seq_source
+    }
+
+    #[getter]
+    fn metadata_event_count(&self) -> u64 {
+        self.inner.metadata_event_count
+    }
+
+    #[getter]
+    fn replay_count(&self) -> usize {
+        self.inner.replay_count
+    }
+
+    #[getter]
+    fn payload_count(&self) -> usize {
+        self.inner.payload_count
+    }
+
+    #[getter]
+    fn lineage_count(&self) -> usize {
+        self.inner.lineage_count
+    }
+
+    #[getter]
+    fn trace_index_count(&self) -> usize {
+        self.inner.trace_index_count
+    }
+
+    #[getter]
+    fn causality_index_count(&self) -> usize {
+        self.inner.causality_index_count
+    }
+
+    #[getter]
+    fn correlation_index_count(&self) -> usize {
+        self.inner.correlation_index_count
+    }
+
+    #[getter]
+    fn history_limit(&self) -> Option<usize> {
+        self.inner.history_limit
+    }
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
 #[pyclass(module = "manyfold._manyfold_rust", from_py_object)]
 #[derive(Clone)]
 pub struct Mailbox {
@@ -1517,6 +1628,96 @@ impl Graph {
         Ok(RouteRef { inner: route })
     }
 
+    fn compile_no_lineage_materializer_drop_profile(
+        &self,
+        route: RouteRef,
+        target_route: RouteRef,
+    ) -> PyResult<NoLineageMaterializerDropProfile> {
+        let graph = lock_graph(&self.state)?;
+        if !graph.materializer_pair_is_registered(&route.inner, &target_route.inner) {
+            return Err(PyRuntimeError::new_err(
+                "materializer profile route pair is not registered",
+            ));
+        }
+        Ok(NoLineageMaterializerDropProfile {
+            source_route: route.inner,
+            target_route: target_route.inner,
+            materialize_generation: graph.materialize_generation,
+        })
+    }
+
+    fn release_no_lineage_materializer_drop_profile(
+        &self,
+        _profile: NoLineageMaterializerDropProfile,
+    ) {
+    }
+
+    #[pyo3(signature = (profile, payload))]
+    fn emit_no_lineage_materializer_drop_profile_python(
+        &self,
+        profile: PyRef<'_, NoLineageMaterializerDropProfile>,
+        payload: Vec<u8>,
+    ) -> PyResult<bool> {
+        let mut graph = lock_graph(&self.state)?;
+        if profile.materialize_generation == graph.materialize_generation {
+            return Ok(graph.write_single_if_unrouted_known_materializer_drop(
+                &profile.source_route,
+                &profile.target_route,
+                payload,
+                ProducerRefCore {
+                    producer_id: "python".to_string(),
+                    kind: ProducerKind::Application,
+                },
+                None,
+            ));
+        }
+        Ok(graph.write_single_if_unrouted_and_materializer_drop(
+            &profile.source_route,
+            &profile.target_route,
+            payload,
+            ProducerRefCore {
+                producer_id: "python".to_string(),
+                kind: ProducerKind::Application,
+            },
+            None,
+        ))
+    }
+
+    #[pyo3(signature = (
+        route,
+        latest_replay_policy,
+        durability_class,
+        replay_window,
+        payload_retention_policy,
+        history_limit=None
+    ))]
+    fn configure_retention(
+        &self,
+        route: RouteRef,
+        latest_replay_policy: String,
+        durability_class: String,
+        replay_window: String,
+        payload_retention_policy: String,
+        history_limit: Option<usize>,
+    ) -> PyResult<()> {
+        validate_nonblank_text("latest_replay_policy", &latest_replay_policy)?;
+        validate_nonblank_text("durability_class", &durability_class)?;
+        validate_nonblank_text("replay_window", &replay_window)?;
+        validate_nonblank_text("payload_retention_policy", &payload_retention_policy)?;
+        let mut graph = lock_graph(&self.state)?;
+        graph.configure_retention(
+            &route.inner,
+            RetentionPolicyCore {
+                latest_replay_policy,
+                durability_class,
+                replay_window,
+                payload_retention_policy,
+                history_limit,
+            },
+        );
+        Ok(())
+    }
+
     fn read(&self, route: RouteRef) -> PyResult<ReadablePort> {
         let mut graph = lock_graph(&self.state)?;
         let route = graph.register_port(route.inner);
@@ -1555,6 +1756,353 @@ impl Graph {
             .into_iter()
             .map(|inner| ClosedEnvelope { inner })
             .collect())
+    }
+
+    #[pyo3(signature = (route, payload, producer=None, control_epoch=None))]
+    fn emit_single_if_unrouted(
+        &self,
+        route: RouteRef,
+        payload: Vec<u8>,
+        producer: Option<ProducerRef>,
+        #[pyo3(from_py_with = extract_optional_control_epoch)] control_epoch: Option<u64>,
+    ) -> PyResult<Option<ClosedEnvelope>> {
+        let mut graph = lock_graph(&self.state)?;
+        let producer = producer
+            .map(|producer| producer.inner)
+            .unwrap_or(ProducerRefCore {
+                producer_id: "python".to_string(),
+                kind: ProducerKind::Application,
+            });
+        Ok(graph
+            .write_single_if_unrouted(&route.inner, payload, producer, control_epoch)
+            .map(|inner| ClosedEnvelope { inner }))
+    }
+
+    #[pyo3(signature = (route, payload, producer=None, control_epoch=None))]
+    fn emit_single_if_unrouted_drop(
+        &self,
+        route: RouteRef,
+        payload: Vec<u8>,
+        producer: Option<ProducerRef>,
+        #[pyo3(from_py_with = extract_optional_control_epoch)] control_epoch: Option<u64>,
+    ) -> PyResult<bool> {
+        let mut graph = lock_graph(&self.state)?;
+        let producer = producer
+            .map(|producer| producer.inner)
+            .unwrap_or(ProducerRefCore {
+                producer_id: "python".to_string(),
+                kind: ProducerKind::Application,
+            });
+        Ok(graph.write_single_if_unrouted_drop(&route.inner, payload, producer, control_epoch))
+    }
+
+    #[pyo3(signature = (route, target_route, payload, producer=None, control_epoch=None))]
+    fn emit_single_if_unrouted_and_materializer_drop(
+        &self,
+        route: RouteRef,
+        target_route: RouteRef,
+        payload: Vec<u8>,
+        producer: Option<ProducerRef>,
+        #[pyo3(from_py_with = extract_optional_control_epoch)] control_epoch: Option<u64>,
+    ) -> PyResult<bool> {
+        let mut graph = lock_graph(&self.state)?;
+        let producer = producer
+            .map(|producer| producer.inner)
+            .unwrap_or(ProducerRefCore {
+                producer_id: "python".to_string(),
+                kind: ProducerKind::Application,
+            });
+        Ok(graph.write_single_if_unrouted_and_materializer_drop(
+            &route.inner,
+            &target_route.inner,
+            payload,
+            producer,
+            control_epoch,
+        ))
+    }
+
+    #[pyo3(signature = (route, target_route, payload))]
+    fn emit_single_if_unrouted_and_materializer_drop_python(
+        &self,
+        route: RouteRef,
+        target_route: RouteRef,
+        payload: Vec<u8>,
+    ) -> PyResult<bool> {
+        let mut graph = lock_graph(&self.state)?;
+        Ok(graph.write_single_if_unrouted_and_materializer_drop(
+            &route.inner,
+            &target_route.inner,
+            payload,
+            ProducerRefCore {
+                producer_id: "python".to_string(),
+                kind: ProducerKind::Application,
+            },
+            None,
+        ))
+    }
+
+    #[pyo3(signature = (
+        route,
+        payload,
+        producer=None,
+        control_epoch=None,
+        trace_id=None,
+        causality_id=None,
+        correlation_id=None,
+    ))]
+    fn emit_single_if_unrouted_with_lineage_no_parents(
+        &self,
+        route: RouteRef,
+        payload: Vec<u8>,
+        producer: Option<ProducerRef>,
+        #[pyo3(from_py_with = extract_optional_control_epoch)] control_epoch: Option<u64>,
+        trace_id: Option<String>,
+        causality_id: Option<String>,
+        correlation_id: Option<String>,
+    ) -> PyResult<Option<ClosedEnvelope>> {
+        let mut graph = lock_graph(&self.state)?;
+        let producer = producer
+            .map(|producer| producer.inner)
+            .unwrap_or(ProducerRefCore {
+                producer_id: "python".to_string(),
+                kind: ProducerKind::Application,
+            });
+        Ok(graph
+            .write_single_if_unrouted_with_lineage_no_parents(
+                &route.inner,
+                payload,
+                producer,
+                control_epoch,
+                trace_id,
+                causality_id,
+                correlation_id,
+            )
+            .map(|inner| ClosedEnvelope { inner }))
+    }
+
+    #[pyo3(signature = (
+        route,
+        payload,
+        producer=None,
+        control_epoch=None,
+        trace_id=None,
+        causality_id=None,
+        correlation_id=None,
+    ))]
+    fn emit_single_if_unrouted_with_lineage_no_parents_and_materializers(
+        &self,
+        route: RouteRef,
+        payload: Vec<u8>,
+        producer: Option<ProducerRef>,
+        #[pyo3(from_py_with = extract_optional_control_epoch)] control_epoch: Option<u64>,
+        trace_id: Option<String>,
+        causality_id: Option<String>,
+        correlation_id: Option<String>,
+    ) -> PyResult<Option<Vec<ClosedEnvelope>>> {
+        let mut graph = lock_graph(&self.state)?;
+        let producer = producer
+            .map(|producer| producer.inner)
+            .unwrap_or(ProducerRefCore {
+                producer_id: "python".to_string(),
+                kind: ProducerKind::Application,
+            });
+        Ok(graph
+            .write_single_if_unrouted_with_lineage_no_parents_and_materializers(
+                &route.inner,
+                payload,
+                producer,
+                control_epoch,
+                trace_id,
+                causality_id,
+                correlation_id,
+            )
+            .map(|envelopes| {
+                envelopes
+                    .into_iter()
+                    .map(|inner| ClosedEnvelope { inner })
+                    .collect()
+            }))
+    }
+
+    #[pyo3(signature = (
+        route,
+        payload,
+        producer=None,
+        control_epoch=None,
+        trace_id=None,
+        causality_id=None,
+        correlation_id=None,
+    ))]
+    fn emit_single_if_unrouted_with_lineage_no_parents_and_materializers_drop(
+        &self,
+        route: RouteRef,
+        payload: Vec<u8>,
+        producer: Option<ProducerRef>,
+        #[pyo3(from_py_with = extract_optional_control_epoch)] control_epoch: Option<u64>,
+        trace_id: Option<String>,
+        causality_id: Option<String>,
+        correlation_id: Option<String>,
+    ) -> PyResult<bool> {
+        let mut graph = lock_graph(&self.state)?;
+        let producer = producer
+            .map(|producer| producer.inner)
+            .unwrap_or(ProducerRefCore {
+                producer_id: "python".to_string(),
+                kind: ProducerKind::Application,
+            });
+        Ok(
+            graph.write_single_if_unrouted_with_lineage_no_parents_and_materializers_drop(
+                &route.inner,
+                payload,
+                producer,
+                control_epoch,
+                trace_id,
+                causality_id,
+                correlation_id,
+            ),
+        )
+    }
+
+    #[pyo3(signature = (
+        route,
+        payload,
+        trace_id=None,
+        causality_id=None,
+        correlation_id=None,
+    ))]
+    fn emit_single_if_unrouted_with_lineage_no_parents_and_materializers_drop_python(
+        &self,
+        route: RouteRef,
+        payload: Vec<u8>,
+        trace_id: Option<String>,
+        causality_id: Option<String>,
+        correlation_id: Option<String>,
+    ) -> PyResult<bool> {
+        let mut graph = lock_graph(&self.state)?;
+        Ok(
+            graph.write_single_if_unrouted_with_lineage_no_parents_and_materializers_drop(
+                &route.inner,
+                payload,
+                ProducerRefCore {
+                    producer_id: "python".to_string(),
+                    kind: ProducerKind::Application,
+                },
+                None,
+                trace_id,
+                causality_id,
+                correlation_id,
+            ),
+        )
+    }
+
+    #[pyo3(signature = (
+        route,
+        payload,
+        trace_id,
+        causality_id,
+        correlation_id=None,
+    ))]
+    fn emit_single_if_unrouted_with_lineage_ids_no_parents_and_materializers_drop_python(
+        &self,
+        route: RouteRef,
+        payload: Vec<u8>,
+        trace_id: String,
+        causality_id: String,
+        correlation_id: Option<String>,
+    ) -> PyResult<bool> {
+        let mut graph = lock_graph(&self.state)?;
+        Ok(
+            graph.write_single_if_unrouted_with_lineage_ids_no_parents_and_materializers_drop(
+                &route.inner,
+                payload,
+                ProducerRefCore {
+                    producer_id: "python".to_string(),
+                    kind: ProducerKind::Application,
+                },
+                None,
+                trace_id,
+                causality_id,
+                correlation_id,
+            ),
+        )
+    }
+
+    #[pyo3(signature = (
+        route,
+        target_route,
+        payload,
+        trace_id,
+        causality_id,
+        correlation_id=None,
+    ))]
+    fn emit_single_if_unrouted_with_lineage_ids_no_parents_and_materializer_drop_python(
+        &self,
+        route: RouteRef,
+        target_route: RouteRef,
+        payload: Vec<u8>,
+        trace_id: String,
+        causality_id: String,
+        correlation_id: Option<String>,
+    ) -> PyResult<bool> {
+        let mut graph = lock_graph(&self.state)?;
+        Ok(
+            graph.write_single_if_unrouted_with_lineage_ids_no_parents_and_materializer_drop(
+                &route.inner,
+                &target_route.inner,
+                payload,
+                ProducerRefCore {
+                    producer_id: "python".to_string(),
+                    kind: ProducerKind::Application,
+                },
+                None,
+                trace_id,
+                causality_id,
+                correlation_id,
+            ),
+        )
+    }
+
+    #[pyo3(signature = (source_route, source_seq_source, target_route, producer=None))]
+    fn materialize_bytes_one_parent(
+        &self,
+        source_route: RouteRef,
+        source_seq_source: u64,
+        target_route: RouteRef,
+        producer: Option<ProducerRef>,
+    ) -> PyResult<Option<ClosedEnvelope>> {
+        let mut graph = lock_graph(&self.state)?;
+        let producer = producer
+            .map(|producer| producer.inner)
+            .unwrap_or(ProducerRefCore {
+                producer_id: "python".to_string(),
+                kind: ProducerKind::Application,
+            });
+        Ok(graph
+            .materialize_bytes_one_parent(
+                &source_route.inner,
+                source_seq_source,
+                &target_route.inner,
+                producer,
+            )
+            .map(|inner| ClosedEnvelope { inner }))
+    }
+
+    fn register_materialize_bytes(
+        &self,
+        source_route: RouteRef,
+        target_route: RouteRef,
+    ) -> PyResult<bool> {
+        let mut graph = lock_graph(&self.state)?;
+        Ok(graph.register_materialize_bytes(&source_route.inner, &target_route.inner))
+    }
+
+    fn unregister_materialize_bytes(
+        &self,
+        source_route: RouteRef,
+        target_route: RouteRef,
+    ) -> PyResult<bool> {
+        let mut graph = lock_graph(&self.state)?;
+        Ok(graph.unregister_materialize_bytes(&source_route.inner, &target_route.inner))
     }
 
     fn register_binding(&self, name: String, binding: WriteBinding) -> PyResult<WriteBinding> {
@@ -1735,6 +2283,57 @@ impl Graph {
         Ok(inner.map(|inner| ClosedEnvelope { inner }))
     }
 
+    fn replay(&self, route: RouteRef) -> PyResult<Vec<ClosedEnvelope>> {
+        let graph = lock_graph(&self.state)?;
+        let QueryResultCore::Replay(items) = graph.query(QueryKindCore::Replay(route.inner)) else {
+            return Err(PyRuntimeError::new_err("unexpected replay response"));
+        };
+        Ok(items
+            .into_iter()
+            .map(|inner| ClosedEnvelope { inner })
+            .collect())
+    }
+
+    fn retained_payload_count(&self, route: RouteRef) -> PyResult<usize> {
+        let graph = lock_graph(&self.state)?;
+        Ok(graph.retained_payload_count(&route.inner))
+    }
+
+    fn payload_by_id(&self, payload_id: String) -> PyResult<Option<Vec<u8>>> {
+        validate_nonblank_text("payload_id", &payload_id)?;
+        let graph = lock_graph(&self.state)?;
+        Ok(graph.payload_by_id(&payload_id))
+    }
+
+    #[pyo3(signature = (route=None))]
+    fn retention_snapshot(&self, route: Option<RouteRef>) -> PyResult<Vec<RetentionSnapshot>> {
+        let graph = lock_graph(&self.state)?;
+        let routes = match route {
+            Some(route) => vec![route.inner],
+            None => {
+                let mut routes = graph.descriptors.keys().cloned().collect::<Vec<_>>();
+                routes.sort_by_cached_key(RouteRefCore::display);
+                routes
+            }
+        };
+        Ok(routes
+            .into_iter()
+            .map(|route| RetentionSnapshot {
+                inner: graph.retention_snapshot(&route),
+            })
+            .collect())
+    }
+
+    fn retention_violations(&self) -> PyResult<Vec<String>> {
+        let graph = lock_graph(&self.state)?;
+        Ok(graph.retention_violations())
+    }
+
+    fn lineage_intern_value_count(&self) -> PyResult<usize> {
+        let graph = lock_graph(&self.state)?;
+        Ok(graph.active_lineage_value_count())
+    }
+
     fn topology(&self) -> PyResult<Vec<(String, String)>> {
         let graph = lock_graph(&self.state)?;
         let QueryResultCore::Topology(edges) = graph.query(QueryKindCore::Topology) else {
@@ -1796,6 +2395,8 @@ fn _manyfold_rust(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()>
     module.add_class::<WriteBinding>()?;
     module.add_class::<MailboxDescriptor>()?;
     module.add_class::<CreditSnapshot>()?;
+    module.add_class::<RetentionSnapshot>()?;
+    module.add_class::<NoLineageMaterializerDropProfile>()?;
     module.add_class::<Mailbox>()?;
     module.add_class::<ControlLoop>()?;
     module.add_class::<Graph>()?;
