@@ -57,6 +57,20 @@ jobs:
       - name: Run Python tests
         run: uv run python -m unittest discover -s tests -p 'test_*.py'
 
+      - name: Check RFC checklist
+        run: uv run python -m manyfold.rfc_checklist_gen --check
+
+      - name: Check example catalog
+        run: uv run manyfold-example-catalog --check
+
+      - name: List reference examples
+        run: uv run manyfold-example-catalog --list reference
+
+      - name: Check example manifest
+        run: uv run python -m examples.catalog --check-manifest
+
+      - name: Check README examples
+        run: uv run python -m examples.catalog --check-readme
   memory-regression:
     name: Memory regression benchmarks
     runs-on: ubuntu-latest

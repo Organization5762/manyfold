@@ -1382,6 +1382,7 @@ def load_manyfold_package():
         "CombineLatestNode": graph.CombineLatestNode,
         "CompositeSubscription": graph.CompositeSubscription,
         "ConstantNode": graph.ConstantNode,
+        "Contract": primitives.Contract,
         "DelimitedMessageBuffer": sensor_io.DelimitedMessageBuffer,
         "DoubleBuffer": sensor_io.DoubleBuffer,
         "DuplexSensorPeripheral": sensor_io.DuplexSensorPeripheral,

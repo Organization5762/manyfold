@@ -124,6 +124,7 @@ from .lego_catalog import (
     legos_by_role as legos_by_role,
 )
 from .primitives import (
+    Contract as Contract,
     OwnerName as OwnerName,
     ReadThenWriteNextEpochStep as ReadThenWriteNextEpochStep,
     RouteIdentity as RouteIdentity,
@@ -220,6 +221,7 @@ __all__ = (
     "Consensus",
     "ConsensusRoutes",
     "ConstantNode",
+    "Contract",
     "ControlLoop",
     "ControlLoops",
     "CorrelationTracingStore",
