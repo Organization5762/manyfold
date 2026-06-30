@@ -5070,11 +5070,11 @@ class Graph:
             producer_id = "python" if producer is None else producer.producer_id
             if process_local_nowait_indexes:
                 self._record_process_local_nowait_envelope(
-                        native_target,
-                        target_key,
-                        single_envelope,
-                        encoded,
-                        producer_id=producer_id,
+                    native_target,
+                    target_key,
+                    single_envelope,
+                    encoded,
+                    producer_id=producer_id,
                 )
                 if (
                     producer is None
@@ -7524,7 +7524,7 @@ class Graph:
         causality_id: str | None,
         correlation_id: str | None,
         parent_events: Sequence[EventRef],
-    ) -> tuple[None, None, None, tuple[()]]:
+    ) -> tuple[None, None, None, tuple[EventRef, ...]]:
         del trace_id, causality_id, correlation_id, parent_events
         return None, None, None, ()
 
@@ -10875,13 +10875,15 @@ def _process_rpc_route(
     variant: Variant,
     schema: Schema[object],
 ) -> TypedRoute[object]:
+    plane = Plane.Query if variant == Variant.Request else Plane.Read
+    resolved_variant = Variant.QueryRequest if variant == Variant.Request else variant
     return route(
-        plane=Plane.Write if variant == Variant.Request else Plane.Read,
+        plane=plane,
         layer=Layer.Logical,
         owner=owner,
         family="process_rpc",
         stream=stream,
-        variant=variant,
+        variant=resolved_variant,
         schema=schema,
     )
 

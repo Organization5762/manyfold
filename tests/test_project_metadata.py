@@ -8,6 +8,8 @@ import sys
 import unittest
 from pathlib import Path
 
+from tests.test_support import subprocess_test_env
+
 try:
     import tomllib
 except ModuleNotFoundError:
@@ -125,6 +127,8 @@ class ProjectMetadataTests(unittest.TestCase):
             ],
             check=True,
             capture_output=True,
+            cwd=PROJECT_ROOT,
+            env=subprocess_test_env(),
             text=True,
         )
         modules = json.loads(probe.stdout)

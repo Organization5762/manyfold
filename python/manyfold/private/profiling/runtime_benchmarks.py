@@ -19,6 +19,8 @@ RuntimeWorkload = Literal["publish", "observe", "rpc"]
 RunMode = Literal["standard", "parallel"]
 
 WORKLOADS: tuple[RuntimeWorkload, ...] = ("publish", "observe", "rpc")
+_PARALLEL_SUM_FIELDS = frozenset({"observed", "retained_audit_payloads", "rpc_calls"})
+_PARALLEL_MAX_FIELDS = frozenset({"latest_payload_bytes"})
 
 
 def run_runtime_benchmark(
@@ -35,12 +37,15 @@ def run_runtime_benchmark(
 
     _require_positive_int(iterations, "iterations")
     _require_positive_int(runs, "runs")
+    _require_positive_int(callers, "callers")
     _require_positive_float_or_none(max_average_event_us, "max_average_event_us")
     _require_positive_float_or_none(max_elapsed_seconds, "max_elapsed_seconds")
     if workload not in WORKLOADS:
         raise ValueError(f"unsupported runtime workload: {workload}")
     if mode not in ("standard", "parallel"):
         raise ValueError("runtime benchmark mode must be standard or parallel")
+    if mode == "parallel" and callers > iterations:
+        raise ValueError("parallel callers cannot exceed iterations")
     runner = _workload_runner(workload)
     timed = _run_repeated(
         lambda: _run_parallel(runner, iterations=iterations, callers=callers)
@@ -189,7 +194,17 @@ def _run_parallel(
         for key, value in result.items():
             if key == "events":
                 continue
-            totals[key] = totals.get(key, 0) + value
+            if key in _PARALLEL_SUM_FIELDS:
+                totals[key] = totals.get(key, 0) + value
+            elif key in _PARALLEL_MAX_FIELDS:
+                totals[key] = max(totals.get(key, 0), value)
+            else:
+                observed = totals.setdefault(key, value)
+                if observed != value:
+                    raise RuntimeError(
+                        f"parallel benchmark field {key!r} is not aggregatable: "
+                        f"observed {observed} and {value}"
+                    )
     return totals
 
 
@@ -235,6 +250,8 @@ def _benchmark_route(stream: str):
 
 
 def _event_shards(*, events: int, shards: int) -> tuple[int, ...]:
+    if shards > events:
+        raise ValueError("shards cannot exceed events")
     base, extra = divmod(events, shards)
     return tuple(base + (1 if index < extra else 0) for index in range(shards))
 

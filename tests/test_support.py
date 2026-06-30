@@ -397,13 +397,17 @@ def install_manyfold_rust_stub() -> None:
         if not isinstance(sql, str):
             raise TypeError("sql must be a string")
         stripped = sql.strip()
+        statements = tuple(part.strip() for part in stripped.split(";") if part.strip())
+        if len(statements) != 1:
+            raise ValueError("SQL planner requires exactly one statement")
+        stripped = statements[0]
         match = re.match(r"\A([A-Za-z]+)\b", stripped)
         if match is None:
             raise ValueError("invalid SQL: expected statement")
         keyword = match.group(1).lower()
         if re.match(r"\ASELECT\s+FROM\b", stripped, re.IGNORECASE):
             raise ValueError("invalid SQL: incomplete statement")
-        if keyword == "select" and re.search(r"\bFROM\b", stripped, re.IGNORECASE):
+        if keyword == "select":
             return {"kind": "select", "sql": stripped}
         if keyword == "insert" and re.search(r"\bVALUES\b", stripped, re.IGNORECASE):
             return {"kind": "insert", "sql": stripped}

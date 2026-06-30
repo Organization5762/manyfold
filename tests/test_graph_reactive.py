@@ -8364,6 +8364,7 @@ else:
             audit = next(
                 graph.retention_snapshot(worker_transport.routes.audit_log)
             )
+            validation_issues = tuple(graph.validate_graph())
         finally:
             caller_transport.dispose()
             worker_transport.dispose()
@@ -8373,6 +8374,9 @@ else:
         self.assertEqual(response.target, caller)
         self.assertEqual(response.payload, {"row": "row-1"})
         self.assertEqual(audit.payload_count, 1)
+        self.assertFalse(
+            any("lacks a shadow binding" in issue.message for issue in validation_issues)
+        )
 
     def test_process_rpc_transport_nowait_and_remote_target_filter(self) -> None:
         graph_module = load_graph_module()

@@ -59,12 +59,32 @@ class RuntimeBenchmarkTests(unittest.TestCase):
         self.assertEqual(result["runs"], 2)
         self.assertGreater(result["average_event_us"], 0.0)
 
+    def test_parallel_publish_keeps_payload_size_as_size_metric(self) -> None:
+        result = runtime_benchmarks.run_runtime_benchmark(
+            "publish",
+            iterations=16,
+            mode="parallel",
+            callers=4,
+        )
+
+        self.assertEqual(result["events"], 16)
+        self.assertEqual(result["callers"], 4)
+        self.assertEqual(result["latest_payload_bytes"], 16)
+
     def test_runtime_benchmark_rejects_invalid_inputs(self) -> None:
         with self.assertRaisesRegex(ValueError, "unsupported runtime workload"):
             runtime_benchmarks.run_runtime_benchmark("missing")  # type: ignore[arg-type]
 
         with self.assertRaisesRegex(ValueError, "iterations must be positive"):
             runtime_benchmarks.run_runtime_benchmark("publish", iterations=0)
+
+        with self.assertRaisesRegex(ValueError, "callers cannot exceed iterations"):
+            runtime_benchmarks.run_runtime_benchmark(
+                "rpc",
+                iterations=1,
+                mode="parallel",
+                callers=2,
+            )
 
         with self.assertRaisesRegex(TypeError, "callers must be an integer"):
             runtime_benchmarks.run_runtime_benchmark(

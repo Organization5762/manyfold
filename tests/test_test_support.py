@@ -74,6 +74,16 @@ class TestSupportTests(unittest.TestCase):
         self.assertEqual(env["PYTHONPATH"].split(os.pathsep).count(python_root), 1)
         self.assertEqual(env["PYTHONPATH"].split(os.pathsep).count("/tmp/project"), 1)
 
+    def test_sql_parser_stub_matches_single_statement_contract(self) -> None:
+        package = test_support.load_manyfold_package()
+
+        self.assertEqual(
+            package.parse_sql_statement("SELECT 1;"),
+            {"kind": "select", "sql": "SELECT 1"},
+        )
+        with self.assertRaisesRegex(ValueError, "exactly one statement"):
+            package.parse_sql_statement("SELECT 1; SELECT 2")
+
     def test_module_available_uses_import_specs_for_installed_modules(self) -> None:
         with mock.patch("importlib.util.find_spec", return_value=object()) as find_spec:
             self.assertTrue(test_support._module_available("reactivex"))
