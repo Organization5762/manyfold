@@ -70,6 +70,10 @@ uv run python -m unittest discover -s tests -p 'test_*.py'
 cargo test
 ```
 
+Standardized benchmark notes live under [docs/benchmarks](benchmarks/). Start
+with [Dormant Runtime Benchmark](benchmarks/dormant_runtime.md) when changing
+runtime wake-up or warm-pool behavior.
+
 ## Performance Checklist
 
 - Is backpressure represented in the graph?
@@ -78,4 +82,3 @@ cargo test
 - Can a route audit explain producers and subscribers?
 - Can lineage explain why an output exists?
 - Does the test use actual graph behavior instead of a stub?
-

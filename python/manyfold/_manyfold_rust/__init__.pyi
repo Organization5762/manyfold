@@ -33,7 +33,10 @@ __all__ = [
     "WritablePort",
     "WriteBinding",
     "bridge_version",
+    "parse_sql_statement",
 ]
+
+def parse_sql_statement(sql: builtins.str) -> builtins.dict[builtins.str, builtins.str]: ...
 
 @typing.final
 class ClockDomainRef:

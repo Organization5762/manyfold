@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import os
+import re
 import sys
 import types
 from collections.abc import Iterable
@@ -391,6 +392,28 @@ def install_manyfold_rust_stub() -> None:
         return
 
     rust_module = types.ModuleType("manyfold._manyfold_rust")
+
+    def parse_sql_statement(sql: str) -> dict[str, str]:
+        if not isinstance(sql, str):
+            raise TypeError("sql must be a string")
+        stripped = sql.strip()
+        match = re.match(r"\A([A-Za-z]+)\b", stripped)
+        if match is None:
+            raise ValueError("invalid SQL: expected statement")
+        keyword = match.group(1).lower()
+        if re.match(r"\ASELECT\s+FROM\b", stripped, re.IGNORECASE):
+            raise ValueError("invalid SQL: incomplete statement")
+        if keyword == "select" and re.search(r"\bFROM\b", stripped, re.IGNORECASE):
+            return {"kind": "select", "sql": stripped}
+        if keyword == "insert" and re.search(r"\bVALUES\b", stripped, re.IGNORECASE):
+            return {"kind": "insert", "sql": stripped}
+        if keyword == "update" and re.search(r"\bSET\b", stripped, re.IGNORECASE):
+            return {"kind": "update", "sql": stripped}
+        if keyword == "delete" and re.search(r"\bFROM\b", stripped, re.IGNORECASE):
+            return {"kind": "delete", "sql": stripped}
+        if keyword in {"select", "insert", "update", "delete"}:
+            raise ValueError("invalid SQL: incomplete statement")
+        return {"kind": "unsupported", "sql": stripped}
 
     class EnumValue(str):
         def __repr__(self) -> str:
@@ -1312,6 +1335,7 @@ def install_manyfold_rust_stub() -> None:
     rust_module.WritablePort = WritablePort
     rust_module.WriteBinding = WriteBinding
     rust_module.bridge_version = lambda: "stub"
+    rust_module.parse_sql_statement = parse_sql_statement
     sys.modules["manyfold._manyfold_rust"] = rust_module
 
 
@@ -1445,6 +1469,13 @@ def load_manyfold_package():
         "PeripheralAdapterHandle": sensor_io.PeripheralAdapterHandle,
         "Plane": rust.Plane,
         "PortDescriptor": rust.PortDescriptor,
+        "ProcessEndpoint": graph.ProcessEndpoint,
+        "ProcessRpcAuditEntry": graph.ProcessRpcAuditEntry,
+        "ProcessRpcFailure": graph.ProcessRpcFailure,
+        "ProcessRpcRequest": graph.ProcessRpcRequest,
+        "ProcessRpcResponse": graph.ProcessRpcResponse,
+        "ProcessRpcRoutes": graph.ProcessRpcRoutes,
+        "ProcessRpcTransport": graph.ProcessRpcTransport,
         "ProducerKind": rust.ProducerKind,
         "ProducerRef": rust.ProducerRef,
         "ReadablePort": rust.ReadablePort,
@@ -1457,6 +1488,7 @@ def load_manyfold_package():
         "RetryPolicy": graph.RetryPolicy,
         "RouteIdentity": primitives.RouteIdentity,
         "RouteNamespace": primitives.RouteNamespace,
+        "RouteScope": primitives.RouteScope,
         "RouteRef": rust.RouteRef,
         "RouteAuditSnapshot": graph.RouteAuditSnapshot,
         "RoutePipeline": graph.RoutePipeline,
@@ -1503,6 +1535,7 @@ def load_manyfold_package():
         "WriteBinding": rust.WriteBinding,
         "WriteBindings": graph.WriteBindings,
         "bridge_version": rust.bridge_version,
+        "parse_sql_statement": rust.parse_sql_statement,
         "dependency_closure_of": lego_catalog.dependency_closure_of,
         "dependencies_of": lego_catalog.dependencies_of,
         "dependents_of": lego_catalog.dependents_of,
@@ -1512,6 +1545,7 @@ def load_manyfold_package():
         "get_lego": lego_catalog.get_lego,
         "health_status_schema": sensor_io.health_status_schema,
         "instrument_stream": graph.instrument_stream,
+        "logical_routes": primitives.logical_routes,
         "route": primitives.route,
         "legos_by_layer": lego_catalog.legos_by_layer,
         "legos_by_role": lego_catalog.legos_by_role,

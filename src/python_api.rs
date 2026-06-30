@@ -15,7 +15,10 @@ use crate::core::{
 use pyo3::basic::CompareOp;
 use pyo3::exceptions::{PyKeyError, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::PyBool;
+use pyo3::types::{PyBool, PyDict};
+use sqlparser::ast::Statement;
+use sqlparser::dialect::GenericDialect;
+use sqlparser::parser::Parser;
 
 #[cfg(feature = "stub-gen")]
 use pyo3_stub_gen::define_stub_info_gatherer;
@@ -2370,9 +2373,36 @@ fn bridge_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyfunction)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyfunction]
+fn parse_sql_statement(py: Python<'_>, sql: &str) -> PyResult<Py<PyDict>> {
+    let dialect = GenericDialect {};
+    let statements = Parser::parse_sql(&dialect, sql)
+        .map_err(|error| PyValueError::new_err(format!("invalid SQL: {error}")))?;
+    if statements.len() != 1 {
+        return Err(PyValueError::new_err(
+            "SQL planner requires exactly one statement",
+        ));
+    }
+    let statement = &statements[0];
+    let kind = match statement {
+        Statement::Query(_) => "select",
+        Statement::Insert(_) => "insert",
+        Statement::Update { .. } => "update",
+        Statement::Delete(_) => "delete",
+        _ => "unsupported",
+    };
+    let result = PyDict::new(py);
+    result.set_item("kind", kind)?;
+    result.set_item("sql", statement.to_string())?;
+    Ok(result.into())
+}
+
 #[pymodule]
 fn _manyfold_rust(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(bridge_version, module)?)?;
+    module.add_function(wrap_pyfunction!(parse_sql_statement, module)?)?;
     module.add_class::<PyPlane>()?;
     module.add_class::<PyLayer>()?;
     module.add_class::<PyVariant>()?;

@@ -451,6 +451,48 @@ class GraphReactiveTests(unittest.TestCase):
         self.assertEqual(rebuilds, 0)
         self.assertNotIn(route.display(), graph._stream_taint_upper_bounds)
 
+    def test_stable_taint_upper_bound_does_not_churn_generation(self) -> None:
+        graph_module = load_graph_module()
+        route = graph_module.route(
+            plane=graph_module.Plane.Write,
+            layer=graph_module.Layer.Logical,
+            owner=graph_module.OwnerName("kafka"),
+            family=graph_module.StreamFamily("log"),
+            stream=graph_module.StreamName("stable_coherence"),
+            variant=graph_module.Variant.Request,
+            schema=graph_module.Schema.bytes(name="StableCoherence"),
+        )
+        graph = graph_module.Graph()
+        graph.configure_retention(
+            route,
+            graph_module.RouteRetentionPolicy(
+                latest_replay_policy="bounded_history",
+                history_limit=1,
+            ),
+        )
+
+        graph.publish(route, b"one")
+        first_generation = graph._taint_generation
+        first_bounds = tuple(
+            item
+            for item in graph._taint_query_items(route)
+            if item.startswith("stream:")
+        )
+
+        graph.publish(route, b"two")
+        second_bounds = tuple(
+            item
+            for item in graph._taint_query_items(route)
+            if item.startswith("stream:")
+        )
+
+        self.assertEqual(graph._taint_generation, first_generation)
+        self.assertEqual(second_bounds, first_bounds)
+        self.assertTrue(
+            any("COHERENCE_WRITE_PENDING" in item for item in first_bounds),
+            first_bounds,
+        )
+
     def test_observe_rolls_back_subscriber_tracking_when_latest_replay_fails(
         self,
     ) -> None:
@@ -8291,6 +8333,124 @@ else:
                 )
             )
 
+    def test_process_rpc_transport_calls_process_local_handler(self) -> None:
+        graph_module = load_graph_module()
+        graph = graph_module.Graph()
+        caller = graph_module.ProcessEndpoint("caller", address="process://caller")
+        worker = graph_module.ProcessEndpoint("worker", address="process://worker")
+        worker_transport = graph_module.ProcessRpcTransport.install(
+            graph,
+            worker,
+            audit_limit=4,
+        )
+        caller_transport = graph_module.ProcessRpcTransport.attach(
+            graph,
+            worker_transport.routes,
+            caller,
+        )
+        try:
+            worker_transport.register(
+                "postgres",
+                "select",
+                lambda request: {"row": request.payload["id"]},
+            )
+            response = caller_transport.call(
+                target=worker,
+                service="postgres",
+                method="select",
+                payload={"id": "row-1"},
+                correlation_id="call-1",
+            )
+            audit = next(
+                graph.retention_snapshot(worker_transport.routes.audit_log)
+            )
+        finally:
+            caller_transport.dispose()
+            worker_transport.dispose()
+
+        self.assertEqual(response.correlation_id, "call-1")
+        self.assertEqual(response.source, worker)
+        self.assertEqual(response.target, caller)
+        self.assertEqual(response.payload, {"row": "row-1"})
+        self.assertEqual(audit.payload_count, 1)
+
+    def test_process_rpc_transport_nowait_and_remote_target_filter(self) -> None:
+        graph_module = load_graph_module()
+        graph = graph_module.Graph()
+        worker = graph_module.ProcessEndpoint("worker")
+        other = graph_module.ProcessEndpoint("other")
+        transport = graph_module.ProcessRpcTransport.install(graph, worker)
+        try:
+            transport.register("cache", "get", lambda request: request.payload)
+            ignored = transport.call_nowait(
+                target=other,
+                service="cache",
+                method="get",
+                payload={"key": "a"},
+                correlation_id="ignored",
+            )
+            handled = transport.call_nowait(
+                target=worker,
+                service="cache",
+                method="get",
+                payload={"key": "b"},
+                correlation_id="handled",
+            )
+            audit = next(graph.retention_snapshot(transport.routes.audit_log))
+        finally:
+            transport.dispose()
+
+        self.assertIsNone(ignored)
+        self.assertIsInstance(handled, graph_module.ProcessRpcResponse)
+        self.assertEqual(handled.payload, {"key": "b"})
+        self.assertEqual(audit.payload_count, 1)
+
+    def test_process_rpc_transport_routes_failures_and_bounds_audit(self) -> None:
+        graph_module = load_graph_module()
+        graph = graph_module.Graph()
+        worker = graph_module.ProcessEndpoint("worker")
+        transport = graph_module.ProcessRpcTransport.install(
+            graph,
+            worker,
+            audit_limit=2,
+        )
+        try:
+            with self.assertRaisesRegex(RuntimeError, "no RPC handler"):
+                transport.call(
+                    target=worker,
+                    service="missing",
+                    method="call",
+                    payload=None,
+                    correlation_id="missing-1",
+                )
+            transport.register(
+                "broken",
+                "call",
+                lambda request: (_ for _ in ()).throw(RuntimeError("boom")),
+            )
+            with self.assertRaisesRegex(RuntimeError, "RuntimeError: boom"):
+                transport.call(
+                    target=worker,
+                    service="broken",
+                    method="call",
+                    payload=None,
+                    correlation_id="broken-1",
+                )
+            transport.register("ok", "call", lambda request: "ok")
+            response = transport.call(
+                target=worker,
+                service="ok",
+                method="call",
+                payload=None,
+                correlation_id="ok-1",
+            )
+            audit = next(graph.retention_snapshot(transport.routes.audit_log))
+        finally:
+            transport.dispose()
+
+        self.assertEqual(response.payload, "ok")
+        self.assertEqual(audit.payload_count, 2)
+
     def test_graph_metadata_records_reject_invalid_construction_inputs(self) -> None:
         graph_module = load_graph_module()
         route = graph_module.route(
@@ -8391,6 +8551,47 @@ else:
             graph_module.QueryServiceRoutes(request=object(), response=route.route_ref)
         with self.assertRaisesRegex(ValueError, "query service response"):
             graph_module.QueryServiceRoutes(request=route.route_ref, response=object())
+        endpoint = graph_module.ProcessEndpoint("node-a")
+        with self.assertRaisesRegex(ValueError, "process endpoint node_id"):
+            graph_module.ProcessEndpoint("")
+        with self.assertRaisesRegex(ValueError, "process endpoint address"):
+            graph_module.ProcessEndpoint("node-a", address="")
+        with self.assertRaisesRegex(ValueError, "process endpoint roles"):
+            graph_module.ProcessEndpoint("node-a", roles=("worker", " "))
+        with self.assertRaisesRegex(ValueError, "RPC correlation_id"):
+            graph_module.ProcessRpcRequest(
+                correlation_id="",
+                service="postgres",
+                method="select",
+                payload={},
+                source=endpoint,
+                target=endpoint,
+            )
+        with self.assertRaisesRegex(ValueError, "RPC service"):
+            graph_module.ProcessRpcRequest(
+                correlation_id="call-1",
+                service="",
+                method="select",
+                payload={},
+                source=endpoint,
+                target=endpoint,
+            )
+        with self.assertRaisesRegex(ValueError, "RPC source"):
+            graph_module.ProcessRpcRequest(
+                correlation_id="call-1",
+                service="postgres",
+                method="select",
+                payload={},
+                source=object(),
+                target=endpoint,
+            )
+        with self.assertRaisesRegex(ValueError, "RPC request"):
+            graph_module.ProcessRpcRoutes(
+                request=object(),
+                response=route,
+                failure=route,
+                audit_log=route,
+            )
         event = graph_module.EventRef(route.display(), 1)
         with self.assertRaisesRegex(ValueError, "event route_display"):
             graph_module.EventRef("", 1)

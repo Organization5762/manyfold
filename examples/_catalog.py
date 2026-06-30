@@ -247,6 +247,10 @@ EXAMPLE_CATALOG: tuple[ExampleCatalogEntry, ...] = (
         reference_title="Cross-partition join",
     ),
     ExampleCatalogEntry(
+        "runtime_substrate",
+        "A runtime substrate composes PubSub, DurableLog, DurablePubSub, and streaming projections.",
+    ),
+    ExampleCatalogEntry(
         "broadcast_mirror",
         "Deterministic capacitor fan-out mirrors state to multiple observers.",
         reference_number=8,

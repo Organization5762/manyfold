@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import ast
+import json
 import re
+import subprocess
+import sys
 import unittest
 from pathlib import Path
 
@@ -23,6 +26,14 @@ PYTHON_SOURCE_ROOTS = (
     PROJECT_ROOT / "python",
     PROJECT_ROOT / "tests",
 )
+PRIVATE_PROFILING_MODULES = frozenset(
+    {
+        "jemalloc_leak_check",
+        "native_profilers",
+        "profile_artifacts",
+        "runtime_benchmarks",
+    }
+)
 RUNTIME_ASSERT_ROOTS = (
     PROJECT_ROOT / "python" / "manyfold",
     PROJECT_ROOT / "python" / "manyfold_example_catalog.py",
@@ -31,6 +42,12 @@ HOT_PATH_PYTHON_PATHS = (
     PROJECT_ROOT / "python" / "manyfold" / "graph.py",
     PROJECT_ROOT / "python" / "manyfold" / "memory_benchmarks.py",
     PROJECT_ROOT / "python" / "manyfold" / "reactive_threads.py",
+    PROJECT_ROOT
+    / "python"
+    / "manyfold"
+    / "private"
+    / "profiling"
+    / "runtime_benchmarks.py",
 )
 PACKAGE_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+")
 TYPE_ALIAS_VALUE_NAMES = frozenset(
@@ -57,6 +74,12 @@ DECLARATION_ORDER_EXCEPTIONS = frozenset(
     {
         ("python/manyfold/graph.py", "_ThreadPlaceableNode"),
         ("python/manyfold/reactive_threads.py", "_NoStartingValue"),
+        ("examples/runtime_substrate.py", "run_example"),
+        ("examples/runtime_substrate.py", "run_kafka_backed_queue_program"),
+        ("examples/runtime_substrate.py", "run_kafka_bootstrap_benchmark"),
+        ("examples/runtime_substrate.py", "run_kafka_leader_failure_example"),
+        ("examples/runtime_substrate.py", "run_projection_into_local_stream_example"),
+        ("examples/runtime_substrate.py", "run_pubsub_upgrade_example"),
     }
 )
 
@@ -88,6 +111,31 @@ class ProjectMetadataTests(unittest.TestCase):
         )
 
         self.assertEqual(violations, ())
+
+    def test_top_level_manyfold_import_stays_lazy(self) -> None:
+        probe = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import json, sys; "
+                    "import manyfold; "
+                    "before=sorted(name for name in sys.modules "
+                    "if name.startswith('manyfold.')); "
+                    "manyfold.Graph; "
+                    "after=sorted(name for name in sys.modules "
+                    "if name.startswith('manyfold.')); "
+                    "print(json.dumps({'before': before, 'after': after}))"
+                ),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        modules = json.loads(probe.stdout)
+
+        self.assertEqual(modules["before"], [])
+        self.assertIn("manyfold.graph", modules["after"])
 
     def test_cargo_dependency_tables_stay_sorted(self) -> None:
         cargo = _toml_document(CARGO_TOML_PATH)
@@ -130,6 +178,46 @@ class ProjectMetadataTests(unittest.TestCase):
         )
         self.assertEqual(script_names, tuple(sorted(script_names)))
         self.assertEqual(url_names, tuple(sorted(url_names)))
+
+    def test_profiling_tools_stay_private(self) -> None:
+        for module_name in sorted(PRIVATE_PROFILING_MODULES):
+            with self.subTest(module=module_name):
+                self.assertFalse(
+                    (PROJECT_ROOT / "python" / "manyfold" / f"{module_name}.py").exists()
+                )
+                self.assertTrue(
+                    (
+                        PROJECT_ROOT
+                        / "python"
+                        / "manyfold"
+                        / "private"
+                        / "profiling"
+                        / f"{module_name}.py"
+                    ).exists()
+                )
+
+        scripts = _toml_document(PYPROJECT_PATH)["project"]["scripts"]
+        profiling_scripts = {
+            name: target
+            for name, target in scripts.items()
+            if name
+            in {
+                "manyfold-jemalloc-leak-check",
+                "manyfold-jemalloc-verify",
+                "manyfold-native-profiler",
+                "manyfold-native-profiler-verify",
+                "manyfold-profile-artifact-verify",
+                "manyfold-runtime-benchmark",
+            }
+        }
+
+        self.assertEqual(len(profiling_scripts), 6)
+        self.assertTrue(
+            all(
+                target.startswith("manyfold.private.profiling.")
+                for target in profiling_scripts.values()
+            )
+        )
 
     def test_native_stub_exports_stay_sorted(self) -> None:
         exports = _module_all_assignment(NATIVE_STUB_PATH)
