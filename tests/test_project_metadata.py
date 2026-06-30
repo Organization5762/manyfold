@@ -19,6 +19,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 AGENTS_PATH = PROJECT_ROOT / "AGENTS.md"
 CARGO_TOML_PATH = PROJECT_ROOT / "Cargo.toml"
 CI_WORKFLOW_PATH = PROJECT_ROOT / ".github" / "workflows" / "ci.yml"
+PYPI_WORKFLOW_PATH = PROJECT_ROOT / ".github" / "workflows" / "pypi.yml"
 NATIVE_STUB_PATH = (
     PROJECT_ROOT / "python" / "manyfold" / "_manyfold_rust" / "__init__.pyi"
 )
@@ -177,6 +178,37 @@ class ProjectMetadataTests(unittest.TestCase):
         )
         self.assertEqual(script_names, tuple(sorted(script_names)))
         self.assertEqual(url_names, tuple(sorted(url_names)))
+
+    def test_python_and_cargo_package_versions_match(self) -> None:
+        cargo = _toml_document(CARGO_TOML_PATH)
+        pyproject = _toml_document(PYPROJECT_PATH)
+
+        self.assertEqual(
+            cargo["package"]["version"],
+            pyproject["project"]["version"],
+        )
+
+    def test_release_workflow_publishes_matching_python_and_cargo_versions(
+        self,
+    ) -> None:
+        workflow = PYPI_WORKFLOW_PATH.read_text(encoding="utf-8")
+
+        required_fragments = (
+            "Validate release metadata",
+            "Verify Python and Cargo versions match",
+            'python_version = pyproject["project"]["version"]',
+            'cargo_version = cargo["package"]["version"]',
+            "cargo package --locked",
+            "Publish crate to crates.io",
+            "CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}",
+            'cargo publish --locked --token "$CARGO_REGISTRY_TOKEN"',
+            "url: https://crates.io/crates/manyfold",
+        )
+
+        for fragment in required_fragments:
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, workflow)
+        self.assertIn("      - publish\n", workflow)
 
     def test_profiling_tools_stay_private(self) -> None:
         for module_name in sorted(PRIVATE_PROFILING_MODULES):

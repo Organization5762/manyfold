@@ -3,7 +3,9 @@
 use std::collections::hash_map::DefaultHasher;
 use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
+use std::net::UdpSocket;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::architecture::{
     InMemoryPubSubCore, PubSubDeliveryCore, PubSubMessageCore, PubSubSubscriptionCore,
@@ -19,7 +21,9 @@ use crate::core::{
 use pyo3::basic::CompareOp;
 use pyo3::exceptions::{PyKeyError, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyBool, PyBytes, PyDict};
+use pyo3::types::{PyBool, PyBytes, PyDict, PyList};
+use rusqlite::types::ValueRef;
+use rusqlite::{params, Connection, ToSql};
 use sqlparser::ast::Statement;
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
@@ -166,6 +170,16 @@ fn extract_positive_capacity(value: &Bound<'_, PyAny>) -> PyResult<usize> {
 
 fn extract_logical_length_bytes(value: &Bound<'_, PyAny>) -> PyResult<u64> {
     extract_nonbool_u64(value, "logical_length_bytes")
+}
+
+fn current_system_time_ns() -> PyResult<u64> {
+    let duration = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| {
+            PyRuntimeError::new_err(format!("system clock before Unix epoch: {error}"))
+        })?;
+    u64::try_from(duration.as_nanos())
+        .map_err(|_| PyRuntimeError::new_err("system time does not fit in nanoseconds"))
 }
 
 fn extract_optional_control_epoch(value: &Bound<'_, PyAny>) -> PyResult<Option<u64>> {
@@ -2374,6 +2388,1378 @@ impl Graph {
 #[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
 #[pyclass(module = "manyfold._manyfold_rust", frozen, from_py_object)]
 #[derive(Clone)]
+pub struct ArchitecturePad {
+    name: String,
+    topic: String,
+    direction: String,
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pymethods]
+impl ArchitecturePad {
+    #[new]
+    #[pyo3(signature = (name, topic, direction="internal".to_string()))]
+    fn new(name: String, topic: String, direction: String) -> PyResult<Self> {
+        validate_nonblank_text("pad name", &name)?;
+        validate_nonblank_text("pad topic", &topic)?;
+        if !matches!(direction.as_str(), "input" | "output" | "internal") {
+            return Err(PyValueError::new_err(
+                "pad direction must be 'input', 'output', or 'internal'",
+            ));
+        }
+        Ok(Self {
+            name,
+            topic,
+            direction,
+        })
+    }
+
+    #[getter]
+    fn name(&self) -> String {
+        self.name.clone()
+    }
+
+    #[getter]
+    fn topic(&self) -> String {
+        self.topic.clone()
+    }
+
+    #[getter]
+    fn direction(&self) -> String {
+        self.direction.clone()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "Pad(name={:?}, topic={:?}, direction={:?})",
+            self.name, self.topic, self.direction
+        )
+    }
+
+    fn __richcmp__(&self, other: PyRef<'_, ArchitecturePad>, op: CompareOp) -> PyResult<bool> {
+        match op {
+            CompareOp::Eq => Ok(self.name == other.name
+                && self.topic == other.topic
+                && self.direction == other.direction),
+            CompareOp::Ne => Ok(self.name != other.name
+                || self.topic != other.topic
+                || self.direction != other.direction),
+            _ => Err(PyTypeError::new_err(
+                "pads only support equality comparison",
+            )),
+        }
+    }
+}
+
+macro_rules! native_named_link {
+    ($name:ident, $repr:literal, [$($field:ident),+]) => {
+        #[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+        #[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+        #[pyclass(module = "manyfold._manyfold_rust", frozen, from_py_object)]
+        #[derive(Clone)]
+        pub struct $name {
+            $( $field: String, )+
+        }
+
+        #[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+        #[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+        #[pymethods]
+        impl $name {
+            #[new]
+            fn new($( $field: String ),+) -> PyResult<Self> {
+                $( validate_nonblank_text(stringify!($field), &$field)?; )+
+                Ok(Self { $( $field, )+ })
+            }
+
+            $(
+                #[getter]
+                fn $field(&self) -> String {
+                    self.$field.clone()
+                }
+            )+
+
+            fn __repr__(&self) -> String {
+                format!($repr, $( &self.$field ),+)
+            }
+        }
+    };
+}
+
+native_named_link!(
+    ArchitectureRelay,
+    "Relay(name={:?}, source={:?}, target={:?})",
+    [name, source, target]
+);
+native_named_link!(
+    ArchitectureVia,
+    "Via(name={:?}, source={:?}, target={:?}, boundary={:?})",
+    [name, source, target, boundary]
+);
+native_named_link!(
+    ArchitectureGround,
+    "Ground(name={:?}, reason={:?})",
+    [name, reason]
+);
+native_named_link!(
+    ArchitectureProbe,
+    "Probe(name={:?}, target={:?})",
+    [name, target]
+);
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust", frozen, from_py_object)]
+#[derive(Clone)]
+pub struct ArchitectureRegulator {
+    name: String,
+    policy: String,
+    limit: Option<u64>,
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pymethods]
+impl ArchitectureRegulator {
+    #[new]
+    #[pyo3(signature = (name, policy, limit=None))]
+    fn new(name: String, policy: String, limit: Option<u64>) -> PyResult<Self> {
+        validate_nonblank_text("regulator name", &name)?;
+        validate_nonblank_text("regulator policy", &policy)?;
+        if limit == Some(0) {
+            return Err(PyValueError::new_err("regulator limit must be positive"));
+        }
+        Ok(Self {
+            name,
+            policy,
+            limit,
+        })
+    }
+
+    #[getter]
+    fn name(&self) -> String {
+        self.name.clone()
+    }
+
+    #[getter]
+    fn policy(&self) -> String {
+        self.policy.clone()
+    }
+
+    #[getter]
+    fn limit(&self) -> Option<u64> {
+        self.limit
+    }
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust", frozen, from_py_object)]
+#[derive(Clone)]
+pub struct ArchitectureCapacitor {
+    name: String,
+    source: String,
+    target: String,
+    capacity: u64,
+    location: Option<String>,
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pymethods]
+impl ArchitectureCapacitor {
+    #[new]
+    #[pyo3(signature = (name, source, target, capacity=1, location=None))]
+    fn new(
+        name: String,
+        source: String,
+        target: String,
+        capacity: u64,
+        location: Option<String>,
+    ) -> PyResult<Self> {
+        validate_nonblank_text("capacitor name", &name)?;
+        validate_nonblank_text("capacitor source", &source)?;
+        validate_nonblank_text("capacitor target", &target)?;
+        if capacity == 0 {
+            return Err(PyValueError::new_err("capacitor capacity must be positive"));
+        }
+        if let Some(value) = location.as_deref() {
+            validate_nonblank_text("capacitor location", value)?;
+        }
+        Ok(Self {
+            name,
+            source,
+            target,
+            capacity,
+            location,
+        })
+    }
+
+    #[getter]
+    fn name(&self) -> String {
+        self.name.clone()
+    }
+
+    #[getter]
+    fn source(&self) -> String {
+        self.source.clone()
+    }
+
+    #[getter]
+    fn target(&self) -> String {
+        self.target.clone()
+    }
+
+    #[getter]
+    fn capacity(&self) -> u64 {
+        self.capacity
+    }
+
+    #[getter]
+    fn location(&self) -> Option<String> {
+        self.location.clone()
+    }
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust", frozen, from_py_object)]
+#[derive(Clone)]
+pub struct ArchitectureResistor {
+    name: String,
+    boundary: String,
+    policy: String,
+    limit: Option<u64>,
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pymethods]
+impl ArchitectureResistor {
+    #[new]
+    #[pyo3(signature = (name, boundary, policy, limit=None))]
+    fn new(name: String, boundary: String, policy: String, limit: Option<u64>) -> PyResult<Self> {
+        validate_nonblank_text("resistor name", &name)?;
+        validate_nonblank_text("resistor boundary", &boundary)?;
+        validate_nonblank_text("resistor policy", &policy)?;
+        if limit == Some(0) {
+            return Err(PyValueError::new_err("resistor limit must be positive"));
+        }
+        Ok(Self {
+            name,
+            boundary,
+            policy,
+            limit,
+        })
+    }
+
+    #[getter]
+    fn name(&self) -> String {
+        self.name.clone()
+    }
+
+    #[getter]
+    fn boundary(&self) -> String {
+        self.boundary.clone()
+    }
+
+    #[getter]
+    fn policy(&self) -> String {
+        self.policy.clone()
+    }
+
+    #[getter]
+    fn limit(&self) -> Option<u64> {
+        self.limit
+    }
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust", frozen, from_py_object)]
+#[derive(Clone)]
+pub struct ClockCalibrationSample {
+    observed_ns: u64,
+    reference_ns: u64,
+    temperature_c: Option<f64>,
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pymethods]
+impl ClockCalibrationSample {
+    #[new]
+    #[pyo3(signature = (observed_ns, reference_ns, temperature_c=None))]
+    fn new(observed_ns: u64, reference_ns: u64, temperature_c: Option<f64>) -> Self {
+        Self {
+            observed_ns,
+            reference_ns,
+            temperature_c,
+        }
+    }
+
+    #[getter]
+    fn observed_ns(&self) -> u64 {
+        self.observed_ns
+    }
+
+    #[getter]
+    fn reference_ns(&self) -> u64 {
+        self.reference_ns
+    }
+
+    #[getter]
+    fn temperature_c(&self) -> Option<f64> {
+        self.temperature_c
+    }
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust", frozen)]
+pub struct SystemTimeProvider;
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pymethods]
+impl SystemTimeProvider {
+    #[new]
+    fn new() -> Self {
+        Self
+    }
+
+    fn now_ns(&self) -> PyResult<u64> {
+        current_system_time_ns()
+    }
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust", frozen)]
+pub struct NtpTimeProvider {
+    server: String,
+    port: u16,
+    timeout_ms: u64,
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pymethods]
+impl NtpTimeProvider {
+    #[new]
+    #[pyo3(signature = (server, *, port=123, timeout_ms=1000))]
+    fn new(server: String, port: u16, timeout_ms: u64) -> PyResult<Self> {
+        validate_nonblank_text("ntp server", &server)?;
+        if port == 0 {
+            return Err(PyValueError::new_err("ntp port must be positive"));
+        }
+        if timeout_ms == 0 {
+            return Err(PyValueError::new_err("ntp timeout_ms must be positive"));
+        }
+        Ok(Self {
+            server,
+            port,
+            timeout_ms,
+        })
+    }
+
+    #[getter]
+    fn server(&self) -> String {
+        self.server.clone()
+    }
+
+    #[getter]
+    fn port(&self) -> u16 {
+        self.port
+    }
+
+    #[getter]
+    fn timeout_ms(&self) -> u64 {
+        self.timeout_ms
+    }
+
+    fn now_ns(&self) -> PyResult<u64> {
+        let socket = UdpSocket::bind("0.0.0.0:0").map_err(|error| {
+            PyRuntimeError::new_err(format!("failed to bind NTP socket: {error}"))
+        })?;
+        let timeout = Some(Duration::from_millis(self.timeout_ms));
+        socket.set_read_timeout(timeout).map_err(|error| {
+            PyRuntimeError::new_err(format!("failed to configure NTP socket: {error}"))
+        })?;
+        socket.set_write_timeout(timeout).map_err(|error| {
+            PyRuntimeError::new_err(format!("failed to configure NTP socket: {error}"))
+        })?;
+
+        let mut request = [0_u8; 48];
+        request[0] = 0x1b;
+        socket
+            .send_to(&request, (self.server.as_str(), self.port))
+            .map_err(|error| {
+                PyRuntimeError::new_err(format!("failed to send NTP request: {error}"))
+            })?;
+
+        let mut response = [0_u8; 48];
+        let (received, _) = socket.recv_from(&mut response).map_err(|error| {
+            PyRuntimeError::new_err(format!("failed to receive NTP response: {error}"))
+        })?;
+        if received < response.len() {
+            return Err(PyRuntimeError::new_err(
+                "NTP response was shorter than 48 bytes",
+            ));
+        }
+
+        const NTP_UNIX_EPOCH_SECONDS: u64 = 2_208_988_800;
+        let seconds =
+            u32::from_be_bytes([response[40], response[41], response[42], response[43]]) as u64;
+        if seconds < NTP_UNIX_EPOCH_SECONDS {
+            return Err(PyRuntimeError::new_err("NTP response predates Unix epoch"));
+        }
+        let fraction =
+            u32::from_be_bytes([response[44], response[45], response[46], response[47]]) as u128;
+        let nanos = ((fraction * 1_000_000_000_u128) >> 32) as u64;
+        (seconds - NTP_UNIX_EPOCH_SECONDS)
+            .checked_mul(1_000_000_000)
+            .and_then(|value| value.checked_add(nanos))
+            .ok_or_else(|| PyRuntimeError::new_err("NTP timestamp overflowed nanoseconds"))
+    }
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust")]
+pub struct MonotonicLogicalClock {
+    value: u64,
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pymethods]
+impl MonotonicLogicalClock {
+    #[new]
+    fn new() -> Self {
+        Self { value: 0 }
+    }
+
+    fn tick(&mut self) -> u64 {
+        self.value += 1;
+        self.value
+    }
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust")]
+pub struct Clock {
+    logical: MonotonicLogicalClock,
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pymethods]
+impl Clock {
+    #[new]
+    fn new() -> Self {
+        Self {
+            logical: MonotonicLogicalClock::new(),
+        }
+    }
+
+    fn tick(&mut self) -> u64 {
+        self.logical.tick()
+    }
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust", frozen)]
+pub struct CalibratedClock {
+    samples: Vec<ClockCalibrationSample>,
+    slope: f64,
+    intercept: f64,
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pymethods]
+impl CalibratedClock {
+    #[new]
+    #[pyo3(signature = (samples))]
+    fn new(samples: Vec<ClockCalibrationSample>) -> PyResult<Self> {
+        if samples.is_empty() {
+            return Err(PyValueError::new_err(
+                "calibrated clock requires at least one true time observation",
+            ));
+        }
+        let (slope, intercept) = fit_clock_calibration(&samples);
+        Ok(Self {
+            samples,
+            slope,
+            intercept,
+        })
+    }
+
+    #[getter]
+    fn samples(&self) -> Vec<ClockCalibrationSample> {
+        self.samples.clone()
+    }
+
+    fn now_ns(&self) -> PyResult<u64> {
+        let observed = current_system_time_ns()? as f64;
+        let calibrated = self.slope.mul_add(observed, self.intercept);
+        if !calibrated.is_finite() || calibrated < 0.0 {
+            return Err(PyRuntimeError::new_err("calibrated time is not finite"));
+        }
+        Ok(calibrated.round() as u64)
+    }
+}
+
+fn fit_clock_calibration(samples: &[ClockCalibrationSample]) -> (f64, f64) {
+    if samples.len() == 1 {
+        let sample = &samples[0];
+        return (1.0, sample.reference_ns as f64 - sample.observed_ns as f64);
+    }
+    let count = samples.len() as f64;
+    let sum_observed: f64 = samples.iter().map(|sample| sample.observed_ns as f64).sum();
+    let sum_reference: f64 = samples
+        .iter()
+        .map(|sample| sample.reference_ns as f64)
+        .sum();
+    let mean_observed = sum_observed / count;
+    let mean_reference = sum_reference / count;
+    let mut numerator = 0.0;
+    let mut denominator = 0.0;
+    for sample in samples {
+        let observed_delta = sample.observed_ns as f64 - mean_observed;
+        numerator += observed_delta * (sample.reference_ns as f64 - mean_reference);
+        denominator += observed_delta * observed_delta;
+    }
+    if denominator == 0.0 {
+        return (1.0, mean_reference - mean_observed);
+    }
+    let slope = numerator / denominator;
+    let intercept = mean_reference - slope * mean_observed;
+    (slope, intercept)
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust", frozen, from_py_object)]
+#[derive(Clone)]
+pub struct DataStreamRecord {
+    pad_name: Option<String>,
+    topic: String,
+    payload: Vec<u8>,
+    offset: u64,
+    process_sequence: u64,
+    event_time: i64,
+    key: Option<String>,
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust", frozen, from_py_object)]
+#[derive(Clone)]
+pub struct FlatBufferField {
+    name: String,
+    index: u16,
+    field_type: String,
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pymethods]
+impl FlatBufferField {
+    #[new]
+    #[pyo3(signature = (name, index, field_type))]
+    fn new(name: String, index: u16, field_type: String) -> PyResult<Self> {
+        validate_sql_identifier("flatbuffer field name", &name)?;
+        validate_flatbuffer_field_type(&field_type)?;
+        Ok(Self {
+            name,
+            index,
+            field_type,
+        })
+    }
+
+    #[getter]
+    fn name(&self) -> String {
+        self.name.clone()
+    }
+
+    #[getter]
+    fn index(&self) -> u16 {
+        self.index
+    }
+
+    #[getter]
+    fn field_type(&self) -> String {
+        self.field_type.clone()
+    }
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust", frozen, from_py_object)]
+#[derive(Clone)]
+pub struct FlatBufferTable {
+    name: String,
+    fields: Vec<FlatBufferField>,
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pymethods]
+impl FlatBufferTable {
+    #[new]
+    #[pyo3(signature = (name, fields))]
+    fn new(name: String, fields: Vec<FlatBufferField>) -> PyResult<Self> {
+        validate_nonblank_text("flatbuffer table name", &name)?;
+        if fields.is_empty() {
+            return Err(PyValueError::new_err(
+                "flatbuffer table must expose at least one field",
+            ));
+        }
+        Ok(Self { name, fields })
+    }
+
+    #[getter]
+    fn name(&self) -> String {
+        self.name.clone()
+    }
+
+    #[getter]
+    fn fields(&self) -> Vec<FlatBufferField> {
+        self.fields.clone()
+    }
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pymethods]
+impl DataStreamRecord {
+    #[getter]
+    fn pad_name(&self) -> Option<String> {
+        self.pad_name.clone()
+    }
+
+    #[getter]
+    fn topic(&self) -> String {
+        self.topic.clone()
+    }
+
+    #[getter]
+    fn payload(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.payload).into()
+    }
+
+    #[getter]
+    fn offset(&self) -> u64 {
+        self.offset
+    }
+
+    #[getter]
+    fn process_sequence(&self) -> u64 {
+        self.process_sequence
+    }
+
+    #[getter]
+    fn event_time(&self) -> i64 {
+        self.event_time
+    }
+
+    #[getter]
+    fn key(&self) -> Option<String> {
+        self.key.clone()
+    }
+
+    #[getter]
+    fn seq_source(&self) -> u64 {
+        self.offset + 1
+    }
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust", unsendable)]
+pub struct DataStreamProcessor {
+    connection: Connection,
+    process_sequence: u64,
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pymethods]
+impl DataStreamProcessor {
+    #[new]
+    fn new() -> PyResult<Self> {
+        Self::new_processor()
+    }
+
+    #[pyo3(signature = (message, *, event_time=None, key=None))]
+    fn ingest(
+        &mut self,
+        message: &PubSubMessage,
+        event_time: Option<i64>,
+        key: Option<String>,
+    ) -> PyResult<DataStreamRecord> {
+        self.ingest_core(&message.inner, event_time, key)
+    }
+
+    #[pyo3(signature = (messages))]
+    fn ingest_many(&mut self, messages: Vec<PubSubMessage>) -> PyResult<Vec<DataStreamRecord>> {
+        messages
+            .iter()
+            .map(|message| self.ingest_core(&message.inner, None, None))
+            .collect()
+    }
+
+    #[pyo3(signature = (sql, parameters=None))]
+    fn query(
+        &self,
+        py: Python<'_>,
+        sql: String,
+        parameters: Option<Bound<'_, PyDict>>,
+    ) -> PyResult<Py<PyList>> {
+        query_connection(py, &self.connection, &sql, parameters.as_ref())
+    }
+
+    #[pyo3(signature = (sql, parameters=None))]
+    fn query_one(
+        &self,
+        py: Python<'_>,
+        sql: String,
+        parameters: Option<Bound<'_, PyDict>>,
+    ) -> PyResult<Option<Py<PyDict>>> {
+        let rows = query_connection(py, &self.connection, &sql, parameters.as_ref())?;
+        let rows = rows.bind(py);
+        match rows.len() {
+            0 => Ok(None),
+            1 => Ok(Some(rows.get_item(0)?.extract()?)),
+            _ => Err(PyValueError::new_err(
+                "stream processor SQL returned more than one row",
+            )),
+        }
+    }
+
+    fn latest(&self, topic: String) -> PyResult<Option<DataStreamRecord>> {
+        self.latest_core(&topic)
+    }
+}
+
+impl DataStreamProcessor {
+    fn new_processor() -> PyResult<Self> {
+        let connection = Connection::open_in_memory().map_err(|error| {
+            PyRuntimeError::new_err(format!("failed to open stream SQL store: {error}"))
+        })?;
+        connection
+            .execute_batch(
+                r#"
+                CREATE TABLE stream_messages (
+                    pad_name TEXT,
+                    topic TEXT NOT NULL,
+                    offset INTEGER NOT NULL,
+                    process_sequence INTEGER NOT NULL,
+                    event_time INTEGER NOT NULL,
+                    message_key TEXT,
+                    payload BLOB NOT NULL,
+                    PRIMARY KEY (topic, offset)
+                );
+                "#,
+            )
+            .map_err(stream_sql_error)?;
+        Ok(Self {
+            connection,
+            process_sequence: 0,
+        })
+    }
+
+    fn ingest_core(
+        &mut self,
+        message: &PubSubMessageCore,
+        event_time: Option<i64>,
+        key: Option<String>,
+    ) -> PyResult<DataStreamRecord> {
+        self.process_sequence += 1;
+        let process_sequence = self.process_sequence;
+        let resolved_event_time = event_time.unwrap_or(process_sequence as i64);
+        self.connection
+            .execute(
+                r#"
+                INSERT OR REPLACE INTO stream_messages (
+                    pad_name,
+                    topic,
+                    offset,
+                    process_sequence,
+                    event_time,
+                    message_key,
+                    payload
+                )
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                "#,
+                params![
+                    None::<String>,
+                    message.topic,
+                    message.offset,
+                    process_sequence,
+                    resolved_event_time,
+                    key,
+                    message.payload,
+                ],
+            )
+            .map_err(stream_sql_error)?;
+        Ok(DataStreamRecord {
+            pad_name: None,
+            topic: message.topic.clone(),
+            payload: message.payload.clone(),
+            offset: message.offset,
+            process_sequence,
+            event_time: resolved_event_time,
+            key,
+        })
+    }
+
+    fn ingest_board_message(
+        &mut self,
+        message: &PubSubMessageCore,
+        metadata: (Option<i64>, Option<String>, Option<String>),
+        flatbuffer_table: Option<&FlatBufferTable>,
+    ) -> PyResult<DataStreamRecord> {
+        let (event_time, key, pad_name) = metadata;
+        self.process_sequence += 1;
+        let process_sequence = self.process_sequence;
+        let resolved_event_time = event_time.unwrap_or(process_sequence as i64);
+        self.connection
+            .execute(
+                r#"
+                INSERT OR REPLACE INTO stream_messages (
+                    pad_name,
+                    topic,
+                    offset,
+                    process_sequence,
+                    event_time,
+                    message_key,
+                    payload
+                )
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                "#,
+                params![
+                    pad_name,
+                    message.topic,
+                    message.offset,
+                    process_sequence,
+                    resolved_event_time,
+                    key,
+                    message.payload,
+                ],
+            )
+            .map_err(stream_sql_error)?;
+        if let Some(table) = flatbuffer_table {
+            self.project_flatbuffer_fields(table, message)?;
+        }
+        Ok(DataStreamRecord {
+            pad_name,
+            topic: message.topic.clone(),
+            payload: message.payload.clone(),
+            offset: message.offset,
+            process_sequence,
+            event_time: resolved_event_time,
+            key,
+        })
+    }
+
+    fn latest_core(&self, topic: &str) -> PyResult<Option<DataStreamRecord>> {
+        let mut statement = self
+            .connection
+            .prepare(
+                r#"
+                SELECT pad_name, topic, payload, offset, process_sequence, event_time, message_key
+                FROM stream_messages
+                WHERE topic = ?1
+                ORDER BY event_time DESC, process_sequence DESC
+                LIMIT 1
+                "#,
+            )
+            .map_err(stream_sql_error)?;
+        let mut rows = statement.query(params![topic]).map_err(stream_sql_error)?;
+        let Some(row) = rows.next().map_err(stream_sql_error)? else {
+            return Ok(None);
+        };
+        Ok(Some(DataStreamRecord {
+            pad_name: row.get(0).map_err(stream_sql_error)?,
+            topic: row.get(1).map_err(stream_sql_error)?,
+            payload: row.get(2).map_err(stream_sql_error)?,
+            offset: row.get(3).map_err(stream_sql_error)?,
+            process_sequence: row.get(4).map_err(stream_sql_error)?,
+            event_time: row.get(5).map_err(stream_sql_error)?,
+            key: row.get(6).map_err(stream_sql_error)?,
+        }))
+    }
+
+    fn ensure_flatbuffer_columns(&self, table: &FlatBufferTable) -> PyResult<()> {
+        for field in &table.fields {
+            self.connection
+                .execute(
+                    &format!(
+                        "ALTER TABLE stream_messages ADD COLUMN {} {}",
+                        field.name,
+                        flatbuffer_sql_type(&field.field_type)
+                    ),
+                    (),
+                )
+                .or_else(|error| {
+                    if is_duplicate_column_error(&error) {
+                        Ok(0)
+                    } else {
+                        Err(error)
+                    }
+                })
+                .map_err(stream_sql_error)?;
+        }
+        Ok(())
+    }
+
+    fn project_flatbuffer_fields(
+        &self,
+        table: &FlatBufferTable,
+        message: &PubSubMessageCore,
+    ) -> PyResult<()> {
+        for field in &table.fields {
+            let value = decode_flatbuffer_field(&message.payload, field)?;
+            self.connection
+                .execute(
+                    &format!(
+                        "UPDATE stream_messages SET {} = ?1 WHERE topic = ?2 AND offset = ?3",
+                        field.name
+                    ),
+                    params![value, message.topic, message.offset],
+                )
+                .map_err(stream_sql_error)?;
+        }
+        Ok(())
+    }
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust", unsendable)]
+pub struct PubSubRuntime {
+    pubsub: InMemoryPubSubCore,
+    processor: DataStreamProcessor,
+    metadata_by_message: BTreeMap<StreamMessageKey, StreamMessageMetadata>,
+    flatbuffer_tables_by_pad: BTreeMap<String, FlatBufferTable>,
+    subscription_name: String,
+}
+
+type StreamMessageKey = (String, u64);
+type StreamMessageMetadata = (Option<i64>, Option<String>, Option<String>);
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pymethods]
+impl PubSubRuntime {
+    #[new]
+    #[pyo3(signature = (*, name="pubsub".to_string(), retained_messages=1024))]
+    fn new(name: String, retained_messages: usize) -> PyResult<Self> {
+        validate_nonblank_text("pubsub name", &name)?;
+        let mut pubsub =
+            InMemoryPubSubCore::new(retained_messages).map_err(PyValueError::new_err)?;
+        let subscription_name = format!("{name}.stream_processor");
+        pubsub
+            .subscribe("*".to_string(), Some(subscription_name.clone()), false)
+            .map_err(PyValueError::new_err)?;
+        Ok(Self {
+            pubsub,
+            processor: DataStreamProcessor::new_processor()?,
+            metadata_by_message: BTreeMap::new(),
+            flatbuffer_tables_by_pad: BTreeMap::new(),
+            subscription_name,
+        })
+    }
+
+    fn register_flatbuffer_pad(
+        &mut self,
+        pad_name: String,
+        table: FlatBufferTable,
+    ) -> PyResult<()> {
+        validate_nonblank_text("pad name", &pad_name)?;
+        self.processor.ensure_flatbuffer_columns(&table)?;
+        self.flatbuffer_tables_by_pad.insert(pad_name, table);
+        Ok(())
+    }
+
+    #[pyo3(signature = (topic, payload, *, pad_name=None, event_time=None, key=None))]
+    fn publish(
+        &mut self,
+        topic: String,
+        payload: Vec<u8>,
+        pad_name: Option<String>,
+        event_time: Option<i64>,
+        key: Option<String>,
+    ) -> PyResult<PubSubDelivery> {
+        let delivery = self
+            .pubsub
+            .publish(topic, payload)
+            .map_err(PyValueError::new_err)?;
+        self.metadata_by_message.insert(
+            (delivery.topic.clone(), delivery.offset),
+            (event_time, key, pad_name),
+        );
+        Ok(PubSubDelivery { inner: delivery })
+    }
+
+    fn drain(&mut self) -> PyResult<Vec<DataStreamRecord>> {
+        let messages = self
+            .pubsub
+            .poll(&self.subscription_name, None)
+            .map_err(PyValueError::new_err)?;
+        let mut records = Vec::with_capacity(messages.len());
+        for message in messages {
+            let metadata = self
+                .metadata_by_message
+                .remove(&(message.topic.clone(), message.offset))
+                .unwrap_or((None, None, None));
+            let flatbuffer_table = metadata
+                .2
+                .as_ref()
+                .and_then(|pad_name| self.flatbuffer_tables_by_pad.get(pad_name));
+            records.push(self.processor.ingest_board_message(
+                &message,
+                metadata,
+                flatbuffer_table,
+            )?);
+        }
+        Ok(records)
+    }
+
+    #[pyo3(signature = (sql, parameters=None))]
+    fn query(
+        &mut self,
+        py: Python<'_>,
+        sql: String,
+        parameters: Option<Bound<'_, PyDict>>,
+    ) -> PyResult<Py<PyList>> {
+        self.drain()?;
+        query_connection(py, &self.processor.connection, &sql, parameters.as_ref())
+    }
+
+    #[pyo3(signature = (sql, parameters=None))]
+    fn query_one(
+        &mut self,
+        py: Python<'_>,
+        sql: String,
+        parameters: Option<Bound<'_, PyDict>>,
+    ) -> PyResult<Option<Py<PyDict>>> {
+        self.drain()?;
+        let rows = query_connection(py, &self.processor.connection, &sql, parameters.as_ref())?;
+        let rows = rows.bind(py);
+        match rows.len() {
+            0 => Ok(None),
+            1 => Ok(Some(rows.get_item(0)?.extract()?)),
+            _ => Err(PyValueError::new_err(
+                "board SQL returned more than one row",
+            )),
+        }
+    }
+
+    fn latest(&mut self, topic: String) -> PyResult<Option<DataStreamRecord>> {
+        self.drain()?;
+        self.processor.latest_core(&topic)
+    }
+}
+
+fn query_connection(
+    py: Python<'_>,
+    connection: &Connection,
+    sql: &str,
+    parameters: Option<&Bound<'_, PyDict>>,
+) -> PyResult<Py<PyList>> {
+    let statement = sql.trim();
+    if statement.is_empty() {
+        return Err(PyValueError::new_err(
+            "stream processor SQL must be non-empty",
+        ));
+    }
+    let operation = statement
+        .split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if !matches!(operation.as_str(), "select" | "with") {
+        return Err(PyValueError::new_err(
+            "stream processor SQL must be a SELECT or WITH query",
+        ));
+    }
+    let mut prepared = connection.prepare(statement).map_err(stream_sql_error)?;
+    let column_names: Vec<String> = prepared
+        .column_names()
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+    let sql_parameters = sql_parameters_from_python(parameters)?;
+    let named_parameters: Vec<(&str, &dyn ToSql)> = sql_parameters
+        .iter()
+        .map(|(name, value)| (name.as_str(), value as &dyn ToSql))
+        .collect();
+    let mut rows = prepared
+        .query(named_parameters.as_slice())
+        .map_err(stream_sql_error)?;
+    let output = PyList::empty(py);
+    while let Some(row) = rows.next().map_err(stream_sql_error)? {
+        let item = PyDict::new(py);
+        for (index, name) in column_names.iter().enumerate() {
+            match row.get_ref(index).map_err(stream_sql_error)? {
+                ValueRef::Null => item.set_item(name, py.None())?,
+                ValueRef::Integer(value) => item.set_item(name, value)?,
+                ValueRef::Real(value) => item.set_item(name, value)?,
+                ValueRef::Text(value) => {
+                    item.set_item(name, String::from_utf8_lossy(value).as_ref())?
+                }
+                ValueRef::Blob(value) => item.set_item(name, PyBytes::new(py, value))?,
+            }
+        }
+        output.append(item)?;
+    }
+    Ok(output.into())
+}
+
+fn sql_parameters_from_python(
+    parameters: Option<&Bound<'_, PyDict>>,
+) -> PyResult<Vec<(String, rusqlite::types::Value)>> {
+    let Some(parameters) = parameters else {
+        return Ok(Vec::new());
+    };
+    let mut values = Vec::with_capacity(parameters.len());
+    for (key, value) in parameters.iter() {
+        let key = key.extract::<String>()?;
+        validate_nonblank_text("SQL parameter name", &key)?;
+        let name = if key.starts_with(':') {
+            key
+        } else {
+            format!(":{key}")
+        };
+        values.push((name, py_to_sql_value(&value)?));
+    }
+    Ok(values)
+}
+
+fn py_to_sql_value(value: &Bound<'_, PyAny>) -> PyResult<rusqlite::types::Value> {
+    if value.is_none() {
+        return Ok(rusqlite::types::Value::Null);
+    }
+    if value.is_instance_of::<PyBool>() {
+        return Ok(rusqlite::types::Value::Integer(i64::from(
+            value.extract::<bool>()?,
+        )));
+    }
+    if let Ok(value) = value.extract::<i64>() {
+        return Ok(rusqlite::types::Value::Integer(value));
+    }
+    if let Ok(value) = value.extract::<f64>() {
+        return Ok(rusqlite::types::Value::Real(value));
+    }
+    if let Ok(value) = value.extract::<Vec<u8>>() {
+        return Ok(rusqlite::types::Value::Blob(value));
+    }
+    if let Ok(value) = value.extract::<String>() {
+        return Ok(rusqlite::types::Value::Text(value));
+    }
+    Err(PyTypeError::new_err(
+        "SQL parameters must be None, bool, int, float, str, or bytes",
+    ))
+}
+
+fn validate_sql_identifier(field: &str, value: &str) -> PyResult<()> {
+    validate_nonblank_text(field, value)?;
+    let mut chars = value.chars();
+    let Some(first) = chars.next() else {
+        return Err(PyValueError::new_err(format!(
+            "{field} must be a SQL identifier"
+        )));
+    };
+    if !(first == '_' || first.is_ascii_alphabetic()) {
+        return Err(PyValueError::new_err(format!(
+            "{field} must be a SQL identifier"
+        )));
+    }
+    if !chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric()) {
+        return Err(PyValueError::new_err(format!(
+            "{field} must be a SQL identifier"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_flatbuffer_field_type(value: &str) -> PyResult<()> {
+    if matches!(
+        value,
+        "bool" | "float32" | "float64" | "int32" | "int64" | "uint32" | "uint64" | "string"
+    ) {
+        return Ok(());
+    }
+    Err(PyValueError::new_err(
+        "flatbuffer field_type must be bool, float32, float64, int32, int64, uint32, uint64, or string",
+    ))
+}
+
+fn flatbuffer_sql_type(field_type: &str) -> &'static str {
+    match field_type {
+        "float32" | "float64" => "REAL",
+        "string" => "TEXT",
+        _ => "INTEGER",
+    }
+}
+
+fn is_duplicate_column_error(error: &rusqlite::Error) -> bool {
+    matches!(error, rusqlite::Error::SqliteFailure(_, Some(message)) if message.contains("duplicate column name"))
+}
+
+fn decode_flatbuffer_field(
+    payload: &[u8],
+    field: &FlatBufferField,
+) -> PyResult<rusqlite::types::Value> {
+    let table_position = read_u32(payload, 0)? as usize;
+    ensure_flatbuffer_range(payload, table_position, 4)?;
+    let vtable_relative = read_i32(payload, table_position)?;
+    if vtable_relative < 0 {
+        return Err(PyValueError::new_err(
+            "invalid FlatBuffer table vtable offset",
+        ));
+    }
+    let vtable_position = table_position
+        .checked_sub(vtable_relative as usize)
+        .ok_or_else(|| PyValueError::new_err("invalid FlatBuffer vtable position"))?;
+    let vtable_length = read_u16(payload, vtable_position)? as usize;
+    let field_vtable_position = 4 + usize::from(field.index) * 2;
+    if field_vtable_position + 2 > vtable_length {
+        return Ok(rusqlite::types::Value::Null);
+    }
+    let field_offset = read_u16(payload, vtable_position + field_vtable_position)? as usize;
+    if field_offset == 0 {
+        return Ok(rusqlite::types::Value::Null);
+    }
+    let value_position = table_position
+        .checked_add(field_offset)
+        .ok_or_else(|| PyValueError::new_err("invalid FlatBuffer field position"))?;
+    match field.field_type.as_str() {
+        "bool" => Ok(rusqlite::types::Value::Integer(i64::from(
+            read_u8(payload, value_position)? != 0,
+        ))),
+        "float32" => Ok(rusqlite::types::Value::Real(f64::from(read_f32(
+            payload,
+            value_position,
+        )?))),
+        "float64" => Ok(rusqlite::types::Value::Real(read_f64(
+            payload,
+            value_position,
+        )?)),
+        "int32" => Ok(rusqlite::types::Value::Integer(i64::from(read_i32(
+            payload,
+            value_position,
+        )?))),
+        "int64" => Ok(rusqlite::types::Value::Integer(read_i64(
+            payload,
+            value_position,
+        )?)),
+        "uint32" => Ok(rusqlite::types::Value::Integer(i64::from(read_u32(
+            payload,
+            value_position,
+        )?))),
+        "uint64" => {
+            let value = read_u64(payload, value_position)?;
+            let value = i64::try_from(value).map_err(|_| {
+                PyValueError::new_err("uint64 FlatBuffer value exceeds SQL integer range")
+            })?;
+            Ok(rusqlite::types::Value::Integer(value))
+        }
+        "string" => Ok(rusqlite::types::Value::Text(read_flatbuffer_string(
+            payload,
+            value_position,
+        )?)),
+        _ => Err(PyValueError::new_err("unsupported FlatBuffer field type")),
+    }
+}
+
+fn read_flatbuffer_string(payload: &[u8], value_position: usize) -> PyResult<String> {
+    let relative = read_u32(payload, value_position)? as usize;
+    let string_position = value_position
+        .checked_add(relative)
+        .ok_or_else(|| PyValueError::new_err("invalid FlatBuffer string position"))?;
+    let length = read_u32(payload, string_position)? as usize;
+    let data_position = string_position + 4;
+    ensure_flatbuffer_range(payload, data_position, length)?;
+    std::str::from_utf8(&payload[data_position..data_position + length])
+        .map(str::to_owned)
+        .map_err(|error| PyValueError::new_err(format!("invalid FlatBuffer UTF-8 string: {error}")))
+}
+
+fn ensure_flatbuffer_range(payload: &[u8], start: usize, length: usize) -> PyResult<()> {
+    let end = start
+        .checked_add(length)
+        .ok_or_else(|| PyValueError::new_err("FlatBuffer offset overflowed"))?;
+    if end > payload.len() {
+        return Err(PyValueError::new_err("FlatBuffer field is out of bounds"));
+    }
+    Ok(())
+}
+
+fn read_u8(payload: &[u8], start: usize) -> PyResult<u8> {
+    ensure_flatbuffer_range(payload, start, 1)?;
+    Ok(payload[start])
+}
+
+fn read_u16(payload: &[u8], start: usize) -> PyResult<u16> {
+    ensure_flatbuffer_range(payload, start, 2)?;
+    Ok(u16::from_le_bytes([payload[start], payload[start + 1]]))
+}
+
+fn read_u32(payload: &[u8], start: usize) -> PyResult<u32> {
+    ensure_flatbuffer_range(payload, start, 4)?;
+    Ok(u32::from_le_bytes([
+        payload[start],
+        payload[start + 1],
+        payload[start + 2],
+        payload[start + 3],
+    ]))
+}
+
+fn read_u64(payload: &[u8], start: usize) -> PyResult<u64> {
+    ensure_flatbuffer_range(payload, start, 8)?;
+    Ok(u64::from_le_bytes([
+        payload[start],
+        payload[start + 1],
+        payload[start + 2],
+        payload[start + 3],
+        payload[start + 4],
+        payload[start + 5],
+        payload[start + 6],
+        payload[start + 7],
+    ]))
+}
+
+fn read_i32(payload: &[u8], start: usize) -> PyResult<i32> {
+    Ok(read_u32(payload, start)? as i32)
+}
+
+fn read_i64(payload: &[u8], start: usize) -> PyResult<i64> {
+    Ok(read_u64(payload, start)? as i64)
+}
+
+fn read_f32(payload: &[u8], start: usize) -> PyResult<f32> {
+    Ok(f32::from_bits(read_u32(payload, start)?))
+}
+
+fn read_f64(payload: &[u8], start: usize) -> PyResult<f64> {
+    Ok(f64::from_bits(read_u64(payload, start)?))
+}
+
+fn stream_sql_error(error: rusqlite::Error) -> PyErr {
+    PyRuntimeError::new_err(format!("stream SQL operation failed: {error}"))
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust", frozen, from_py_object)]
+#[derive(Clone)]
 pub struct PubSubMessage {
     inner: PubSubMessageCore,
 }
@@ -2662,6 +4048,25 @@ fn _manyfold_rust(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()>
     module.add_class::<CreditSnapshot>()?;
     module.add_class::<RetentionSnapshot>()?;
     module.add_class::<NoLineageMaterializerDropProfile>()?;
+    module.add_class::<ArchitecturePad>()?;
+    module.add_class::<ArchitectureRelay>()?;
+    module.add_class::<ArchitectureVia>()?;
+    module.add_class::<ArchitectureRegulator>()?;
+    module.add_class::<ArchitectureGround>()?;
+    module.add_class::<ArchitectureProbe>()?;
+    module.add_class::<ArchitectureCapacitor>()?;
+    module.add_class::<ArchitectureResistor>()?;
+    module.add_class::<ClockCalibrationSample>()?;
+    module.add_class::<SystemTimeProvider>()?;
+    module.add_class::<NtpTimeProvider>()?;
+    module.add_class::<MonotonicLogicalClock>()?;
+    module.add_class::<Clock>()?;
+    module.add_class::<CalibratedClock>()?;
+    module.add_class::<FlatBufferField>()?;
+    module.add_class::<FlatBufferTable>()?;
+    module.add_class::<DataStreamRecord>()?;
+    module.add_class::<DataStreamProcessor>()?;
+    module.add_class::<PubSubRuntime>()?;
     module.add_class::<PubSubMessage>()?;
     module.add_class::<PubSubSubscription>()?;
     module.add_class::<PubSubDelivery>()?;

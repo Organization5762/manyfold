@@ -5,17 +5,34 @@ import builtins
 import typing
 
 __all__ = [
+    "ArchitectureCapacitor",
+    "ArchitectureGround",
+    "ArchitecturePad",
+    "ArchitectureProbe",
+    "ArchitectureRegulator",
+    "ArchitectureRelay",
+    "ArchitectureResistor",
+    "ArchitectureVia",
+    "CalibratedClock",
+    "Clock",
+    "ClockCalibrationSample",
     "ClockDomainRef",
     "ClosedEnvelope",
     "ControlLoop",
     "CreditSnapshot",
+    "DataStreamProcessor",
+    "DataStreamRecord",
+    "FlatBufferField",
+    "FlatBufferTable",
     "Graph",
     "InMemoryPubSub",
     "Layer",
     "Mailbox",
     "MailboxDescriptor",
+    "MonotonicLogicalClock",
     "NamespaceRef",
     "NoLineageMaterializerDropProfile",
+    "NtpTimeProvider",
     "OpenedEnvelope",
     "PayloadRef",
     "Plane",
@@ -24,6 +41,7 @@ __all__ = [
     "ProducerRef",
     "PubSubDelivery",
     "PubSubMessage",
+    "PubSubRuntime",
     "PubSubSubscription",
     "ReadablePort",
     "RetentionSnapshot",
@@ -31,6 +49,7 @@ __all__ = [
     "RuntimeRef",
     "ScheduleGuard",
     "SchemaRef",
+    "SystemTimeProvider",
     "TaintDomain",
     "TaintMark",
     "Variant",
@@ -41,6 +60,229 @@ __all__ = [
 ]
 
 def parse_sql_statement(sql: builtins.str) -> builtins.dict[builtins.str, builtins.str]: ...
+
+@typing.final
+class ArchitecturePad:
+    @property
+    def name(self) -> builtins.str: ...
+    @property
+    def topic(self) -> builtins.str: ...
+    @property
+    def direction(self) -> builtins.str: ...
+    def __new__(
+        cls,
+        name: builtins.str,
+        topic: builtins.str,
+        direction: builtins.str = "internal",
+    ) -> ArchitecturePad: ...
+
+@typing.final
+class FlatBufferField:
+    @property
+    def name(self) -> builtins.str: ...
+    @property
+    def index(self) -> builtins.int: ...
+    @property
+    def field_type(self) -> builtins.str: ...
+    def __new__(cls, name: builtins.str, index: builtins.int, field_type: builtins.str) -> FlatBufferField: ...
+
+@typing.final
+class FlatBufferTable:
+    @property
+    def name(self) -> builtins.str: ...
+    @property
+    def fields(self) -> builtins.list[FlatBufferField]: ...
+    def __new__(cls, name: builtins.str, fields: typing.Sequence[FlatBufferField]) -> FlatBufferTable: ...
+
+@typing.final
+class ArchitectureRelay:
+    @property
+    def name(self) -> builtins.str: ...
+    @property
+    def source(self) -> builtins.str: ...
+    @property
+    def target(self) -> builtins.str: ...
+    def __new__(cls, name: builtins.str, source: builtins.str, target: builtins.str) -> ArchitectureRelay: ...
+
+@typing.final
+class ArchitectureVia:
+    @property
+    def name(self) -> builtins.str: ...
+    @property
+    def source(self) -> builtins.str: ...
+    @property
+    def target(self) -> builtins.str: ...
+    @property
+    def boundary(self) -> builtins.str: ...
+    def __new__(cls, name: builtins.str, source: builtins.str, target: builtins.str, boundary: builtins.str) -> ArchitectureVia: ...
+
+@typing.final
+class ArchitectureGround:
+    @property
+    def name(self) -> builtins.str: ...
+    @property
+    def reason(self) -> builtins.str: ...
+    def __new__(cls, name: builtins.str, reason: builtins.str) -> ArchitectureGround: ...
+
+@typing.final
+class ArchitectureProbe:
+    @property
+    def name(self) -> builtins.str: ...
+    @property
+    def target(self) -> builtins.str: ...
+    def __new__(cls, name: builtins.str, target: builtins.str) -> ArchitectureProbe: ...
+
+@typing.final
+class ArchitectureRegulator:
+    @property
+    def name(self) -> builtins.str: ...
+    @property
+    def policy(self) -> builtins.str: ...
+    @property
+    def limit(self) -> typing.Optional[builtins.int]: ...
+    def __new__(cls, name: builtins.str, policy: builtins.str, limit: typing.Optional[builtins.int] = None) -> ArchitectureRegulator: ...
+
+@typing.final
+class ArchitectureCapacitor:
+    @property
+    def name(self) -> builtins.str: ...
+    @property
+    def source(self) -> builtins.str: ...
+    @property
+    def target(self) -> builtins.str: ...
+    @property
+    def capacity(self) -> builtins.int: ...
+    @property
+    def location(self) -> typing.Optional[builtins.str]: ...
+    def __new__(cls, name: builtins.str, source: builtins.str, target: builtins.str, capacity: builtins.int = 1, location: typing.Optional[builtins.str] = None) -> ArchitectureCapacitor: ...
+
+@typing.final
+class ArchitectureResistor:
+    @property
+    def name(self) -> builtins.str: ...
+    @property
+    def boundary(self) -> builtins.str: ...
+    @property
+    def policy(self) -> builtins.str: ...
+    @property
+    def limit(self) -> typing.Optional[builtins.int]: ...
+    def __new__(cls, name: builtins.str, boundary: builtins.str, policy: builtins.str, limit: typing.Optional[builtins.int] = None) -> ArchitectureResistor: ...
+
+@typing.final
+class DataStreamRecord:
+    @property
+    def pad_name(self) -> typing.Optional[builtins.str]: ...
+    @property
+    def topic(self) -> builtins.str: ...
+    @property
+    def payload(self) -> builtins.bytes: ...
+    @property
+    def offset(self) -> builtins.int: ...
+    @property
+    def process_sequence(self) -> builtins.int: ...
+    @property
+    def event_time(self) -> builtins.int: ...
+    @property
+    def key(self) -> typing.Optional[builtins.str]: ...
+    @property
+    def seq_source(self) -> builtins.int: ...
+
+@typing.final
+class DataStreamProcessor:
+    def __new__(cls) -> DataStreamProcessor: ...
+    def ingest(
+        self,
+        message: PubSubMessage,
+        *,
+        event_time: typing.Optional[builtins.int] = None,
+        key: typing.Optional[builtins.str] = None,
+    ) -> DataStreamRecord: ...
+    def ingest_many(self, messages: typing.Sequence[PubSubMessage]) -> builtins.list[DataStreamRecord]: ...
+    def query(
+        self,
+        sql: builtins.str,
+        parameters: typing.Optional[builtins.dict[builtins.str, object]] = None,
+    ) -> builtins.list[builtins.dict[builtins.str, object]]: ...
+    def query_one(
+        self,
+        sql: builtins.str,
+        parameters: typing.Optional[builtins.dict[builtins.str, object]] = None,
+    ) -> typing.Optional[builtins.dict[builtins.str, object]]: ...
+    def latest(self, topic: builtins.str) -> typing.Optional[DataStreamRecord]: ...
+
+@typing.final
+class PubSubRuntime:
+    def __new__(
+        cls,
+        *,
+        name: builtins.str = "pubsub",
+        retained_messages: builtins.int = 1024,
+    ) -> PubSubRuntime: ...
+    def register_flatbuffer_pad(self, pad_name: builtins.str, table: FlatBufferTable) -> None: ...
+    def publish(
+        self,
+        topic: builtins.str,
+        payload: builtins.bytes,
+        *,
+        pad_name: typing.Optional[builtins.str] = None,
+        event_time: typing.Optional[builtins.int] = None,
+        key: typing.Optional[builtins.str] = None,
+    ) -> PubSubDelivery: ...
+    def drain(self) -> builtins.list[DataStreamRecord]: ...
+    def query(
+        self,
+        sql: builtins.str,
+        parameters: typing.Optional[builtins.dict[builtins.str, object]] = None,
+    ) -> builtins.list[builtins.dict[builtins.str, object]]: ...
+    def query_one(
+        self,
+        sql: builtins.str,
+        parameters: typing.Optional[builtins.dict[builtins.str, object]] = None,
+    ) -> typing.Optional[builtins.dict[builtins.str, object]]: ...
+    def latest(self, topic: builtins.str) -> typing.Optional[DataStreamRecord]: ...
+
+@typing.final
+class ClockCalibrationSample:
+    @property
+    def observed_ns(self) -> builtins.int: ...
+    @property
+    def reference_ns(self) -> builtins.int: ...
+    @property
+    def temperature_c(self) -> typing.Optional[builtins.float]: ...
+    def __new__(cls, observed_ns: builtins.int, reference_ns: builtins.int, temperature_c: typing.Optional[builtins.float] = None) -> ClockCalibrationSample: ...
+
+@typing.final
+class SystemTimeProvider:
+    def __new__(cls) -> SystemTimeProvider: ...
+    def now_ns(self) -> builtins.int: ...
+
+@typing.final
+class NtpTimeProvider:
+    @property
+    def server(self) -> builtins.str: ...
+    @property
+    def port(self) -> builtins.int: ...
+    @property
+    def timeout_ms(self) -> builtins.int: ...
+    def __new__(cls, server: builtins.str, *, port: builtins.int = 123, timeout_ms: builtins.int = 1000) -> NtpTimeProvider: ...
+    def now_ns(self) -> builtins.int: ...
+
+@typing.final
+class MonotonicLogicalClock:
+    def __new__(cls) -> MonotonicLogicalClock: ...
+    def tick(self) -> builtins.int: ...
+
+@typing.final
+class Clock:
+    def __new__(cls) -> Clock: ...
+    def tick(self) -> builtins.int: ...
+
+@typing.final
+class CalibratedClock:
+    @property
+    def samples(self) -> builtins.list[ClockCalibrationSample]: ...
+    def __new__(cls, samples: typing.Sequence[ClockCalibrationSample]) -> CalibratedClock: ...
+    def now_ns(self) -> builtins.int: ...
 
 @typing.final
 class ClockDomainRef:

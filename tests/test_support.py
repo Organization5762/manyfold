@@ -4,7 +4,9 @@ import importlib
 import importlib.util
 import os
 import re
+import struct
 import sys
+import time
 import types
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -1311,28 +1313,365 @@ def install_manyfold_rust_stub() -> None:
                 emitted.extend(self._fanout(egress_envelope))
             return emitted
 
+    @dataclass(frozen=True)
+    class ArchitecturePad:
+        name: str
+        topic: str
+        direction: str = "internal"
+
+    @dataclass(frozen=True)
+    class ArchitectureRelay:
+        name: str
+        source: str
+        target: str
+
+    @dataclass(frozen=True)
+    class ArchitectureVia:
+        name: str
+        source: str
+        target: str
+        boundary: str
+
+    @dataclass(frozen=True)
+    class ArchitectureGround:
+        name: str
+        reason: str
+
+    @dataclass(frozen=True)
+    class ArchitectureProbe:
+        name: str
+        target: str
+
+    @dataclass(frozen=True)
+    class ArchitectureRegulator:
+        name: str
+        policy: str
+        limit: int | None = None
+
+    @dataclass(frozen=True)
+    class ArchitectureCapacitor:
+        name: str
+        source: str
+        target: str
+        capacity: int = 1
+        location: str | None = None
+
+    @dataclass(frozen=True)
+    class ArchitectureResistor:
+        name: str
+        boundary: str
+        policy: str
+        limit: int | None = None
+
+    @dataclass(frozen=True)
+    class ClockCalibrationSample:
+        observed_ns: int
+        reference_ns: int
+        temperature_c: float | None = None
+
+    @dataclass(frozen=True)
+    class FlatBufferField:
+        name: str
+        index: int
+        field_type: str
+
+    @dataclass(frozen=True)
+    class FlatBufferTable:
+        name: str
+        fields: list[FlatBufferField]
+
+    class SystemTimeProvider:
+        def now_ns(self):
+            return time.time_ns()
+
+    @dataclass(frozen=True)
+    class NtpTimeProvider:
+        server: str
+        port: int = 123
+        timeout_ms: int = 1000
+
+        def now_ns(self):
+            return time.time_ns()
+
+    class MonotonicLogicalClock:
+        def __init__(self):
+            self._value = 0
+
+        def tick(self):
+            self._value += 1
+            return self._value
+
+    class Clock(MonotonicLogicalClock):
+        pass
+
+    @dataclass(frozen=True)
+    class CalibratedClock:
+        samples: list[ClockCalibrationSample]
+
+        def now_ns(self):
+            if not self.samples:
+                raise ValueError("calibrated clock requires observations")
+            sample = self.samples[0]
+            return time.time_ns() + sample.reference_ns - sample.observed_ns
+
+    @dataclass(frozen=True)
+    class PubSubMessage:
+        topic: str
+        payload: bytes
+        offset: int = 0
+
+    @dataclass(frozen=True)
+    class PubSubSubscription:
+        name: str
+        topic: str
+
+    @dataclass(frozen=True)
+    class PubSubDelivery:
+        topic: str
+        offset: int
+        delivered_to: list[str]
+
+        @property
+        def subscriber_count(self):
+            return len(self.delivered_to)
+
+    class InMemoryPubSub:
+        def __init__(self, *, retained_messages=1024):
+            self.retained_messages = retained_messages
+            self._messages = []
+            self._subscriptions = {}
+            self._positions = {}
+
+        @property
+        def message_count(self):
+            return len(self._messages)
+
+        @property
+        def subscriber_count(self):
+            return len(self._subscriptions)
+
+        def subscribe(self, topic, *, name=None, replay_from_beginning=False):
+            subscription_name = name or topic
+            self._subscriptions[subscription_name] = topic
+            self._positions[subscription_name] = 0 if replay_from_beginning else len(self._messages)
+            return PubSubSubscription(subscription_name, topic)
+
+        def publish(self, topic, payload):
+            offset = len(self._messages)
+            message = PubSubMessage(topic, bytes(payload), offset)
+            self._messages.append(message)
+            delivered_to = [
+                name
+                for name, subscribed_topic in self._subscriptions.items()
+                if subscribed_topic in {topic, "*"}
+            ]
+            return PubSubDelivery(topic, offset, delivered_to)
+
+        def poll(self, subscription, *, max_messages=None):
+            topic = self._subscriptions[subscription]
+            start = self._positions[subscription]
+            messages = [
+                message
+                for message in self._messages[start:]
+                if topic in {message.topic, "*"}
+            ]
+            if max_messages is not None:
+                messages = messages[:max_messages]
+            self._positions[subscription] = len(self._messages)
+            return messages
+
+        def latest(self, topic=None):
+            for message in reversed(self._messages):
+                if topic is None or message.topic == topic:
+                    return message
+            return None
+
+        def topic_offsets(self):
+            return {message.topic: message.offset for message in self._messages}
+
+    @dataclass(frozen=True)
+    class DataStreamRecord:
+        pad_name: str | None
+        topic: str
+        payload: bytes
+        offset: int
+        process_sequence: int
+        event_time: int
+        key: str | None = None
+
+        @property
+        def seq_source(self):
+            return self.offset + 1
+
+    class DataStreamProcessor:
+        def __init__(self):
+            self._records = []
+            self._process_sequence = 0
+
+        def ingest(self, message, *, event_time=None, key=None):
+            self._process_sequence += 1
+            record = DataStreamRecord(
+                None,
+                message.topic,
+                message.payload,
+                message.offset,
+                self._process_sequence,
+                self._process_sequence if event_time is None else event_time,
+                key,
+            )
+            self._records.append(record)
+            return record
+
+        def ingest_many(self, messages):
+            return [self.ingest(message) for message in messages]
+
+        def query(self, sql, parameters=None):
+            latest = self.latest((parameters or {}).get("topic", "sensor.environment.temperature"))
+            if latest is None:
+                return []
+            temperature_f = None
+            unit = None
+            if latest.payload:
+                try:
+                    temperature_f, unit = _decode_temperature_flatbuffer(latest.payload)
+                except (IndexError, UnicodeDecodeError, ValueError):
+                    pass
+            return [
+                {
+                    "pad_name": latest.pad_name,
+                    "seq_source": latest.seq_source,
+                    "temperature_f": temperature_f,
+                    "unit": unit,
+                    "payload": latest.payload,
+                }
+            ]
+
+        def query_one(self, sql, parameters=None):
+            rows = self.query(sql, parameters)
+            return rows[0] if rows else None
+
+        def latest(self, topic):
+            for record in reversed(self._records):
+                if record.topic == topic:
+                    return record
+            return None
+
+    class PubSubRuntime:
+        def __init__(self, *, name="pubsub", retained_messages=1024):
+            self.pubsub = InMemoryPubSub(retained_messages=retained_messages)
+            self.subscription = self.pubsub.subscribe("*", name=f"{name}.stream_processor")
+            self.processor = DataStreamProcessor()
+            self.metadata = {}
+            self.records = []
+
+        def register_flatbuffer_pad(self, pad_name, table):
+            return None
+
+        def publish(self, topic, payload, *, pad_name=None, event_time=None, key=None):
+            delivery = self.pubsub.publish(topic, payload)
+            self.metadata[(topic, delivery.offset)] = (event_time, key, pad_name)
+            return delivery
+
+        def drain(self):
+            records = []
+            for message in self.pubsub.poll(self.subscription.name):
+                event_time, key, pad_name = self.metadata.pop(
+                    (message.topic, message.offset),
+                    (None, None, None),
+                )
+                record = self.processor.ingest(message, event_time=event_time, key=key)
+                board_record = DataStreamRecord(
+                    pad_name,
+                    record.topic,
+                    record.payload,
+                    record.offset,
+                    record.process_sequence,
+                    record.event_time,
+                    record.key,
+                )
+                self.records.append(board_record)
+                records.append(board_record)
+            return records
+
+        def latest(self, topic):
+            self.drain()
+            for record in reversed(self.records):
+                if record.topic == topic:
+                    return record
+            return None
+
+        def query(self, sql, parameters=None):
+            self.drain()
+            topic = (parameters or {}).get("topic", "sensor.environment.temperature")
+            for record in reversed(self.records):
+                if record.topic == topic:
+                    temperature_f = None
+                    unit = None
+                    if record.payload:
+                        try:
+                            temperature_f, unit = _decode_temperature_flatbuffer(record.payload)
+                        except (IndexError, UnicodeDecodeError, ValueError):
+                            pass
+                    return [
+                        {
+                            "pad_name": record.pad_name,
+                            "seq_source": record.seq_source,
+                            "temperature_f": temperature_f,
+                            "unit": unit,
+                            "payload": record.payload,
+                        }
+                    ]
+            return []
+
+        def query_one(self, sql, parameters=None):
+            rows = self.query(sql, parameters)
+            return rows[0] if rows else None
+
+    rust_module.PubSubRuntime = PubSubRuntime
+    rust_module.ArchitectureCapacitor = ArchitectureCapacitor
+    rust_module.ArchitectureGround = ArchitectureGround
+    rust_module.ArchitecturePad = ArchitecturePad
+    rust_module.ArchitectureProbe = ArchitectureProbe
+    rust_module.ArchitectureRegulator = ArchitectureRegulator
+    rust_module.ArchitectureRelay = ArchitectureRelay
+    rust_module.ArchitectureResistor = ArchitectureResistor
+    rust_module.ArchitectureVia = ArchitectureVia
+    rust_module.CalibratedClock = CalibratedClock
+    rust_module.Clock = Clock
+    rust_module.ClockCalibrationSample = ClockCalibrationSample
     rust_module.ClockDomainRef = ClockDomainRef
     rust_module.ClosedEnvelope = ClosedEnvelope
     rust_module.ControlLoop = ControlLoop
     rust_module.CreditSnapshot = CreditSnapshot
+    rust_module.DataStreamProcessor = DataStreamProcessor
+    rust_module.DataStreamRecord = DataStreamRecord
+    rust_module.FlatBufferField = FlatBufferField
+    rust_module.FlatBufferTable = FlatBufferTable
     rust_module.Graph = Graph
+    rust_module.InMemoryPubSub = InMemoryPubSub
     rust_module.Layer = Layer
     rust_module.Mailbox = Mailbox
     rust_module.MailboxDescriptor = MailboxDescriptor
     rust_module.NamespaceRef = NamespaceRef
     rust_module.NoLineageMaterializerDropProfile = NoLineageMaterializerDropProfile
+    rust_module.MonotonicLogicalClock = MonotonicLogicalClock
+    rust_module.NtpTimeProvider = NtpTimeProvider
     rust_module.OpenedEnvelope = OpenedEnvelope
     rust_module.PayloadRef = PayloadRef
     rust_module.Plane = Plane
     rust_module.PortDescriptor = PortDescriptor
     rust_module.ProducerKind = ProducerKind
     rust_module.ProducerRef = ProducerRef
+    rust_module.PubSubDelivery = PubSubDelivery
+    rust_module.PubSubMessage = PubSubMessage
+    rust_module.PubSubSubscription = PubSubSubscription
     rust_module.ReadablePort = ReadablePort
     rust_module.RetentionSnapshot = RetentionSnapshot
     rust_module.RouteRef = RouteRef
     rust_module.RuntimeRef = RuntimeRef
     rust_module.ScheduleGuard = ScheduleGuard
     rust_module.SchemaRef = SchemaRef
+    rust_module.SystemTimeProvider = SystemTimeProvider
     rust_module.TaintDomain = TaintDomain
     rust_module.TaintMark = TaintMark
     rust_module.Variant = Variant
@@ -1600,6 +1939,21 @@ def load_example_module(name: str):
 def load_manyfold_graph_module():
     load_manyfold_package()
     return sys.modules["manyfold.graph"]
+
+
+def _decode_temperature_flatbuffer(payload: bytes) -> tuple[float, str]:
+    root_offset = struct.unpack_from("<I", payload, 0)[0]
+    temperature = struct.unpack_from("<f", payload, root_offset + 4)[0]
+    string_offset_position = root_offset + 8
+    string_position = string_offset_position + struct.unpack_from(
+        "<I",
+        payload,
+        string_offset_position,
+    )[0]
+    unit_length = struct.unpack_from("<I", payload, string_position)[0]
+    unit_start = string_position + 4
+    unit = payload[unit_start : unit_start + unit_length].decode("utf-8")
+    return temperature, unit
 
 
 def _module_available(module_name: str) -> bool:

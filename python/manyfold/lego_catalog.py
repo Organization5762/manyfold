@@ -205,6 +205,7 @@ _LEGOS = (
     Lego("Decode", "capability", "capability", "Turn bytes into a value."),
     Lego("Sign", "capability", "capability", "Attach authenticity proof."),
     Lego("Verify", "capability", "capability", "Check authenticity proof."),
+    Lego("SQL", "query", "local", "Declarative relational stream query.", ("Read", "Scan")),
     # Local runtime.
     Lego(
         "Schema", "data", "local", "Typed encode/decode contract.", ("Encode", "Decode")
@@ -388,6 +389,69 @@ _LEGOS = (
         ("RouteRef", "Envelope", "Publish", "Subscribe"),
     ),
     Lego(
+        "Board",
+        "architecture",
+        "local",
+        "Architecture surface whose pads are wired by a graph.",
+        ("Graph",),
+    ),
+    Lego(
+        "Pad",
+        "architecture",
+        "local",
+        "Public or internal IO point on a board.",
+        ("Board", "RouteRef"),
+    ),
+    Lego(
+        "Relay",
+        "architecture",
+        "local",
+        "Board-local forwarding path between topics on the same boundary.",
+        ("Graph",),
+    ),
+    Lego(
+        "Via",
+        "architecture",
+        "local",
+        "Crossing between board regions, processes, trust zones, or clock domains.",
+        ("Relay", "Clock"),
+    ),
+    Lego(
+        "Regulator",
+        "architecture",
+        "local",
+        "Continuous operating-budget policy for board traffic.",
+        ("Graph",),
+    ),
+    Lego(
+        "Ground",
+        "architecture",
+        "local",
+        "Explicit discard boundary for traffic that leaves the board.",
+        ("Pad",),
+    ),
+    Lego(
+        "Probe",
+        "architecture",
+        "local",
+        "Observation-only attachment for board traffic or state.",
+        ("Read",),
+    ),
+    Lego(
+        "Capacitor",
+        "architecture",
+        "local",
+        "Stages or pre-pulls data closer to where it will be consumed.",
+        ("Pad", "Graph"),
+    ),
+    Lego(
+        "Resistor",
+        "architecture",
+        "local",
+        "Bounds IO traversal so transfer is governed rather than unbounded.",
+        ("Regulator", "Via"),
+    ),
+    Lego(
         "Mailbox",
         "handoff",
         "local",
@@ -414,6 +478,13 @@ _LEGOS = (
         "local",
         "Broadcasts events to subscribers.",
         ("RouteRef", "Envelope"),
+    ),
+    Lego(
+        "DataStreamProcessor",
+        "processing",
+        "local",
+        "Runs SQL queries over delivered stream messages.",
+        ("PubSub", "SQL"),
     ),
     # Durable.
     Lego(

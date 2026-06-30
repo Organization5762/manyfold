@@ -596,7 +596,7 @@ class MemoryBenchmarkTests(unittest.TestCase):
                     rss_warmup_fraction=0.0,
                 ),
                 metadata={
-                    "manyfold_bridge_version": "0.1.38",
+                    "manyfold_bridge_version": "0.1.39",
                     "manyfold_source": "/tmp/manyfold/python/manyfold/__init__.py",
                 },
                 samples=(
@@ -642,7 +642,7 @@ class MemoryBenchmarkTests(unittest.TestCase):
             summary["metadata"]["manyfold_source"],
             "/tmp/manyfold/python/manyfold/__init__.py",
         )
-        self.assertEqual(summary["metadata"]["manyfold_bridge_version"], "0.1.38")
+        self.assertEqual(summary["metadata"]["manyfold_bridge_version"], "0.1.39")
         self.assertEqual(summary["samples"][1]["current_rss_kib"], 33_000)
         self.assertEqual(summary["samples"][1]["private_kib"], 10_000)
         self.assertEqual(summary["samples"][1]["fd_count"], 42)

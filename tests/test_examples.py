@@ -1631,10 +1631,15 @@ class ExampleTests(unittest.TestCase):
         self.assertNotIn("SENTINEL", vars(sys.modules["examples.cross_partition_join"]))
 
     def test_simple_latest_example(self) -> None:
-        result = load_example_module("simple_latest").run_example()
+        module = load_example_module("simple_latest")
+        result = module.run_example()
 
-        self.assertEqual(result["latest_payload"], b"72.9F")
+        self.assertIsInstance(result["latest_payload"], bytes)
+        self.assertGreater(len(result["latest_payload"]), 0)
         self.assertEqual(result["latest_seq"], 2)
+        self.assertAlmostEqual(result["latest_degrees"], 72.9, places=3)
+        self.assertEqual(result["latest_unit"], "F")
+        self.assertAlmostEqual(result["average_degrees"], 72.65)
 
     def test_average_temperature_example(self) -> None:
         result = load_example_module("average_temperature").run_example()
