@@ -32,39 +32,67 @@ uv run python -m unittest tests.test_examples
 ### Publish Values
 
 ```python
-from manyfold import Graph, Schema, route
+from dataclasses import dataclass
 
-graph = Graph()
-temperature = route(
-    owner="sensor",
-    family="environment",
-    stream="temperature",
-    schema=Schema.bytes(name="Temperature"),
+from manyfold.architecture import PubSub
+
+
+@dataclass(frozen=True)
+class Temperature:
+    degrees: float
+    unit: str
+
+
+temperature = PubSub()
+
+temperature.publish(Temperature(degrees=72.4, unit="F"))
+temperature.publish(Temperature(degrees=72.9, unit="F"))
+latest = temperature.latest()
+latest_row = temperature.query_one(
+    """
+    SELECT pad_name, offset + 1 AS seq_source, degrees, unit
+    FROM stream
+    ORDER BY event_time DESC, process_sequence DESC
+    LIMIT 1
+    """
 )
-
-graph.publish(temperature, b"72.4F")
-graph.publish(temperature, b"72.9F")
-latest = graph.latest(temperature)
-assert latest is not None
-print(f"latest #{latest.closed.seq_source}: {latest.value!r}")
+if latest is not None and latest_row is not None:
+    print(f"latest #{latest_row['seq_source']}: {latest.degrees}{latest.unit}")
 ```
 
 Output:
 
 ```text
-latest #2: b'72.9F'
+latest #2: 72.9F
 ```
 
-The fields are the parts of the graph name:
+When a topic matters, pass it explicitly. Dotted topics keep the same ownership
+shape as a route name:
 
 - `owner` is the component or subsystem responsible for the signal.
 - `family` groups related streams.
 - `stream` names this specific signal.
-- `schema` says how payloads are encoded and decoded.
 
-Basic routes default to read/logical/meta, so the first example stays focused
-on the moving signal. Pass explicit `plane`, `layer`, or `variant` when that
-role matters.
+`PubSub` is a stream backed by PubSub delivery and a Rust SQL
+stream processor, so `latest()` is an ordinary ordered `query_one(...)` under
+the hood. If no topic is provided, the stream gets an ephemeral UUID5 topic.
+`latest()` returns a row object, so SQL-backed fields can be read as
+`latest.degrees` or `latest["degrees"]`. The SQL table exposes `pad_name` for
+filtering and joins. If no schema is provided, the first structured model
+publish fixes the stream schema lazily.
+Pydantic models work through their `model_fields` and `model_dump()` surface;
+dataclasses work through type annotations.
+The current runtime encodes those values as FlatBuffer bytes in `payload` and
+materializes the logical fields as typed SQL columns during Rust ingestion.
+Callers may still pass generated FlatBuffer bytes, builder `Output()`, or table
+objects. The queue assigns a default `event_time` when callers do not provide
+one, and `key` defaults to `None`; distributed queue implementations own their
+ordering contract.
+
+Manyfold-native architecture elements remain available from
+`manyfold.architecture.native` for lower-level topology descriptions, but
+`PubSub` is the primary application stream surface. Behavior-heavy substrates
+stay backed by the runtime implementation.
 
 ### Stats: Compute Values
 

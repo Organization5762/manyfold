@@ -184,7 +184,7 @@ class HeartBenchmarkTests(unittest.TestCase):
                 heart_benchmarks,
                 "_verify_local_manyfold_import",
                 return_value={
-                    "manyfold_bridge_version": "0.1.38",
+                    "manyfold_bridge_version": "0.1.39",
                     "manyfold_source": "/tmp/manyfold/python/manyfold/__init__.py",
                 },
             ) as verify,
@@ -218,7 +218,7 @@ class HeartBenchmarkTests(unittest.TestCase):
         self.assertEqual(
             monitor_args.external_metadata,
             {
-                "manyfold_bridge_version": "0.1.38",
+                "manyfold_bridge_version": "0.1.39",
                 "manyfold_source": "/tmp/manyfold/python/manyfold/__init__.py",
             },
         )
@@ -275,7 +275,7 @@ class HeartBenchmarkTests(unittest.TestCase):
             returncode=0,
             stdout=(
                 "manyfold_import source=/tmp/manyfold/python/manyfold/__init__.py\n"
-                "manyfold_bridge_version=0.1.38\n"
+                "manyfold_bridge_version=0.1.39\n"
             ),
             stderr="",
         )
@@ -294,7 +294,7 @@ class HeartBenchmarkTests(unittest.TestCase):
         self.assertEqual(
             metadata,
             {
-                "manyfold_bridge_version": "0.1.38",
+                "manyfold_bridge_version": "0.1.39",
                 "manyfold_source": "/tmp/manyfold/python/manyfold/__init__.py",
             },
         )

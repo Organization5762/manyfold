@@ -39,22 +39,58 @@ For a first route, read the fields as:
 ## Publish and Read
 
 ```python
-graph.publish(temperature, b"72.4F")
-graph.publish(temperature, b"72.9F")
-latest = graph.latest(temperature)
+from dataclasses import dataclass
 
-if latest is not None:
-    print(f"latest #{latest.closed.seq_source}: {latest.value!r}")
+from manyfold.architecture import PubSub
+
+
+@dataclass(frozen=True)
+class Temperature:
+    degrees: float
+    unit: str
+
+
+temperature = PubSub()
+
+temperature.publish(Temperature(degrees=72.4, unit="F"))
+temperature.publish(Temperature(degrees=72.9, unit="F"))
+latest = temperature.latest()
+latest_row = temperature.query_one(
+    """
+    SELECT pad_name, offset + 1 AS seq_source, degrees, unit
+    FROM stream
+    ORDER BY event_time DESC, process_sequence DESC
+    LIMIT 1
+    """
+)
+if latest is not None and latest_row is not None:
+    print(f"latest #{latest_row['seq_source']}: {latest.degrees}{latest.unit}")
 ```
 
 Output:
 
 ```text
-latest #2: b'72.9F'
+latest #2: 72.9F
 ```
 
-`Schema` owns encoding and decoding, so reads and observations can return typed
-payloads rather than raw transport bytes.
+`PubSub` is a stream backed by PubSub delivery and a Rust SQL
+stream processor, so `latest()` is an ordinary ordered `query_one(...)` under
+the hood. If no topic is provided, the stream gets an ephemeral UUID5 topic.
+`latest()` returns a row object, so SQL-backed fields can be read as
+`latest.degrees` or `latest["degrees"]`. If no schema is provided, the first
+structured model publish fixes the stream schema lazily. The stream materializes
+logical schema fields into the SQL table. The current runtime encodes model
+values as FlatBuffer bytes in `payload`.
+Pydantic models work through their `model_fields` and `model_dump()` surface;
+dataclasses work through type annotations.
+Callers may still pass generated FlatBuffer bytes, builder `Output()`, or table
+objects. The queue assigns a default `event_time` when callers omit it, and
+`key` defaults to `None`.
+
+Manyfold-native architecture elements remain available from
+`manyfold.architecture.native` for lower-level topology descriptions, but the
+stream API is the primary application surface. Behavior-heavy substrates such
+as PubSub stay backed by the runtime implementation.
 
 ## Observe
 
@@ -192,20 +228,31 @@ graph.resistor(
 )
 ```
 
-Windows and joins make time and coordination visible:
+Windows and joins can be written directly against stream SQL relations:
 
-```python
-graph.window_by_time(source, width=1, watermark=watermark_route)
-graph.interval_join(
-    left_stream,
-    right_stream,
-    within=2,
-    combine=combine_values,
-    left_time=lambda value: value.event_time,
-    right_time=lambda value: value.event_time,
+```sql
+SELECT *
+FROM stream
+WHERE event_time BETWEEN :watermark - :width + 1 AND :watermark;
+
+SELECT left_payload, right_payload, message_key
+FROM joined_stream;
+
+WITH latest_state AS (
+  SELECT payload
+  FROM right_stream
+  ORDER BY event_time DESC, process_sequence DESC
+  LIMIT 1
 )
-graph.lookup_join(left_stream, right_state, combine=combine_values)
+SELECT left_stream.payload, latest_state.payload
+FROM left_stream
+CROSS JOIN latest_state
 ```
+
+Use `stream.query(...)` for SQL scoped to one PubSub stream and
+`stream.query_one(...)` when the SQL must return at most one row. The queue
+assigns a default `event_time` when callers do not provide one; distributed
+queue implementations own that ordering contract.
 
 ## Inspect
 
