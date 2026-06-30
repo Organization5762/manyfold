@@ -28,6 +28,7 @@ PYTHON_SOURCE_ROOTS = (
 )
 PRIVATE_PROFILING_MODULES = frozenset(
     {
+        "benchmark_baselines",
         "jemalloc_leak_check",
         "native_profilers",
         "profile_artifacts",
@@ -198,6 +199,7 @@ class ProjectMetadataTests(unittest.TestCase):
             in {
                 "manyfold-jemalloc-leak-check",
                 "manyfold-jemalloc-verify",
+                "manyfold-benchmark-baselines-check",
                 "manyfold-native-profiler",
                 "manyfold-native-profiler-verify",
                 "manyfold-profile-artifact-verify",
@@ -205,7 +207,7 @@ class ProjectMetadataTests(unittest.TestCase):
             }
         }
 
-        self.assertEqual(len(profiling_scripts), 6)
+        self.assertEqual(len(profiling_scripts), 7)
         self.assertTrue(
             all(
                 target.startswith("manyfold.private.profiling.")
@@ -226,6 +228,8 @@ class ProjectMetadataTests(unittest.TestCase):
         self.assertIn("cargo fmt --check", workflow)
         self.assertIn("Run Clippy", workflow)
         self.assertIn("cargo clippy --all-targets --all-features -- -D warnings", workflow)
+        self.assertIn("Check benchmark baselines", workflow)
+        self.assertIn("uv run manyfold-benchmark-baselines-check", workflow)
 
     def test_ci_gates_heart_nowait_memory_paths(self) -> None:
         workflow = CI_WORKFLOW_PATH.read_text(encoding="utf-8")
