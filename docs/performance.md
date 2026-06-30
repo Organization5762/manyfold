@@ -73,6 +73,8 @@ cargo test
 Standardized benchmark notes live under [docs/benchmarks](benchmarks/). Start
 with [Dormant Runtime Benchmark](benchmarks/dormant_runtime.md) when changing
 runtime wake-up or warm-pool behavior.
+Use [Architecture PubSub Benchmark](benchmarks/architecture_pubsub.md) when
+changing the Rust-backed `manyfold.architecture.pubsub` module.
 
 ## Performance Checklist
 
