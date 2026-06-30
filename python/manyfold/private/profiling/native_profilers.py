@@ -159,8 +159,8 @@ class ProfilerResult:
         }
 
 
-def _main() -> None:
-    args = _parse_args()
+def _main(argv: tuple[str, ...] | None = None) -> None:
+    args = _parse_args(argv)
     if args.list:
         for profiler in SUPPORTED_PROFILERS:
             print(profiler)
@@ -181,8 +181,8 @@ def _main() -> None:
         raise SystemExit(1)
 
 
-def _verify_main() -> None:
-    args = _parse_verify_args()
+def _verify_main(argv: tuple[str, ...] | None = None) -> None:
+    args = _parse_verify_args(argv)
     summary = verify_profiler_summary(
         args.summary,
         required_profilers=tuple(args.require_profiler or ()),
@@ -197,7 +197,7 @@ def _verify_main() -> None:
     )
 
 
-def _parse_args() -> argparse.Namespace:
+def _parse_args(argv: tuple[str, ...] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run native profiling tools against the Manyfold benchmark."
     )
@@ -234,13 +234,13 @@ def _parse_args() -> argparse.Namespace:
         help="List supported profiler names and exit.",
     )
     parser.add_argument("command", nargs=argparse.REMAINDER)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.command and args.command[0] == "--":
         args.command = args.command[1:]
     return args
 
 
-def _parse_verify_args() -> argparse.Namespace:
+def _parse_verify_args(argv: tuple[str, ...] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Verify a Manyfold native profiler summary JSON artifact."
     )
@@ -261,7 +261,7 @@ def _parse_verify_args() -> argparse.Namespace:
         action="store_true",
         help="Allow skipped profiler results. Failed results are never accepted.",
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def _expand_profilers(profilers: tuple[str, ...]) -> tuple[str, ...]:

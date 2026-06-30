@@ -43,6 +43,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test
 uv run ruff check
 uv run python -m unittest discover -s tests -p 'test_*.py'
+uv run manyfold-benchmark-baselines-check
 uv run python -m manyfold.rfc_checklist_gen --check
 uv run manyfold-example-catalog --check
 uv run manyfold-example-catalog --list reference

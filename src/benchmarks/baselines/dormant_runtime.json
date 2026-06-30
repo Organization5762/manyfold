@@ -1,0 +1,18 @@
+{
+  "mode": "slots",
+  "controller_instances": 1,
+  "capacity_instances": 10,
+  "dormant_processes_per_runtime": 10,
+  "total_dormant_processes": 100,
+  "construction_seconds": 0.000014625,
+  "idle_wall_seconds": 0.504046750,
+  "idle_cpu_seconds": 0.000009000,
+  "idle_cpu_percent": 0.001786,
+  "poll_iterations": 1000000,
+  "poll_seconds": 0.001835584,
+  "average_poll_us": 0.001836,
+  "wake_iterations": 1000000,
+  "wake_seconds": 0.001074625,
+  "average_wake_us": 0.001075,
+  "current_rss_kib": 1248
+}

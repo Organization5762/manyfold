@@ -1,5 +1,7 @@
+pub mod architecture;
 pub mod core;
 
+pub use architecture::*;
 pub use core::*;
 
 #[cfg(any(feature = "python-extension", feature = "stub-gen"))]

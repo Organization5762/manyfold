@@ -60,6 +60,11 @@ def sink(route: TypedRoute[T] | RouteRef) -> Sink[T]:
     return Sink(route=route)
 
 
+def logical_routes(*, owner: OwnerName | str, family: StreamFamily | str) -> RouteScope:
+    """Create a logical route scope for one service or component family."""
+    return RouteScope.logical(owner=owner, family=family)
+
+
 @overload
 def route(
     *,
@@ -199,6 +204,134 @@ class StreamName:
 
     def __post_init__(self) -> None:
         _require_non_empty_string(self.value, "stream")
+
+
+@dataclass(frozen=True)
+class RouteScope:
+    """Route naming context for one owner/family/layer.
+
+    A scope carries only route organization. Methods such as
+    ``write_request`` and ``read_event`` choose the executable direction and
+    message role explicitly at the call site.
+    """
+
+    owner: OwnerName
+    family: StreamFamily
+    layer: Layer = field(default_factory=lambda: Layer.Logical)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.owner, OwnerName):
+            raise ValueError("owner must be an OwnerName")
+        if not isinstance(self.family, StreamFamily):
+            raise ValueError("family must be a StreamFamily")
+        _require_enum_member(self.layer, Layer, "layer")
+
+    @classmethod
+    def logical(
+        cls,
+        *,
+        owner: OwnerName | str,
+        family: StreamFamily | str,
+    ) -> RouteScope:
+        return cls(
+            owner=_coerce_owner_name(owner),
+            family=_coerce_stream_family(family),
+            layer=Layer.Logical,
+        )
+
+    def read_event(
+        self,
+        stream: StreamName | str,
+        schema: SchemaLike[T],
+        *,
+        schema_id: str | None = None,
+        version: int | None = None,
+    ) -> TypedRoute[T]:
+        """Build a read-side event route in this scope."""
+        return self._route(
+            plane=Plane.Read,
+            stream=stream,
+            variant=Variant.Event,
+            schema=schema,
+            schema_id=schema_id,
+            version=version,
+        )
+
+    def read_state(
+        self,
+        stream: StreamName | str,
+        schema: SchemaLike[T],
+        *,
+        schema_id: str | None = None,
+        version: int | None = None,
+    ) -> TypedRoute[T]:
+        """Build a read-side latest-state route in this scope."""
+        return self._route(
+            plane=Plane.Read,
+            stream=stream,
+            variant=Variant.Meta,
+            schema=schema,
+            schema_id=schema_id,
+            version=version,
+        )
+
+    def write_request(
+        self,
+        stream: StreamName | str,
+        schema: SchemaLike[T],
+        *,
+        schema_id: str | None = None,
+        version: int | None = None,
+    ) -> TypedRoute[T]:
+        """Build a write-side request route in this scope."""
+        return self._route(
+            plane=Plane.Write,
+            stream=stream,
+            variant=Variant.Request,
+            schema=schema,
+            schema_id=schema_id,
+            version=version,
+        )
+
+    def state(
+        self,
+        stream: StreamName | str,
+        schema: SchemaLike[T],
+        *,
+        schema_id: str | None = None,
+        version: int | None = None,
+    ) -> TypedRoute[T]:
+        """Build a state-plane route in this scope."""
+        return self._route(
+            plane=Plane.State,
+            stream=stream,
+            variant=Variant.State,
+            schema=schema,
+            schema_id=schema_id,
+            version=version,
+        )
+
+    def _route(
+        self,
+        *,
+        plane: Plane,
+        stream: StreamName | str,
+        variant: Variant,
+        schema: SchemaLike[T],
+        schema_id: str | None,
+        version: int | None,
+    ) -> TypedRoute[T]:
+        return route(
+            plane=plane,
+            layer=self.layer,
+            owner=self.owner,
+            family=self.family,
+            stream=stream,
+            variant=variant,
+            schema=schema,
+            schema_id=schema_id,
+            version=version,
+        )
 
 
 @dataclass(frozen=True)

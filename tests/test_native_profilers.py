@@ -5,10 +5,11 @@ import json
 import subprocess
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-from manyfold import native_profilers
+from manyfold.private.profiling import native_profilers
 
 
 class NativeProfilerTests(unittest.TestCase):
@@ -376,17 +377,15 @@ class NativeProfilerTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            with mock.patch(
-                "sys.argv",
-                (
-                    "manyfold-native-profiler-verify",
-                    str(summary_path),
-                    "--require-profiler",
-                    "dhat",
-                ),
-            ):
-                with mock.patch("sys.stdout", new_callable=io.StringIO) as stdout:
-                    native_profilers._verify_main()
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                native_profilers._verify_main(
+                    (
+                        str(summary_path),
+                        "--require-profiler",
+                        "dhat",
+                    )
+                )
 
         self.assertIn("native_profiler_summary passed=true", stdout.getvalue())
 

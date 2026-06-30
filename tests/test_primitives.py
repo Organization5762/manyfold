@@ -28,6 +28,57 @@ class PrimitiveTests(unittest.TestCase):
         )
         self.assertEqual(route.route_display, route.display())
 
+    def test_logical_route_scope_builds_typed_service_routes(self) -> None:
+        manyfold = load_manyfold_package()
+        scope = manyfold.logical_routes(owner="kafka", family="log")
+
+        request = scope.write_request(
+            "stable_coherence",
+            manyfold.Schema.bytes(name="StableCoherence"),
+        )
+        event = scope.read_event("appended", manyfold.Schema.bytes(name="KafkaAppend"))
+        state = scope.read_state("offset", manyfold.Schema.bytes(name="KafkaOffset"))
+        state_plane = scope.state("mirror", manyfold.Schema.bytes(name="KafkaMirror"))
+
+        self.assertEqual(
+            request.display(),
+            "write.logical.kafka.log.stable_coherence.request.v1",
+        )
+        self.assertEqual(event.display(), "read.logical.kafka.log.appended.event.v1")
+        self.assertEqual(state.display(), "read.logical.kafka.log.offset.meta.v1")
+        self.assertEqual(
+            state_plane.display(),
+            "state.logical.kafka.log.mirror.state.v1",
+        )
+        self.assertIs(request.plane, manyfold.Plane.Write)
+        self.assertIs(request.variant, manyfold.Variant.Request)
+        self.assertIs(event.plane, manyfold.Plane.Read)
+        self.assertIs(event.variant, manyfold.Variant.Event)
+        self.assertIs(state.plane, manyfold.Plane.Read)
+        self.assertIs(state.variant, manyfold.Variant.Meta)
+        self.assertIs(state_plane.plane, manyfold.Plane.State)
+        self.assertIs(state_plane.variant, manyfold.Variant.State)
+
+    def test_route_scope_rejects_invalid_context(self) -> None:
+        manyfold = load_manyfold_package()
+
+        with self.assertRaisesRegex(ValueError, "owner must be an OwnerName"):
+            manyfold.RouteScope(
+                owner="kafka",
+                family=manyfold.StreamFamily("log"),
+            )
+        with self.assertRaisesRegex(ValueError, "family must be a StreamFamily"):
+            manyfold.RouteScope(
+                owner=manyfold.OwnerName("kafka"),
+                family="log",
+            )
+        with self.assertRaisesRegex(ValueError, "layer must be a Layer"):
+            manyfold.RouteScope(
+                owner=manyfold.OwnerName("kafka"),
+                family=manyfold.StreamFamily("log"),
+                layer="logical",
+            )
+
     def test_route_reports_missing_identity_parts_in_stable_order(self) -> None:
         manyfold = load_manyfold_package()
 

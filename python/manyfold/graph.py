@@ -77,6 +77,10 @@ from .primitives import (
     sink as sink,
     source as source,
 )
+from .private.graph_publish import (
+    NativeEmitCalls,
+    TypedPublishTarget,
+)
 from .stats import Average
 
 T = TypeVar("T")
@@ -1400,6 +1404,350 @@ class QueryServiceRoutes:
     def __post_init__(self) -> None:
         _require_route_ref(self.request, "query service request")
         _require_route_ref(self.response, "query service response")
+
+
+@dataclass(frozen=True)
+class ProcessEndpoint:
+    """Stable identity for one Manyfold node or process participating in RPC."""
+
+    node_id: str
+    address: str = "process://local"
+    roles: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        _require_non_empty_text(self.node_id, "process endpoint node_id")
+        _require_non_empty_text(self.address, "process endpoint address")
+        object.__setattr__(
+            self,
+            "roles",
+            _require_text_tuple(self.roles, "process endpoint roles"),
+        )
+
+
+@dataclass(frozen=True)
+class ProcessRpcRequest:
+    """One process-to-process Manyfold RPC request."""
+
+    correlation_id: str
+    service: str
+    method: str
+    payload: object
+    source: ProcessEndpoint
+    target: ProcessEndpoint
+    ack: bool = True
+
+    def __post_init__(self) -> None:
+        _require_non_empty_text(self.correlation_id, "RPC correlation_id")
+        _require_non_empty_text(self.service, "RPC service")
+        _require_non_empty_text(self.method, "RPC method")
+        if not isinstance(self.source, ProcessEndpoint):
+            raise ValueError("RPC source must be a ProcessEndpoint")
+        if not isinstance(self.target, ProcessEndpoint):
+            raise ValueError("RPC target must be a ProcessEndpoint")
+        _require_bool(self.ack, "RPC ack")
+
+
+@dataclass(frozen=True)
+class ProcessRpcResponse:
+    """Successful process-to-process Manyfold RPC response."""
+
+    correlation_id: str
+    service: str
+    method: str
+    payload: object
+    source: ProcessEndpoint
+    target: ProcessEndpoint
+
+    def __post_init__(self) -> None:
+        _require_non_empty_text(self.correlation_id, "RPC response correlation_id")
+        _require_non_empty_text(self.service, "RPC response service")
+        _require_non_empty_text(self.method, "RPC response method")
+        if not isinstance(self.source, ProcessEndpoint):
+            raise ValueError("RPC response source must be a ProcessEndpoint")
+        if not isinstance(self.target, ProcessEndpoint):
+            raise ValueError("RPC response target must be a ProcessEndpoint")
+
+
+@dataclass(frozen=True)
+class ProcessRpcFailure:
+    """Failed process-to-process Manyfold RPC response."""
+
+    correlation_id: str
+    service: str
+    method: str
+    error: str
+    source: ProcessEndpoint
+    target: ProcessEndpoint
+
+    def __post_init__(self) -> None:
+        _require_non_empty_text(self.correlation_id, "RPC failure correlation_id")
+        _require_non_empty_text(self.service, "RPC failure service")
+        _require_non_empty_text(self.method, "RPC failure method")
+        _require_non_empty_text(self.error, "RPC failure error")
+        if not isinstance(self.source, ProcessEndpoint):
+            raise ValueError("RPC failure source must be a ProcessEndpoint")
+        if not isinstance(self.target, ProcessEndpoint):
+            raise ValueError("RPC failure target must be a ProcessEndpoint")
+
+
+@dataclass(frozen=True)
+class ProcessRpcAuditEntry:
+    """Bounded audit event for an RPC request handled by this process."""
+
+    correlation_id: str
+    service: str
+    method: str
+    source_node_id: str
+    target_node_id: str
+    status: str
+
+    def __post_init__(self) -> None:
+        _require_non_empty_text(self.correlation_id, "RPC audit correlation_id")
+        _require_non_empty_text(self.service, "RPC audit service")
+        _require_non_empty_text(self.method, "RPC audit method")
+        _require_non_empty_text(self.source_node_id, "RPC audit source_node_id")
+        _require_non_empty_text(self.target_node_id, "RPC audit target_node_id")
+        _require_non_empty_text(self.status, "RPC audit status")
+
+
+@dataclass(frozen=True)
+class ProcessRpcRoutes:
+    """Route bundle for a process-to-process Manyfold RPC plane."""
+
+    request: AnyTypedRoute
+    response: AnyTypedRoute
+    failure: AnyTypedRoute
+    audit_log: AnyTypedRoute
+
+    def __post_init__(self) -> None:
+        _require_typed_route(self.request, "RPC request")
+        _require_typed_route(self.response, "RPC response")
+        _require_typed_route(self.failure, "RPC failure")
+        _require_typed_route(self.audit_log, "RPC audit_log")
+
+
+ProcessRpcHandler: TypeAlias = Callable[[ProcessRpcRequest], object]
+
+
+class ProcessRpcTransport:
+    """Process-local implementation of the Manyfold RPC route contract."""
+
+    def __init__(
+        self,
+        graph: Graph,
+        routes: ProcessRpcRoutes,
+        endpoint: ProcessEndpoint,
+    ) -> None:
+        self._graph = graph
+        self.routes = routes
+        self.endpoint = endpoint
+        self._handlers: dict[tuple[str, str], ProcessRpcHandler] = {}
+        self._latest_nowait_response: ProcessRpcResponse | ProcessRpcFailure | None = (
+            None
+        )
+        self._subscription = graph.observe(routes.request).subscribe(self._on_request)
+
+    @classmethod
+    def install(
+        cls,
+        graph: Graph,
+        endpoint: ProcessEndpoint,
+        *,
+        owner: str = "process_rpc",
+        audit_limit: int = DEFAULT_ROUTE_HISTORY_LIMIT,
+    ) -> ProcessRpcTransport:
+        if not isinstance(endpoint, ProcessEndpoint):
+            raise ValueError("RPC endpoint must be a ProcessEndpoint")
+        _require_non_empty_text(owner, "RPC owner")
+        _require_integer(audit_limit, "RPC audit_limit")
+        if audit_limit <= 0:
+            raise ValueError("RPC audit_limit must be positive")
+        routes = ProcessRpcRoutes(
+            request=_process_rpc_route(
+                owner=owner,
+                stream="request",
+                variant=Variant.Request,
+                schema=Schema.any("ProcessRpcRequest"),
+            ),
+            response=_process_rpc_route(
+                owner=owner,
+                stream="response",
+                variant=Variant.Event,
+                schema=Schema.any("ProcessRpcResponse"),
+            ),
+            failure=_process_rpc_route(
+                owner=owner,
+                stream="failure",
+                variant=Variant.Event,
+                schema=Schema.any("ProcessRpcFailure"),
+            ),
+            audit_log=_process_rpc_route(
+                owner=owner,
+                stream="audit_log",
+                variant=Variant.Event,
+                schema=Schema.any("ProcessRpcAuditEntry"),
+            ),
+        )
+        for route_ref in (
+            routes.request,
+            routes.response,
+            routes.failure,
+            routes.audit_log,
+        ):
+            graph.configure_retention(
+                route_ref,
+                RouteRetentionPolicy(
+                    latest_replay_policy="bounded_history",
+                    history_limit=audit_limit if route_ref is routes.audit_log else 1,
+                ),
+        )
+        return cls(graph, routes, endpoint)
+
+    @classmethod
+    def attach(
+        cls,
+        graph: Graph,
+        routes: ProcessRpcRoutes,
+        endpoint: ProcessEndpoint,
+    ) -> ProcessRpcTransport:
+        if not isinstance(routes, ProcessRpcRoutes):
+            raise ValueError("RPC routes must be ProcessRpcRoutes")
+        if not isinstance(endpoint, ProcessEndpoint):
+            raise ValueError("RPC endpoint must be a ProcessEndpoint")
+        return cls(graph, routes, endpoint)
+
+    def register(
+        self,
+        service: str,
+        method: str,
+        handler: ProcessRpcHandler,
+    ) -> None:
+        _require_non_empty_text(service, "RPC service")
+        _require_non_empty_text(method, "RPC method")
+        if not callable(handler):
+            raise TypeError("RPC handler must be callable")
+        self._handlers[(service, method)] = handler
+
+    def call(
+        self,
+        *,
+        target: ProcessEndpoint,
+        service: str,
+        method: str,
+        payload: object,
+        correlation_id: str,
+    ) -> ProcessRpcResponse:
+        request = ProcessRpcRequest(
+            correlation_id=correlation_id,
+            service=service,
+            method=method,
+            payload=payload,
+            source=self.endpoint,
+            target=target,
+        )
+        self._graph.publish(self.routes.request, request)
+        latest_failure = self._graph.latest(self.routes.failure)
+        if (
+            latest_failure is not None
+            and latest_failure.value.correlation_id == correlation_id
+        ):
+            raise RuntimeError(latest_failure.value.error)
+        latest_response = self._graph.latest(self.routes.response)
+        if (
+            latest_response is None
+            or latest_response.value.correlation_id != correlation_id
+        ):
+            raise RuntimeError("RPC request produced no response")
+        return latest_response.value
+
+    def call_nowait(
+        self,
+        *,
+        target: ProcessEndpoint,
+        service: str,
+        method: str,
+        payload: object,
+        correlation_id: str,
+    ) -> ProcessRpcResponse | ProcessRpcFailure | None:
+        request = ProcessRpcRequest(
+            correlation_id=correlation_id,
+            service=service,
+            method=method,
+            payload=payload,
+            source=self.endpoint,
+            target=target,
+            ack=False,
+        )
+        self._graph.publish_nowait(self.routes.request, request)
+        if (
+            self._latest_nowait_response is not None
+            and self._latest_nowait_response.correlation_id == correlation_id
+        ):
+            return self._latest_nowait_response
+        return None
+
+    def dispose(self) -> None:
+        self._subscription.dispose()
+        self._handlers.clear()
+
+    def _on_request(self, envelope: ClosedEnvelope) -> None:
+        request = envelope.value
+        if request.target.node_id != self.endpoint.node_id:
+            return
+        handler = self._handlers.get((request.service, request.method))
+        if handler is None:
+            failure = ProcessRpcFailure(
+                correlation_id=request.correlation_id,
+                service=request.service,
+                method=request.method,
+                error=f"no RPC handler for {request.service}.{request.method}",
+                source=self.endpoint,
+                target=request.source,
+            )
+            self._latest_nowait_response = failure
+            self._graph.publish_nowait(self.routes.failure, failure)
+            self._publish_audit(request, "failure")
+            return
+        try:
+            payload = handler(request)
+        except Exception as error:
+            failure = ProcessRpcFailure(
+                correlation_id=request.correlation_id,
+                service=request.service,
+                method=request.method,
+                error=f"{type(error).__name__}: {error}",
+                source=self.endpoint,
+                target=request.source,
+            )
+            self._latest_nowait_response = failure
+            self._graph.publish_nowait(self.routes.failure, failure)
+            self._publish_audit(request, "failure")
+            return
+        response = ProcessRpcResponse(
+            correlation_id=request.correlation_id,
+            service=request.service,
+            method=request.method,
+            payload=payload,
+            source=self.endpoint,
+            target=request.source,
+        )
+        self._latest_nowait_response = response
+        self._publish_audit(request, "ok")
+        if request.ack:
+            self._graph.publish(self.routes.response, response)
+
+    def _publish_audit(self, request: ProcessRpcRequest, status: str) -> None:
+        self._graph.publish_nowait(
+            self.routes.audit_log,
+            ProcessRpcAuditEntry(
+                correlation_id=request.correlation_id,
+                service=request.service,
+                method=request.method,
+                source_node_id=request.source.node_id,
+                target_node_id=request.target.node_id,
+                status=status,
+            ),
+        )
 
 
 @dataclass(frozen=True)
@@ -3310,88 +3658,57 @@ class Graph:
     def reset_runtime_state(self) -> None:
         """Reset all graph-owned runtime state after explicit disposal."""
         self._graph = NativeGraph()
-        self._native_emit = getattr(self._graph, "emit", None)
-        self._native_emit_single_if_unrouted = getattr(
-            self._graph,
-            "emit_single_if_unrouted",
-            None,
+        self._native_emit_calls = NativeEmitCalls.from_native_graph(self._graph)
+        self._native_emit = self._native_emit_calls.emit
+        self._native_emit_single_if_unrouted = (
+            self._native_emit_calls.emit_single_if_unrouted
         )
-        self._native_emit_single_if_unrouted_drop = getattr(
-            self._graph,
-            "emit_single_if_unrouted_drop",
-            None,
+        self._native_emit_single_if_unrouted_drop = (
+            self._native_emit_calls.emit_single_if_unrouted_drop
         )
-        self._native_emit_single_if_unrouted_and_materializer_drop = getattr(
-            self._graph,
-            "emit_single_if_unrouted_and_materializer_drop",
-            None,
+        self._native_emit_single_if_unrouted_and_materializer_drop = (
+            self._native_emit_calls.emit_single_if_unrouted_and_materializer_drop
         )
-        self._native_emit_single_if_unrouted_and_materializer_drop_python = getattr(
-            self._graph,
-            "emit_single_if_unrouted_and_materializer_drop_python",
-            None,
+        self._native_emit_single_if_unrouted_and_materializer_drop_python = (
+            self._native_emit_calls.emit_single_if_unrouted_and_materializer_drop_python
         )
-        self._native_emit_single_if_unrouted_with_lineage_no_parents = getattr(
-            self._graph,
-            "emit_single_if_unrouted_with_lineage_no_parents",
-            None,
+        self._native_emit_single_if_unrouted_with_lineage_no_parents = (
+            self._native_emit_calls.emit_single_if_unrouted_with_lineage_no_parents
         )
-        self._native_emit_single_if_unrouted_with_lineage_no_parents_and_materializers = getattr(
-            self._graph,
-            "emit_single_if_unrouted_with_lineage_no_parents_and_materializers",
-            None,
+        self._native_emit_single_if_unrouted_with_lineage_no_parents_and_materializers = (
+            self._native_emit_calls.emit_single_if_unrouted_with_lineage_no_parents_and_materializers
         )
-        self._native_emit_single_if_unrouted_with_lineage_no_parents_and_materializers_drop = getattr(
-            self._graph,
-            "emit_single_if_unrouted_with_lineage_no_parents_and_materializers_drop",
-            None,
+        self._native_emit_single_if_unrouted_with_lineage_no_parents_and_materializers_drop = (
+            self._native_emit_calls.emit_single_if_unrouted_with_lineage_no_parents_and_materializers_drop
         )
-        self._native_emit_single_if_unrouted_with_lineage_no_parents_and_materializers_drop_python = getattr(
-            self._graph,
-            "emit_single_if_unrouted_with_lineage_no_parents_and_materializers_drop_python",
-            None,
+        self._native_emit_single_if_unrouted_with_lineage_no_parents_and_materializers_drop_python = (
+            self._native_emit_calls.emit_single_if_unrouted_with_lineage_no_parents_and_materializers_drop_python
         )
-        self._native_emit_single_if_unrouted_with_lineage_ids_no_parents_and_materializers_drop_python = getattr(
-            self._graph,
-            "emit_single_if_unrouted_with_lineage_ids_no_parents_and_materializers_drop_python",
-            None,
+        self._native_emit_single_if_unrouted_with_lineage_ids_no_parents_and_materializers_drop_python = (
+            self._native_emit_calls.emit_single_if_unrouted_with_lineage_ids_no_parents_and_materializers_drop_python
         )
-        self._native_emit_single_if_unrouted_with_lineage_ids_no_parents_and_materializer_drop_python = getattr(
-            self._graph,
-            "emit_single_if_unrouted_with_lineage_ids_no_parents_and_materializer_drop_python",
-            None,
+        self._native_emit_single_if_unrouted_with_lineage_ids_no_parents_and_materializer_drop_python = (
+            self._native_emit_calls.emit_single_if_unrouted_with_lineage_ids_no_parents_and_materializer_drop_python
         )
-        self._native_compile_no_lineage_materializer_drop_profile = getattr(
-            self._graph,
-            "compile_no_lineage_materializer_drop_profile",
-            None,
+        self._native_compile_no_lineage_materializer_drop_profile = (
+            self._native_emit_calls.compile_no_lineage_materializer_drop_profile
         )
-        self._native_release_no_lineage_materializer_drop_profile = getattr(
-            self._graph,
-            "release_no_lineage_materializer_drop_profile",
-            None,
+        self._native_release_no_lineage_materializer_drop_profile = (
+            self._native_emit_calls.release_no_lineage_materializer_drop_profile
         )
-        self._native_emit_no_lineage_materializer_drop_profile_python = getattr(
-            self._graph,
-            "emit_no_lineage_materializer_drop_profile_python",
-            None,
+        self._native_emit_no_lineage_materializer_drop_profile_python = (
+            self._native_emit_calls.emit_no_lineage_materializer_drop_profile_python
         )
-        self._native_materialize_bytes_one_parent = getattr(
-            self._graph,
-            "materialize_bytes_one_parent",
-            None,
+        self._native_materialize_bytes_one_parent = (
+            self._native_emit_calls.materialize_bytes_one_parent
         )
-        self._native_register_materialize_bytes = getattr(
-            self._graph,
-            "register_materialize_bytes",
-            None,
+        self._native_register_materialize_bytes = (
+            self._native_emit_calls.register_materialize_bytes
         )
-        self._native_unregister_materialize_bytes = getattr(
-            self._graph,
-            "unregister_materialize_bytes",
-            None,
+        self._native_unregister_materialize_bytes = (
+            self._native_emit_calls.unregister_materialize_bytes
         )
-        self._native_payload_by_id = getattr(self._graph, "payload_by_id", None)
+        self._native_payload_by_id = self._native_emit_calls.payload_by_id
         self._subjects: dict[str, EventStream[ClosedEnvelope]] = {}
         self._direct_envelope_subscribers: dict[str, dict[int, EnvelopeCallback]] = {}
         self._direct_envelope_snapshots: dict[str, tuple[EnvelopeCallback, ...]] = {}
@@ -3732,18 +4049,14 @@ class Graph:
         parent_events: Sequence[EventRef] = (),
     ) -> TypedEnvelope[Any] | ClosedEnvelope:
         """Write one payload to a route and return the resulting envelope."""
-        if (
-            trace_id is not None
-            or causality_id is not None
-            or correlation_id is not None
-            or parent_events
-        ):
-            trace_id, causality_id, correlation_id, parent_events = (
-                None,
-                None,
-                None,
-                (),
+        trace_id, causality_id, correlation_id, parent_events = (
+            self._discard_publish_lineage_args(
+                trace_id=trace_id,
+                causality_id=causality_id,
+                correlation_id=correlation_id,
+                parent_events=parent_events,
             )
+        )
         if isinstance(target, LifecycleBinding):
             self._remember_active_context_route(target.request, "input")
             self._write_bindings[target.request.display()] = target.binding
@@ -3785,58 +4098,16 @@ class Graph:
                 "write", f"published {binding.request.display()}", binding.request
             )
             return emitted[0]
-        if target is self._last_publish_route_target:
-            typed_target = self._last_publish_typed_target
-        else:
-            if isinstance(target, TypedRoute):
-                typed_target = target
-            elif isinstance(target, (Source, Sink)) and isinstance(target.route, TypedRoute):
-                typed_target = target.route
-            else:
-                typed_target = None
-            self._last_publish_route_target = target
-            self._last_publish_typed_target = typed_target
+        typed_target = self._typed_target_for_publish(target)
         if typed_target is not None:
-            native_target = typed_target.route_ref
-            target_key = typed_target.route_display
+            publish_target = self._typed_publish_target(typed_target)
+            native_target = publish_target.native_route
+            target_key = publish_target.route_key
             if self._context_stack:
                 self._remember_active_context_route(native_target)
-            if (
-                self._last_typed_route_runtime_key == target_key
-                and self._last_typed_route_runtime_flags is not None
-            ):
-                runtime_flags = self._last_typed_route_runtime_flags
-            else:
-                runtime_flags = self._typed_route_runtime_flags_by_key.get(target_key)
-            if runtime_flags is None:
-                target_process_local = typed_target.schema.process_local
-                target_bytes_passthrough = typed_target.schema.is_bytes_passthrough()
-                sparse_native_retention = (
-                    target_bytes_passthrough
-                    and not target_process_local
-                    and native_target.namespace.layer != Layer.Ephemeral
-                    and not (
-                        native_target.namespace.plane == Plane.Write
-                        and native_target.variant == Variant.Request
-                    )
-                )
-                runtime_flags = (
-                    target_process_local,
-                    target_bytes_passthrough,
-                    sparse_native_retention,
-                )
-                self._typed_route_runtime_flags_by_key[target_key] = runtime_flags
-                self._sparse_native_retention_by_key[target_key] = sparse_native_retention
-                self._last_typed_route_runtime_key = target_key
-                self._last_typed_route_runtime_flags = runtime_flags
-            else:
-                (
-                    target_process_local,
-                    target_bytes_passthrough,
-                    sparse_native_retention,
-                ) = runtime_flags
-                self._last_typed_route_runtime_key = target_key
-                self._last_typed_route_runtime_flags = runtime_flags
+            target_process_local = publish_target.is_process_local
+            target_bytes_passthrough = publish_target.is_bytes_passthrough
+            sparse_native_retention = publish_target.uses_sparse_native_retention
             encoded = (
                 payload
                 if target_bytes_passthrough and type(payload) is bytes
@@ -4130,18 +4401,14 @@ class Graph:
                     )
                     ):
                         return
-        if (
-            trace_id is not None
-            or causality_id is not None
-            or correlation_id is not None
-            or parent_events
-        ):
-            trace_id, causality_id, correlation_id, parent_events = (
-                None,
-                None,
-                None,
-                (),
+        trace_id, causality_id, correlation_id, parent_events = (
+            self._discard_publish_lineage_args(
+                trace_id=trace_id,
+                causality_id=causality_id,
+                correlation_id=correlation_id,
+                parent_events=parent_events,
             )
+        )
         if isinstance(target, LifecycleBinding) or isinstance(target, WriteBinding):
             self.publish(
                 target,
@@ -4430,17 +4697,7 @@ class Graph:
                     )
                     return
                 _release_known_any_schema_value(encoded)
-        if target is self._last_publish_route_target:
-            typed_target = self._last_publish_typed_target
-        else:
-            if isinstance(target, TypedRoute):
-                typed_target = target
-            elif isinstance(target, (Source, Sink)) and isinstance(target.route, TypedRoute):
-                typed_target = target.route
-            else:
-                typed_target = None
-            self._last_publish_route_target = target
-            self._last_publish_typed_target = typed_target
+        typed_target = self._typed_target_for_publish(target)
         if typed_target is None:
             self.publish(
                 target,
@@ -4453,46 +4710,14 @@ class Graph:
                 parent_events=parent_events,
             )
             return
-        native_target = typed_target.route_ref
-        target_key = typed_target.route_display
+        publish_target = self._typed_publish_target(typed_target)
+        native_target = publish_target.native_route
+        target_key = publish_target.route_key
         if self._context_stack:
             self._remember_active_context_route(native_target)
-        if (
-            self._last_typed_route_runtime_key == target_key
-            and self._last_typed_route_runtime_flags is not None
-        ):
-            runtime_flags = self._last_typed_route_runtime_flags
-        else:
-            runtime_flags = self._typed_route_runtime_flags_by_key.get(target_key)
-        if runtime_flags is None:
-            target_process_local = typed_target.schema.process_local
-            target_bytes_passthrough = typed_target.schema.is_bytes_passthrough()
-            sparse_native_retention = (
-                target_bytes_passthrough
-                and not target_process_local
-                and native_target.namespace.layer != Layer.Ephemeral
-                and not (
-                    native_target.namespace.plane == Plane.Write
-                    and native_target.variant == Variant.Request
-                )
-            )
-            runtime_flags = (
-                target_process_local,
-                target_bytes_passthrough,
-                sparse_native_retention,
-            )
-            self._typed_route_runtime_flags_by_key[target_key] = runtime_flags
-            self._sparse_native_retention_by_key[target_key] = sparse_native_retention
-            self._last_typed_route_runtime_key = target_key
-            self._last_typed_route_runtime_flags = runtime_flags
-        else:
-            (
-                target_process_local,
-                target_bytes_passthrough,
-                sparse_native_retention,
-            ) = runtime_flags
-            self._last_typed_route_runtime_key = target_key
-            self._last_typed_route_runtime_flags = runtime_flags
+        target_process_local = publish_target.is_process_local
+        target_bytes_passthrough = publish_target.is_bytes_passthrough
+        sparse_native_retention = publish_target.uses_sparse_native_retention
         encoded = (
             payload
             if target_bytes_passthrough and type(payload) is bytes
@@ -7292,6 +7517,74 @@ class Graph:
             )
         )
 
+    def _discard_publish_lineage_args(
+        self,
+        *,
+        trace_id: str | None,
+        causality_id: str | None,
+        correlation_id: str | None,
+        parent_events: Sequence[EventRef],
+    ) -> tuple[None, None, None, tuple[EventRef, ...]]:
+        del trace_id, causality_id, correlation_id, parent_events
+        return None, None, None, ()
+
+    def _typed_target_for_publish(self, target: WriteTarget) -> TypedRoute[Any] | None:
+        if target is self._last_publish_route_target:
+            return self._last_publish_typed_target
+        if isinstance(target, TypedRoute):
+            typed_target = target
+        elif isinstance(target, (Source, Sink)) and isinstance(target.route, TypedRoute):
+            typed_target = target.route
+        else:
+            typed_target = None
+        self._last_publish_route_target = target
+        self._last_publish_typed_target = typed_target
+        return typed_target
+
+    def _typed_publish_target(self, typed_target: TypedRoute[Any]) -> TypedPublishTarget:
+        target_key = typed_target.route_display
+        if (
+            self._last_typed_route_runtime_key == target_key
+            and self._last_typed_route_runtime_flags is not None
+        ):
+            runtime_flags = self._last_typed_route_runtime_flags
+        else:
+            runtime_flags = self._typed_route_runtime_flags_by_key.get(target_key)
+        native_target = typed_target.route_ref
+        if runtime_flags is None:
+            target_process_local = typed_target.schema.process_local
+            target_bytes_passthrough = typed_target.schema.is_bytes_passthrough()
+            sparse_native_retention = (
+                target_bytes_passthrough
+                and not target_process_local
+                and native_target.namespace.layer != Layer.Ephemeral
+                and not (
+                    native_target.namespace.plane == Plane.Write
+                    and native_target.variant == Variant.Request
+                )
+            )
+        else:
+            (
+                target_process_local,
+                target_bytes_passthrough,
+                sparse_native_retention,
+            ) = runtime_flags
+        target = TypedPublishTarget(
+            route=typed_target,
+            native_route=native_target,
+            route_key=target_key,
+            is_process_local=target_process_local,
+            is_bytes_passthrough=target_bytes_passthrough,
+            uses_sparse_native_retention=sparse_native_retention,
+        )
+        self._typed_route_runtime_flags_by_key[target_key] = target.runtime_flags
+        self._sparse_native_retention_by_key[target_key] = (
+            target.uses_sparse_native_retention
+        )
+        self._last_typed_route_runtime_key = target_key
+        self._last_typed_route_runtime_flags = target.runtime_flags
+        return target
+
     def _coerce_route_ref(self, route_ref: RouteLike) -> RouteRef:
         if isinstance(route_ref, (Source, Sink)):
             return self._coerce_route_ref(route_ref.route)
@@ -8232,7 +8525,6 @@ class Graph:
         if history is None:
             history = deque()
             self._history[key] = history
-        expired_history = False
         history_limit = retention.history_limit
         if history_limit == 0:
             return
@@ -8240,10 +8532,7 @@ class Graph:
             while len(history) >= history_limit:
                 expired_envelope = history.popleft()
                 self._purge_envelope_payload_ref_for_key(expired_envelope, key)
-                expired_history = True
         history.append(envelope)
-        if expired_history and key in self._stream_taint_upper_bounds:
-            self._rebuild_stream_taint_upper_bound(native_route)
         payload_id = envelope.payload_id
         self._payload_route_by_id[payload_id] = key
         route_payload_ids = self._payload_ids_by_route.get(key)
@@ -8653,6 +8942,21 @@ class Graph:
         )
 
     @staticmethod
+    def _taint_upper_bound_signature(
+        upper_bound: dict[tuple[str, str], Any],
+    ) -> tuple[tuple[str, str, str], ...]:
+        return tuple(
+            sorted(
+                (
+                    domain_name,
+                    value_id,
+                    str(getattr(taint, "origin_id", "")),
+                )
+                for (domain_name, value_id), taint in upper_bound.items()
+            )
+        )
+
+    @staticmethod
     def _taint_domain_name(domain: Any) -> str:
         if hasattr(domain, "as_str"):
             return cast(str, domain.as_str())
@@ -8749,8 +9053,15 @@ class Graph:
                     continue
                 remembered.setdefault((domain_name, value_id), taint)
         if remembered:
+            current = self._stream_taint_upper_bounds.get(key)
+            if current is not None and self._taint_upper_bound_signature(
+                current
+            ) == self._taint_upper_bound_signature(remembered):
+                return
             self._stream_taint_upper_bounds[key] = remembered
         else:
+            if key not in self._stream_taint_upper_bounds:
+                return
             self._stream_taint_upper_bounds.pop(key, None)
         self._taint_generation += 1
 
@@ -10415,6 +10726,11 @@ def _require_route_like(value: object, field: str) -> None:
         raise ValueError(f"{field} must be a TypedRoute, RouteRef, Source, or Sink")
 
 
+def _require_typed_route(value: object, field: str) -> None:
+    if not isinstance(value, TypedRoute):
+        raise ValueError(f"{field} must be a TypedRoute")
+
+
 def _require_route_ref(value: object, field: str) -> None:
     if not isinstance(value, RouteRef):
         raise ValueError(f"{field} must be a RouteRef")
@@ -10550,6 +10866,26 @@ def _validate_control_epoch(control_epoch: int | None) -> None:
         ) from exc
     if control_epoch < 0:
         raise ValueError("control_epoch must be a non-negative integer or None")
+
+
+def _process_rpc_route(
+    *,
+    owner: str,
+    stream: str,
+    variant: Variant,
+    schema: Schema[object],
+) -> TypedRoute[object]:
+    plane = Plane.Query if variant == Variant.Request else Plane.Read
+    resolved_variant = Variant.QueryRequest if variant == Variant.Request else variant
+    return route(
+        plane=plane,
+        layer=Layer.Logical,
+        owner=owner,
+        family="process_rpc",
+        stream=stream,
+        variant=resolved_variant,
+        schema=schema,
+    )
 
 
 def _parent_event_parts(parent: ParentEventLike) -> tuple[str, int]:

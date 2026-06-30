@@ -7,7 +7,13 @@ import re
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable, Sequence
 from pathlib import Path
+
+_CommandRunner = Callable[
+    [tuple[str, ...], dict[str, str]],
+    subprocess.CompletedProcess[str],
+]
 
 LEAK_SUMMARY_RE = re.compile(
     r"<jemalloc>:\s+Leak(?: approximation)? summary:\s+~?(?P<bytes>\d+)\s+"
@@ -25,6 +31,7 @@ def run_leak_check(
     output_dir: Path | None = None,
     leak_bytes_threshold: int = 0,
     leak_objects_threshold: int = 0,
+    command_runner: _CommandRunner | None = None,
 ) -> LeakCheckResult:
     """Run a command under jemalloc's final leak profiler and parse the result."""
     if output_dir is not None:
@@ -40,12 +47,10 @@ def run_leak_check(
             env["MALLOC_CONF"],
             f"prof_prefix:{output_dir / 'jeprof'}",
         )
-    completed = subprocess.run(
-        command,
-        check=False,
-        capture_output=True,
-        text=True,
-        env=env,
+    completed = (
+        _run_command(command, env)
+        if command_runner is None
+        else command_runner(command, env)
     )
     observed_summary = _parse_leak_summary(completed.stderr)
     failing_summary = observed_summary
@@ -150,8 +155,12 @@ class LeakSummary:
         }
 
 
-def _main() -> None:
-    args = _parse_args()
+def _main(
+    argv: Sequence[str] | None = None,
+    *,
+    command_runner: _CommandRunner | None = None,
+) -> None:
+    args = _parse_args(argv)
     command = tuple(args.command)
     if not command:
         raise SystemExit("jemalloc leak check requires a command after --")
@@ -162,6 +171,7 @@ def _main() -> None:
         output_dir=args.output_dir,
         leak_bytes_threshold=args.leak_bytes_threshold,
         leak_objects_threshold=args.leak_objects_threshold,
+        command_runner=command_runner,
     )
     sys.stdout.write(result.stdout)
     sys.stderr.write(result.stderr)
@@ -182,8 +192,8 @@ def _main() -> None:
     print(result.format())
 
 
-def _verify_main() -> None:
-    args = _parse_verify_args()
+def _verify_main(argv: Sequence[str] | None = None) -> None:
+    args = _parse_verify_args(argv)
     summary = verify_jemalloc_summary(
         args.summary,
         required_command_fragments=tuple(args.require_command_fragment or ()),
@@ -200,7 +210,7 @@ def _verify_main() -> None:
     )
 
 
-def _parse_args() -> argparse.Namespace:
+def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run a command under jemalloc final leak profiling."
     )
@@ -242,13 +252,13 @@ def _parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument("command", nargs=argparse.REMAINDER)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.command and args.command[0] == "--":
         args.command = args.command[1:]
     return args
 
 
-def _parse_verify_args() -> argparse.Namespace:
+def _parse_verify_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Verify a Manyfold jemalloc leak-check summary JSON artifact."
     )
@@ -258,7 +268,7 @@ def _parse_verify_args() -> argparse.Namespace:
         action="append",
         help="Require this string to appear in the recorded command.",
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def _find_jemalloc_library() -> str:
@@ -279,6 +289,19 @@ def _find_jemalloc_library() -> str:
         return located
     raise SystemExit(
         "libjemalloc was not found; install jemalloc or pass --libjemalloc"
+    )
+
+
+def _run_command(
+    command: tuple[str, ...],
+    env: dict[str, str],
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        command,
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
     )
 
 

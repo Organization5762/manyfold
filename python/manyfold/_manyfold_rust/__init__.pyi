@@ -10,6 +10,7 @@ __all__ = [
     "ControlLoop",
     "CreditSnapshot",
     "Graph",
+    "InMemoryPubSub",
     "Layer",
     "Mailbox",
     "MailboxDescriptor",
@@ -21,6 +22,9 @@ __all__ = [
     "PortDescriptor",
     "ProducerKind",
     "ProducerRef",
+    "PubSubDelivery",
+    "PubSubMessage",
+    "PubSubSubscription",
     "ReadablePort",
     "RetentionSnapshot",
     "RouteRef",
@@ -33,7 +37,10 @@ __all__ = [
     "WritablePort",
     "WriteBinding",
     "bridge_version",
+    "parse_sql_statement",
 ]
+
+def parse_sql_statement(sql: builtins.str) -> builtins.dict[builtins.str, builtins.str]: ...
 
 @typing.final
 class ClockDomainRef:
@@ -121,6 +128,73 @@ class RetentionSnapshot:
 
 @typing.final
 class NoLineageMaterializerDropProfile: ...
+
+@typing.final
+class PubSubMessage:
+    @property
+    def topic(self) -> builtins.str: ...
+    @property
+    def payload(self) -> builtins.bytes: ...
+    @property
+    def offset(self) -> builtins.int: ...
+    def __new__(
+        cls,
+        topic: builtins.str,
+        payload: builtins.bytes,
+        offset: builtins.int = 0,
+    ) -> PubSubMessage: ...
+
+@typing.final
+class PubSubSubscription:
+    @property
+    def name(self) -> builtins.str: ...
+    @property
+    def topic(self) -> builtins.str: ...
+
+@typing.final
+class PubSubDelivery:
+    @property
+    def topic(self) -> builtins.str: ...
+    @property
+    def offset(self) -> builtins.int: ...
+    @property
+    def delivered_to(self) -> builtins.list[builtins.str]: ...
+    @property
+    def subscriber_count(self) -> builtins.int: ...
+
+@typing.final
+class InMemoryPubSub:
+    @property
+    def retained_messages(self) -> builtins.int: ...
+    @property
+    def message_count(self) -> builtins.int: ...
+    @property
+    def subscriber_count(self) -> builtins.int: ...
+    def __new__(
+        cls,
+        *,
+        retained_messages: builtins.int = 1024,
+    ) -> InMemoryPubSub: ...
+    def subscribe(
+        self,
+        topic: builtins.str,
+        *,
+        name: typing.Optional[builtins.str] = None,
+        replay_from_beginning: builtins.bool = False,
+    ) -> PubSubSubscription: ...
+    def unsubscribe(self, subscription: builtins.str) -> builtins.bool: ...
+    def publish(self, topic: builtins.str, payload: builtins.bytes) -> PubSubDelivery: ...
+    def poll(
+        self,
+        subscription: builtins.str,
+        *,
+        max_messages: typing.Optional[builtins.int] = None,
+    ) -> builtins.list[PubSubMessage]: ...
+    def latest(
+        self,
+        topic: typing.Optional[builtins.str] = None,
+    ) -> typing.Optional[PubSubMessage]: ...
+    def topic_offsets(self) -> builtins.dict[builtins.str, builtins.int]: ...
 
 @typing.final
 class Graph:
