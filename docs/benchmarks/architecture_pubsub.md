@@ -27,17 +27,19 @@ Environment:
 - Date: 2026-06-30.
 - Host: `Darwin Lapis 24.4.0 arm64`.
 - Build: `cargo run --release --bin architecture_pubsub_benchmark`.
+- Checked-in baseline:
+  `src/benchmarks/baseline/architecture_pubsub.json`.
 - Workload: 100,000 iterations, 4,096 retained messages, 16 subscribers,
   32-message poll batches, 64-byte payloads, 8 topics.
 
 | Workload | Average Operation us | Final Messages | Final Subscribers |
 | --- | ---: | ---: | ---: |
-| publish | 0.102790 | 4096 | 0 |
-| poll | 0.329273 | 4096 | 1 |
-| wildcard_fanout | 0.847722 | 4096 | 16 |
-| replay | 277.989562 | 4096 | 16 |
-| latest | 0.111062 | 4096 | 0 |
-| retention | 0.099188 | 4096 | 0 |
+| publish | 0.096278 | 4096 | 0 |
+| poll | 0.334627 | 4096 | 1 |
+| wildcard_fanout | 0.874094 | 4096 | 16 |
+| replay | 279.481750 | 4096 | 16 |
+| latest | 0.113537 | 4096 | 0 |
+| retention | 0.101683 | 4096 | 0 |
 
 `replay` is reported per replay subscription, not per retained message; each
 operation drains the retained history for one new subscriber.
@@ -47,9 +49,16 @@ operation drains the retained history for one new subscriber.
 Run this focused gate before changing `src/architecture/pubsub.rs`:
 
 ```sh
-cargo run --release --bin architecture_pubsub_benchmark -- --workload all --iterations 100000 --retained-messages 4096 --subscribers 16 --batch-size 32 --payload-bytes 64 --topic-count 8 --max-average-operation-us 1000
+cargo run --release --bin architecture_pubsub_benchmark -- --workload all --iterations 100000 --retained-messages 4096 --subscribers 16 --batch-size 32 --payload-bytes 64 --topic-count 8 --check-baseline
 ```
 
-The gate is intentionally loose at first because this is the first architecture
-benchmark. Tighten per-workload gates after collecting CI baselines on stable
-hardware.
+By default, `--check-baseline` reads the sibling baseline file for this
+benchmark and allows a 20% latency regression per workload. It also rejects
+shape drift and final retained/subscriber count drift. Use
+`--max-regression-percent N` to temporarily widen or tighten the threshold.
+
+Refresh the checked-in baseline only when the measured change is intentional:
+
+```sh
+cargo run --release --bin architecture_pubsub_benchmark -- --workload all --iterations 100000 --retained-messages 4096 --subscribers 16 --batch-size 32 --payload-bytes 64 --topic-count 8 --write-baseline
+```

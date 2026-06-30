@@ -1,5 +1,7 @@
 use std::env;
+use std::fs;
 use std::hint::black_box;
+use std::path::PathBuf;
 use std::time::Instant;
 
 use manyfold::architecture::InMemoryPubSubCore;
@@ -24,10 +26,14 @@ struct Config {
     payload_bytes: usize,
     topic_count: usize,
     max_average_operation_us: Option<f64>,
+    baseline_path: PathBuf,
+    check_baseline: bool,
+    write_baseline: bool,
+    max_regression_percent: f64,
 }
 
 struct BenchmarkResult {
-    workload: &'static str,
+    workload: String,
     iterations: usize,
     retained_messages: usize,
     subscribers: usize,
@@ -70,7 +76,14 @@ fn main() {
             }
         }
     }
-    print_results(&results);
+    if config.check_baseline {
+        check_baseline(&results, &config);
+    }
+    if config.write_baseline {
+        fs::write(&config.baseline_path, results_json(&results))
+            .unwrap_or_else(|error| panic!("write baseline {:?}: {error}", config.baseline_path));
+    }
+    print!("{}", results_json(&results));
 }
 
 fn run_publish(config: &Config) -> BenchmarkResult {
@@ -222,7 +235,7 @@ fn run_retention(config: &Config) -> BenchmarkResult {
 }
 
 fn result(
-    workload: &'static str,
+    workload: &str,
     config: &Config,
     pubsub: &InMemoryPubSubCore,
     operation_count: usize,
@@ -232,7 +245,7 @@ fn result(
     let elapsed_seconds = start.elapsed().as_secs_f64();
     black_box(checksum);
     BenchmarkResult {
-        workload,
+        workload: workload.to_string(),
         iterations: config.iterations,
         retained_messages: config.retained_messages,
         subscribers: config.subscribers,
@@ -256,18 +269,18 @@ fn payload(payload_bytes: usize) -> Vec<u8> {
     vec![b'x'; payload_bytes]
 }
 
-fn print_results(results: &[BenchmarkResult]) {
-    println!("[");
+fn results_json(results: &[BenchmarkResult]) -> String {
+    let mut output = String::from("[\n");
     for (index, result) in results.iter().enumerate() {
         let comma = if index + 1 == results.len() { "" } else { "," };
-        println!(
+        output.push_str(&format!(
             "  {{\n    \"workload\": \"{}\",\n    \"iterations\": {},\n    \
              \"retained_messages\": {},\n    \"subscribers\": {},\n    \
              \"batch_size\": {},\n    \"payload_bytes\": {},\n    \
              \"topic_count\": {},\n    \"operation_count\": {},\n    \
              \"elapsed_seconds\": {:.9},\n    \"average_operation_us\": {:.6},\n    \
              \"final_message_count\": {},\n    \"final_subscriber_count\": {},\n    \
-             \"checksum\": {}\n  }}{}",
+             \"checksum\": {}\n  }}{}\n",
             result.workload,
             result.iterations,
             result.retained_messages,
@@ -282,9 +295,129 @@ fn print_results(results: &[BenchmarkResult]) {
             result.final_subscriber_count,
             result.checksum,
             comma,
-        );
+        ));
     }
-    println!("]");
+    output.push_str("]\n");
+    output
+}
+
+fn check_baseline(results: &[BenchmarkResult], config: &Config) {
+    let baseline_text = fs::read_to_string(&config.baseline_path)
+        .unwrap_or_else(|error| panic!("read baseline {:?}: {error}", config.baseline_path));
+    let baseline = parse_baseline_results(&baseline_text);
+    for result in results {
+        let Some(baseline_result) = baseline
+            .iter()
+            .find(|item| item.workload == result.workload)
+        else {
+            panic!(
+                "baseline {:?} has no workload {}",
+                config.baseline_path, result.workload
+            );
+        };
+        if result.iterations != baseline_result.iterations
+            || result.retained_messages != baseline_result.retained_messages
+            || result.subscribers != baseline_result.subscribers
+            || result.batch_size != baseline_result.batch_size
+            || result.payload_bytes != baseline_result.payload_bytes
+            || result.topic_count != baseline_result.topic_count
+            || result.operation_count != baseline_result.operation_count
+        {
+            panic!(
+                "benchmark shape for {} differs from baseline {:?}",
+                result.workload, config.baseline_path
+            );
+        }
+        if result.final_message_count != baseline_result.final_message_count
+            || result.final_subscriber_count != baseline_result.final_subscriber_count
+        {
+            panic!(
+                "benchmark final state for {} differs from baseline {:?}",
+                result.workload, config.baseline_path
+            );
+        }
+        let max_allowed =
+            baseline_result.average_operation_us * (1.0 + config.max_regression_percent / 100.0);
+        if result.average_operation_us > max_allowed {
+            panic!(
+                "{} average operation latency {:.6} us regressed more than {:.3}% from baseline {:.6} us",
+                result.workload,
+                result.average_operation_us,
+                config.max_regression_percent,
+                baseline_result.average_operation_us
+            );
+        }
+    }
+}
+
+fn parse_baseline_results(text: &str) -> Vec<BenchmarkResult> {
+    text.split("{\n")
+        .skip(1)
+        .map(parse_baseline_result)
+        .collect()
+}
+
+fn parse_baseline_result(item: &str) -> BenchmarkResult {
+    BenchmarkResult {
+        workload: string_field(item, "workload"),
+        iterations: usize_field(item, "iterations"),
+        retained_messages: usize_field(item, "retained_messages"),
+        subscribers: usize_field(item, "subscribers"),
+        batch_size: usize_field(item, "batch_size"),
+        payload_bytes: usize_field(item, "payload_bytes"),
+        topic_count: usize_field(item, "topic_count"),
+        operation_count: usize_field(item, "operation_count"),
+        elapsed_seconds: f64_field(item, "elapsed_seconds"),
+        average_operation_us: f64_field(item, "average_operation_us"),
+        final_message_count: usize_field(item, "final_message_count"),
+        final_subscriber_count: usize_field(item, "final_subscriber_count"),
+        checksum: u64_field(item, "checksum"),
+    }
+}
+
+fn string_field(item: &str, field: &str) -> String {
+    let marker = format!("\"{field}\": \"");
+    let start = item
+        .find(&marker)
+        .unwrap_or_else(|| panic!("missing baseline field {field}"))
+        + marker.len();
+    let rest = &item[start..];
+    let end = rest
+        .find('"')
+        .unwrap_or_else(|| panic!("unterminated baseline string field {field}"));
+    rest[..end].to_string()
+}
+
+fn usize_field(item: &str, field: &str) -> usize {
+    numeric_field(item, field)
+        .parse()
+        .unwrap_or_else(|_| panic!("baseline field {field} must be an integer"))
+}
+
+fn u64_field(item: &str, field: &str) -> u64 {
+    numeric_field(item, field)
+        .parse()
+        .unwrap_or_else(|_| panic!("baseline field {field} must be an integer"))
+}
+
+fn f64_field(item: &str, field: &str) -> f64 {
+    numeric_field(item, field)
+        .parse()
+        .unwrap_or_else(|_| panic!("baseline field {field} must be a number"))
+}
+
+fn numeric_field<'a>(item: &'a str, field: &str) -> &'a str {
+    let marker = format!("\"{field}\": ");
+    let start = item
+        .find(&marker)
+        .unwrap_or_else(|| panic!("missing baseline field {field}"))
+        + marker.len();
+    item[start..]
+        .trim_start()
+        .split([',', '\n'])
+        .next()
+        .unwrap_or_else(|| panic!("missing baseline value {field}"))
+        .trim()
 }
 
 impl Config {
@@ -298,6 +431,10 @@ impl Config {
             payload_bytes: 64,
             topic_count: 8,
             max_average_operation_us: None,
+            baseline_path: default_baseline_path(),
+            check_baseline: false,
+            write_baseline: false,
+            max_regression_percent: 20.0,
         };
         let mut index = 0;
         while index < args.len() {
@@ -338,6 +475,24 @@ impl Config {
                         "--max-average-operation-us",
                     ));
                 }
+                "--baseline" => {
+                    index += 1;
+                    config.baseline_path = PathBuf::from(
+                        args.get(index)
+                            .unwrap_or_else(|| panic!("--baseline requires a value")),
+                    );
+                }
+                "--check-baseline" => {
+                    config.check_baseline = true;
+                }
+                "--write-baseline" => {
+                    config.write_baseline = true;
+                }
+                "--max-regression-percent" => {
+                    index += 1;
+                    config.max_regression_percent =
+                        parse_positive_f64(args.get(index), "--max-regression-percent");
+                }
                 "--help" | "-h" => print_usage_and_exit(),
                 other => panic!("unknown argument: {other}"),
             }
@@ -345,6 +500,14 @@ impl Config {
         }
         config
     }
+}
+
+fn default_baseline_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("src")
+        .join("benchmarks")
+        .join("baseline")
+        .join("architecture_pubsub.json")
 }
 
 fn parse_workload(value: Option<&String>) -> Workload {
@@ -388,7 +551,8 @@ fn print_usage_and_exit() -> ! {
         "architecture_pubsub_benchmark [--workload publish|poll|wildcard_fanout|replay|latest|retention|all] \
          [--iterations N] [--retained-messages N] [--subscribers N] \
          [--batch-size N] [--payload-bytes N] [--topic-count N] \
-         [--max-average-operation-us N]"
+         [--max-average-operation-us N] [--check-baseline] [--write-baseline] \
+         [--baseline PATH] [--max-regression-percent N]"
     );
     std::process::exit(0);
 }
@@ -408,6 +572,10 @@ mod tests {
             payload_bytes: 4,
             topic_count: 2,
             max_average_operation_us: None,
+            baseline_path: default_baseline_path(),
+            check_baseline: false,
+            write_baseline: false,
+            max_regression_percent: 20.0,
         });
 
         assert_eq!(result.workload, "publish");
@@ -423,5 +591,30 @@ mod tests {
         });
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn parses_generated_baseline_results() {
+        let result = run_publish(&Config {
+            workload: Workload::Publish,
+            iterations: 4,
+            retained_messages: 8,
+            subscribers: 2,
+            batch_size: 2,
+            payload_bytes: 4,
+            topic_count: 2,
+            max_average_operation_us: None,
+            baseline_path: default_baseline_path(),
+            check_baseline: false,
+            write_baseline: false,
+            max_regression_percent: 20.0,
+        });
+
+        let parsed = parse_baseline_results(&results_json(&[result]));
+
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].workload, "publish");
+        assert_eq!(parsed[0].iterations, 4);
+        assert_eq!(parsed[0].final_message_count, 4);
     }
 }
