@@ -35,7 +35,7 @@ class MonitorArtifactTests(unittest.TestCase):
                     "external_rss_tail_plateau_seconds": "min",
                 },
                 required_metadata={
-                    "manyfold_bridge_version": "0.1.39",
+                    "manyfold_bridge_version": "0.1.40",
                     "manyfold_source": "/tmp/manyfold/python/manyfold/__init__.py",
                 },
                 required_metrics=("rss", "private", "fd"),
@@ -206,7 +206,7 @@ class MonitorArtifactTests(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, "metadata"):
                 monitor_artifacts.verify_monitor_artifact(
                     path,
-                    required_metadata={"manyfold_bridge_version": "0.1.39"},
+                    required_metadata={"manyfold_bridge_version": "0.1.40"},
                 )
 
     def test_parse_rejects_malformed_required_metadata(self) -> None:
@@ -284,7 +284,7 @@ def _artifact(
             "rss_kib": _metric_summary(32_000),
         },
         "metadata": {
-            "manyfold_bridge_version": "0.1.39",
+            "manyfold_bridge_version": "0.1.40",
             "manyfold_source": "/tmp/manyfold/python/manyfold/__init__.py",
         },
         "passed": passed,
