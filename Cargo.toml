@@ -23,7 +23,7 @@ path = "src/bin/retention_stress.rs"
 
 [[bin]]
 name = "dormant_runtime_benchmark"
-path = "src/bin/dormant_runtime_benchmark.rs"
+path = "src/benchmarks/dormant_runtime.rs"
 
 [features]
 coz-profiler = ["dep:coz"]
