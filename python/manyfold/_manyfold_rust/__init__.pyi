@@ -29,6 +29,8 @@ __all__ = [
     "Layer",
     "Mailbox",
     "MailboxDescriptor",
+    "ManyFoldLock",
+    "ManyFoldLockLease",
     "MonotonicLogicalClock",
     "NamespaceRef",
     "NoLineageMaterializerDropProfile",
@@ -93,6 +95,41 @@ class FlatBufferTable:
     @property
     def fields(self) -> builtins.list[FlatBufferField]: ...
     def __new__(cls, name: builtins.str, fields: typing.Sequence[FlatBufferField]) -> FlatBufferTable: ...
+
+@typing.final
+class ManyFoldLock:
+    @property
+    def name(self) -> builtins.str: ...
+    @property
+    def path(self) -> builtins.str: ...
+    @staticmethod
+    def for_resource(name: builtins.str) -> ManyFoldLock: ...
+    def take(
+        self,
+        *,
+        owner: builtins.str | None = None,
+        blocking: builtins.bool = True,
+    ) -> ManyFoldLockLease: ...
+    def __new__(cls, name: builtins.str) -> ManyFoldLock: ...
+
+@typing.final
+class ManyFoldLockLease:
+    @property
+    def lock_name(self) -> builtins.str: ...
+    @property
+    def owner(self) -> builtins.str: ...
+    @property
+    def acquired_time_ns(self) -> builtins.int: ...
+    @property
+    def is_released(self) -> builtins.bool: ...
+    def release(self) -> builtins.bool: ...
+    def __enter__(self) -> ManyFoldLockLease: ...
+    def __exit__(
+        self,
+        exc_type: typing.Any,
+        exc: typing.Any,
+        traceback: typing.Any,
+    ) -> None: ...
 
 @typing.final
 class ArchitectureRelay:
@@ -189,7 +226,11 @@ class DataStreamRecord:
 
 @typing.final
 class DataStreamProcessor:
-    def __new__(cls) -> DataStreamProcessor: ...
+    def __new__(
+        cls,
+        *,
+        retained_messages: builtins.int = 1024,
+    ) -> DataStreamProcessor: ...
     def ingest(
         self,
         message: PubSubMessage,

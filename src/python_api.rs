@@ -2,9 +2,12 @@
 
 use std::collections::hash_map::DefaultHasher;
 use std::collections::BTreeMap;
+use std::fs::{File, OpenOptions};
 use std::hash::{Hash, Hasher};
+use std::io::{Seek, SeekFrom, Write};
 use std::net::UdpSocket;
-use std::sync::{Arc, Mutex};
+use std::path::PathBuf;
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::architecture::{
@@ -18,6 +21,7 @@ use crate::core::{
     RuntimeRefCore, ScheduleConditionCore, ScheduleGuardCore, SchemaRefCore, TaintDomain,
     TaintMarkCore, Variant, WriteBindingCore,
 };
+use fs2::FileExt;
 use pyo3::basic::CompareOp;
 use pyo3::exceptions::{PyKeyError, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
@@ -3080,10 +3084,15 @@ impl DataStreamRecord {
 
 #[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
 #[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
-#[pyclass(module = "manyfold._manyfold_rust", unsendable)]
+#[pyclass(module = "manyfold._manyfold_rust")]
 pub struct DataStreamProcessor {
+    inner: Arc<Mutex<DataStreamProcessorState>>,
+}
+
+struct DataStreamProcessorState {
     connection: Connection,
     process_sequence: u64,
+    retained_messages: usize,
 }
 
 #[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
@@ -3091,8 +3100,9 @@ pub struct DataStreamProcessor {
 #[pymethods]
 impl DataStreamProcessor {
     #[new]
-    fn new() -> PyResult<Self> {
-        Self::new_processor()
+    #[pyo3(signature = (*, retained_messages=1024))]
+    fn new(retained_messages: usize) -> PyResult<Self> {
+        Self::new_processor(retained_messages)
     }
 
     #[pyo3(signature = (message, *, event_time=None, key=None))]
@@ -3102,14 +3112,15 @@ impl DataStreamProcessor {
         event_time: Option<i64>,
         key: Option<String>,
     ) -> PyResult<DataStreamRecord> {
-        self.ingest_core(&message.inner, event_time, key)
+        lock_stream_processor(&self.inner)?.ingest_core(&message.inner, event_time, key)
     }
 
     #[pyo3(signature = (messages))]
     fn ingest_many(&mut self, messages: Vec<PubSubMessage>) -> PyResult<Vec<DataStreamRecord>> {
+        let mut processor = lock_stream_processor(&self.inner)?;
         messages
             .iter()
-            .map(|message| self.ingest_core(&message.inner, None, None))
+            .map(|message| processor.ingest_core(&message.inner, None, None))
             .collect()
     }
 
@@ -3120,7 +3131,7 @@ impl DataStreamProcessor {
         sql: String,
         parameters: Option<Bound<'_, PyDict>>,
     ) -> PyResult<Py<PyList>> {
-        query_connection(py, &self.connection, &sql, parameters.as_ref())
+        query_stream_processor(py, self.inner.clone(), &sql, parameters.as_ref())
     }
 
     #[pyo3(signature = (sql, parameters=None))]
@@ -3130,7 +3141,7 @@ impl DataStreamProcessor {
         sql: String,
         parameters: Option<Bound<'_, PyDict>>,
     ) -> PyResult<Option<Py<PyDict>>> {
-        let rows = query_connection(py, &self.connection, &sql, parameters.as_ref())?;
+        let rows = query_stream_processor(py, self.inner.clone(), &sql, parameters.as_ref())?;
         let rows = rows.bind(py);
         match rows.len() {
             0 => Ok(None),
@@ -3142,12 +3153,25 @@ impl DataStreamProcessor {
     }
 
     fn latest(&self, topic: String) -> PyResult<Option<DataStreamRecord>> {
-        self.latest_core(&topic)
+        lock_stream_processor(&self.inner)?.latest_core(&topic)
     }
 }
 
 impl DataStreamProcessor {
-    fn new_processor() -> PyResult<Self> {
+    fn new_processor(retained_messages: usize) -> PyResult<Self> {
+        Ok(Self {
+            inner: Arc::new(Mutex::new(DataStreamProcessorState::new(
+                retained_messages,
+            )?)),
+        })
+    }
+}
+
+impl DataStreamProcessorState {
+    fn new(retained_messages: usize) -> PyResult<Self> {
+        if retained_messages == 0 {
+            return Err(PyValueError::new_err("retained_messages must be positive"));
+        }
         let connection = Connection::open_in_memory().map_err(|error| {
             PyRuntimeError::new_err(format!("failed to open stream SQL store: {error}"))
         })?;
@@ -3164,12 +3188,22 @@ impl DataStreamProcessor {
                     payload BLOB NOT NULL,
                     PRIMARY KEY (topic, offset)
                 );
+
+                CREATE INDEX stream_messages_offset_idx
+                ON stream_messages(offset);
+
+                CREATE INDEX stream_messages_topic_pad_offset_idx
+                ON stream_messages(topic, pad_name, offset);
+
+                CREATE INDEX stream_messages_topic_pad_event_sequence_idx
+                ON stream_messages(topic, pad_name, event_time, process_sequence);
                 "#,
             )
             .map_err(stream_sql_error)?;
         Ok(Self {
             connection,
             process_sequence: 0,
+            retained_messages,
         })
     }
 
@@ -3207,6 +3241,7 @@ impl DataStreamProcessor {
                 ],
             )
             .map_err(stream_sql_error)?;
+        self.prune_retained_rows(message.offset)?;
         Ok(DataStreamRecord {
             pad_name: None,
             topic: message.topic.clone(),
@@ -3256,6 +3291,7 @@ impl DataStreamProcessor {
         if let Some(table) = flatbuffer_table {
             self.project_flatbuffer_fields(table, message)?;
         }
+        self.prune_retained_rows(message.offset)?;
         Ok(DataStreamRecord {
             pad_name,
             topic: message.topic.clone(),
@@ -3293,6 +3329,64 @@ impl DataStreamProcessor {
             event_time: row.get(5).map_err(stream_sql_error)?,
             key: row.get(6).map_err(stream_sql_error)?,
         }))
+    }
+
+    fn query_rows(
+        &self,
+        statement: &str,
+        sql_parameters: Vec<(String, rusqlite::types::Value)>,
+    ) -> PyResult<QueryRows> {
+        let mut prepared = self
+            .connection
+            .prepare(statement)
+            .map_err(stream_sql_error)?;
+        let column_names: Vec<String> = prepared
+            .column_names()
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        let named_parameters: Vec<(&str, &dyn ToSql)> = sql_parameters
+            .iter()
+            .map(|(name, value)| (name.as_str(), value as &dyn ToSql))
+            .collect();
+        let mut rows = prepared
+            .query(named_parameters.as_slice())
+            .map_err(stream_sql_error)?;
+        let mut output = Vec::new();
+        while let Some(row) = rows.next().map_err(stream_sql_error)? {
+            let mut item = Vec::with_capacity(column_names.len());
+            for index in 0..column_names.len() {
+                item.push(match row.get_ref(index).map_err(stream_sql_error)? {
+                    ValueRef::Null => QueryCell::Null,
+                    ValueRef::Integer(value) => QueryCell::Integer(value),
+                    ValueRef::Real(value) => QueryCell::Real(value),
+                    ValueRef::Text(value) => {
+                        QueryCell::Text(String::from_utf8_lossy(value).into_owned())
+                    }
+                    ValueRef::Blob(value) => QueryCell::Blob(value.to_vec()),
+                });
+            }
+            output.push(item);
+        }
+        Ok(QueryRows {
+            column_names,
+            rows: output,
+        })
+    }
+
+    fn prune_retained_rows(&self, current_offset: u64) -> PyResult<()> {
+        let retained_messages = self.retained_messages as u64;
+        if current_offset < retained_messages {
+            return Ok(());
+        }
+        let minimum_offset = current_offset + 1 - retained_messages;
+        self.connection
+            .execute(
+                "DELETE FROM stream_messages WHERE offset < ?1",
+                params![minimum_offset],
+            )
+            .map_err(stream_sql_error)?;
+        Ok(())
     }
 
     fn ensure_flatbuffer_columns(&self, table: &FlatBufferTable) -> PyResult<()> {
@@ -3341,10 +3435,10 @@ impl DataStreamProcessor {
 
 #[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
 #[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
-#[pyclass(module = "manyfold._manyfold_rust", unsendable)]
+#[pyclass(module = "manyfold._manyfold_rust")]
 pub struct PubSubRuntime {
     pubsub: InMemoryPubSubCore,
-    processor: DataStreamProcessor,
+    processor: Arc<Mutex<DataStreamProcessorState>>,
     metadata_by_message: BTreeMap<StreamMessageKey, StreamMessageMetadata>,
     flatbuffer_tables_by_pad: BTreeMap<String, FlatBufferTable>,
     subscription_name: String,
@@ -3352,6 +3446,19 @@ pub struct PubSubRuntime {
 
 type StreamMessageKey = (String, u64);
 type StreamMessageMetadata = (Option<i64>, Option<String>, Option<String>);
+
+struct QueryRows {
+    column_names: Vec<String>,
+    rows: Vec<Vec<QueryCell>>,
+}
+
+enum QueryCell {
+    Null,
+    Integer(i64),
+    Real(f64),
+    Text(String),
+    Blob(Vec<u8>),
+}
 
 #[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
 #[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
@@ -3369,7 +3476,9 @@ impl PubSubRuntime {
             .map_err(PyValueError::new_err)?;
         Ok(Self {
             pubsub,
-            processor: DataStreamProcessor::new_processor()?,
+            processor: Arc::new(Mutex::new(DataStreamProcessorState::new(
+                retained_messages,
+            )?)),
             metadata_by_message: BTreeMap::new(),
             flatbuffer_tables_by_pad: BTreeMap::new(),
             subscription_name,
@@ -3382,7 +3491,7 @@ impl PubSubRuntime {
         table: FlatBufferTable,
     ) -> PyResult<()> {
         validate_nonblank_text("pad name", &pad_name)?;
-        self.processor.ensure_flatbuffer_columns(&table)?;
+        lock_stream_processor(&self.processor)?.ensure_flatbuffer_columns(&table)?;
         self.flatbuffer_tables_by_pad.insert(pad_name, table);
         Ok(())
     }
@@ -3413,6 +3522,7 @@ impl PubSubRuntime {
             .poll(&self.subscription_name, None)
             .map_err(PyValueError::new_err)?;
         let mut records = Vec::with_capacity(messages.len());
+        let mut processor = lock_stream_processor(&self.processor)?;
         for message in messages {
             let metadata = self
                 .metadata_by_message
@@ -3422,11 +3532,7 @@ impl PubSubRuntime {
                 .2
                 .as_ref()
                 .and_then(|pad_name| self.flatbuffer_tables_by_pad.get(pad_name));
-            records.push(self.processor.ingest_board_message(
-                &message,
-                metadata,
-                flatbuffer_table,
-            )?);
+            records.push(processor.ingest_board_message(&message, metadata, flatbuffer_table)?);
         }
         Ok(records)
     }
@@ -3439,7 +3545,7 @@ impl PubSubRuntime {
         parameters: Option<Bound<'_, PyDict>>,
     ) -> PyResult<Py<PyList>> {
         self.drain()?;
-        query_connection(py, &self.processor.connection, &sql, parameters.as_ref())
+        query_stream_processor(py, self.processor.clone(), &sql, parameters.as_ref())
     }
 
     #[pyo3(signature = (sql, parameters=None))]
@@ -3450,7 +3556,7 @@ impl PubSubRuntime {
         parameters: Option<Bound<'_, PyDict>>,
     ) -> PyResult<Option<Py<PyDict>>> {
         self.drain()?;
-        let rows = query_connection(py, &self.processor.connection, &sql, parameters.as_ref())?;
+        let rows = query_stream_processor(py, self.processor.clone(), &sql, parameters.as_ref())?;
         let rows = rows.bind(py);
         match rows.len() {
             0 => Ok(None),
@@ -3463,17 +3569,25 @@ impl PubSubRuntime {
 
     fn latest(&mut self, topic: String) -> PyResult<Option<DataStreamRecord>> {
         self.drain()?;
-        self.processor.latest_core(&topic)
+        lock_stream_processor(&self.processor)?.latest_core(&topic)
     }
 }
 
-fn query_connection(
+fn lock_stream_processor(
+    state: &Arc<Mutex<DataStreamProcessorState>>,
+) -> PyResult<std::sync::MutexGuard<'_, DataStreamProcessorState>> {
+    state
+        .lock()
+        .map_err(|_| PyRuntimeError::new_err("stream processor mutex poisoned"))
+}
+
+fn query_stream_processor(
     py: Python<'_>,
-    connection: &Connection,
+    processor: Arc<Mutex<DataStreamProcessorState>>,
     sql: &str,
     parameters: Option<&Bound<'_, PyDict>>,
 ) -> PyResult<Py<PyList>> {
-    let statement = sql.trim();
+    let statement = sql.trim().to_owned();
     if statement.is_empty() {
         return Err(PyValueError::new_err(
             "stream processor SQL must be non-empty",
@@ -3489,32 +3603,25 @@ fn query_connection(
             "stream processor SQL must be a SELECT or WITH query",
         ));
     }
-    let mut prepared = connection.prepare(statement).map_err(stream_sql_error)?;
-    let column_names: Vec<String> = prepared
-        .column_names()
-        .into_iter()
-        .map(str::to_owned)
-        .collect();
     let sql_parameters = sql_parameters_from_python(parameters)?;
-    let named_parameters: Vec<(&str, &dyn ToSql)> = sql_parameters
-        .iter()
-        .map(|(name, value)| (name.as_str(), value as &dyn ToSql))
-        .collect();
-    let mut rows = prepared
-        .query(named_parameters.as_slice())
-        .map_err(stream_sql_error)?;
+    let rows = py.detach(move || {
+        let processor = lock_stream_processor(&processor)?;
+        processor.query_rows(&statement, sql_parameters)
+    })?;
+    query_rows_to_python(py, rows)
+}
+
+fn query_rows_to_python(py: Python<'_>, rows: QueryRows) -> PyResult<Py<PyList>> {
     let output = PyList::empty(py);
-    while let Some(row) = rows.next().map_err(stream_sql_error)? {
+    for row in rows.rows {
         let item = PyDict::new(py);
-        for (index, name) in column_names.iter().enumerate() {
-            match row.get_ref(index).map_err(stream_sql_error)? {
-                ValueRef::Null => item.set_item(name, py.None())?,
-                ValueRef::Integer(value) => item.set_item(name, value)?,
-                ValueRef::Real(value) => item.set_item(name, value)?,
-                ValueRef::Text(value) => {
-                    item.set_item(name, String::from_utf8_lossy(value).as_ref())?
-                }
-                ValueRef::Blob(value) => item.set_item(name, PyBytes::new(py, value))?,
+        for (name, cell) in rows.column_names.iter().zip(row) {
+            match cell {
+                QueryCell::Null => item.set_item(name, py.None())?,
+                QueryCell::Integer(value) => item.set_item(name, value)?,
+                QueryCell::Real(value) => item.set_item(name, value)?,
+                QueryCell::Text(value) => item.set_item(name, value)?,
+                QueryCell::Blob(value) => item.set_item(name, PyBytes::new(py, &value))?,
             }
         }
         output.append(item)?;
@@ -3754,6 +3861,319 @@ fn read_f64(payload: &[u8], start: usize) -> PyResult<f64> {
 
 fn stream_sql_error(error: rusqlite::Error) -> PyErr {
     PyRuntimeError::new_err(format!("stream SQL operation failed: {error}"))
+}
+
+type NativeLockState = Arc<(Mutex<bool>, Condvar)>;
+
+static MANYFOLD_LOCKS: OnceLock<Mutex<BTreeMap<String, NativeLockState>>> = OnceLock::new();
+
+trait ManyFoldTimeProvider: Send + Sync {
+    fn now_ns(&self) -> PyResult<i64>;
+}
+
+struct SystemManyFoldTimeProvider;
+
+impl ManyFoldTimeProvider for SystemManyFoldTimeProvider {
+    fn now_ns(&self) -> PyResult<i64> {
+        let elapsed = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|error| {
+                PyRuntimeError::new_err(format!("system clock before UNIX epoch: {error}"))
+            })?;
+        i64::try_from(elapsed.as_nanos()).map_err(|_| {
+            PyRuntimeError::new_err("system time nanoseconds exceed signed 64-bit range")
+        })
+    }
+}
+
+#[derive(Clone)]
+struct ManyFoldClock {
+    provider: Arc<dyn ManyFoldTimeProvider>,
+}
+
+impl ManyFoldClock {
+    fn system() -> Self {
+        Self {
+            provider: Arc::new(SystemManyFoldTimeProvider),
+        }
+    }
+
+    fn now_ns(&self) -> PyResult<i64> {
+        self.provider.now_ns()
+    }
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust")]
+pub struct ManyFoldLock {
+    name: String,
+    path: PathBuf,
+    state: NativeLockState,
+    clock: ManyFoldClock,
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pymethods]
+impl ManyFoldLock {
+    #[new]
+    fn new(name: String) -> PyResult<Self> {
+        Self::for_resource(name)
+    }
+
+    #[staticmethod]
+    fn for_resource(name: String) -> PyResult<Self> {
+        let name = require_lock_name(name)?;
+        let state = canonical_lock_state(&name)?;
+        Ok(Self {
+            path: lock_path(&name),
+            name,
+            state,
+            clock: ManyFoldClock::system(),
+        })
+    }
+
+    #[getter]
+    fn name(&self) -> String {
+        self.name.clone()
+    }
+
+    #[getter]
+    fn path(&self) -> String {
+        self.path.to_string_lossy().into_owned()
+    }
+
+    #[pyo3(signature = (*, owner=None, blocking=true))]
+    fn take(&self, owner: Option<String>, blocking: bool) -> PyResult<ManyFoldLockLease> {
+        let owner = resolve_lock_owner(owner)?;
+        acquire_native_lock_state(&self.name, &self.state, blocking)?;
+        let file = match open_lock_file(&self.path).and_then(|mut file| {
+            acquire_file_lock(&file, blocking)?;
+            write_lock_metadata(&mut file, &self.name, &owner, &self.clock)?;
+            Ok(file)
+        }) {
+            Ok(file) => file,
+            Err(error) => {
+                release_native_lock_state(&self.state);
+                return Err(error);
+            }
+        };
+        Ok(ManyFoldLockLease {
+            lock_name: self.name.clone(),
+            owner,
+            acquired_time_ns: self.clock.now_ns()?,
+            is_released: false,
+            state: self.state.clone(),
+            file: Some(file),
+        })
+    }
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust")]
+pub struct ManyFoldLockLease {
+    lock_name: String,
+    owner: String,
+    acquired_time_ns: i64,
+    is_released: bool,
+    state: NativeLockState,
+    file: Option<File>,
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pymethods]
+impl ManyFoldLockLease {
+    #[getter]
+    fn lock_name(&self) -> String {
+        self.lock_name.clone()
+    }
+
+    #[getter]
+    fn owner(&self) -> String {
+        self.owner.clone()
+    }
+
+    #[getter]
+    fn acquired_time_ns(&self) -> i64 {
+        self.acquired_time_ns
+    }
+
+    #[getter]
+    fn is_released(&self) -> bool {
+        self.is_released
+    }
+
+    fn release(&mut self) -> PyResult<bool> {
+        if self.is_released {
+            return Ok(false);
+        }
+        if let Some(file) = self.file.take() {
+            FileExt::unlock(&file).map_err(|error| {
+                PyRuntimeError::new_err(format!("failed to unlock ManyFold lock file: {error}"))
+            })?;
+        }
+        release_native_lock_state(&self.state);
+        self.is_released = true;
+        Ok(true)
+    }
+
+    fn __enter__(slf: PyRefMut<'_, Self>) -> PyRefMut<'_, Self> {
+        slf
+    }
+
+    fn __exit__(
+        &mut self,
+        _exc_type: &Bound<'_, PyAny>,
+        _exc: &Bound<'_, PyAny>,
+        _traceback: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
+        self.release()?;
+        Ok(())
+    }
+}
+
+impl Drop for ManyFoldLockLease {
+    fn drop(&mut self) {
+        let _ = self.release();
+    }
+}
+
+fn canonical_lock_state(name: &str) -> PyResult<NativeLockState> {
+    let mut locks = MANYFOLD_LOCKS
+        .get_or_init(|| Mutex::new(BTreeMap::new()))
+        .lock()
+        .map_err(|_| PyRuntimeError::new_err("ManyFold lock registry mutex poisoned"))?;
+    Ok(locks
+        .entry(name.to_owned())
+        .or_insert_with(|| Arc::new((Mutex::new(false), Condvar::new())))
+        .clone())
+}
+
+fn acquire_native_lock_state(name: &str, state: &NativeLockState, blocking: bool) -> PyResult<()> {
+    let (lock, condvar) = &**state;
+    let mut is_held = lock
+        .lock()
+        .map_err(|_| PyRuntimeError::new_err("ManyFold lock mutex poisoned"))?;
+    if blocking {
+        while *is_held {
+            is_held = condvar
+                .wait(is_held)
+                .map_err(|_| PyRuntimeError::new_err("ManyFold lock mutex poisoned"))?;
+        }
+    } else if *is_held {
+        return Err(PyRuntimeError::new_err(format!(
+            "ManyFold lock {name:?} is already held"
+        )));
+    }
+    *is_held = true;
+    Ok(())
+}
+
+fn release_native_lock_state(state: &NativeLockState) {
+    let (lock, condvar) = &**state;
+    if let Ok(mut is_held) = lock.lock() {
+        *is_held = false;
+        condvar.notify_one();
+    }
+}
+
+fn require_lock_name(name: String) -> PyResult<String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(PyValueError::new_err(
+            "lock name must be a non-empty string",
+        ));
+    }
+    Ok(name.to_owned())
+}
+
+fn resolve_lock_owner(owner: Option<String>) -> PyResult<String> {
+    let Some(owner) = owner else {
+        return Ok(format!("thread:{:?}", std::thread::current().id()));
+    };
+    let owner = owner.trim();
+    if owner.is_empty() {
+        return Err(PyValueError::new_err(
+            "lock owner must be a non-empty string",
+        ));
+    }
+    Ok(owner.to_owned())
+}
+
+fn lock_path(name: &str) -> PathBuf {
+    std::env::temp_dir()
+        .join("manyfold")
+        .join("locks")
+        .join(format!("{}.lock", hex_encode(name.as_bytes())))
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        output.push(HEX[(byte >> 4) as usize] as char);
+        output.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    output
+}
+
+fn open_lock_file(path: &PathBuf) -> PyResult<File> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| {
+            PyRuntimeError::new_err(format!("failed to create ManyFold lock directory: {error}"))
+        })?;
+    }
+    OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(path)
+        .map_err(|error| {
+            PyRuntimeError::new_err(format!("failed to open ManyFold lock file: {error}"))
+        })
+}
+
+fn acquire_file_lock(file: &File, blocking: bool) -> PyResult<()> {
+    let result = if blocking {
+        file.lock_exclusive()
+    } else {
+        file.try_lock_exclusive()
+    };
+    result.map_err(|error| {
+        PyRuntimeError::new_err(format!("failed to acquire ManyFold lock file: {error}"))
+    })
+}
+
+fn write_lock_metadata(
+    file: &mut File,
+    name: &str,
+    owner: &str,
+    clock: &ManyFoldClock,
+) -> PyResult<()> {
+    file.set_len(0).map_err(|error| {
+        PyRuntimeError::new_err(format!("failed to clear ManyFold lock file: {error}"))
+    })?;
+    file.seek(SeekFrom::Start(0)).map_err(|error| {
+        PyRuntimeError::new_err(format!("failed to seek ManyFold lock file: {error}"))
+    })?;
+    write!(
+        file,
+        "name={name}\nowner={owner}\npid={}\nthread={:?}\nacquired_time_ns={}\n",
+        std::process::id(),
+        std::thread::current().id(),
+        clock.now_ns()?
+    )
+    .map_err(|error| {
+        PyRuntimeError::new_err(format!("failed to write ManyFold lock metadata: {error}"))
+    })?;
+    file.sync_all().map_err(|error| {
+        PyRuntimeError::new_err(format!("failed to sync ManyFold lock file: {error}"))
+    })?;
+    Ok(())
 }
 
 #[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
@@ -4071,6 +4491,8 @@ fn _manyfold_rust(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()>
     module.add_class::<PubSubSubscription>()?;
     module.add_class::<PubSubDelivery>()?;
     module.add_class::<InMemoryPubSub>()?;
+    module.add_class::<ManyFoldLock>()?;
+    module.add_class::<ManyFoldLockLease>()?;
     module.add_class::<Mailbox>()?;
     module.add_class::<ControlLoop>()?;
     module.add_class::<Graph>()?;
