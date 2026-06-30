@@ -28,7 +28,7 @@ Environment:
 - Host: `Darwin Lapis 24.4.0 arm64`.
 - Build: `cargo run --release --bin architecture_pubsub_benchmark`.
 - Checked-in baseline:
-  `src/benchmarks/baseline/architecture_pubsub.json`.
+  `src/benchmarks/baselines/architecture_pubsub.json`.
 - Workload: 100,000 iterations, 4,096 retained messages, 16 subscribers,
   32-message poll batches, 64-byte payloads, 8 topics.
 

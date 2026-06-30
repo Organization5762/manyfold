@@ -506,7 +506,7 @@ fn default_baseline_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("src")
         .join("benchmarks")
-        .join("baseline")
+        .join("baselines")
         .join("architecture_pubsub.json")
 }
 
