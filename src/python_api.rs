@@ -1,9 +1,13 @@
 #![allow(clippy::too_many_arguments)]
 
 use std::collections::hash_map::DefaultHasher;
+use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
 
+use crate::architecture::{
+    InMemoryPubSubCore, PubSubDeliveryCore, PubSubMessageCore, PubSubSubscriptionCore,
+};
 use crate::core::{
     ClockDomainRefCore, ClosedEnvelopeCore, ControlLoopCore, CreditSnapshotCore, DeliveryMode,
     GraphCore, Layer, MailboxCore, MailboxDescriptorCore, NamespaceRefCore, OpenedEnvelopeCore,
@@ -15,7 +19,7 @@ use crate::core::{
 use pyo3::basic::CompareOp;
 use pyo3::exceptions::{PyKeyError, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyBool, PyDict};
+use pyo3::types::{PyBool, PyBytes, PyDict};
 use sqlparser::ast::Statement;
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
@@ -2366,6 +2370,237 @@ impl Graph {
     }
 }
 
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust", frozen, from_py_object)]
+#[derive(Clone)]
+pub struct PubSubMessage {
+    inner: PubSubMessageCore,
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pymethods]
+impl PubSubMessage {
+    #[new]
+    #[pyo3(signature = (topic, payload, offset=0))]
+    fn new(topic: String, payload: Vec<u8>, offset: u64) -> PyResult<Self> {
+        validate_nonblank_text("pubsub topic", &topic)?;
+        if payload.is_empty() {
+            return Err(PyValueError::new_err(
+                "pubsub payload must be non-empty bytes",
+            ));
+        }
+        Ok(Self {
+            inner: PubSubMessageCore {
+                topic,
+                payload,
+                offset,
+            },
+        })
+    }
+
+    #[getter]
+    fn topic(&self) -> String {
+        self.inner.topic.clone()
+    }
+
+    #[getter]
+    fn payload(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.payload).into()
+    }
+
+    #[getter]
+    fn offset(&self) -> u64 {
+        self.inner.offset
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "PubSubMessage(topic={:?}, offset={}, payload_len={})",
+            self.inner.topic,
+            self.inner.offset,
+            self.inner.payload.len()
+        )
+    }
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust", frozen, from_py_object)]
+#[derive(Clone)]
+pub struct PubSubSubscription {
+    inner: PubSubSubscriptionCore,
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pymethods]
+impl PubSubSubscription {
+    #[getter]
+    fn name(&self) -> String {
+        self.inner.name.clone()
+    }
+
+    #[getter]
+    fn topic(&self) -> String {
+        self.inner.topic.clone()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "PubSubSubscription(name={:?}, topic={:?})",
+            self.inner.name, self.inner.topic
+        )
+    }
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust", frozen, from_py_object)]
+#[derive(Clone)]
+pub struct PubSubDelivery {
+    inner: PubSubDeliveryCore,
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pymethods]
+impl PubSubDelivery {
+    #[getter]
+    fn topic(&self) -> String {
+        self.inner.topic.clone()
+    }
+
+    #[getter]
+    fn offset(&self) -> u64 {
+        self.inner.offset
+    }
+
+    #[getter]
+    fn delivered_to(&self) -> Vec<String> {
+        self.inner.delivered_to.clone()
+    }
+
+    #[getter]
+    fn subscriber_count(&self) -> usize {
+        self.inner.delivered_to.len()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "PubSubDelivery(topic={:?}, offset={}, subscriber_count={})",
+            self.inner.topic,
+            self.inner.offset,
+            self.inner.delivered_to.len()
+        )
+    }
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust")]
+pub struct InMemoryPubSub {
+    inner: Arc<Mutex<InMemoryPubSubCore>>,
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pymethods]
+impl InMemoryPubSub {
+    #[new]
+    #[pyo3(signature = (*, retained_messages=1024))]
+    fn new(retained_messages: usize) -> PyResult<Self> {
+        Ok(Self {
+            inner: Arc::new(Mutex::new(
+                InMemoryPubSubCore::new(retained_messages).map_err(PyValueError::new_err)?,
+            )),
+        })
+    }
+
+    #[getter]
+    fn retained_messages(&self) -> PyResult<usize> {
+        Ok(lock_pubsub(&self.inner)?.retained_messages())
+    }
+
+    #[getter]
+    fn message_count(&self) -> PyResult<usize> {
+        Ok(lock_pubsub(&self.inner)?.message_count())
+    }
+
+    #[getter]
+    fn subscriber_count(&self) -> PyResult<usize> {
+        Ok(lock_pubsub(&self.inner)?.subscriber_count())
+    }
+
+    #[pyo3(signature = (topic, *, name=None, replay_from_beginning=false))]
+    fn subscribe(
+        &self,
+        topic: String,
+        name: Option<String>,
+        replay_from_beginning: bool,
+    ) -> PyResult<PubSubSubscription> {
+        let mut pubsub = lock_pubsub(&self.inner)?;
+        Ok(PubSubSubscription {
+            inner: pubsub
+                .subscribe(topic, name, replay_from_beginning)
+                .map_err(PyValueError::new_err)?,
+        })
+    }
+
+    fn unsubscribe(&self, subscription: String) -> PyResult<bool> {
+        let mut pubsub = lock_pubsub(&self.inner)?;
+        pubsub
+            .unsubscribe(&subscription)
+            .map_err(PyValueError::new_err)
+    }
+
+    fn publish(&self, topic: String, payload: Vec<u8>) -> PyResult<PubSubDelivery> {
+        let mut pubsub = lock_pubsub(&self.inner)?;
+        Ok(PubSubDelivery {
+            inner: pubsub
+                .publish(topic, payload)
+                .map_err(PyValueError::new_err)?,
+        })
+    }
+
+    #[pyo3(signature = (subscription, *, max_messages=None))]
+    fn poll(
+        &self,
+        subscription: String,
+        max_messages: Option<usize>,
+    ) -> PyResult<Vec<PubSubMessage>> {
+        let mut pubsub = lock_pubsub(&self.inner)?;
+        Ok(pubsub
+            .poll(&subscription, max_messages)
+            .map_err(PyValueError::new_err)?
+            .into_iter()
+            .map(|inner| PubSubMessage { inner })
+            .collect())
+    }
+
+    #[pyo3(signature = (topic=None))]
+    fn latest(&self, topic: Option<String>) -> PyResult<Option<PubSubMessage>> {
+        let pubsub = lock_pubsub(&self.inner)?;
+        Ok(pubsub
+            .latest(topic.as_deref())
+            .map_err(PyValueError::new_err)?
+            .map(|inner| PubSubMessage { inner }))
+    }
+
+    fn topic_offsets(&self) -> PyResult<BTreeMap<String, u64>> {
+        Ok(lock_pubsub(&self.inner)?.topic_offsets())
+    }
+}
+
+fn lock_pubsub(
+    state: &Arc<Mutex<InMemoryPubSubCore>>,
+) -> PyResult<std::sync::MutexGuard<'_, InMemoryPubSubCore>> {
+    state
+        .lock()
+        .map_err(|_| PyRuntimeError::new_err("pubsub mutex poisoned"))
+}
+
 #[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyfunction)]
 #[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
 #[pyfunction]
@@ -2427,6 +2662,10 @@ fn _manyfold_rust(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()>
     module.add_class::<CreditSnapshot>()?;
     module.add_class::<RetentionSnapshot>()?;
     module.add_class::<NoLineageMaterializerDropProfile>()?;
+    module.add_class::<PubSubMessage>()?;
+    module.add_class::<PubSubSubscription>()?;
+    module.add_class::<PubSubDelivery>()?;
+    module.add_class::<InMemoryPubSub>()?;
     module.add_class::<Mailbox>()?;
     module.add_class::<ControlLoop>()?;
     module.add_class::<Graph>()?;

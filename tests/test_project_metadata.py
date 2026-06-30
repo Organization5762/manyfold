@@ -74,12 +74,6 @@ DECLARATION_ORDER_EXCEPTIONS = frozenset(
     {
         ("python/manyfold/graph.py", "_ThreadPlaceableNode"),
         ("python/manyfold/reactive_threads.py", "_NoStartingValue"),
-        ("examples/runtime_substrate.py", "run_example"),
-        ("examples/runtime_substrate.py", "run_kafka_backed_queue_program"),
-        ("examples/runtime_substrate.py", "run_kafka_bootstrap_benchmark"),
-        ("examples/runtime_substrate.py", "run_kafka_leader_failure_example"),
-        ("examples/runtime_substrate.py", "run_projection_into_local_stream_example"),
-        ("examples/runtime_substrate.py", "run_pubsub_upgrade_example"),
     }
 )
 
