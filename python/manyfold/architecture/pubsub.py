@@ -6,6 +6,8 @@ import os
 import struct
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, is_dataclass
+from inspect import Parameter, signature
+from subprocess import Popen
 from threading import get_ident
 from time import time_ns
 from types import NoneType
@@ -21,7 +23,16 @@ from manyfold._manyfold_rust import (
     PubSubRuntime,
     PubSubSubscription as PubSubSubscription,
 )
-from manyfold.architecture.locks import ManyFoldLock
+from manyfold.architecture.callbacks import CallbackDelivery, CallbackPlacement
+from manyfold.architecture.locks import Lock, ManyFoldLock
+from manyfold.architecture.native._elements import Clock
+from manyfold.architecture.values import (
+    HistoricalValue,
+    ImmutableValue,
+    NewValues,
+    Value,
+    _register_value_stream_factory,
+)
 
 _EPHEMERAL_TOPIC_NAMESPACE = UUID("6b9b5ff0-76e8-5c7f-b3b3-854f53ed8a3e")
 _FILTERED = object()
@@ -60,6 +71,25 @@ def PubSubTopic(
 class PubSub:
     """Topic-scoped PubSub stream with SQL-backed state."""
 
+    @staticmethod
+    def spawn_rust_worker(
+        command: str,
+        args: tuple[str, ...] = (),
+        *,
+        cwd: str | None = None,
+        env: Mapping[str, str] | None = None,
+    ) -> Popen[str]:
+        """Spawn a native Rust worker process for desktop Python hosts."""
+        if not command.strip():
+            raise ValueError("worker command must be a non-empty string")
+        environment = dict(env) if env is not None else None
+        return Popen(
+            (command, *args),
+            cwd=cwd,
+            env=environment,
+            text=True,
+        )
+
     def __init__(
         self,
         *,
@@ -75,14 +105,18 @@ class PubSub:
         resolved_topic = _resolve_topic(topic)
         self.topic = resolved_topic
         self.schema = schema
-        self.schedule = _schedule if _runtime is not None else (
-            PubSubSchedule.current_thread(
-                topic=resolved_topic,
-                worker_name=worker_name,
-                service_discovery=service_discovery,
+        self.schedule = (
+            _schedule
+            if _runtime is not None
+            else (
+                PubSubSchedule.current_thread(
+                    topic=resolved_topic,
+                    worker_name=worker_name,
+                    service_discovery=service_discovery,
+                )
+                if schedule
+                else None
             )
-            if schedule
-            else None
         )
         self._stream_schema = _coerce_stream_schema(resolved_topic, schema)
         self._runtime = _runtime or PubSubRuntime(
@@ -96,6 +130,19 @@ class PubSub:
             )
         self._callbacks: dict[int, Callable[[StreamRow], object]] = {}
         self._next_callback_id = 1
+
+    @property
+    def value(self) -> "PubSubValueSurface":
+        """Return semantic value views over this PubSub stream."""
+        return PubSubValueSurface(self)
+
+    def lock(self) -> Lock:
+        """Return this PubSub runtime's canonical infrastructure lock."""
+        return Lock.for_resource(_pubsub_infrastructure_lock(self.topic))
+
+    def clock(self) -> Clock:
+        """Return this PubSub runtime's canonical infrastructure clock."""
+        return Clock()
 
     def publish(
         self,
@@ -143,6 +190,7 @@ class PubSub:
         on_completed: Callable[[], object] | None = None,
         scheduler: object | None = None,
         *,
+        callback_placement: CallbackPlacement | None = None,
         on_next: Callable[[StreamRow], object] | None = None,
         replay_latest: bool = False,
     ) -> "PubSubCallbackSubscription":
@@ -155,28 +203,49 @@ class PubSub:
         )
         if not callable(callback):
             raise TypeError("PubSub.subscribe requires a callable callback")
+        delivery = CallbackDelivery(callback_placement)
+
+        def deliver(row: StreamRow) -> None:
+            _deliver_callback_or_raise(
+                delivery,
+                callback,
+                row,
+                "PubSub.subscribe",
+            )
+
         callback_id = self._next_callback_id
         self._next_callback_id += 1
-        self._callbacks[callback_id] = callback
+        self._callbacks[callback_id] = deliver
+
+        def dispose() -> bool:
+            removed = self._callbacks.pop(callback_id, None) is not None
+            delivery.close()
+            return removed
+
         subscription = PubSubCallbackSubscription(
-            lambda: self._callbacks.pop(callback_id, None) is not None
+            dispose,
         )
         if replay_latest:
             latest = self.latest()
             if latest is not None and callback_id in self._callbacks:
-                callback(latest)
+                deliver(latest)
         return subscription
 
     def callback(
         self,
         callback: Callable[[StreamRow], object],
         *,
+        callback_placement: CallbackPlacement | None = None,
         name: str | None = None,
         replay_latest: bool = False,
     ) -> "PubSubCallbackSubscription":
         """Alias for ``subscribe`` when wiring callback-style stream sinks."""
         del name
-        return self.subscribe(callback, replay_latest=replay_latest)
+        return self.subscribe(
+            callback,
+            callback_placement=callback_placement,
+            replay_latest=replay_latest,
+        )
 
     def pipe(
         self,
@@ -228,6 +297,18 @@ class PubSub:
         """Return a live stream of ``(value, latest_other)`` tuples."""
         return PubSubObservable(self).with_latest_from(*others)
 
+    def deliver_on(self, placement: CallbackPlacement) -> "PubSubObservable":
+        """Return a stream view that delivers callbacks using ``placement``."""
+        return PubSubObservable(self).deliver_on(placement)
+
+    def state(
+        self,
+        initial: object,
+        reducer: Callable[[object, StreamRow], object],
+    ) -> "PubSubObservable":
+        """Return a live reducer stream that emits ``initial`` first."""
+        return PubSubObservable(self).state(initial, reducer)
+
     def do_action(
         self,
         action: Callable[[StreamRow], object] | None = None,
@@ -267,7 +348,7 @@ class PubSub:
             f"""
             SELECT *
             FROM stream
-            WHERE {' AND '.join(clauses)}
+            WHERE {" AND ".join(clauses)}
             """,
             parameters,
         )
@@ -280,7 +361,7 @@ class PubSub:
             _require_sql_identifier(field, "field")
         return self.query(
             f"""
-            SELECT {', '.join(fields)}
+            SELECT {", ".join(fields)}
             FROM stream
             """
         )
@@ -323,7 +404,9 @@ class PubSub:
             """
         )
 
-    def pairwise(self, field: str | None = None) -> list["StreamRow"] | "PubSubObservable":
+    def pairwise(
+        self, field: str | None = None
+    ) -> list["StreamRow"] | "PubSubObservable":
         """Return adjacent previous/current values for one field."""
         if field is None:
             return PubSubObservable(self).pairwise()
@@ -475,12 +558,20 @@ class PubSub:
 class PubSubCallbackSubscription:
     """Disposable handle returned by a PubSub callback subscription."""
 
-    def __init__(self, dispose_callback: Callable[[], bool]) -> None:
+    def __init__(
+        self,
+        dispose_callback: Callable[[], bool],
+        *,
+        is_disposed_callback: Callable[[], bool] | None = None,
+    ) -> None:
         self._dispose_callback: Callable[[], bool] | None = dispose_callback
+        self._is_disposed_callback = is_disposed_callback
 
     @property
     def is_disposed(self) -> bool:
         """Return whether this subscription has already been disposed."""
+        if self._is_disposed_callback is not None and self._is_disposed_callback():
+            return True
         return self._dispose_callback is None
 
     def dispose(self) -> bool:
@@ -509,6 +600,25 @@ class PubSubObservable:
         self._transforms = transforms
         self._subscribe_factory = subscribe_factory
 
+    @classmethod
+    def merge(cls, *sources: object) -> "PubSubObservable":
+        """Return a live stream that forwards values from all ``sources``."""
+        if not sources:
+            raise ValueError("merge requires at least one source")
+        streams = tuple(_as_pubsub_observable(source) for source in sources)
+
+        def subscribe(
+            callback: Callable[[object], object],
+            replay_latest: bool,
+        ) -> PubSubCallbackSubscription:
+            subscriptions = tuple(
+                stream.subscribe(callback, replay_latest=replay_latest)
+                for stream in streams
+            )
+            return _composite_subscription(*subscriptions)
+
+        return cls(subscribe_factory=subscribe)
+
     def subscribe(
         self,
         callback: Callable[[object], object] | object | None = None,
@@ -516,6 +626,7 @@ class PubSubObservable:
         on_completed: Callable[[], object] | None = None,
         scheduler: object | None = None,
         *,
+        callback_placement: CallbackPlacement | None = None,
         on_next: Callable[[object], object] | None = None,
         replay_latest: bool = False,
     ) -> PubSubCallbackSubscription:
@@ -528,9 +639,25 @@ class PubSubObservable:
         )
         if not callable(callback):
             raise TypeError("PubSubObservable.subscribe requires a callable callback")
+        delivery = CallbackDelivery(callback_placement)
+
+        def deliver(value: object) -> None:
+            _deliver_callback_or_raise(
+                delivery,
+                callback,
+                value,
+                "PubSubObservable.subscribe",
+            )
+
         if self._subscribe_factory is not None:
-            return self._subscribe_factory(callback, replay_latest)
+            try:
+                subscription = self._subscribe_factory(deliver, replay_latest)
+            except Exception:
+                delivery.close()
+                raise
+            return _subscription_with_delivery(subscription, delivery)
         if self._source is None:
+            delivery.close()
             raise RuntimeError("PubSubObservable has no source")
 
         def receive(row: StreamRow) -> None:
@@ -539,20 +666,46 @@ class PubSubObservable:
                 value = transform(value)
                 if value is _FILTERED:
                     return
-            callback(value)
+            deliver(value)
 
-        return self._source.subscribe(receive, replay_latest=replay_latest)
+        try:
+            subscription = self._source.subscribe(receive, replay_latest=replay_latest)
+        except Exception:
+            delivery.close()
+            raise
+        return _subscription_with_delivery(subscription, delivery)
 
     def callback(
         self,
         callback: Callable[[object], object],
         *,
+        callback_placement: CallbackPlacement | None = None,
         name: str | None = None,
         replay_latest: bool = False,
     ) -> PubSubCallbackSubscription:
         """Alias for ``subscribe`` when wiring callback-style stream sinks."""
         del name
-        return self.subscribe(callback, replay_latest=replay_latest)
+        return self.subscribe(
+            callback,
+            callback_placement=callback_placement,
+            replay_latest=replay_latest,
+        )
+
+    def deliver_on(self, placement: CallbackPlacement) -> "PubSubObservable":
+        """Return a stream view that delivers subscriber callbacks using placement."""
+        _require_callback_placement(placement)
+
+        def subscribe(
+            callback: Callable[[object], object],
+            replay_latest: bool,
+        ) -> PubSubCallbackSubscription:
+            return self.subscribe(
+                callback,
+                callback_placement=placement,
+                replay_latest=replay_latest,
+            )
+
+        return PubSubObservable(subscribe_factory=subscribe)
 
     def pipe(
         self,
@@ -592,6 +745,7 @@ class PubSubObservable:
         if not callable(transform):
             raise TypeError("PubSubObservable.map requires a callable transform")
         if self._subscribe_factory is not None or self._source is None:
+
             def subscribe(
                 callback: Callable[[object], object],
                 replay_latest: bool,
@@ -615,6 +769,7 @@ class PubSubObservable:
         if not callable(predicate):
             raise TypeError("PubSubObservable.filter requires a callable predicate")
         if self._subscribe_factory is not None or self._source is None:
+
             def subscribe(
                 callback: Callable[[object], object],
                 replay_latest: bool,
@@ -697,6 +852,14 @@ class PubSubObservable:
 
         return PubSubObservable(subscribe_factory=subscribe)
 
+    def state(
+        self,
+        initial: object,
+        reducer: Callable[[object, object], object],
+    ) -> "PubSubObservable":
+        """Emit ``initial`` and then each reducer state update."""
+        return self.scan(reducer, seed=initial).start_with(initial)
+
     def do_action(
         self,
         action: Callable[[object], object] | None = None,
@@ -723,7 +886,9 @@ class PubSubObservable:
     ) -> "PubSubObservable":
         """Forward values whose comparison key changed from the previous value."""
         if key is not None and not callable(key):
-            raise TypeError("PubSubObservable.distinct_until_changed key must be callable")
+            raise TypeError(
+                "PubSubObservable.distinct_until_changed key must be callable"
+            )
 
         def subscribe(
             callback: Callable[[object], object],
@@ -905,6 +1070,72 @@ class PubSubFabric:
         return created
 
 
+class PubSubValueSurface:
+    """Semantic value views over a PubSub stream."""
+
+    def __init__(self, stream: PubSub) -> None:
+        self._stream = stream
+
+    @property
+    def stream(self) -> PubSub:
+        """Return the backing PubSub stream."""
+        return self._stream
+
+    @property
+    def current(self) -> "PubSubCurrentValueSurface":
+        """Return mutable current-value views over this PubSub stream."""
+        return PubSubCurrentValueSurface(self._stream)
+
+    def latest(self) -> object:
+        """Return an immutable value containing the latest retained stream row."""
+        row = self._stream.latest()
+        if row is None:
+            return ImmutableValue[StreamRow](name=f"{self._stream.topic}.latest")
+        return ImmutableValue[StreamRow](
+            row,
+            name=f"{self._stream.topic}.latest",
+            has_initial=True,
+        )
+
+    def historical(self, *, retained_values: int = 1024) -> object:
+        """Return a ``HistoricalValue`` handle backed by this PubSub stream."""
+        return HistoricalValue(
+            name=self._stream.topic,
+            retained_values=retained_values,
+        ).from_stream(self._stream)
+
+    def history(self, retained_values: int) -> object:
+        """Return a bounded historical value view over this PubSub stream."""
+        return self.historical(retained_values=retained_values)
+
+    def new_values(self) -> object:
+        """Return a ``NewValues`` handle backed by this PubSub stream."""
+        return NewValues(name=self._stream.topic).from_stream(self._stream)
+
+
+class PubSubCurrentValueSurface:
+    """Mutable current-value views over a PubSub stream."""
+
+    def __init__(self, stream: PubSub) -> None:
+        self._stream = stream
+
+    @property
+    def stream(self) -> PubSub:
+        """Return the backing PubSub stream."""
+        return self._stream
+
+    def latest(self) -> object:
+        """Return a mutable value initialized from the latest retained stream row."""
+        row = self._stream.latest()
+        if row is None:
+            return Value[StreamRow](name=f"{self._stream.topic}.current")
+        return Value[StreamRow](
+            row,
+            name=f"{self._stream.topic}.current",
+            has_initial=True,
+        )
+
+
 @dataclass(frozen=True)
 class ServiceDiscoveryRequirement:
     """Process-level dependency PubSub needs for worker discovery."""
@@ -1003,6 +1234,23 @@ def _as_pubsub_observable(value: object) -> PubSubObservable:
         return value
     if isinstance(value, PubSub):
         return PubSubObservable(value)
+    if callable(getattr(value, "subscribe", None)):
+
+        def subscribe(
+            callback: Callable[[object], object],
+            replay_latest: bool,
+        ) -> PubSubCallbackSubscription:
+            source_subscribe = value.subscribe  # type: ignore[attr-defined]
+            if _accepts_keyword(source_subscribe, "replay_latest"):
+                subscription = source_subscribe(callback, replay_latest=replay_latest)
+            else:
+                subscription = source_subscribe(callback)
+            dispose = getattr(subscription, "dispose", None)
+            if callable(dispose):
+                return PubSubCallbackSubscription(lambda: bool(dispose()))
+            return PubSubCallbackSubscription(lambda: False)
+
+        return PubSubObservable(subscribe_factory=subscribe)
     raise TypeError("value must be a PubSub or PubSubObservable")
 
 
@@ -1024,12 +1272,43 @@ def _callback_from_observer(
     raise TypeError(f"{method} requires a callable callback")
 
 
+def _require_callback_placement(value: object) -> CallbackPlacement:
+    if not isinstance(value, CallbackPlacement):
+        raise TypeError("placement must be a CallbackPlacement")
+    return value
+
+
 def _resolve_scan_initial(initial: object, seed: object) -> object:
     if initial is not _NO_SCAN_INITIAL and seed is not _NO_SCAN_INITIAL:
         raise ValueError("scan accepts either initial or seed, not both")
     if seed is not _NO_SCAN_INITIAL:
         return seed
     return initial
+
+
+def _deliver_callback_or_raise(
+    delivery: CallbackDelivery,
+    callback: Callable[[object], object],
+    value: object,
+    method: str,
+) -> None:
+    if not delivery.deliver(callback, value):
+        raise RuntimeError(f"{method} callback queue is full")
+
+
+def _subscription_with_delivery(
+    subscription: PubSubCallbackSubscription,
+    delivery: CallbackDelivery,
+) -> PubSubCallbackSubscription:
+    def dispose() -> bool:
+        disposed = subscription.dispose()
+        delivery.close()
+        return disposed
+
+    return PubSubCallbackSubscription(
+        dispose,
+        is_disposed_callback=lambda: subscription.is_disposed,
+    )
 
 
 def _composite_subscription(
@@ -1135,6 +1414,39 @@ def _resolve_worker_name(topic: str, worker_name: str | None) -> str:
     return f"pubsub:{safe_topic}"
 
 
+def _pubsub_infrastructure_lock(topic: str) -> str:
+    return f"{topic}.infrastructure.lock"
+
+
+def _accepts_keyword(callable_object: Callable[..., object], keyword: str) -> bool:
+    try:
+        parameters = signature(callable_object).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(
+        parameter.kind is Parameter.VAR_KEYWORD or parameter.name == keyword
+        for parameter in parameters
+    )
+
+
+def _pubsub_value_stream_factory(
+    name: str | None,
+    *,
+    namespace: str,
+    schema: type | None,
+    retained_messages: int,
+) -> PubSub:
+    return PubSubTopic(
+        name,
+        namespace=namespace,
+        schema=schema,
+        retained_messages=retained_messages,
+    )
+
+
+_register_value_stream_factory(_pubsub_value_stream_factory)
+
+
 def _sql_alias_prefix(topic: str) -> str:
     alias = "".join(char if char == "_" or char.isalnum() else "_" for char in topic)
     alias = alias.strip("_")
@@ -1165,7 +1477,9 @@ def _unwrap_optional(annotation: object) -> object:
     arguments = get_args(annotation)
     if not arguments:
         return annotation
-    if get_origin(annotation) not in {Union, NoneType} and not _is_pep604_union(annotation):
+    if get_origin(annotation) not in {Union, NoneType} and not _is_pep604_union(
+        annotation
+    ):
         return annotation
     non_none = tuple(argument for argument in arguments if argument is not NoneType)
     if len(non_none) == 1 and len(non_none) != len(arguments):
@@ -1338,7 +1652,9 @@ class _StreamSchema:
             self.name,
             [
                 FlatBufferField(field_name, index, field_type)
-                for index, (field_name, field_type) in enumerate(self.field_types.items())
+                for index, (field_name, field_type) in enumerate(
+                    self.field_types.items()
+                )
             ],
         )
 
@@ -1350,6 +1666,7 @@ __all__ = [
     "InMemoryPubSub",
     "PubSub",
     "PubSubCallbackSubscription",
+    "PubSubCurrentValueSurface",
     "PubSubDelivery",
     "PubSubFabric",
     "PubSubMessage",
@@ -1357,6 +1674,7 @@ __all__ = [
     "PubSubSchedule",
     "PubSubSubscription",
     "PubSubTopic",
+    "PubSubValueSurface",
     "ServiceDiscoveryRequirement",
     "StreamRow",
 ]

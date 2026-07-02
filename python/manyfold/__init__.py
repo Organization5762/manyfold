@@ -34,9 +34,6 @@ _EXPORTS_BY_MODULE = {
         "bridge_version",
         "parse_sql_statement",
     ),
-    "manyfold._rx.subject": (
-        "BehaviorSubject",
-    ),
     "manyfold.components": (
         "Consensus",
         "ConsensusRoutes",
@@ -213,9 +210,7 @@ _EXPORTS_BY_MODULE = {
         "sensor_sample_schema",
         "xor_checksum",
     ),
-    "manyfold.stats": (
-        "Average",
-    ),
+    "manyfold.stats": ("Average",),
 }
 
 _ALIASED_EXPORTS = {
@@ -249,7 +244,6 @@ def __dir__() -> list[str]:
 __all__ = (
     "Average",
     "BackoffPolicy",
-    "BehaviorSubject",
     "BoundedRingBuffer",
     "CallbackNode",
     "CallbackObservable",

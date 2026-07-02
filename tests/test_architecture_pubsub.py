@@ -11,19 +11,24 @@ from uuid import UUID
 
 from manyfold.architecture import (
     CalibratedClock,
+    CallbackPlacement,
     Capacitor,
     Clock,
     ClockCalibrationSample,
     DataStreamProcessor,
     Ground,
+    Lock,
+    LockLease,
     ManyFoldLock,
     ManyFoldLockLease,
     MonotonicLogicalClock,
+    NewValues,
     NtpTimeProvider,
     Probe,
     PubSub,
     PubSubCallbackSubscription,
     PubSubFabric,
+    PubSubMarbleRecord,
     PubSubObservable,
     PubSubSchedule,
     PubSubTopic,
@@ -33,10 +38,13 @@ from manyfold.architecture import (
     ServiceDiscoveryRequirement,
     StreamRow,
     SystemTimeProvider,
+    Value,
     Via,
     WorkerEvent,
     WorkerHandle,
     WorkerRuntime,
+    drain_main_thread_callbacks,
+    pubsub_marbles,
 )
 from manyfold.architecture.pubsub import InMemoryPubSub, PubSubMessage
 
@@ -73,7 +81,9 @@ class ArchitecturePubSubTests(unittest.TestCase):
             ["orders.created", "orders.paid"],
         )
         self.assertEqual([message.offset for message in messages], [0, 1])
-        self.assertEqual(pubsub.topic_offsets(), {"orders.created": 0, "orders.paid": 1})
+        self.assertEqual(
+            pubsub.topic_offsets(), {"orders.created": 0, "orders.paid": 1}
+        )
 
     def test_pubsub_can_replay_retained_messages_from_beginning(self) -> None:
         pubsub = InMemoryPubSub(retained_messages=2)
@@ -84,7 +94,9 @@ class ArchitecturePubSubTests(unittest.TestCase):
         pubsub.subscribe("events", name="replay", replay_from_beginning=True)
         messages = pubsub.poll("replay")
 
-        self.assertEqual([message.payload for message in messages], [b"second", b"third"])
+        self.assertEqual(
+            [message.payload for message in messages], [b"second", b"third"]
+        )
         self.assertEqual([message.offset for message in messages], [1, 2])
         self.assertEqual(pubsub.message_count, 2)
 
@@ -213,7 +225,9 @@ class DataStreamProcessorTests(unittest.TestCase):
 
 
 class PubSubStreamTests(unittest.TestCase):
-    def test_pubsub_schedules_current_thread_and_service_discovery_by_default(self) -> None:
+    def test_pubsub_schedules_current_thread_and_service_discovery_by_default(
+        self,
+    ) -> None:
         stream = PubSub(topic="heart.events")
 
         self.assertIsInstance(stream.schedule, PubSubSchedule)
@@ -315,6 +329,27 @@ class PubSubStreamTests(unittest.TestCase):
         self.assertEqual(fabric.boot_lock.name, boot_lock.name)
         self.assertEqual(fabric.boot_lock.path, boot_lock.path)
 
+    def test_pubsub_exposes_lock_and_clock_endpoints_without_proxy_api(self) -> None:
+        stream = PubSub(topic="heart.proxyless", schema=GamepadEvent)
+        lock = stream.lock()
+        clock = stream.clock()
+
+        with lock.take(owner="proxy") as lease:
+            self.assertIsInstance(lease, LockLease)
+            self.assertEqual(lease.lock_name, "heart.proxyless.infrastructure.lock")
+            self.assertEqual(lease.owner, "proxy")
+        self.assertEqual(clock.tick(), 1)
+
+    def test_pubsub_can_spawn_desktop_worker_process(self) -> None:
+        process = PubSub.spawn_rust_worker(
+            sys.executable,
+            ("-c", "import sys; sys.exit(0)"),
+        )
+
+        self.assertEqual(process.wait(timeout=5), 0)
+        with self.assertRaisesRegex(ValueError, "worker command"):
+            PubSub.spawn_rust_worker("")
+
     def test_pubsub_stream_latest_returns_row_from_sql_query(self) -> None:
         temperature = PubSub(
             topic="sensor.environment.temperature",
@@ -338,7 +373,9 @@ class PubSubStreamTests(unittest.TestCase):
         self.assertEqual(latest.degrees, 72.9)
         self.assertEqual(latest["unit"], "F")
         self.assertEqual(latest.seq_source, 2)
-        self.assertEqual(latest.as_model(Temperature), Temperature(degrees=72.9, unit="F"))
+        self.assertEqual(
+            latest.as_model(Temperature), Temperature(degrees=72.9, unit="F")
+        )
         self.assertEqual(
             latest_row,
             {"seq_source": 2, "degrees": 72.9, "unit": "F"},
@@ -407,7 +444,10 @@ class PubSubStreamTests(unittest.TestCase):
         latest = temperature.latest()
         self.assertIsNotNone(latest)
         self.assertEqual(latest.degrees, 72.9)
-        self.assertEqual(latest.as_model(_PydanticTemperature), _PydanticTemperature(degrees=72.9, unit="F"))
+        self.assertEqual(
+            latest.as_model(_PydanticTemperature),
+            _PydanticTemperature(degrees=72.9, unit="F"),
+        )
 
     def test_pubsub_stream_without_schema_returns_latest_payload(self) -> None:
         stream = PubSub(topic="raw")
@@ -432,7 +472,9 @@ class PubSubStreamTests(unittest.TestCase):
         )
 
         self.assertTrue(stream.topic.startswith("manyfold.ephemeral."))
-        self.assertEqual(UUID(stream.topic.removeprefix("manyfold.ephemeral.")).version, 5)
+        self.assertEqual(
+            UUID(stream.topic.removeprefix("manyfold.ephemeral.")).version, 5
+        )
         latest = stream.latest()
         self.assertIsNotNone(latest)
         self.assertEqual(latest.degrees, 72.9)
@@ -465,7 +507,9 @@ class PubSubStreamTests(unittest.TestCase):
         latest = stream.latest()
         self.assertIsNotNone(latest)
         self.assertEqual(latest.degrees, 72.9)
-        self.assertEqual(latest.as_model(Temperature), Temperature(degrees=72.9, unit="F"))
+        self.assertEqual(
+            latest.as_model(Temperature), Temperature(degrees=72.9, unit="F")
+        )
         self.assertEqual(
             stream._stream_schema.name,
             f"{stream.topic}.Temperature",
@@ -502,6 +546,67 @@ class PubSubStreamTests(unittest.TestCase):
         stream.publish(Temperature(degrees=72.9, unit="F"))
 
         self.assertEqual(observed, [72.4, 72.9])
+
+    def test_pubsub_stream_can_queue_callbacks_for_main_thread(self) -> None:
+        stream = PubSub(
+            topic="sensor.environment.temperature",
+            schema=Temperature,
+        )
+        observed: list[float] = []
+        drain_main_thread_callbacks()
+
+        stream.subscribe(
+            lambda row: observed.append(row.degrees),
+            callback_placement=CallbackPlacement.main_thread(),
+        )
+        stream.publish(Temperature(degrees=72.4, unit="F"))
+
+        self.assertEqual(observed, [])
+        self.assertEqual(drain_main_thread_callbacks(), 1)
+        self.assertEqual(observed, [72.4])
+
+    def test_pubsub_stream_deliver_on_places_downstream_callbacks(self) -> None:
+        stream = PubSub(
+            topic="sensor.environment.temperature",
+            schema=Temperature,
+        )
+        observed: list[float] = []
+        drain_main_thread_callbacks()
+
+        stream.map(lambda row: row.degrees).deliver_on(
+            CallbackPlacement.main_thread()
+        ).subscribe(observed.append)
+        stream.publish(Temperature(degrees=72.4, unit="F"))
+
+        self.assertEqual(observed, [])
+        self.assertEqual(drain_main_thread_callbacks(), 1)
+        self.assertEqual(observed, [72.4])
+
+    def test_pubsub_stream_deliver_on_rejects_invalid_placement(self) -> None:
+        stream = PubSub(
+            topic="sensor.environment.temperature",
+            schema=Temperature,
+        )
+
+        with self.assertRaisesRegex(TypeError, "CallbackPlacement"):
+            stream.deliver_on("background")  # type: ignore[arg-type]
+
+    def test_pubsub_stream_can_deliver_callbacks_on_spawned_thread(self) -> None:
+        stream = PubSub(
+            topic="sensor.environment.temperature",
+            schema=Temperature,
+        )
+        caller_thread = get_ident()
+        callback_threads: Queue[int] = Queue()
+
+        subscription = stream.subscribe(
+            lambda _row: callback_threads.put(get_ident()),
+            callback_placement=CallbackPlacement.spawned_thread("test-pubsub-callback"),
+        )
+        stream.publish(Temperature(degrees=72.4, unit="F"))
+
+        self.assertNotEqual(callback_threads.get(timeout=1.0), caller_thread)
+        self.assertTrue(subscription.dispose())
 
     def test_pubsub_stream_subscription_can_replay_latest_and_dispose(self) -> None:
         stream = PubSub(
@@ -542,7 +647,9 @@ class PubSubStreamTests(unittest.TestCase):
 
         self.assertEqual(observed, ["72.9F"])
 
-    def test_pubsub_live_stream_supports_initial_scan_tap_callback_and_pipe(self) -> None:
+    def test_pubsub_live_stream_supports_initial_scan_tap_callback_and_pipe(
+        self,
+    ) -> None:
         stream = PubSub(
             topic="heart.values",
             schema=GamepadEvent,
@@ -643,6 +750,153 @@ class PubSubStreamTests(unittest.TestCase):
         self.assertEqual(tapped, [11, 13, 16])
         self.assertEqual(observed, [13, 16])
 
+    def test_pubsub_value_history_returns_bounded_historical_value(self) -> None:
+        stream = PubSub(topic="heart.value.history", schema=GamepadEvent)
+
+        for frame_index in range(1, 4):
+            stream.publish(
+                GamepadEvent(
+                    source_id="gamepad.1",
+                    event_time=frame_index,
+                    frame_index=frame_index,
+                    delta_ms=16.0,
+                    value=frame_index,
+                ),
+                event_time=frame_index,
+            )
+
+        history = stream.value.history(2)
+
+        self.assertEqual(history.retained_values, 2)
+        self.assertEqual([event.frame_index for event in history.replay()], [2, 3])
+
+    def test_pubsub_value_historical_accepts_named_retention_bound(self) -> None:
+        stream = PubSub(topic="heart.value.historical", schema=GamepadEvent)
+
+        for frame_index in range(1, 5):
+            stream.publish(
+                GamepadEvent(
+                    source_id="gamepad.1",
+                    event_time=frame_index,
+                    frame_index=frame_index,
+                    delta_ms=16.0,
+                    value=frame_index,
+                ),
+                event_time=frame_index,
+            )
+
+        history = stream.value.historical(retained_values=3)
+
+        self.assertEqual(history.retained_values, 3)
+        self.assertEqual([event.frame_index for event in history.replay()], [2, 3, 4])
+        self.assertEqual(
+            [event.frame_index for event in history.replay(limit=2)], [3, 4]
+        )
+
+    def test_pubsub_observable_merge_and_state_replace_reducer_boilerplate(
+        self,
+    ) -> None:
+        left = PubSub(topic="heart.reducer.left", schema=GamepadEvent)
+        right = PubSub(topic="heart.reducer.right", schema=GamepadEvent)
+        observed: list[int] = []
+
+        PubSubObservable.merge(
+            left.map(lambda row: row.value),
+            right.map(lambda row: row.value),
+        ).state(10, lambda total, value: total + value).subscribe(observed.append)
+
+        left.publish(
+            GamepadEvent(
+                source_id="gamepad.1",
+                event_time=1,
+                frame_index=1,
+                delta_ms=16.0,
+                value=1,
+            ),
+            event_time=1,
+        )
+        right.publish(
+            GamepadEvent(
+                source_id="gamepad.2",
+                event_time=2,
+                frame_index=2,
+                delta_ms=16.0,
+                value=2,
+            ),
+            event_time=2,
+        )
+
+        self.assertEqual(observed, [10, 11, 13])
+
+    def test_pubsub_observable_with_latest_from_accepts_value_handles(self) -> None:
+        frames = PubSub(topic="heart.value.frames", schema=FrameTick)
+        current_scale = Value.initialized(2)
+        observed: list[int] = []
+
+        frames.with_latest_from(current_scale).subscribe(
+            lambda latest: observed.append(latest[0].frame_index * latest[1])
+        )
+
+        frames.publish(FrameTick(event_time=1, frame_index=3, delta_ms=16.0))
+        current_scale.set(4)
+        frames.publish(FrameTick(event_time=2, frame_index=5, delta_ms=16.0))
+
+        self.assertEqual(observed, [6, 20])
+
+    def test_pubsub_observable_merge_accepts_future_only_value_handles(self) -> None:
+        frames = PubSub(topic="heart.new-values.frames", schema=FrameTick)
+        injected = NewValues[int]()
+        observed: list[int] = []
+
+        PubSubObservable.merge(
+            frames.map(lambda row: row.frame_index),
+            injected,
+        ).subscribe(observed.append)
+
+        frames.publish(FrameTick(event_time=1, frame_index=3, delta_ms=16.0))
+        injected.publish(5)
+
+        self.assertEqual(observed, [3, 5])
+
+    def test_pubsub_marbles_drive_real_pubsub_runtime_with_virtual_frames(self) -> None:
+        with pubsub_marbles() as marbles:
+            frames = marbles.topic("frames", schema=FrameTick)
+
+            records = marbles.run(
+                frames,
+                "-a-b-|",
+                {
+                    "a": FrameTick(event_time=1, frame_index=1, delta_ms=16.0),
+                    "b": FrameTick(event_time=3, frame_index=2, delta_ms=17.0),
+                },
+                observe=frames.map(lambda row: row.frame_index),
+            )
+
+            self.assertEqual(
+                records,
+                (
+                    PubSubMarbleRecord(frame=1, value=1),
+                    PubSubMarbleRecord(frame=3, value=2),
+                ),
+            )
+            self.assertEqual([row.frame_index for row in frames.take(2)], [1, 2])
+
+    def test_pubsub_marbles_dispose_subscriptions_on_context_exit(self) -> None:
+        with pubsub_marbles() as marbles:
+            frames = marbles.topic("frames", schema=FrameTick)
+            records = marbles.observe(frames.map(lambda row: row.frame_index))
+            marbles.publish(
+                frames,
+                "a",
+                {"a": FrameTick(event_time=0, frame_index=1, delta_ms=16.0)},
+            )
+
+        frames.publish(FrameTick(event_time=1, frame_index=2, delta_ms=16.0))
+
+        self.assertEqual(records, [PubSubMarbleRecord(frame=0, value=1)])
+        with self.assertRaisesRegex(RuntimeError, "closed"):
+            marbles.topic("closed")
+
     def test_pubsub_subscribe_accepts_observer_and_on_next_callback(self) -> None:
         stream = PubSub(topic="heart.compat.subscribe", schema=Temperature)
         observed: list[float] = []
@@ -669,11 +923,21 @@ class PubSubStreamTests(unittest.TestCase):
             lambda pair: observed.append((pair[0].frame_index, pair[1].x))
         )
 
-        frames.publish(FrameTick(event_time=10, frame_index=1, delta_ms=16.0), event_time=10)
-        acceleration.publish(Acceleration(event_time=15, x=1.0, y=2.0, z=3.0), event_time=15)
-        frames.publish(FrameTick(event_time=20, frame_index=2, delta_ms=17.0), event_time=20)
-        acceleration.publish(Acceleration(event_time=25, x=4.0, y=5.0, z=6.0), event_time=25)
-        frames.publish(FrameTick(event_time=30, frame_index=3, delta_ms=18.0), event_time=30)
+        frames.publish(
+            FrameTick(event_time=10, frame_index=1, delta_ms=16.0), event_time=10
+        )
+        acceleration.publish(
+            Acceleration(event_time=15, x=1.0, y=2.0, z=3.0), event_time=15
+        )
+        frames.publish(
+            FrameTick(event_time=20, frame_index=2, delta_ms=17.0), event_time=20
+        )
+        acceleration.publish(
+            Acceleration(event_time=25, x=4.0, y=5.0, z=6.0), event_time=25
+        )
+        frames.publish(
+            FrameTick(event_time=30, frame_index=3, delta_ms=18.0), event_time=30
+        )
 
         self.assertEqual(observed, [(2, 1.0), (3, 4.0)])
 
@@ -691,10 +955,16 @@ class PubSubStreamTests(unittest.TestCase):
             )
         )
 
-        acceleration.publish(Acceleration(event_time=10, x=1.0, y=2.0, z=3.0), event_time=10)
-        frames.publish(FrameTick(event_time=20, frame_index=1, delta_ms=16.0), event_time=20)
+        acceleration.publish(
+            Acceleration(event_time=10, x=1.0, y=2.0, z=3.0), event_time=10
+        )
+        frames.publish(
+            FrameTick(event_time=20, frame_index=1, delta_ms=16.0), event_time=20
+        )
         temperature.publish(Temperature(degrees=72.4, unit="F"), event_time=30)
-        frames.publish(FrameTick(event_time=40, frame_index=2, delta_ms=17.0), event_time=40)
+        frames.publish(
+            FrameTick(event_time=40, frame_index=2, delta_ms=17.0), event_time=40
+        )
 
         self.assertEqual(observed, [(2, 1.0, 72.4)])
 
@@ -716,7 +986,9 @@ class PubSubStreamTests(unittest.TestCase):
 
         self.assertEqual(observed, [70.0, 80.0])
 
-    def test_pubsub_live_stream_switch_latest_uses_only_latest_inner_stream(self) -> None:
+    def test_pubsub_live_stream_switch_latest_uses_only_latest_inner_stream(
+        self,
+    ) -> None:
         selections = PubSub(topic="heart.switch", schema=StreamSelection)
         left = PubSub(topic="heart.switch.left", schema=Temperature)
         right = PubSub(topic="heart.switch.right", schema=Temperature)
@@ -821,15 +1093,25 @@ class PubSubStreamTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "field must be a SQL identifier"):
             stream.project("not valid")
 
-    def test_pubsub_latest_join_matches_each_row_to_latest_prior_topic_row(self) -> None:
+    def test_pubsub_latest_join_matches_each_row_to_latest_prior_topic_row(
+        self,
+    ) -> None:
         fabric = PubSubFabric(namespace="test-latest-join")
         frames = fabric.topic("frame_ticks", schema=FrameTick)
         acceleration = fabric.topic("acceleration", schema=Acceleration)
 
-        acceleration.publish(Acceleration(event_time=5, x=1.0, y=2.0, z=3.0), event_time=5)
-        frames.publish(FrameTick(event_time=10, frame_index=1, delta_ms=16.0), event_time=10)
-        acceleration.publish(Acceleration(event_time=15, x=4.0, y=5.0, z=6.0), event_time=15)
-        frames.publish(FrameTick(event_time=20, frame_index=2, delta_ms=17.0), event_time=20)
+        acceleration.publish(
+            Acceleration(event_time=5, x=1.0, y=2.0, z=3.0), event_time=5
+        )
+        frames.publish(
+            FrameTick(event_time=10, frame_index=1, delta_ms=16.0), event_time=10
+        )
+        acceleration.publish(
+            Acceleration(event_time=15, x=4.0, y=5.0, z=6.0), event_time=15
+        )
+        frames.publish(
+            FrameTick(event_time=20, frame_index=2, delta_ms=17.0), event_time=20
+        )
 
         rows = frames.latest_join(acceleration, "x", "y", "z", prefix="latest_accel")
 
@@ -851,9 +1133,15 @@ class PubSubStreamTests(unittest.TestCase):
 
     def test_pubsub_recursive_sum_accumulates_numeric_field_by_offset(self) -> None:
         frames = PubSub(topic="frame_ticks", schema=FrameTick)
-        frames.publish(FrameTick(event_time=10, frame_index=1, delta_ms=16.0), event_time=10)
-        frames.publish(FrameTick(event_time=20, frame_index=2, delta_ms=17.0), event_time=20)
-        frames.publish(FrameTick(event_time=30, frame_index=3, delta_ms=18.0), event_time=30)
+        frames.publish(
+            FrameTick(event_time=10, frame_index=1, delta_ms=16.0), event_time=10
+        )
+        frames.publish(
+            FrameTick(event_time=20, frame_index=2, delta_ms=17.0), event_time=20
+        )
+        frames.publish(
+            FrameTick(event_time=30, frame_index=3, delta_ms=18.0), event_time=30
+        )
 
         self.assertEqual(
             frames.recursive_sum("delta_ms"),
@@ -866,8 +1154,12 @@ class PubSubStreamTests(unittest.TestCase):
 
     def test_pubsub_query_composes_recursive_ctes_with_scoped_stream(self) -> None:
         frames = PubSub(topic="frame_ticks", schema=FrameTick)
-        frames.publish(FrameTick(event_time=10, frame_index=1, delta_ms=16.0), event_time=10)
-        frames.publish(FrameTick(event_time=20, frame_index=2, delta_ms=17.0), event_time=20)
+        frames.publish(
+            FrameTick(event_time=10, frame_index=1, delta_ms=16.0), event_time=10
+        )
+        frames.publish(
+            FrameTick(event_time=20, frame_index=2, delta_ms=17.0), event_time=20
+        )
 
         rows = frames.query(
             """
@@ -969,6 +1261,13 @@ class ManyFoldLockTests(unittest.TestCase):
         self.assertEqual(left.name, "pubsub:heart:boot")
         self.assertEqual(right.name, "pubsub:heart:boot")
         self.assertEqual(left.path, right.path)
+
+    def test_lock_alias_matches_cross_environment_name(self) -> None:
+        lock = Lock.for_resource("test:alias")
+
+        with lock.take(owner="alias") as lease:
+            self.assertIsInstance(lease, LockLease)
+            self.assertEqual(lease.owner, "alias")
 
     def test_lock_take_returns_releasable_lease(self) -> None:
         lock = ManyFoldLock.for_resource("test:lease")
@@ -1085,7 +1384,10 @@ class WorkerRuntimeTests(unittest.TestCase):
         self.assertIsInstance(worker, WorkerHandle)
         self.assertEqual(worker.worker.name, "heart-runtime")
         self.assertEqual(worker.worker.roles, ("pubsub", "heart"))
-        self.assertEqual(worker.worker.address, f"thread://{worker.worker.process_id}/{worker.worker.thread_id}")
+        self.assertEqual(
+            worker.worker.address,
+            f"thread://{worker.worker.process_id}/{worker.worker.thread_id}",
+        )
         rows = pubsub.query(
             """
             SELECT worker, event, capacity, active_jobs, available_jobs, roles
@@ -1137,7 +1439,9 @@ class WorkerRuntimeTests(unittest.TestCase):
         right.join()
         self.assertEqual({name for name, _ in workers}, {"left", "right"})
         self.assertEqual(len({thread_id for _, thread_id in workers}), 2)
-        self.assertEqual(pubsub.query_one("SELECT COUNT(*) AS count FROM stream").count, 2)
+        self.assertEqual(
+            pubsub.query_one("SELECT COUNT(*) AS count FROM stream").count, 2
+        )
 
     def test_worker_handle_detaches_once(self) -> None:
         pubsub = PubSub(topic="manyfold.workers.detach", schema=WorkerEvent)

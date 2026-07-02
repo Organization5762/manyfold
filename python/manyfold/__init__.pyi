@@ -31,7 +31,6 @@ from ._manyfold_rust import (
     bridge_version as bridge_version,
     parse_sql_statement as parse_sql_statement,
 )
-from ._rx.subject import BehaviorSubject as BehaviorSubject
 from .components import (
     Consensus as Consensus,
     ConsensusRoutes as ConsensusRoutes,
@@ -215,7 +214,6 @@ from .stats import Average as Average
 __all__ = (
     "Average",
     "BackoffPolicy",
-    "BehaviorSubject",
     "BoundedRingBuffer",
     "CallbackNode",
     "CallbackObservable",

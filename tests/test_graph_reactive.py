@@ -1437,7 +1437,7 @@ else:
             stream_name="numbers",
         )
         seen: list[int] = []
-        source = graph_module.Subject()
+        source = graph_module.EventStream()
 
         node.observable(source).subscribe(seen.append)
         source.on_next(1)
@@ -1460,7 +1460,7 @@ else:
             stream_name="numbers",
         )
         seen: list[int] = []
-        source = graph_module.Subject()
+        source = graph_module.EventStream()
 
         try:
             node.observable(source).subscribe(seen.append)
@@ -1662,7 +1662,9 @@ else:
         graph.publish(second, b"second")
 
         def _unexpected_debug_emit(*_args: object) -> object:
-            raise AssertionError("coalesced route-local writes should skip debug emission")
+            raise AssertionError(
+                "coalesced route-local writes should skip debug emission"
+            )
 
         graph._emit_debug_event_for_key = _unexpected_debug_emit
         for value in range(20):
@@ -1861,7 +1863,9 @@ else:
         graph.publish_nowait(route, {"value": 0})
 
         def _unexpected_subscriber_probe(_route_display: str) -> bool:
-            raise AssertionError("cached process-local nowait should skip subscriber probes")
+            raise AssertionError(
+                "cached process-local nowait should skip subscriber probes"
+            )
 
         graph._route_has_python_subscribers = _unexpected_subscriber_probe
         for value in range(1, 10):
@@ -1875,7 +1879,10 @@ else:
         self.assertEqual(len(graph._process_local_payload_ids_by_route[key]), 2)
         self.assertEqual(len(graph._payload_ids_by_route[key]), 2)
         self.assertEqual(
-            tuple(route.schema.decode(graph.open_payload(envelope)) for envelope in graph.replay(route)),
+            tuple(
+                route.schema.decode(graph.open_payload(envelope))
+                for envelope in graph.replay(route)
+            ),
             ({"value": 8}, {"value": 9}),
         )
 
@@ -1954,7 +1961,7 @@ else:
 
     def test_instrument_stream_logs_periodic_delivery_stats(self) -> None:
         graph_module = load_graph_module()
-        source = graph_module.Subject()
+        source = graph_module.EventStream()
         seen: list[int] = []
 
         with self.assertLogs("manyfold.graph", level="DEBUG") as logs:
@@ -2140,9 +2147,9 @@ else:
 
         cases = (
             ({"name": " "}, "step name must be a non-empty string"),
-            ({"read": object()}, "read must be an Observable"),
+            ({"read": object()}, "read must be a subscribable stream"),
             ({"output": object()}, "output must be a TypedRoute"),
-            ({"write": object()}, "write must be an Observable"),
+            ({"write": object()}, "write must be a subscribable stream"),
             ({"_connect": object()}, "connect must be callable"),
             ({"_connection": object()}, "connection must provide dispose"),
         )
@@ -2161,7 +2168,9 @@ else:
                 transform=object(),
             )
 
-    def test_read_then_write_next_epoch_step_revalidates_connection_result(self) -> None:
+    def test_read_then_write_next_epoch_step_revalidates_connection_result(
+        self,
+    ) -> None:
         graph_module = load_graph_module()
         read = graph_module.rx.from_iterable([b"one"])
         write_request = graph_module.route(
@@ -5636,9 +5645,7 @@ else:
 
         subscription = graph.materialize(source, state_route=state_route)
         setattr(graph, native_drop_name, _count_native_drop)
-        graph._native_emit_single_if_unrouted_with_lineage_no_parents_and_materializers = (
-            _unexpected_envelope_emit
-        )
+        graph._native_emit_single_if_unrouted_with_lineage_no_parents_and_materializers = _unexpected_envelope_emit
         try:
             graph.publish_nowait(source, b"frame-1")
         finally:
@@ -5768,20 +5775,13 @@ else:
 
         try:
             graph.publish_nowait(source, b"warmup")
-            if (
-                graph._native_compile_no_lineage_materializer_drop_profile
-                is not None
-            ):
+            if graph._native_compile_no_lineage_materializer_drop_profile is not None:
                 self.assertEqual(
                     graph._last_nowait_drop_native_call_kind,
                     "no_lineage_profile",
                 )
-                self.assertIsNotNone(
-                    graph._last_nowait_drop_no_lineage_profile
-                )
-                self.assertIsNotNone(
-                    graph._last_nowait_drop_no_lineage_profile_emit
-                )
+                self.assertIsNotNone(graph._last_nowait_drop_no_lineage_profile)
+                self.assertIsNotNone(graph._last_nowait_drop_no_lineage_profile_emit)
             else:
                 self.assertIn(
                     graph._last_nowait_drop_native_call_kind,
@@ -5790,10 +5790,7 @@ else:
             cached_native = graph._last_nowait_drop_explicit_lineage_native
             self.assertIsNotNone(cached_native)
             graph._last_nowait_drop_mode = "unexpected"
-            if (
-                graph._last_nowait_drop_native_call_kind
-                == "no_lineage_profile"
-            ):
+            if graph._last_nowait_drop_native_call_kind == "no_lineage_profile":
                 graph._last_nowait_drop_explicit_lineage_native = None
             graph.publish_nowait(source, b"cached")
         finally:
@@ -6279,7 +6276,9 @@ else:
 
         self.assertEqual(len(writers), graph_module.DEFAULT_ROUTE_WRITER_LIMIT)
         self.assertNotIn("producer-0", writers)
-        self.assertIn(f"producer-{graph_module.DEFAULT_ROUTE_WRITER_LIMIT + 4}", writers)
+        self.assertIn(
+            f"producer-{graph_module.DEFAULT_ROUTE_WRITER_LIMIT + 4}", writers
+        )
         self.assertEqual(audit.recent_producers, writers)
 
     def test_repeated_writer_metadata_is_coalesced(self) -> None:
@@ -6342,7 +6341,9 @@ else:
         graph = graph_module.Graph()
 
         graph.publish(route, b"sparse-python")
-        subscription = graph.observe(route, replay_latest=False).subscribe(lambda _item: None)
+        subscription = graph.observe(route, replay_latest=False).subscribe(
+            lambda _item: None
+        )
         graph.publish(
             route,
             b"observed-device",
@@ -7171,7 +7172,9 @@ else:
         graph = graph_module.Graph()
 
         def _unexpected_payload_sweep(*_args: object) -> None:
-            raise AssertionError("external_store publish should not sweep payload indexes")
+            raise AssertionError(
+                "external_store publish should not sweep payload indexes"
+            )
 
         graph._enforce_payload_retention_for_key = _unexpected_payload_sweep
 
@@ -7183,7 +7186,9 @@ else:
         self.assertNotIn(key, graph._payload_ids_by_route)
         self.assertEqual(graph._payload_route_by_id, {})
         self.assertEqual(graph._materialized_payloads, {})
-        self.assertEqual(tuple(envelope.seq_source for envelope in replay), tuple(range(13, 21)))
+        self.assertEqual(
+            tuple(envelope.seq_source for envelope in replay), tuple(range(13, 21))
+        )
         self.assertEqual(graph._graph.retained_payload_count(stream.route_ref), 8)
 
     def test_publish_applies_history_limit_without_expiry_helper(self) -> None:
@@ -7256,7 +7261,10 @@ else:
         self.assertNotIn(key, graph._history)
         self.assertNotIn(key, graph._payload_ids_by_route)
         self.assertEqual(graph._payload_route_by_id, {})
-        self.assertEqual(tuple(envelope.seq_source for envelope in graph.replay(stream)), tuple(range(13, 21)))
+        self.assertEqual(
+            tuple(envelope.seq_source for envelope in graph.replay(stream)),
+            tuple(range(13, 21)),
+        )
         self.assertEqual(graph._graph.retained_payload_count(stream.route_ref), 8)
 
     def test_sparse_byte_publish_caches_typed_route_runtime_flags(self) -> None:
@@ -7457,7 +7465,10 @@ else:
 
         key = stream.display()
         self.assertNotIn(key, graph._subjects)
-        self.assertEqual(tuple(envelope.seq_source for envelope in graph.replay(stream)), tuple(range(13, 21)))
+        self.assertEqual(
+            tuple(envelope.seq_source for envelope in graph.replay(stream)),
+            tuple(range(13, 21)),
+        )
         self.assertEqual(graph._graph.retained_payload_count(stream.route_ref), 8)
 
     def test_plain_byte_payload_expiry_skips_full_release_path(self) -> None:
@@ -7521,7 +7532,9 @@ else:
         )
 
         def _unexpected_any_release(_payload: bytes) -> None:
-            raise AssertionError("byte payload expiry should not check Schema.any release")
+            raise AssertionError(
+                "byte payload expiry should not check Schema.any release"
+            )
 
         original_any_release = graph_module._release_any_schema_value
         graph_module._release_any_schema_value = _unexpected_any_release
@@ -8277,7 +8290,9 @@ else:
         self.assertEqual(manifest.diagram_nodes[0].name, "planner")
         self.assertEqual(manifest.diagram_nodes[0].thread_placement.kind, "main")
         self.assertEqual(manifest.query_services[0].owner, "query")
-        self.assertIn(source.display(), [route.route.display() for route in manifest.routes])
+        self.assertIn(
+            source.display(), [route.route.display() for route in manifest.routes]
+        )
 
     def test_manifest_value_orders_string_colliding_mapping_keys(self) -> None:
         graph_module = load_graph_module()
@@ -8361,9 +8376,7 @@ else:
                 payload={"id": "row-1"},
                 correlation_id="call-1",
             )
-            audit = next(
-                graph.retention_snapshot(worker_transport.routes.audit_log)
-            )
+            audit = next(graph.retention_snapshot(worker_transport.routes.audit_log))
             validation_issues = tuple(graph.validate_graph())
         finally:
             caller_transport.dispose()
@@ -8375,7 +8388,9 @@ else:
         self.assertEqual(response.payload, {"row": "row-1"})
         self.assertEqual(audit.payload_count, 1)
         self.assertFalse(
-            any("lacks a shadow binding" in issue.message for issue in validation_issues)
+            any(
+                "lacks a shadow binding" in issue.message for issue in validation_issues
+            )
         )
 
     def test_process_rpc_transport_nowait_and_remote_target_filter(self) -> None:
@@ -8536,9 +8551,7 @@ else:
         with self.assertRaisesRegex(ValueError, "query response command"):
             graph_module.QueryResponse(command="", correlation_id="abc", items=())
         with self.assertRaisesRegex(ValueError, "query response correlation_id"):
-            graph_module.QueryResponse(
-                command="manifest", correlation_id="", items=()
-            )
+            graph_module.QueryResponse(command="manifest", correlation_id="", items=())
         with self.assertRaisesRegex(ValueError, "query response items"):
             graph_module.QueryResponse(
                 command="manifest",
@@ -10119,7 +10132,9 @@ else:
                 before = tuple(graph.scheduler_snapshot(binding.request))
                 with self.assertRaisesRegex(ValueError, "scheduler epoch"):
                     graph.run_scheduler(epoch=epoch)  # type: ignore[arg-type]
-                self.assertEqual(tuple(graph.scheduler_snapshot(binding.request)), before)
+                self.assertEqual(
+                    tuple(graph.scheduler_snapshot(binding.request)), before
+                )
                 self.assertIsNone(graph.latest(binding.request))
 
         self.assertEqual(len(graph.run_scheduler(epoch=2)), 1)

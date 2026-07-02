@@ -1,10 +1,5 @@
-"""Subject implementations re-exported through Manyfold."""
+"""Subject implementation re-exported through Manyfold."""
 
-from reactivex.subject import (
-    AsyncSubject as AsyncSubject,
-    BehaviorSubject as BehaviorSubject,
-    ReplaySubject as ReplaySubject,
-    Subject as Subject,
-)
+from reactivex.subject import Subject as Subject
 
-__all__ = ("AsyncSubject", "BehaviorSubject", "ReplaySubject", "Subject")
+__all__ = ("Subject",)

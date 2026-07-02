@@ -312,6 +312,7 @@ version = "0.1.40"
 dependencies = [
  "coz",
  "fs2",
+ "js-sys",
  "libc",
  "pretty_assertions",
  "pyo3",
@@ -320,6 +321,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "sqlparser",
+ "wasm-bindgen",
 ]
 
 [[package]]

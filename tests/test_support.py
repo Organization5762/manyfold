@@ -6,6 +6,7 @@ import os
 import re
 import struct
 import sys
+import threading
 import time
 import types
 from collections.abc import Iterable
@@ -33,12 +34,7 @@ MODULES_TO_RESET = (
     "manyfold._rx.operators",
     "manyfold._rx.scheduler",
     "manyfold._rx.subject",
-    "manyfold._rx.subject.asyncsubject",
-    "manyfold._rx.subject.behaviorsubject",
-    "manyfold._rx.subject.replaysubject",
     "manyfold._rx.subject.subject",
-    "manyfold._rx.testing",
-    "manyfold._rx.testing.marbles",
     "manyfold._rx.typing",
     "manyfold.rx",
     "manyfold.rx.abc",
@@ -46,12 +42,7 @@ MODULES_TO_RESET = (
     "manyfold.rx.operators",
     "manyfold.rx.scheduler",
     "manyfold.rx.subject",
-    "manyfold.rx.subject.asyncsubject",
-    "manyfold.rx.subject.behaviorsubject",
-    "manyfold.rx.subject.replaysubject",
     "manyfold.rx.subject.subject",
-    "manyfold.rx.testing",
-    "manyfold.rx.testing.marbles",
     "manyfold.rx.typing",
     "manyfold._manyfold_rust",
     "reactivex",
@@ -59,12 +50,7 @@ MODULES_TO_RESET = (
     "reactivex.disposable",
     "reactivex.scheduler",
     "reactivex.subject",
-    "reactivex.subject.asyncsubject",
-    "reactivex.subject.behaviorsubject",
-    "reactivex.subject.replaysubject",
     "reactivex.subject.subject",
-    "reactivex.testing",
-    "reactivex.testing.marbles",
     "reactivex.typing",
     "reactivex.operators",
 )
@@ -163,40 +149,6 @@ def install_reactivex_stub() -> None:
         def on_next(self, value) -> None:
             for observer in list(self._observers):
                 observer.on_next(value)
-
-    class BehaviorSubject(Subject):
-        def __init__(self, value):
-            super().__init__()
-            self._value = value
-
-        def subscribe(
-            self,
-            observer=None,
-            on_error=None,
-            on_completed=None,
-            scheduler=None,
-        ):
-            subscription = super().subscribe(
-                observer,
-                on_error,
-                on_completed,
-                scheduler=scheduler,
-            )
-            if callable(observer) and not hasattr(observer, "on_next"):
-                observer(self._value)
-            else:
-                observer.on_next(self._value)
-            return subscription
-
-        def on_next(self, value) -> None:
-            self._value = value
-            super().on_next(value)
-
-    class ReplaySubject(Subject):
-        pass
-
-    class AsyncSubject(Subject):
-        pass
 
     class TimeoutScheduler:
         pass
@@ -330,36 +282,8 @@ def install_reactivex_stub() -> None:
     scheduler_module.TimeoutScheduler = TimeoutScheduler
     subject_module = types.ModuleType("reactivex.subject")
     subject_module.Subject = Subject
-    subject_module.BehaviorSubject = BehaviorSubject
-    subject_module.ReplaySubject = ReplaySubject
-    subject_module.AsyncSubject = AsyncSubject
     subject_subject_module = types.ModuleType("reactivex.subject.subject")
     subject_subject_module.Subject = Subject
-    behavior_subject_module = types.ModuleType("reactivex.subject.behaviorsubject")
-    behavior_subject_module.BehaviorSubject = BehaviorSubject
-    replay_subject_module = types.ModuleType("reactivex.subject.replaysubject")
-    replay_subject_module.ReplaySubject = ReplaySubject
-    async_subject_module = types.ModuleType("reactivex.subject.asyncsubject")
-    async_subject_module.AsyncSubject = AsyncSubject
-    testing_module = types.ModuleType("reactivex.testing")
-    marbles_module = types.ModuleType("reactivex.testing.marbles")
-
-    def marbles_testing():
-        class MarbleContext:
-            def __enter__(self):
-                return (
-                    lambda source: source,
-                    lambda source: source,
-                    lambda source: source,
-                    lambda expected: expected,
-                )
-
-            def __exit__(self, exc_type, exc, tb):
-                return False
-
-        return MarbleContext()
-
-    marbles_module.marbles_testing = marbles_testing
     typing_module = types.ModuleType("reactivex.typing")
     typing_module.StartableTarget = object
     ops_module = types.ModuleType("reactivex.operators")
@@ -372,7 +296,6 @@ def install_reactivex_stub() -> None:
     rx_module.operators = ops_module
     rx_module.scheduler = scheduler_module
     rx_module.subject = subject_module
-    rx_module.testing = testing_module
     rx_module.typing = typing_module
     sys.modules["reactivex"] = rx_module
     sys.modules["reactivex.abc"] = abc_module
@@ -380,11 +303,6 @@ def install_reactivex_stub() -> None:
     sys.modules["reactivex.scheduler"] = scheduler_module
     sys.modules["reactivex.subject"] = subject_module
     sys.modules["reactivex.subject.subject"] = subject_subject_module
-    sys.modules["reactivex.subject.behaviorsubject"] = behavior_subject_module
-    sys.modules["reactivex.subject.replaysubject"] = replay_subject_module
-    sys.modules["reactivex.subject.asyncsubject"] = async_subject_module
-    sys.modules["reactivex.testing"] = testing_module
-    sys.modules["reactivex.testing.marbles"] = marbles_module
     sys.modules["reactivex.typing"] = typing_module
     sys.modules["reactivex.operators"] = ops_module
 
@@ -519,6 +437,62 @@ def install_manyfold_rust_stub() -> None:
     @dataclass(frozen=True)
     class ClockDomainRef:
         clock_domain_id: str
+
+    class ManyFoldLockLease:
+        def __init__(
+            self,
+            lock: "ManyFoldLock",
+            *,
+            owner: str | None = None,
+        ) -> None:
+            self._lock = lock
+            self.lock_name = lock.name
+            self.owner = owner
+            self.is_released = False
+
+        def __enter__(self) -> "ManyFoldLockLease":
+            return self
+
+        def __exit__(self, *_exc: object) -> None:
+            self.release()
+
+        def release(self) -> None:
+            if self.is_released:
+                return
+            self.is_released = True
+            self._lock._release()
+
+    class ManyFoldLock:
+        _registry: dict[str, "ManyFoldLock"] = {}
+        _registry_lock = threading.Lock()
+
+        def __init__(self, name: str) -> None:
+            self.name = name.strip()
+            self.path = f"stub://manyfold-lock/{self.name}"
+            self._lock = threading.Lock()
+
+        @classmethod
+        def for_resource(cls, name: str) -> "ManyFoldLock":
+            normalized = name.strip()
+            with cls._registry_lock:
+                lock = cls._registry.get(normalized)
+                if lock is None:
+                    lock = cls(normalized)
+                    cls._registry[normalized] = lock
+                return lock
+
+        def take(
+            self,
+            *,
+            owner: str | None = None,
+            blocking: bool = True,
+        ) -> ManyFoldLockLease:
+            if not self._lock.acquire(blocking=blocking):
+                raise RuntimeError(f"lock {self.name!r} is already held")
+            return ManyFoldLockLease(self, owner=owner)
+
+        def _release(self) -> None:
+            self._lock.release()
 
     @dataclass(frozen=True)
     class TaintMark:
@@ -849,7 +823,9 @@ def install_manyfold_rust_stub() -> None:
                 return None
             if any(source == route.display() for source, _ in self._edges):
                 return None
-            if any(mailbox.ingress._route == route for mailbox in self._mailboxes.values()):
+            if any(
+                mailbox.ingress._route == route for mailbox in self._mailboxes.values()
+            ):
                 return None
             return self.writable_port(route).write(
                 payload,
@@ -992,14 +968,16 @@ def install_manyfold_rust_stub() -> None:
             causality_id=None,
             correlation_id=None,
         ):
-            emitted = self.emit_single_if_unrouted_with_lineage_no_parents_and_materializers(
-                route,
-                payload,
-                producer=producer,
-                control_epoch=control_epoch,
-                trace_id=trace_id,
-                causality_id=causality_id,
-                correlation_id=correlation_id,
+            emitted = (
+                self.emit_single_if_unrouted_with_lineage_no_parents_and_materializers(
+                    route,
+                    payload,
+                    producer=producer,
+                    control_epoch=control_epoch,
+                    trace_id=trace_id,
+                    causality_id=causality_id,
+                    correlation_id=correlation_id,
+                )
             )
             return emitted is not None
 
@@ -1453,7 +1431,9 @@ def install_manyfold_rust_stub() -> None:
         def subscribe(self, topic, *, name=None, replay_from_beginning=False):
             subscription_name = name or topic
             self._subscriptions[subscription_name] = topic
-            self._positions[subscription_name] = 0 if replay_from_beginning else len(self._messages)
+            self._positions[subscription_name] = (
+                0 if replay_from_beginning else len(self._messages)
+            )
             return PubSubSubscription(subscription_name, topic)
 
         def publish(self, topic, payload):
@@ -1526,7 +1506,9 @@ def install_manyfold_rust_stub() -> None:
             return [self.ingest(message) for message in messages]
 
         def query(self, sql, parameters=None):
-            latest = self.latest((parameters or {}).get("topic", "sensor.environment.temperature"))
+            latest = self.latest(
+                (parameters or {}).get("topic", "sensor.environment.temperature")
+            )
             if latest is None:
                 return []
             temperature_f = None
@@ -1559,7 +1541,9 @@ def install_manyfold_rust_stub() -> None:
     class PubSubRuntime:
         def __init__(self, *, name="pubsub", retained_messages=1024):
             self.pubsub = InMemoryPubSub(retained_messages=retained_messages)
-            self.subscription = self.pubsub.subscribe("*", name=f"{name}.stream_processor")
+            self.subscription = self.pubsub.subscribe(
+                "*", name=f"{name}.stream_processor"
+            )
             self.processor = DataStreamProcessor()
             self.metadata = {}
             self.records = []
@@ -1609,7 +1593,9 @@ def install_manyfold_rust_stub() -> None:
                     unit = None
                     if record.payload:
                         try:
-                            temperature_f, unit = _decode_temperature_flatbuffer(record.payload)
+                            temperature_f, unit = _decode_temperature_flatbuffer(
+                                record.payload
+                            )
                         except (IndexError, UnicodeDecodeError, ValueError):
                             pass
                     return [
@@ -1652,6 +1638,8 @@ def install_manyfold_rust_stub() -> None:
     rust_module.Layer = Layer
     rust_module.Mailbox = Mailbox
     rust_module.MailboxDescriptor = MailboxDescriptor
+    rust_module.ManyFoldLock = ManyFoldLock
+    rust_module.ManyFoldLockLease = ManyFoldLockLease
     rust_module.NamespaceRef = NamespaceRef
     rust_module.NoLineageMaterializerDropProfile = NoLineageMaterializerDropProfile
     rust_module.MonotonicLogicalClock = MonotonicLogicalClock
@@ -1716,7 +1704,6 @@ def load_manyfold_package():
         "all_legos": lego_catalog.all_legos,
         "Average": stats.Average,
         "BackoffPolicy": sensor_io.BackoffPolicy,
-        "BehaviorSubject": sys.modules["manyfold._rx.subject"].BehaviorSubject,
         "BoundedRingBuffer": sensor_io.BoundedRingBuffer,
         "ChangeFilter": sensor_io.ChangeFilter,
         "Clock": sensor_io.Clock,
@@ -1945,11 +1932,14 @@ def _decode_temperature_flatbuffer(payload: bytes) -> tuple[float, str]:
     root_offset = struct.unpack_from("<I", payload, 0)[0]
     temperature = struct.unpack_from("<f", payload, root_offset + 4)[0]
     string_offset_position = root_offset + 8
-    string_position = string_offset_position + struct.unpack_from(
-        "<I",
-        payload,
-        string_offset_position,
-    )[0]
+    string_position = (
+        string_offset_position
+        + struct.unpack_from(
+            "<I",
+            payload,
+            string_offset_position,
+        )[0]
+    )
     unit_length = struct.unpack_from("<I", payload, string_position)[0]
     unit_start = string_position + 4
     unit = payload[unit_start : unit_start + unit_length].decode("utf-8")

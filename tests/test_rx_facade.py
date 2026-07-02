@@ -24,47 +24,33 @@ class RxFacadeTests(unittest.TestCase):
         self.assertTrue(callable(getattr(subscription, "dispose", None)))
         self.assertEqual(values, [2, 3, 4])
 
-    def test_private_facade_exposes_subjects_and_schedulers(self) -> None:
+    def test_private_facade_exposes_subject_and_schedulers(self) -> None:
         load_manyfold_package()
         scheduler_module = importlib.import_module("manyfold._rx.scheduler")
         subject_module = importlib.import_module("manyfold._rx.subject")
-        behavior_module = importlib.import_module(
-            "manyfold._rx.subject.behaviorsubject"
-        )
-        behavior_subject = subject_module.BehaviorSubject
+        subject_class = subject_module.Subject
 
-        subject = behavior_subject(1)
+        subject = subject_class()
         values: list[int] = []
 
         subject.subscribe(values.append)
         subject.on_next(2)
 
-        self.assertEqual(values, [1, 2])
-        self.assertIs(behavior_module.BehaviorSubject, behavior_subject)
+        self.assertEqual(values, [2])
         self.assertIsInstance(
             scheduler_module.TimeoutScheduler(),
             scheduler_module.TimeoutScheduler,
         )
 
-    def test_private_facade_exposes_marble_testing(self) -> None:
+    def test_architecture_facade_exposes_pubsub_marble_testing(self) -> None:
         load_manyfold_package()
-        marble_module = importlib.import_module("manyfold._rx.testing.marbles")
-        with marble_module.marbles_testing() as (start, cold, _hot, exp):
-            source = cold("--1-2-|")
-            actual = start(source)
+        architecture = importlib.import_module("manyfold.architecture")
 
-        self.assertEqual(actual, exp("--1-2-|"))
-
-    def test_private_marble_facade_exports_only_testing_helpers(self) -> None:
-        load_manyfold_package()
-        marble_module = importlib.import_module("manyfold._rx.testing.marbles")
-
+        self.assertTrue(callable(architecture.pubsub_marbles))
         self.assertEqual(
-            marble_module.__all__,
-            ("MarblesContext", "marbles_testing", "messages_to_records"),
+            architecture.PubSubMarbleRecord(frame=1, value=b"value").value,
+            b"value",
         )
-        self.assertNotIn("warn", marble_module.__all__)
-        self.assertNotIn("typing", marble_module.__all__)
 
     def test_private_operator_facade_deduplicates_upstream_exports(self) -> None:
         load_manyfold_package()
@@ -86,46 +72,10 @@ class RxFacadeTests(unittest.TestCase):
 
         self.assertNotIn("_operators", operators_module.__dict__)
 
-    def test_private_marble_facade_does_not_leak_runtime_imports(self) -> None:
-        load_manyfold_package()
-        marble_module = importlib.import_module("manyfold._rx.testing.marbles")
-
-        self.assertNotIn("datetime", marble_module.__dict__)
-        self.assertNotIn("typing", marble_module.__dict__)
-        self.assertNotIn("warn", marble_module.__dict__)
-
-    def test_private_testing_facade_exports_only_rx_test_primitives(self) -> None:
-        load_manyfold_package()
-        testing_module = importlib.import_module("manyfold._rx.testing")
-
-        self.assertEqual(
-            testing_module.__all__,
-            (
-                "MockDisposable",
-                "OnErrorPredicate",
-                "OnNextPredicate",
-                "ReactiveTest",
-                "Recorded",
-                "TestScheduler",
-            ),
-        )
-        self.assertNotIn("annotations", testing_module.__dict__)
-        self.assertNotIn("coldobservable", testing_module.__all__)
-        self.assertNotIn("hotobservable", testing_module.__all__)
-        self.assertNotIn("is_prime", testing_module.__all__)
-
     def test_private_subject_submodules_export_only_subject_classes(self) -> None:
         load_manyfold_package()
         expected_exports = {
-            "manyfold._rx.subject": (
-                "AsyncSubject",
-                "BehaviorSubject",
-                "ReplaySubject",
-                "Subject",
-            ),
-            "manyfold._rx.subject.asyncsubject": ("AsyncSubject",),
-            "manyfold._rx.subject.behaviorsubject": ("BehaviorSubject",),
-            "manyfold._rx.subject.replaysubject": ("ReplaySubject",),
+            "manyfold._rx.subject": ("Subject",),
             "manyfold._rx.subject.subject": ("Subject",),
         }
 
@@ -219,12 +169,8 @@ class RxFacadeTests(unittest.TestCase):
             "manyfold._rx.disposable": ("Disposable", "SerialDisposable"),
             "manyfold._rx.operators": ("map",),
             "manyfold._rx.scheduler": ("TimeoutScheduler",),
-            "manyfold._rx.subject": ("BehaviorSubject", "Subject"),
-            "manyfold._rx.subject.behaviorsubject": ("BehaviorSubject",),
-            "manyfold._rx.subject.replaysubject": ("ReplaySubject",),
+            "manyfold._rx.subject": ("Subject",),
             "manyfold._rx.subject.subject": ("Subject",),
-            "manyfold._rx.testing": ("ReactiveTest", "TestScheduler"),
-            "manyfold._rx.testing.marbles": ("marbles_testing",),
             "manyfold._rx.typing": ("Mapper", "Predicate", "Subscription"),
         }
 
@@ -254,10 +200,10 @@ class RxFacadeTests(unittest.TestCase):
         subject_module = importlib.import_module("manyfold._rx.subject")
 
         self.assertIs(graph_module.rx, rx_module)
-        self.assertIs(primitives_module.Observable, rx_module.Observable)
+        self.assertNotIn("Observable", primitives_module.__dict__)
         self.assertNotIn("reactivex", graph_module.__dict__)
         self.assertIs(rx_module.Subject, subject_module.Subject)
-        self.assertIs(graph_module.Subject, subject_module.Subject)
+        self.assertNotIn("Subject", graph_module.__dict__)
 
 
 if __name__ == "__main__":

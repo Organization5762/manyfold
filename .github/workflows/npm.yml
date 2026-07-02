@@ -1,0 +1,113 @@
+name: Publish WASM npm package
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      package_name:
+        description: "npm package name"
+        default: "@organization5762/manyfold"
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  CARGO_TERM_COLOR: always
+  NPM_PACKAGE_NAME: ${{ inputs.package_name || '@organization5762/manyfold' }}
+
+jobs:
+  validate-release-metadata:
+    name: Validate release metadata
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Verify Python and Cargo versions match
+        run: |
+          python - <<'PY'
+          import pathlib
+          import tomllib
+
+          root = pathlib.Path.cwd()
+          pyproject = tomllib.loads((root / "pyproject.toml").read_text())
+          cargo = tomllib.loads((root / "Cargo.toml").read_text())
+          python_version = pyproject["project"]["version"]
+          cargo_version = cargo["package"]["version"]
+          if python_version != cargo_version:
+              raise SystemExit(
+                  "pyproject.toml project.version "
+                  f"{python_version!r} must match Cargo.toml package.version "
+                  f"{cargo_version!r}"
+              )
+          print(f"manyfold wasm npm release version: {python_version}")
+          PY
+
+  build-package:
+    name: Build npm package
+    needs:
+      - validate-release-metadata
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Set up Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked
+
+      - name: Build generated npm package
+        run: |
+          python scripts/build_wasm_npm.py \
+            --package-name "$NPM_PACKAGE_NAME" \
+            --out-dir dist/npm/manyfold
+
+      - name: Verify npm package contents
+        run: npm pack --dry-run
+        working-directory: dist/npm/manyfold
+
+      - name: Upload npm package artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: manyfold-npm-package
+          path: dist/npm/manyfold/
+
+  publish:
+    name: Publish npm package
+    needs:
+      - build-package
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/@organization5762/manyfold
+    steps:
+      - name: Download npm package artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: manyfold-npm-package
+          path: dist/npm/manyfold/
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Publish package to npm
+        run: npm stage publish --access public --provenance
+        working-directory: dist/npm/manyfold

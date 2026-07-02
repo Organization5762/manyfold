@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+from .callbacks import (
+    DEFAULT_CALLBACK_QUEUE_LIMIT as DEFAULT_CALLBACK_QUEUE_LIMIT,
+    CallbackDelivery as CallbackDelivery,
+    CallbackPlacement as CallbackPlacement,
+    drain_main_thread_callbacks as drain_main_thread_callbacks,
+    on_main_callback_thread as on_main_callback_thread,
+)
 from .datastream_processor import (
     DataStreamProcessor as DataStreamProcessor,
     DataStreamRecord as DataStreamRecord,
 )
 from .locks import (
+    Lock as Lock,
+    LockLease as LockLease,
     ManyFoldLock as ManyFoldLock,
     ManyFoldLockLease as ManyFoldLockLease,
 )
@@ -31,6 +40,7 @@ from .pubsub import (
     InMemoryPubSub as InMemoryPubSub,
     PubSub as PubSub,
     PubSubCallbackSubscription as PubSubCallbackSubscription,
+    PubSubCurrentValueSurface as PubSubCurrentValueSurface,
     PubSubDelivery as PubSubDelivery,
     PubSubFabric as PubSubFabric,
     PubSubMessage as PubSubMessage,
@@ -38,8 +48,21 @@ from .pubsub import (
     PubSubSchedule as PubSubSchedule,
     PubSubSubscription as PubSubSubscription,
     PubSubTopic as PubSubTopic,
+    PubSubValueSurface as PubSubValueSurface,
     ServiceDiscoveryRequirement as ServiceDiscoveryRequirement,
     StreamRow as StreamRow,
+)
+from .testing import (
+    PubSubMarbleRecord as PubSubMarbleRecord,
+    PubSubMarbles as PubSubMarbles,
+    pubsub_marbles as pubsub_marbles,
+)
+from .values import (
+    HistoricalValue as HistoricalValue,
+    ImmutableValue as ImmutableValue,
+    NewValues as NewValues,
+    Value as Value,
+    ValueSubscription as ValueSubscription,
 )
 from .workers import (
     DEFAULT_WORKER_TOPIC as DEFAULT_WORKER_TOPIC,
@@ -51,39 +74,56 @@ from .workers import (
 
 __all__ = [
     "CalibratedClock",
+    "CallbackDelivery",
+    "CallbackPlacement",
     "Capacitor",
     "Clock",
     "ClockCalibrationSample",
+    "DEFAULT_CALLBACK_QUEUE_LIMIT",
     "DEFAULT_WORKER_TOPIC",
     "DataStreamProcessor",
     "DataStreamRecord",
     "Ground",
+    "HistoricalValue",
+    "ImmutableValue",
     "InMemoryPubSub",
+    "Lock",
+    "LockLease",
     "ManyFoldLock",
     "ManyFoldLockLease",
     "MonotonicLogicalClock",
+    "NewValues",
     "NtpTimeProvider",
     "Pad",
     "PadDirection",
     "Probe",
     "PubSub",
     "PubSubCallbackSubscription",
+    "PubSubCurrentValueSurface",
     "PubSubDelivery",
     "PubSubFabric",
+    "PubSubMarbleRecord",
+    "PubSubMarbles",
     "PubSubMessage",
     "PubSubObservable",
     "PubSubSchedule",
     "PubSubSubscription",
     "PubSubTopic",
+    "PubSubValueSurface",
     "Regulator",
     "Relay",
     "Resistor",
     "ServiceDiscoveryRequirement",
     "StreamRow",
     "SystemTimeProvider",
+    "Value",
+    "ValueSubscription",
     "Via",
     "WorkerEvent",
     "WorkerHandle",
     "WorkerRef",
     "WorkerRuntime",
+    "drain_main_thread_callbacks",
+    "on_main_callback_thread",
+    "pubsub_marbles",
 ]
