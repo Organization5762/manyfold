@@ -26,33 +26,9 @@ MODULES_TO_RESET = (
     "manyfold.lego_catalog",
     "manyfold.sensor_io",
     "manyfold.reference_examples",
-    "manyfold.reactive_threads",
+    "manyfold.streams",
+    "manyfold.stream_threads",
     "manyfold.stats",
-    "manyfold._rx",
-    "manyfold._rx.abc",
-    "manyfold._rx.disposable",
-    "manyfold._rx.operators",
-    "manyfold._rx.scheduler",
-    "manyfold._rx.subject",
-    "manyfold._rx.subject.subject",
-    "manyfold._rx.typing",
-    "manyfold.rx",
-    "manyfold.rx.abc",
-    "manyfold.rx.disposable",
-    "manyfold.rx.operators",
-    "manyfold.rx.scheduler",
-    "manyfold.rx.subject",
-    "manyfold.rx.subject.subject",
-    "manyfold.rx.typing",
-    "manyfold._manyfold_rust",
-    "reactivex",
-    "reactivex.abc",
-    "reactivex.disposable",
-    "reactivex.scheduler",
-    "reactivex.subject",
-    "reactivex.subject.subject",
-    "reactivex.typing",
-    "reactivex.operators",
 )
 _MISSING_MODULE = object()
 UV_BIN_DIR = Path(os.environ.get("UV_BIN_DIR", Path.home() / ".local" / "bin"))
@@ -65,246 +41,6 @@ def subprocess_test_env() -> dict[str, str]:
         env["PATH"] = f"{UV_BIN_DIR}{os.pathsep}{env.get('PATH', '')}"
     env.setdefault("UV_CACHE_DIR", str(REPO_ROOT / ".cache" / "uv"))
     return env
-
-
-def install_reactivex_stub() -> None:
-    if _reactivex_available():
-        return
-
-    if (
-        "reactivex" in sys.modules
-        and "reactivex.subject" in sys.modules
-        and "reactivex.operators" in sys.modules
-    ):
-        return
-
-    class Disposable:
-        def __init__(self, dispose=None):
-            self._dispose = dispose or (lambda: None)
-
-        def dispose(self) -> None:
-            self._dispose()
-
-    class _CallbackObserver:
-        def __init__(self, on_next, on_error=None, on_completed=None):
-            self.on_next = on_next or (lambda _value: None)
-            self._on_error = on_error
-            self._on_completed = on_completed
-
-        def on_error(self, error):
-            if self._on_error is not None:
-                self._on_error(error)
-                return
-            raise error
-
-        def on_completed(self):
-            if self._on_completed is not None:
-                self._on_completed()
-
-    class Observable:
-        def __init__(self, subscribe):
-            self._subscribe = subscribe
-
-        def __class_getitem__(cls, item):
-            return cls
-
-        def subscribe(
-            self,
-            observer=None,
-            on_error=None,
-            on_completed=None,
-            scheduler=None,
-        ):
-            if callable(observer) and not hasattr(observer, "on_next"):
-                observer = _CallbackObserver(observer, on_error, on_completed)
-            return self._subscribe(observer, scheduler)
-
-        def pipe(self, *transforms):
-            observable = self
-            for transform in transforms:
-                observable = transform(observable)
-            return observable
-
-    class Subject:
-        def __init__(self):
-            self._observers = []
-
-        def subscribe(
-            self,
-            observer=None,
-            on_error=None,
-            on_completed=None,
-            scheduler=None,
-        ):
-            if callable(observer) and not hasattr(observer, "on_next"):
-                observer = _CallbackObserver(observer, on_error, on_completed)
-            self._observers.append(observer)
-
-            def unsubscribe() -> None:
-                if observer in self._observers:
-                    self._observers.remove(observer)
-
-            return Disposable(unsubscribe)
-
-        def on_next(self, value) -> None:
-            for observer in list(self._observers):
-                observer.on_next(value)
-
-    class TimeoutScheduler:
-        pass
-
-    def create(subscribe):
-        return Observable(subscribe)
-
-    def from_iterable(items):
-        def subscribe(observer=None, scheduler=None):
-            for item in items:
-                observer.on_next(item)
-            observer.on_completed()
-            return Disposable()
-
-        return Observable(subscribe)
-
-    def op_map(mapper):
-        def transform(source):
-            def subscribe(observer=None, scheduler=None):
-                return source.subscribe(
-                    lambda item: observer.on_next(mapper(item)),
-                    scheduler=scheduler,
-                )
-
-            return Observable(subscribe)
-
-        return transform
-
-    def op_filter(predicate):
-        def transform(source):
-            def subscribe(observer=None, scheduler=None):
-                return source.subscribe(
-                    lambda item: observer.on_next(item) if predicate(item) else None,
-                    scheduler=scheduler,
-                )
-
-            return Observable(subscribe)
-
-        return transform
-
-    def op_distinct():
-        def transform(source):
-            seen = []
-
-            def subscribe(observer=None, scheduler=None):
-                def on_next(item):
-                    if item not in seen:
-                        seen.append(item)
-                        observer.on_next(item)
-
-                return source.subscribe(on_next, scheduler=scheduler)
-
-            return Observable(subscribe)
-
-        return transform
-
-    def op_publish():
-        class ConnectableObservable(Observable):
-            def __init__(self, source):
-                self._source = source
-                self._observers = []
-                super().__init__(self._subscribe_connectable)
-
-            def connect(self):
-                return self._source.subscribe(
-                    lambda item: [
-                        observer.on_next(item) for observer in list(self._observers)
-                    ]
-                )
-
-            def _subscribe_connectable(self, observer=None, scheduler=None):
-                if callable(observer) and not hasattr(observer, "on_next"):
-                    observer = _CallbackObserver(observer)
-                self._observers.append(observer)
-
-                def unsubscribe() -> None:
-                    if observer in self._observers:
-                        self._observers.remove(observer)
-
-                return Disposable(unsubscribe)
-
-        def transform(source):
-            return ConnectableObservable(source)
-
-        return transform
-
-    rx_module = types.ModuleType("reactivex")
-    rx_module.Observable = Observable
-    rx_module.create = create
-    rx_module.from_iterable = from_iterable
-    for name in (
-        "amb",
-        "case",
-        "catch",
-        "combine_latest",
-        "concat",
-        "defer",
-        "empty",
-        "fork_join",
-        "from_callable",
-        "from_callback",
-        "from_future",
-        "from_marbles",
-        "generate",
-        "generate_with_relative_time",
-        "if_then",
-        "interval",
-        "just",
-        "merge",
-        "never",
-        "of",
-        "pipe",
-        "range",
-        "repeat_value",
-        "return_value",
-        "start",
-        "start_async",
-        "throw",
-        "timer",
-        "to_async",
-        "using",
-        "with_latest_from",
-    ):
-        setattr(
-            rx_module, name, lambda *args, **kwargs: Observable(lambda *_: Disposable())
-        )
-    abc_module = types.ModuleType("reactivex.abc")
-    disposable_module = types.ModuleType("reactivex.disposable")
-    disposable_module.Disposable = Disposable
-    scheduler_module = types.ModuleType("reactivex.scheduler")
-    scheduler_module.TimeoutScheduler = TimeoutScheduler
-    subject_module = types.ModuleType("reactivex.subject")
-    subject_module.Subject = Subject
-    subject_subject_module = types.ModuleType("reactivex.subject.subject")
-    subject_subject_module.Subject = Subject
-    typing_module = types.ModuleType("reactivex.typing")
-    typing_module.StartableTarget = object
-    ops_module = types.ModuleType("reactivex.operators")
-    ops_module.filter = op_filter
-    ops_module.map = op_map
-    ops_module.distinct = op_distinct
-    ops_module.publish = op_publish
-    rx_module.abc = abc_module
-    rx_module.disposable = disposable_module
-    rx_module.operators = ops_module
-    rx_module.scheduler = scheduler_module
-    rx_module.subject = subject_module
-    rx_module.typing = typing_module
-    sys.modules["reactivex"] = rx_module
-    sys.modules["reactivex.abc"] = abc_module
-    sys.modules["reactivex.disposable"] = disposable_module
-    sys.modules["reactivex.scheduler"] = scheduler_module
-    sys.modules["reactivex.subject"] = subject_module
-    sys.modules["reactivex.subject.subject"] = subject_subject_module
-    sys.modules["reactivex.typing"] = typing_module
-    sys.modules["reactivex.operators"] = ops_module
 
 
 def install_manyfold_rust_stub() -> None:
@@ -1680,7 +1416,6 @@ def reset_test_modules() -> None:
 
 def load_manyfold_package():
     reset_test_modules()
-    install_reactivex_stub()
     install_manyfold_rust_stub()
     if str(REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(REPO_ROOT))
@@ -1870,7 +1605,7 @@ def load_manyfold_package():
         "dependencies_of": lego_catalog.dependencies_of,
         "dependents_of": lego_catalog.dependents_of,
         "drain_frame_thread_queue": sys.modules[
-            "manyfold.reactive_threads"
+            "manyfold.stream_threads"
         ].drain_frame_thread_queue,
         "get_lego": lego_catalog.get_lego,
         "health_status_schema": sensor_io.health_status_schema,
@@ -1881,7 +1616,7 @@ def load_manyfold_package():
         "legos_by_role": lego_catalog.legos_by_role,
         "sensor_event_schema": sensor_io.sensor_event_schema,
         "sensor_sample_schema": sensor_io.sensor_sample_schema,
-        "shutdown": sys.modules["manyfold.reactive_threads"].shutdown,
+        "shutdown": sys.modules["manyfold.stream_threads"].shutdown,
         "sink": primitives.sink,
         "source": primitives.source,
         "SystemClock": sensor_io.SystemClock,
@@ -1951,17 +1686,6 @@ def _module_available(module_name: str) -> bool:
         return importlib.util.find_spec(module_name) is not None
     except (ImportError, ValueError):
         return module_name in sys.modules
-
-
-def _reactivex_available() -> bool:
-    return all(
-        _module_available(module_name)
-        for module_name in (
-            "reactivex",
-            "reactivex.operators",
-            "reactivex.subject",
-        )
-    )
 
 
 def _pythonpath_with_repo_python_first(current_pythonpath: str | None) -> str:

@@ -149,10 +149,6 @@ from .primitives import (
     sink as sink,
     source as source,
 )
-from .reactive_threads import (
-    drain_frame_thread_queue as drain_frame_thread_queue,
-    shutdown as shutdown,
-)
 from .reference_examples import (
     REFERENCE_EXAMPLE_SUITE as REFERENCE_EXAMPLE_SUITE,
     ReferenceExample as ReferenceExample,
@@ -210,6 +206,10 @@ from .sensor_io import (
     xor_checksum as xor_checksum,
 )
 from .stats import Average as Average
+from .stream_threads import (
+    drain_frame_thread_queue as drain_frame_thread_queue,
+    shutdown as shutdown,
+)
 
 __all__ = (
     "Average",

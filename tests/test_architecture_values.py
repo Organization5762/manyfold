@@ -116,7 +116,7 @@ class ArchitectureValueTests(unittest.TestCase):
         self.assertEqual(observed, [20, 30])
         self.assertTrue(subscription.dispose())
 
-    def test_value_subscribe_accepts_rx_style_callback_arguments(self) -> None:
+    def test_value_subscribe_accepts_callback_arguments(self) -> None:
         value = Value.initialized(2)
         observed: list[int] = []
 

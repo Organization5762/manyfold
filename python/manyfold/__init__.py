@@ -152,7 +152,7 @@ _EXPORTS_BY_MODULE = {
         "sink",
         "source",
     ),
-    "manyfold.reactive_threads": (
+    "manyfold.stream_threads": (
         "drain_frame_thread_queue",
         "shutdown",
     ),

@@ -9,9 +9,15 @@ import unittest
 from dataclasses import dataclass
 from pathlib import Path
 
-import reactivex as rx
-
 from tests.test_support import load_manyfold_package
+
+
+class StreamsProxy:
+    def __getattr__(self, name: str):
+        return getattr(sys.modules["manyfold.streams"], name)
+
+
+streams = StreamsProxy()
 
 
 class SensorIoTests(unittest.TestCase):
@@ -712,8 +718,7 @@ class SensorIoTests(unittest.TestCase):
             b'"source_timestamp":1.0,"status":"ok","value":"MjE="}'
         )
         event_payload = (
-            b'{"data":{"reading":21},"event_type":"sensor.temp",'
-            b'"observed_at":2.0}'
+            b'{"data":{"reading":21},"event_type":"sensor.temp","observed_at":2.0}'
         )
         health_payload = (
             b'{"error_count":0,"message":"ready","observed_at":2.0,'
@@ -2033,7 +2038,7 @@ class SensorIoTests(unittest.TestCase):
 
         handle = manyfold.ReactiveSensorSource(
             route=route,
-            observable=rx.from_iterable([1, 2]),
+            observable=streams.from_iterable([1, 2]),
             mapper=lambda value: value * 10,
             wrap_sample=True,
             clock=clock,
@@ -2067,7 +2072,7 @@ class SensorIoTests(unittest.TestCase):
         ):
             manyfold.ReactiveSensorSource(
                 route=route,
-                observable=rx.from_iterable([1]),
+                observable=streams.from_iterable([1]),
                 wrap_sample=True,
                 clock=_NonFiniteClock(),
                 sequence=sequence,
@@ -2091,7 +2096,7 @@ class SensorIoTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "encode failed"):
             manyfold.ReactiveSensorSource(
                 route=route,
-                observable=rx.from_iterable([1]),
+                observable=streams.from_iterable([1]),
                 wrap_sample=True,
                 clock=manyfold.ManualClock(2.0),
                 sequence=sequence,
@@ -2127,7 +2132,7 @@ class SensorIoTests(unittest.TestCase):
                     manyfold.ReactiveSensorSource(
                         **{
                             "route": route,
-                            "observable": rx.from_iterable(()),
+                            "observable": streams.from_iterable(()),
                             "mapper": lambda value: value,
                             "debug_tap": tap,
                             **kwargs,
@@ -2293,7 +2298,7 @@ class SensorIoTests(unittest.TestCase):
         class FakePeripheral:
             def __init__(self) -> None:
                 self.run_count = 0
-                self.observe = rx.from_iterable(
+                self.observe = streams.from_iterable(
                     [
                         FakeEnvelope(
                             peripheral_info=FakeInfo(
@@ -2340,7 +2345,7 @@ class SensorIoTests(unittest.TestCase):
 
         class FakePeripheral:
             def __init__(self) -> None:
-                self.observe = rx.Subject()
+                self.observe = streams.Subject()
                 self.run_count = 0
 
             def run(self) -> None:
@@ -2372,7 +2377,7 @@ class SensorIoTests(unittest.TestCase):
 
         class FakePeripheral:
             def __init__(self) -> None:
-                self.observe = rx.from_iterable([{"temperature": 21}])
+                self.observe = streams.from_iterable([{"temperature": 21}])
 
         graph = manyfold.Graph()
         sequence = manyfold.SequenceCounter(current=30)
@@ -2401,7 +2406,7 @@ class SensorIoTests(unittest.TestCase):
 
         class FakePeripheral:
             def __init__(self) -> None:
-                self.observe = rx.from_iterable([{"temperature": 21}])
+                self.observe = streams.from_iterable([{"temperature": 21}])
 
         graph = manyfold.Graph()
         sequence = manyfold.SequenceCounter(current=30)
@@ -2428,7 +2433,7 @@ class SensorIoTests(unittest.TestCase):
 
         class FakePeripheral:
             def __init__(self) -> None:
-                self.observe = rx.from_iterable([])
+                self.observe = streams.from_iterable([])
                 self.inputs: list[int] = []
 
             def handle_input(self, value: int) -> None:
@@ -2455,7 +2460,7 @@ class SensorIoTests(unittest.TestCase):
 
         class FakePeripheral:
             def __init__(self) -> None:
-                self.observe = rx.from_iterable(())
+                self.observe = streams.from_iterable(())
 
         route = _route(manyfold, "invalid_peripheral", manyfold.sensor_event_schema())
         control = _route(

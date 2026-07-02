@@ -32,7 +32,7 @@ from typing import (
     runtime_checkable,
 )
 
-from . import _rx as rx, reactive_threads
+from . import stream_threads, streams
 from ._manyfold_rust import (
     ClosedEnvelope,
     ControlLoop as NativeControlLoop,
@@ -56,9 +56,6 @@ from ._manyfold_rust import (
     WritablePort as NativeWritablePort,
     WriteBinding,
 )
-from ._rx import Observable, operators as ops
-from ._rx.disposable import Disposable
-from ._rx.scheduler import EventLoopScheduler, TimeoutScheduler
 from .primitives import (
     OwnerName,
     ReadThenWriteNextEpochStep,
@@ -81,6 +78,13 @@ from .private.graph_publish import (
     TypedPublishTarget,
 )
 from .stats import Average
+from .streams import (
+    Disposable,
+    EventLoopScheduler,
+    Observable,
+    TimeoutScheduler,
+    operators as ops,
+)
 
 T = TypeVar("T")
 TIn = TypeVar("TIn")
@@ -157,7 +161,7 @@ def stream_from(
             scheduler=scheduler,
         )
 
-    return rx.create(subscribe)
+    return streams.create(subscribe)
 
 
 def instrument_stream(
@@ -494,7 +498,7 @@ class CoalesceLatestNode(Generic[T]):
                 cancel_timers()
                 generation += 1
                 scheduled_generation = generation
-                timer = reactive_threads.coalesce_scheduler().schedule_relative(
+                timer = stream_threads.coalesce_scheduler().schedule_relative(
                     window_seconds,
                     lambda *_: flush(scheduled_generation),
                 )
@@ -531,7 +535,7 @@ class CoalesceLatestNode(Generic[T]):
                 on_next,
                 on_error,
                 on_completed,
-                scheduler=reactive_threads.coalesce_scheduler(),
+                scheduler=stream_threads.coalesce_scheduler(),
             )
 
             def dispose() -> None:
@@ -544,7 +548,7 @@ class CoalesceLatestNode(Generic[T]):
 
             return Disposable(dispose)
 
-        return rx.create(subscribe)
+        return streams.create(subscribe)
 
 
 @dataclass(frozen=True)
@@ -636,7 +640,7 @@ class LoggingNode(Generic[T]):
 
             return Disposable(dispose)
 
-        return rx.create(subscribe)
+        return streams.create(subscribe)
 
 
 @dataclass(frozen=True)
@@ -657,7 +661,7 @@ class EmptyNode(Generic[T]):
     name: str = "empty"
 
     def observable(self) -> StreamNode[T]:
-        return rx.empty()
+        return streams.empty()
 
     def subscribe(
         self,
@@ -681,7 +685,7 @@ class MainThreadNode(Generic[T]):
     name: str = "main-thread"
 
     def observable(self, source: ObservableLike[T]) -> Observable[T]:
-        return reactive_threads.deliver_on_frame_thread(cast(Observable[T], source))
+        return stream_threads.deliver_on_frame_thread(cast(Observable[T], source))
 
 
 @dataclass(frozen=True)
@@ -772,7 +776,7 @@ class IntervalNode:
     period: timedelta
 
     def observable(self) -> Observable[int]:
-        return reactive_threads.interval_in_background(self.period, name=self.name)
+        return stream_threads.interval_in_background(self.period, name=self.name)
 
 
 class FluentStream(Generic[T]):
@@ -781,10 +785,10 @@ class FluentStream(Generic[T]):
 
     def then_on_background_thread(self, *, isolated: bool = False) -> "FluentStream[T]":
         del isolated
-        return FluentStream(reactive_threads.observe_on_background(self._observable))
+        return FluentStream(stream_threads.observe_on_background(self._observable))
 
     def then_on_main_thread(self) -> "FluentStream[T]":
-        return FluentStream(reactive_threads.deliver_on_frame_thread(self._observable))
+        return FluentStream(stream_threads.deliver_on_frame_thread(self._observable))
 
     def then_on_isolated_thread(self, name: str | None = None) -> "FluentStream[T]":
         del name
@@ -3188,7 +3192,7 @@ class ReactiveReadablePort:
                 raise
             return subscription
 
-        return rx.create(subscribe)
+        return streams.create(subscribe)
 
 
 class ReactiveWritablePort:
@@ -6532,7 +6536,7 @@ class Graph:
                 raise
             return source_sub
 
-        return rx.create(subscribe)
+        return streams.create(subscribe)
 
     def window(
         self,
@@ -6605,7 +6609,7 @@ class Graph:
                 raise
             return subscription
 
-        return rx.create(subscribe)
+        return streams.create(subscribe)
 
     def window_aggregate(
         self,
@@ -6645,7 +6649,7 @@ class Graph:
                 scheduler=scheduler,
             )
 
-        return rx.create(subscribe)
+        return streams.create(subscribe)
 
     def window_by_time(
         self,
@@ -6803,7 +6807,7 @@ class Graph:
                 raise
             return subscription
 
-        return rx.create(subscribe)
+        return streams.create(subscribe)
 
     def window_aggregate_by_time(
         self,
@@ -6841,7 +6845,7 @@ class Graph:
             )
             return windowed.subscribe(on_window, scheduler=scheduler)
 
-        return rx.create(subscribe)
+        return streams.create(subscribe)
 
     def join_latest(
         self,
@@ -6893,7 +6897,7 @@ class Graph:
                 raise
             return subscription
 
-        return rx.create(subscribe)
+        return streams.create(subscribe)
 
     def lookup_join(
         self,
@@ -6946,7 +6950,7 @@ class Graph:
                 raise
             return subscription
 
-        return rx.create(subscribe)
+        return streams.create(subscribe)
 
     def interval_join(
         self,
@@ -7035,7 +7039,7 @@ class Graph:
 
             return _CompositeSubscription((left_sub, right_sub))
 
-        return rx.create(subscribe)
+        return streams.create(subscribe)
 
     def materialize(
         self,
@@ -10173,7 +10177,7 @@ class Graph:
             )
 
         return self._thread_placed_observable(
-            rx.create(subscribe),
+            streams.create(subscribe),
             thread_placement,
         )
 
@@ -10236,7 +10240,7 @@ class Graph:
             )
 
         return self._thread_placed_observable(
-            rx.create(subscribe),
+            streams.create(subscribe),
             thread_placement,
         )
 
@@ -10248,7 +10252,7 @@ class Graph:
         if placement is None:
             return observable
         if placement.kind == "main":
-            return reactive_threads.deliver_on_frame_thread(observable)
+            return stream_threads.deliver_on_frame_thread(observable)
 
         def subscribe(
             observer: ObserverLike[Any],
@@ -10264,24 +10268,24 @@ class Graph:
                 owned_scheduler=thread_scheduler if owns_scheduler else None,
             )
 
-        return rx.create(subscribe)
+        return streams.create(subscribe)
 
     def _thread_scheduler_for(
         self,
         placement: NodeThreadPlacement,
     ) -> tuple[object, bool]:
         if placement.kind == "background":
-            return reactive_threads.background_scheduler(), False
+            return stream_threads.background_scheduler(), False
         if placement.kind == "pooled":
             if placement.scheduler_name == "blocking_io":
-                return reactive_threads.blocking_io_scheduler(), False
+                return stream_threads.blocking_io_scheduler(), False
             if placement.scheduler_name == "input":
-                return reactive_threads.input_scheduler(), False
-            return reactive_threads.background_scheduler(), False
+                return stream_threads.input_scheduler(), False
+            return stream_threads.background_scheduler(), False
         thread_name = placement.thread_name or self._next_pipeline_node_name("isolated")
         return (
             EventLoopScheduler(
-                thread_factory=reactive_threads.create_default_thread_factory(
+                thread_factory=stream_threads.create_default_thread_factory(
                     thread_name,
                 )
             ),
@@ -10729,7 +10733,7 @@ class Graph:
 
 
 def _fluent_interval_observable(period: timedelta) -> Observable[int]:
-    period = reactive_threads._require_positive_timedelta(period)
+    period = stream_threads._require_positive_timedelta(period)
     seconds = period.total_seconds()
 
     def _subscribe(
@@ -10774,7 +10778,7 @@ def _fluent_interval_observable(period: timedelta) -> Observable[int]:
         _schedule_next()
         return Disposable(_dispose)
 
-    return rx.create(_subscribe)
+    return streams.create(_subscribe)
 
 
 def _require_non_empty_text(value: str, field_name: str) -> None:

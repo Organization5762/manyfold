@@ -1,4 +1,4 @@
-"""Threading helpers for Rx-backed Manyfold streams.
+"""Threading helpers for ManyFold-backed Manyfold streams.
 
 This module carries the process-local scheduling patterns used by applications
 that need to hand stream emissions between worker threads and a frame thread.
@@ -24,16 +24,21 @@ from queue import Full, PriorityQueue
 from threading import Event, Lock, Thread, get_ident
 from typing import Any, TypeVar
 
-from . import _rx as rx
-from ._rx import Observable, Subject, operators as ops, pipe
-from ._rx.abc import DisposableBase, SchedulerBase
-from ._rx.disposable import Disposable
-from ._rx.scheduler import (
+from . import streams
+from .streams import (
+    Disposable,
     EventLoopScheduler,
     NewThreadScheduler,
+    Observable,
+    SchedulerBase,
+    Subject,
     ThreadPoolScheduler,
     TimeoutScheduler,
+    operators as ops,
+    pipe,
 )
+
+DisposableBase = Disposable
 
 T = TypeVar("T")
 
@@ -64,7 +69,7 @@ def background_scheduler() -> SchedulerBase:
     """Return the shared scheduler for CPU-light background stream work."""
 
     max_workers = _env_int(
-        "MANYFOLD_RX_BACKGROUND_MAX_WORKERS",
+        "MANYFOLD_STREAM_BACKGROUND_MAX_WORKERS",
         legacy_name="HEART_RX_BACKGROUND_MAX_WORKERS",
         default=4,
     )
@@ -79,7 +84,7 @@ def blocking_io_scheduler() -> SchedulerBase:
     """Return the shared scheduler for blocking stream adapters."""
 
     max_workers = _env_int(
-        "MANYFOLD_RX_BLOCKING_IO_MAX_WORKERS",
+        "MANYFOLD_STREAM_BLOCKING_IO_MAX_WORKERS",
         legacy_name="HEART_RX_BLOCKING_IO_MAX_WORKERS",
         default=2,
     )
@@ -94,7 +99,7 @@ def input_scheduler() -> SchedulerBase:
     """Return the shared scheduler for human-input streams."""
 
     max_workers = _env_int(
-        "MANYFOLD_RX_INPUT_MAX_WORKERS",
+        "MANYFOLD_STREAM_INPUT_MAX_WORKERS",
         legacy_name="HEART_RX_INPUT_MAX_WORKERS",
         default=2,
     )
@@ -112,7 +117,7 @@ def interval_scheduler() -> SchedulerBase:
         _INTERVAL_SCHEDULER,
         constructor=partial(
             EventLoopScheduler,
-            thread_factory=create_default_thread_factory("reactive-interval"),
+            thread_factory=create_default_thread_factory("stream-interval"),
         ),
     )
 
@@ -130,7 +135,7 @@ def replay_scheduler() -> TimeoutScheduler:
 
 
 def create_default_thread_factory(name: str) -> Callable[[StartableTarget], Thread]:
-    """Build a non-daemon thread factory for Rx event-loop schedulers."""
+    """Build a non-daemon thread factory for stream event-loop schedulers."""
 
     thread_name = _require_thread_name(name)
 
@@ -155,7 +160,7 @@ def interval_in_background(
         if thread_name is not None
         else interval_scheduler()
     )
-    return rx.interval(period=period, scheduler=resolved_scheduler).pipe(
+    return streams.interval(period=period, scheduler=resolved_scheduler).pipe(
         ops.take_until(shutdown),
     )
 
@@ -272,7 +277,7 @@ def deliver_on_frame_thread(source: Observable[T]) -> Observable[T]:
 
         return Disposable(_dispose)
 
-    return rx.create(_subscribe)
+    return streams.create(_subscribe)
 
 
 def observe_on_background(
@@ -373,7 +378,7 @@ def observe_on_background(
 
         return Disposable(_dispose)
 
-    return rx.create(_subscribe)
+    return streams.create(_subscribe)
 
 
 def start_with_once(value: TStarting) -> Callable[[Observable[T]], Observable[Any]]:
@@ -390,22 +395,22 @@ def pipe_in_background(
     *operators: Any,
     starting_value: TStarting | _NoStartingValue = _NO_STARTING_VALUE,
 ) -> Observable[Any]:
-    """Apply operators to a source and share the resulting observable."""
+    """Apply operators to a source observable."""
 
     _require_observable(source, "source")
     logger.debug("Building background pipeline.")
     resolved_operators = operators
     if not isinstance(starting_value, _NoStartingValue):
         resolved_operators = (*operators, start_with_once(starting_value))
-    return pipe(source, *resolved_operators, ops.share())
+    return pipe(source, *resolved_operators)
 
 
 def pipe_in_main_thread(source: Observable[T], *operators: Any) -> Observable[Any]:
-    """Deliver source emissions on the frame thread, apply operators, and share."""
+    """Deliver source emissions on the frame thread and apply operators."""
 
     _require_observable(source, "source")
     logger.debug("Building frame-thread pipeline.")
-    return pipe(deliver_on_frame_thread(source), *operators, ops.share())
+    return pipe(deliver_on_frame_thread(source), *operators)
 
 
 def pipe_to_background_event_loop(
@@ -482,7 +487,7 @@ def scheduler_diagnostics() -> dict[str, int | None]:
     }
 
 
-def reset_reactive_threading_state_for_tests() -> None:
+def reset_stream_threading_state_for_tests() -> None:
     """Reset module-level schedulers, queues, shutdown, and latency state."""
 
     global _BACKGROUND_PRIORITY_QUEUE, _FRAME_THREAD_IDENT, _FRAME_THREAD_QUEUE_LIMIT
@@ -515,7 +520,7 @@ def materialize_sequence(sequence: Iterable[T]) -> Observable[T]:
     if not isinstance(sequence, Iterable):
         raise ValueError("sequence must be iterable")
     snapshot = tuple(sequence)
-    return rx.from_iterable(snapshot)
+    return streams.from_iterable(snapshot)
 
 
 class StreamPriority(IntEnum):
@@ -608,6 +613,7 @@ def _require_stream_priority_resolver(
     if value is None:
         return lambda: StreamPriority.NORMAL
     if callable(value):
+
         def _resolve() -> StreamPriority:
             return _require_stream_priority(value())
 
@@ -758,7 +764,7 @@ def _stop_background_priority_worker_locked() -> None:
 def _new_background_priority_queue() -> PriorityQueue[_BackgroundPriorityTask]:
     return PriorityQueue(
         maxsize=_env_int(
-            "MANYFOLD_RX_BACKGROUND_PRIORITY_QUEUE_LIMIT",
+            "MANYFOLD_STREAM_BACKGROUND_PRIORITY_QUEUE_LIMIT",
             legacy_name="HEART_RX_BACKGROUND_PRIORITY_QUEUE_LIMIT",
             default=DEFAULT_BACKGROUND_PRIORITY_QUEUE_LIMIT,
         )
@@ -767,7 +773,7 @@ def _new_background_priority_queue() -> PriorityQueue[_BackgroundPriorityTask]:
 
 def _frame_thread_queue_limit() -> int:
     return _env_int(
-        "MANYFOLD_RX_FRAME_THREAD_QUEUE_LIMIT",
+        "MANYFOLD_STREAM_FRAME_THREAD_QUEUE_LIMIT",
         legacy_name="HEART_RX_FRAME_THREAD_QUEUE_LIMIT",
         default=DEFAULT_FRAME_THREAD_QUEUE_LIMIT,
     )
@@ -919,7 +925,7 @@ __all__ = (
     "pipe_to_background_event_loop",
     "pipe_to_background_thread",
     "replay_scheduler",
-    "reset_reactive_threading_state_for_tests",
+    "reset_stream_threading_state_for_tests",
     "scheduler_diagnostics",
     "shutdown",
     "start_with_once",

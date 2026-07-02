@@ -548,7 +548,7 @@ class GraphReactiveTests(unittest.TestCase):
 
         self.assertEqual(observed_sequences, [1, 2])
 
-    def test_pipe_binds_rx_source_into_writable_port(self) -> None:
+    def test_pipe_binds_stream_source_into_writable_port(self) -> None:
         graph_module = load_graph_module()
         route = graph_module.route(
             plane=graph_module.Plane.Write,
@@ -561,7 +561,7 @@ class GraphReactiveTests(unittest.TestCase):
         )
         graph = graph_module.Graph()
 
-        graph.pipe(graph_module.rx.from_iterable([b"one", b"two"]), route)
+        graph.pipe(graph_module.streams.from_iterable([b"one", b"two"]), route)
         latest = graph.latest(route)
 
         self.assertIsNotNone(latest)
@@ -1193,8 +1193,8 @@ else:
 
     def test_pipeline_can_place_following_nodes_on_main_thread(self) -> None:
         graph_module = load_graph_module()
-        reactive_threads = importlib.import_module("manyfold.reactive_threads")
-        reactive_threads.reset_reactive_threading_state_for_tests()
+        stream_threads = importlib.import_module("manyfold.stream_threads")
+        stream_threads.reset_stream_threading_state_for_tests()
         route = graph_module.route(
             plane=graph_module.Plane.Read,
             layer=graph_module.Layer.Logical,
@@ -1219,19 +1219,19 @@ else:
             graph.publish(route, 3)
 
             self.assertEqual(seen, [])
-            self.assertEqual(reactive_threads.drain_frame_thread_queue(), 1)
+            self.assertEqual(stream_threads.drain_frame_thread_queue(), 1)
             self.assertEqual(seen, [3])
             node = next(graph.diagram_nodes())
             self.assertEqual(node.thread_placement.kind, "main")
             self.assertIn("main_thread", graph.render_diagram(group_by=("thread",)))
         finally:
             connection.remove()
-            reactive_threads.reset_reactive_threading_state_for_tests()
+            stream_threads.reset_stream_threading_state_for_tests()
 
     def test_main_thread_delivery_coalesces_pending_values(self) -> None:
         graph_module = load_graph_module()
-        reactive_threads = importlib.import_module("manyfold.reactive_threads")
-        reactive_threads.reset_reactive_threading_state_for_tests()
+        stream_threads = importlib.import_module("manyfold.stream_threads")
+        stream_threads.reset_stream_threading_state_for_tests()
         route = graph_module.route(
             plane=graph_module.Plane.Read,
             layer=graph_module.Layer.Logical,
@@ -1255,11 +1255,11 @@ else:
             graph.publish(route, 3)
 
             self.assertEqual(seen, [])
-            self.assertEqual(reactive_threads.drain_frame_thread_queue(), 1)
+            self.assertEqual(stream_threads.drain_frame_thread_queue(), 1)
             self.assertEqual(seen, [3])
         finally:
             connection.remove()
-            reactive_threads.reset_reactive_threading_state_for_tests()
+            stream_threads.reset_stream_threading_state_for_tests()
 
     def test_pipeline_can_place_following_nodes_on_pooled_thread(self) -> None:
         graph_module = load_graph_module()
@@ -1366,8 +1366,8 @@ else:
 
     def test_pipeline_can_return_to_prior_thread_placement(self) -> None:
         graph_module = load_graph_module()
-        reactive_threads = importlib.import_module("manyfold.reactive_threads")
-        reactive_threads.reset_reactive_threading_state_for_tests()
+        stream_threads = importlib.import_module("manyfold.stream_threads")
+        stream_threads.reset_stream_threading_state_for_tests()
         route = graph_module.route(
             plane=graph_module.Plane.Read,
             layer=graph_module.Layer.Logical,
@@ -1412,7 +1412,7 @@ else:
             graph.publish(route, 10)
             self.assertTrue(pooled_seen.wait(timeout=2), "pooled step did not run")
             self.assertEqual(values, [])
-            self.assertEqual(reactive_threads.drain_frame_thread_queue(), 1)
+            self.assertEqual(stream_threads.drain_frame_thread_queue(), 1)
             self.assertTrue(callback_seen.wait(timeout=2), "callback did not run")
 
             self.assertEqual(values, [12])
@@ -1427,7 +1427,7 @@ else:
             self.assertEqual(placements["collect-prior"].kind, "pooled")
         finally:
             connection.remove()
-            reactive_threads.reset_reactive_threading_state_for_tests()
+            stream_threads.reset_stream_threading_state_for_tests()
 
     def test_coalesce_latest_node_emits_latest_value_on_completion(self) -> None:
         graph_module = load_graph_module()
@@ -1450,9 +1450,9 @@ else:
     def test_coalesce_latest_ignores_stale_timer_callbacks(self) -> None:
         graph_module = load_graph_module()
         scheduler = ManualCoalesceScheduler()
-        original_scheduler = graph_module.reactive_threads.coalesce_scheduler
+        original_scheduler = graph_module.stream_threads.coalesce_scheduler
         original_timer = graph_module.Timer
-        graph_module.reactive_threads.coalesce_scheduler = lambda: scheduler
+        graph_module.stream_threads.coalesce_scheduler = lambda: scheduler
         graph_module.Timer = ManualTimer
         node = graph_module.CoalesceLatestNode(
             name="coalesce",
@@ -1473,7 +1473,7 @@ else:
             scheduler.callbacks[1]()
             self.assertEqual(seen, [2])
         finally:
-            graph_module.reactive_threads.coalesce_scheduler = original_scheduler
+            graph_module.stream_threads.coalesce_scheduler = original_scheduler
             graph_module.Timer = original_timer
 
     def test_coalesce_latest_node_rejects_non_integer_windows(self) -> None:
@@ -1554,8 +1554,8 @@ else:
 
     def test_coalesce_latest_preserves_main_thread_placement_downstream(self) -> None:
         graph_module = load_graph_module()
-        reactive_threads = importlib.import_module("manyfold.reactive_threads")
-        reactive_threads.reset_reactive_threading_state_for_tests()
+        stream_threads = importlib.import_module("manyfold.stream_threads")
+        stream_threads.reset_stream_threading_state_for_tests()
         route = graph_module.route(
             plane=graph_module.Plane.Read,
             layer=graph_module.Layer.Logical,
@@ -1577,11 +1577,11 @@ else:
         try:
             graph.publish(route, 4)
             self.assertEqual(seen, [])
-            self.assertEqual(reactive_threads.drain_frame_thread_queue(), 1)
+            self.assertEqual(stream_threads.drain_frame_thread_queue(), 1)
             time.sleep(0.05)
 
             self.assertEqual(seen, [])
-            self.assertEqual(reactive_threads.drain_frame_thread_queue(), 1)
+            self.assertEqual(stream_threads.drain_frame_thread_queue(), 1)
             self.assertEqual(seen, [4])
             placements = {
                 node.name: node.thread_placement for node in graph.diagram_nodes()
@@ -1590,7 +1590,7 @@ else:
             self.assertEqual(placements["collect-main-coalesced"].kind, "main")
         finally:
             connection.remove()
-            reactive_threads.reset_reactive_threading_state_for_tests()
+            stream_threads.reset_stream_threading_state_for_tests()
 
     def test_repeated_write_audit_events_are_coalesced(self) -> None:
         graph_module = load_graph_module()
@@ -2108,7 +2108,7 @@ else:
         )
         step = graph_module.ReadThenWriteNextEpochStep.map(
             name="Step",
-            read=graph_module.rx.from_iterable([b"one", b"two"]),
+            read=graph_module.streams.from_iterable([b"one", b"two"]),
             output=write_request,
             transform=lambda payload: payload.upper(),
         )
@@ -2126,7 +2126,7 @@ else:
 
     def test_read_then_write_next_epoch_step_rejects_invalid_construction(self) -> None:
         graph_module = load_graph_module()
-        read = graph_module.rx.from_iterable([b"one"])
+        read = graph_module.streams.from_iterable([b"one"])
         write_request = graph_module.route(
             plane=graph_module.Plane.Write,
             layer=graph_module.Layer.Logical,
@@ -2172,7 +2172,7 @@ else:
         self,
     ) -> None:
         graph_module = load_graph_module()
-        read = graph_module.rx.from_iterable([b"one"])
+        read = graph_module.streams.from_iterable([b"one"])
         write_request = graph_module.route(
             plane=graph_module.Plane.Write,
             layer=graph_module.Layer.Logical,

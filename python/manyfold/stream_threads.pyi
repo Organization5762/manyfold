@@ -6,9 +6,7 @@ from enum import IntEnum
 from threading import Thread
 from typing import Any, TypeVar
 
-from ._rx import Observable, Subject
-from ._rx.abc import SchedulerBase
-from ._rx.scheduler import TimeoutScheduler
+from .streams import Observable, SchedulerBase, Subject, TimeoutScheduler
 
 T = TypeVar("T")
 TStarting = TypeVar("TStarting")
@@ -77,5 +75,5 @@ def background_threaded_observable(
     name: str,
 ) -> AbstractContextManager[Iterator[Observable[T]]]: ...
 def scheduler_diagnostics() -> dict[str, int | None]: ...
-def reset_reactive_threading_state_for_tests() -> None: ...
+def reset_stream_threading_state_for_tests() -> None: ...
 def materialize_sequence(sequence: Iterable[T]) -> Observable[T]: ...

@@ -31,7 +31,6 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "reactivex==5.0.0a2",
 ]
 
 [project.urls]
