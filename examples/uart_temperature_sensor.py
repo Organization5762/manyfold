@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TypedDict
 
-import reactivex as rx
+import manyfold.streams as streams
 from manyfold import (
     EmbeddedDeviceProfile,
     Graph,
@@ -37,7 +37,7 @@ def run_example() -> UartTemperatureSensorExampleResult:
         capacity=1,
         immediate=True,
     )
-    graph.pipe(rx.from_iterable(raw_values), raw_sensor.metadata_route)
+    graph.pipe(streams.from_iterable(raw_values), raw_sensor.metadata_route)
 
     raw_latest = graph.latest(raw_sensor.metadata_route)
     smoothed_latest = graph.latest(smoothed_route)

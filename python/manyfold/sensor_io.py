@@ -35,6 +35,8 @@ TFrame = TypeVar("TFrame")
 OverflowMode = Literal["drop_oldest", "drop_newest", "reject", "latest"]
 SensorBufferMode = Literal["latest", "fifo"]
 MessageBufferMode = Literal["bytes", "text"]
+
+
 def sensor_sample_schema(
     value_schema: Schema[T], schema_id: str | None = None
 ) -> Schema[SensorSample[T]]:
@@ -1575,7 +1577,7 @@ class ReactiveSensorHandle:
 
 @dataclass
 class ReactiveSensorSource:
-    """Publish values from a reactivex-style observable into a route."""
+    """Publish values from a local stream-style observable into a route."""
 
     route: TypedRoute[Any]
     observable: Any

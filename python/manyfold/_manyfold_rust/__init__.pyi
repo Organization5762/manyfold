@@ -27,14 +27,17 @@ __all__ = [
     "Graph",
     "InMemoryPubSub",
     "Layer",
+    "LogRecordEnvelope",
     "Mailbox",
     "MailboxDescriptor",
     "ManyFoldLock",
     "ManyFoldLockLease",
+    "MetricHistogramRecord",
     "MonotonicLogicalClock",
     "NamespaceRef",
     "NoLineageMaterializerDropProfile",
     "NtpTimeProvider",
+    "ObservabilityRuntime",
     "OpenedEnvelope",
     "PayloadRef",
     "Plane",
@@ -281,6 +284,75 @@ class PubSubRuntime:
         parameters: typing.Optional[builtins.dict[builtins.str, object]] = None,
     ) -> typing.Optional[builtins.dict[builtins.str, object]]: ...
     def latest(self, topic: builtins.str) -> typing.Optional[DataStreamRecord]: ...
+    def observability_metrics(self) -> builtins.list[MetricHistogramRecord]: ...
+    def observability_logs(self) -> builtins.list[LogRecordEnvelope]: ...
+
+@typing.final
+class LogRecordEnvelope:
+    @property
+    def timestamp_ns(self) -> builtins.int: ...
+    @property
+    def severity_text(self) -> builtins.str: ...
+    @property
+    def logger_name(self) -> builtins.str: ...
+    @property
+    def body(self) -> builtins.str: ...
+    @property
+    def file_path(self) -> builtins.str: ...
+    @property
+    def line_number(self) -> builtins.int: ...
+    @property
+    def attributes_json(self) -> builtins.str: ...
+
+@typing.final
+class MetricHistogramRecord:
+    @property
+    def timestamp_ns(self) -> builtins.int: ...
+    @property
+    def name(self) -> builtins.str: ...
+    @property
+    def unit(self) -> builtins.str: ...
+    @property
+    def count(self) -> builtins.int: ...
+    @property
+    def sum(self) -> builtins.float: ...
+    @property
+    def min(self) -> builtins.float: ...
+    @property
+    def max(self) -> builtins.float: ...
+    @property
+    def explicit_bounds_json(self) -> builtins.str: ...
+    @property
+    def bucket_counts_json(self) -> builtins.str: ...
+    @property
+    def attributes_json(self) -> builtins.str: ...
+
+@typing.final
+class ObservabilityRuntime:
+    def __new__(cls, *, retained_records: builtins.int = 1024) -> ObservabilityRuntime: ...
+    def record_histogram(
+        self,
+        name: builtins.str,
+        value: builtins.float,
+        *,
+        unit: builtins.str = "",
+        attributes_json: builtins.str = "{}",
+        timestamp_ns: typing.Optional[builtins.int] = None,
+    ) -> MetricHistogramRecord: ...
+    def set_buckets(self, buckets: builtins.list[builtins.float]) -> None: ...
+    def record_log(
+        self,
+        severity_text: builtins.str,
+        logger_name: builtins.str,
+        body: builtins.str,
+        *,
+        file_path: builtins.str = "",
+        line_number: builtins.int = 0,
+        attributes_json: builtins.str = "{}",
+        timestamp_ns: typing.Optional[builtins.int] = None,
+    ) -> LogRecordEnvelope: ...
+    def metrics(self) -> builtins.list[MetricHistogramRecord]: ...
+    def logs(self) -> builtins.list[LogRecordEnvelope]: ...
 
 @typing.final
 class ClockCalibrationSample:

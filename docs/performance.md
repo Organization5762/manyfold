@@ -75,6 +75,8 @@ with [Dormant Runtime Benchmark](benchmarks/dormant_runtime.md) when changing
 runtime wake-up or warm-pool behavior.
 Use [Architecture PubSub Benchmark](benchmarks/architecture_pubsub.md) when
 changing the Rust-backed `manyfold.architecture.pubsub` module.
+Use [IPC Worker Benchmark](benchmarks/ipc_worker.md) when changing Python,
+WASM, or desktop compatibility paths that cross into a Rust worker process.
 
 ## Performance Checklist
 

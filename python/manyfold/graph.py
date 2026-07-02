@@ -32,7 +32,7 @@ from typing import (
     runtime_checkable,
 )
 
-from . import _rx as rx, reactive_threads
+from . import datastream_threads, streams
 from ._manyfold_rust import (
     ClosedEnvelope,
     ControlLoop as NativeControlLoop,
@@ -56,10 +56,6 @@ from ._manyfold_rust import (
     WritablePort as NativeWritablePort,
     WriteBinding,
 )
-from ._rx import Observable, operators as ops
-from ._rx.disposable import Disposable
-from ._rx.scheduler import EventLoopScheduler, TimeoutScheduler
-from ._rx.subject import BehaviorSubject, Subject as Subject
 from .primitives import (
     OwnerName,
     ReadThenWriteNextEpochStep,
@@ -82,6 +78,13 @@ from .private.graph_publish import (
     TypedPublishTarget,
 )
 from .stats import Average
+from .streams import (
+    Disposable,
+    EventLoopScheduler,
+    Observable,
+    TimeoutScheduler,
+    operators as ops,
+)
 
 T = TypeVar("T")
 TIn = TypeVar("TIn")
@@ -142,7 +145,11 @@ def stream_from(
 
     def subscribe(observer: ObserverLike[Any], scheduler: object | None = None) -> Any:
         def emit(value: Any) -> None:
-            if unwrap_envelopes and hasattr(value, "closed") and hasattr(value, "value"):
+            if (
+                unwrap_envelopes
+                and hasattr(value, "closed")
+                and hasattr(value, "value")
+            ):
                 observer.on_next(value.value)
             else:
                 observer.on_next(value)
@@ -154,7 +161,7 @@ def stream_from(
             scheduler=scheduler,
         )
 
-    return rx.create(subscribe)
+    return streams.create(subscribe)
 
 
 def instrument_stream(
@@ -195,7 +202,9 @@ class ObservableLike(Protocol[T]):
 
 
 StreamNode: TypeAlias = ObservableLike[T]
-SubscribeCallback: TypeAlias = Callable[[ObserverLike[T], object | None], SubscriptionLike]
+SubscribeCallback: TypeAlias = Callable[
+    [ObserverLike[T], object | None], SubscriptionLike
+]
 
 
 class CallbackSubscription:
@@ -327,8 +336,8 @@ class EventStream(Generic[T]):
 
     def __init__(self) -> None:
         self._lock = Lock()
-        self._subscribers: dict[int, Callable[[T], None]] = {}
-        self._subscriber_snapshot: tuple[Callable[[T], None], ...] = ()
+        self._subscribers: dict[int, ObserverLike[T]] = {}
+        self._subscriber_snapshot: tuple[ObserverLike[T], ...] = ()
         self._next_subscription_id = 0
 
     @property
@@ -339,7 +348,7 @@ class EventStream(Generic[T]):
         with self._lock:
             subscribers = self._subscriber_snapshot
         for subscriber in subscribers:
-            subscriber(value)
+            subscriber.on_next(value)
 
     def on_next(self, value: T) -> None:
         self.emit(value)
@@ -356,23 +365,36 @@ class EventStream(Generic[T]):
         *,
         on_next: Callable[[T], None] | None = None,
     ) -> SubscriptionLike:
-        del on_error, on_completed, scheduler
+        del scheduler
         callback = on_next or observer
         if callback is None:
-            def resolved_callback(_value: T) -> None:
-                return None
+            resolved_observer: ObserverLike[T] = CallableObserver(
+                lambda _value: None,
+                on_error,
+                on_completed,
+            )
         elif callable(callback):
-            resolved_callback = callback
+            resolved_observer = CallableObserver(callback, on_error, on_completed)
         else:
-            resolved_callback = callback.on_next
+            resolved_observer = callback
         with self._lock:
             subscription_id = self._next_subscription_id
             self._next_subscription_id += 1
-            self._subscribers[subscription_id] = resolved_callback
+            self._subscribers[subscription_id] = resolved_observer
             self._subscriber_snapshot = tuple(self._subscribers.values())
-        return CallbackSubscription(
-            lambda: self._remove_subscription(subscription_id)
-        )
+        return CallbackSubscription(lambda: self._remove_subscription(subscription_id))
+
+    def on_error(self, error: Exception) -> None:
+        with self._lock:
+            subscribers = self._subscriber_snapshot
+        for subscriber in subscribers:
+            subscriber.on_error(error)
+
+    def on_completed(self) -> None:
+        with self._lock:
+            subscribers = self._subscriber_snapshot
+        for subscriber in subscribers:
+            subscriber.on_completed()
 
     def _remove_subscription(self, subscription_id: int) -> None:
         with self._lock:
@@ -380,6 +402,43 @@ class EventStream(Generic[T]):
                 return
             self._subscribers.pop(subscription_id)
             self._subscriber_snapshot = tuple(self._subscribers.values())
+
+
+class ReplayValueStream(EventStream[T]):
+    """Hot stream that replays its current value to each new subscriber."""
+
+    def __init__(self, value: T) -> None:
+        super().__init__()
+        self.value = value
+
+    def emit(self, value: T) -> None:
+        self.value = value
+        super().emit(value)
+
+    def subscribe(
+        self,
+        observer: ObserverLike[T] | Callable[[T], None] | None = None,
+        on_error: Callable[[Exception], None] | None = None,
+        on_completed: Callable[[], None] | None = None,
+        scheduler: object | None = None,
+        *,
+        on_next: Callable[[T], None] | None = None,
+    ) -> SubscriptionLike:
+        subscription = super().subscribe(
+            observer,
+            on_error,
+            on_completed,
+            scheduler,
+            on_next=on_next,
+        )
+        callback = on_next or observer
+        if callback is None:
+            return subscription
+        if callable(callback):
+            callback(self.value)
+        else:
+            callback.on_next(self.value)
+        return subscription
 
 
 @dataclass(frozen=True)
@@ -439,7 +498,7 @@ class CoalesceLatestNode(Generic[T]):
                 cancel_timers()
                 generation += 1
                 scheduled_generation = generation
-                timer = reactive_threads.coalesce_scheduler().schedule_relative(
+                timer = datastream_threads.coalesce_scheduler().schedule_relative(
                     window_seconds,
                     lambda *_: flush(scheduled_generation),
                 )
@@ -476,7 +535,7 @@ class CoalesceLatestNode(Generic[T]):
                 on_next,
                 on_error,
                 on_completed,
-                scheduler=reactive_threads.coalesce_scheduler(),
+                scheduler=datastream_threads.coalesce_scheduler(),
             )
 
             def dispose() -> None:
@@ -489,7 +548,7 @@ class CoalesceLatestNode(Generic[T]):
 
             return Disposable(dispose)
 
-        return rx.create(subscribe)
+        return streams.create(subscribe)
 
 
 @dataclass(frozen=True)
@@ -581,7 +640,7 @@ class LoggingNode(Generic[T]):
 
             return Disposable(dispose)
 
-        return rx.create(subscribe)
+        return streams.create(subscribe)
 
 
 @dataclass(frozen=True)
@@ -592,7 +651,7 @@ class ConstantNode(Generic[T]):
     name: str = "constant"
 
     def observable(self) -> StreamNode[T]:
-        return BehaviorSubject(self.value)
+        return ReplayValueStream(self.value)
 
 
 @dataclass(frozen=True)
@@ -602,7 +661,7 @@ class EmptyNode(Generic[T]):
     name: str = "empty"
 
     def observable(self) -> StreamNode[T]:
-        return rx.empty()
+        return streams.empty()
 
     def subscribe(
         self,
@@ -621,12 +680,12 @@ class EmptyNode(Generic[T]):
 
 @dataclass(frozen=True)
 class MainThreadNode(Generic[T]):
-    """Deliver an observable through Manyfold's frame-thread queue."""
+    """Deliver an observable through Manyfold's main-thread queue."""
 
     name: str = "main-thread"
 
     def observable(self, source: ObservableLike[T]) -> Observable[T]:
-        return reactive_threads.deliver_on_frame_thread(cast(Observable[T], source))
+        return datastream_threads.deliver_on_main_thread(cast(Observable[T], source))
 
 
 @dataclass(frozen=True)
@@ -641,7 +700,21 @@ class MergeNode(Generic[T]):
         return cls().observable(*sources)
 
     def observable(self, *sources: ObservableLike[T]) -> StreamNode[T]:
-        return rx.merge(*cast(tuple[Observable[T], ...], sources)).pipe(ops.share())
+        def subscribe(
+            observer: ObserverLike[T], scheduler: object | None = None
+        ) -> SubscriptionLike:
+            subscriptions = tuple(
+                source.subscribe(
+                    observer.on_next,
+                    observer.on_error,
+                    observer.on_completed,
+                    scheduler=scheduler,
+                )
+                for source in sources
+            )
+            return CompositeSubscription(subscriptions)
+
+        return CallbackObservable(subscribe)
 
 
 @dataclass(frozen=True)
@@ -651,9 +724,48 @@ class CombineLatestNode(Generic[T]):
     name: str = "combine-latest"
 
     def observable(self, *sources: ObservableLike[Any]) -> StreamNode[tuple[Any, ...]]:
-        return rx.combine_latest(*cast(tuple[Observable[Any], ...], sources)).pipe(
-            ops.share()
-        )
+        def subscribe(
+            observer: ObserverLike[tuple[Any, ...]],
+            scheduler: object | None = None,
+        ) -> SubscriptionLike:
+            source_count = len(sources)
+            values = [None] * source_count
+            ready = [False] * source_count
+            completed = [False] * source_count
+            lock = Lock()
+
+            def subscribe_source(index: int, source: ObservableLike[Any]) -> Any:
+                def on_next(value: Any) -> None:
+                    with lock:
+                        values[index] = value
+                        ready[index] = True
+                        if not all(ready):
+                            return
+                        emitted = tuple(values)
+                    observer.on_next(emitted)
+
+                def on_completed() -> None:
+                    with lock:
+                        completed[index] = True
+                        if not all(completed):
+                            return
+                    observer.on_completed()
+
+                return source.subscribe(
+                    on_next,
+                    observer.on_error,
+                    on_completed,
+                    scheduler=scheduler,
+                )
+
+            return CompositeSubscription(
+                tuple(
+                    subscribe_source(index, source)
+                    for index, source in enumerate(sources)
+                )
+            )
+
+        return CallbackObservable(subscribe)
 
 
 @dataclass(frozen=True)
@@ -664,7 +776,7 @@ class IntervalNode:
     period: timedelta
 
     def observable(self) -> Observable[int]:
-        return reactive_threads.interval_in_background(self.period, name=self.name)
+        return datastream_threads.interval_in_background(self.period, name=self.name)
 
 
 class FluentStream(Generic[T]):
@@ -673,18 +785,18 @@ class FluentStream(Generic[T]):
 
     def then_on_background_thread(self, *, isolated: bool = False) -> "FluentStream[T]":
         del isolated
-        return FluentStream(
-            reactive_threads.observe_on_background(self._observable)
-        )
+        return FluentStream(datastream_threads.deliver_on_background(self._observable))
 
     def then_on_main_thread(self) -> "FluentStream[T]":
-        return FluentStream(reactive_threads.deliver_on_frame_thread(self._observable))
+        return FluentStream(datastream_threads.deliver_on_main_thread(self._observable))
 
     def then_on_isolated_thread(self, name: str | None = None) -> "FluentStream[T]":
         del name
         return self.then_on_background_thread()
 
-    def map(self, transform: Callable[[T], U], *, name: str | None = None) -> "FluentStream[U]":
+    def map(
+        self, transform: Callable[[T], U], *, name: str | None = None
+    ) -> "FluentStream[U]":
         del name
         return FluentStream(self._observable.pipe(ops.map(transform)))
 
@@ -943,7 +1055,7 @@ class NodeThreadPlacement:
 
     @classmethod
     def main_thread(cls) -> NodeThreadPlacement:
-        """Return a placement that queues node work onto the main frame thread."""
+        """Return a placement that queues node work onto the main main thread."""
         return cls("main")
 
     @classmethod
@@ -1600,7 +1712,7 @@ class ProcessRpcTransport:
                     latest_replay_policy="bounded_history",
                     history_limit=audit_limit if route_ref is routes.audit_log else 1,
                 ),
-        )
+            )
         return cls(graph, routes, endpoint)
 
     @classmethod
@@ -3080,7 +3192,7 @@ class ReactiveReadablePort:
                 raise
             return subscription
 
-        return rx.create(subscribe)
+        return streams.create(subscribe)
 
 
 class ReactiveWritablePort:
@@ -3250,7 +3362,7 @@ class _ThreadPlaceableNode:
         return replace(self, thread_placement=placement)
 
     def on_main_thread(self) -> Any:
-        """Run this node on the main frame thread."""
+        """Run this node on the main main thread."""
         return self.with_thread_placement(NodeThreadPlacement.main_thread())
 
     def on_background_thread(self, *, isolated: bool = False) -> Any:
@@ -3517,7 +3629,7 @@ class RoutePipeline(Generic[T]):
         )
 
     def on_main_thread(self) -> RoutePipeline[T]:
-        """Schedule all following pipeline nodes on the main frame thread."""
+        """Schedule all following pipeline nodes on the main main thread."""
         return self._with_thread_placement(NodeThreadPlacement.main_thread())
 
     def on_background_thread(self, *, isolated: bool = False) -> RoutePipeline[T]:
@@ -3675,21 +3787,11 @@ class Graph:
         self._native_emit_single_if_unrouted_with_lineage_no_parents = (
             self._native_emit_calls.emit_single_if_unrouted_with_lineage_no_parents
         )
-        self._native_emit_single_if_unrouted_with_lineage_no_parents_and_materializers = (
-            self._native_emit_calls.emit_single_if_unrouted_with_lineage_no_parents_and_materializers
-        )
-        self._native_emit_single_if_unrouted_with_lineage_no_parents_and_materializers_drop = (
-            self._native_emit_calls.emit_single_if_unrouted_with_lineage_no_parents_and_materializers_drop
-        )
-        self._native_emit_single_if_unrouted_with_lineage_no_parents_and_materializers_drop_python = (
-            self._native_emit_calls.emit_single_if_unrouted_with_lineage_no_parents_and_materializers_drop_python
-        )
-        self._native_emit_single_if_unrouted_with_lineage_ids_no_parents_and_materializers_drop_python = (
-            self._native_emit_calls.emit_single_if_unrouted_with_lineage_ids_no_parents_and_materializers_drop_python
-        )
-        self._native_emit_single_if_unrouted_with_lineage_ids_no_parents_and_materializer_drop_python = (
-            self._native_emit_calls.emit_single_if_unrouted_with_lineage_ids_no_parents_and_materializer_drop_python
-        )
+        self._native_emit_single_if_unrouted_with_lineage_no_parents_and_materializers = self._native_emit_calls.emit_single_if_unrouted_with_lineage_no_parents_and_materializers
+        self._native_emit_single_if_unrouted_with_lineage_no_parents_and_materializers_drop = self._native_emit_calls.emit_single_if_unrouted_with_lineage_no_parents_and_materializers_drop
+        self._native_emit_single_if_unrouted_with_lineage_no_parents_and_materializers_drop_python = self._native_emit_calls.emit_single_if_unrouted_with_lineage_no_parents_and_materializers_drop_python
+        self._native_emit_single_if_unrouted_with_lineage_ids_no_parents_and_materializers_drop_python = self._native_emit_calls.emit_single_if_unrouted_with_lineage_ids_no_parents_and_materializers_drop_python
+        self._native_emit_single_if_unrouted_with_lineage_ids_no_parents_and_materializer_drop_python = self._native_emit_calls.emit_single_if_unrouted_with_lineage_ids_no_parents_and_materializer_drop_python
         self._native_compile_no_lineage_materializer_drop_profile = (
             self._native_emit_calls.compile_no_lineage_materializer_drop_profile
         )
@@ -3714,7 +3816,9 @@ class Graph:
         self._direct_envelope_snapshots: dict[str, tuple[EnvelopeCallback, ...]] = {}
         self._direct_envelope_subscription_sequence = 0
         self._native_materialize_edges_by_source: dict[str, dict[str, int]] = {}
-        self._native_materialize_route_refs_by_source: dict[str, dict[str, RouteRef]] = {}
+        self._native_materialize_route_refs_by_source: dict[
+            str, dict[str, RouteRef]
+        ] = {}
         self._subscriber_generation = 0
         self._subscriptions: deque[SubscriptionLike] = deque()
         self._history: dict[str, deque[ClosedEnvelope]] = {}
@@ -3982,7 +4086,9 @@ class Graph:
         """Bind an observable source into a route."""
         if isinstance(target, TypedRoute):
             typed_target = target
-        elif isinstance(target, (Source, Sink)) and isinstance(target.route, TypedRoute):
+        elif isinstance(target, (Source, Sink)) and isinstance(
+            target.route, TypedRoute
+        ):
             typed_target = target.route
         else:
             typed_target = None
@@ -4139,9 +4245,7 @@ class Graph:
                 and control_epoch is None
                 and self._native_payload_by_id is not None
             )
-            native_emit_with_materializers = (
-                self._native_emit_single_if_unrouted_with_lineage_no_parents_and_materializers
-            )
+            native_emit_with_materializers = self._native_emit_single_if_unrouted_with_lineage_no_parents_and_materializers
             if (
                 native_materialize_retention
                 and not parent_events
@@ -4238,7 +4342,9 @@ class Graph:
                 ):
                     self._emit_write_debug_event_for_key(target_key)
                 if target_bytes_passthrough:
-                    return TypedEnvelope._trusted(typed_target, single_envelope, encoded)
+                    return TypedEnvelope._trusted(
+                        typed_target, single_envelope, encoded
+                    )
                 return self._decode_envelope(typed_target, single_envelope)
             emitted = self._emit_native(
                 native_target,
@@ -4315,7 +4421,9 @@ class Graph:
             self._record_envelope(
                 emitted_envelope.route,
                 emitted_envelope,
-                route_key=target_key if emitted_envelope.route == native_target else None,
+                route_key=target_key
+                if emitted_envelope.route == native_target
+                else None,
                 producer_id=producer_id,
                 trace_id=trace_id,
                 causality_id=causality_id,
@@ -4349,14 +4457,11 @@ class Graph:
             and not parent_events
             and not self._context_stack
             and "write" not in self._debug_routes
-            and self._subscriber_generation
-            == self._last_nowait_drop_generation
+            and self._subscriber_generation == self._last_nowait_drop_generation
             and self._taint_generation == self._last_nowait_drop_taint_generation
         ):
             if self._last_nowait_drop_native_call_kind == "no_lineage_profile":
-                cached_profile_emit = (
-                    self._last_nowait_drop_no_lineage_profile_emit
-                )
+                cached_profile_emit = self._last_nowait_drop_no_lineage_profile_emit
                 cached_profile = self._last_nowait_drop_no_lineage_profile
                 if (
                     cached_profile is not None
@@ -4370,9 +4475,7 @@ class Graph:
             ):
                 cached_native_call = self._last_nowait_drop_explicit_lineage_native
                 cached_native_target = self._last_nowait_drop_native_target
-                cached_materialized_target = (
-                    self._last_nowait_drop_materialized_target
-                )
+                cached_materialized_target = self._last_nowait_drop_materialized_target
                 if (
                     cached_native_call is not None
                     and cached_native_target is not None
@@ -4399,8 +4502,8 @@ class Graph:
                         causality_id=None,
                         correlation_id=None,
                     )
-                    ):
-                        return
+                ):
+                    return
         trace_id, causality_id, correlation_id, parent_events = (
             self._discard_publish_lineage_args(
                 trace_id=trace_id,
@@ -4429,8 +4532,7 @@ class Graph:
             and not parent_events
             and not self._context_stack
             and "write" not in self._debug_routes
-            and self._subscriber_generation
-            == self._last_nowait_drop_generation
+            and self._subscriber_generation == self._last_nowait_drop_generation
             and self._taint_generation == self._last_nowait_drop_taint_generation
         ):
             if (
@@ -4439,9 +4541,7 @@ class Graph:
                 and causality_id is None
                 and correlation_id is None
             ):
-                cached_profile_emit = (
-                    self._last_nowait_drop_no_lineage_profile_emit
-                )
+                cached_profile_emit = self._last_nowait_drop_no_lineage_profile_emit
                 cached_profile = self._last_nowait_drop_no_lineage_profile
                 if (
                     cached_profile is not None
@@ -4458,9 +4558,7 @@ class Graph:
             ):
                 cached_native_call = self._last_nowait_drop_explicit_lineage_native
                 cached_native_target = self._last_nowait_drop_native_target
-                cached_materialized_target = (
-                    self._last_nowait_drop_materialized_target
-                )
+                cached_materialized_target = self._last_nowait_drop_materialized_target
                 if (
                     cached_native_call is not None
                     and cached_native_target is not None
@@ -4524,8 +4622,7 @@ class Graph:
                     ):
                         return
                     if (
-                        cached_call_kind
-                        in ("no_lineage_profile", "no_lineage_python")
+                        cached_call_kind in ("no_lineage_profile", "no_lineage_python")
                         and cached_materialized_target is not None
                         and cached_native_call is not None
                         and cached_native_call(
@@ -4604,15 +4701,9 @@ class Graph:
                         )
                     ):
                         return
-                    native_drop_ids = (
-                        self._native_emit_single_if_unrouted_with_lineage_ids_no_parents_and_materializers_drop_python
-                    )
-                    native_emit_with_materializers_drop_python = (
-                        self._native_emit_single_if_unrouted_with_lineage_no_parents_and_materializers_drop_python
-                    )
-                    native_emit_with_materializers_drop = (
-                        self._native_emit_single_if_unrouted_with_lineage_no_parents_and_materializers_drop
-                    )
+                    native_drop_ids = self._native_emit_single_if_unrouted_with_lineage_ids_no_parents_and_materializers_drop_python
+                    native_emit_with_materializers_drop_python = self._native_emit_single_if_unrouted_with_lineage_no_parents_and_materializers_drop_python
+                    native_emit_with_materializers_drop = self._native_emit_single_if_unrouted_with_lineage_no_parents_and_materializers_drop
                     if (
                         (
                             native_emit_with_materializers_drop_python is not None
@@ -4675,7 +4766,8 @@ class Graph:
             and "write" not in self._debug_routes
             and self._subscriber_generation
             == self._last_process_local_nowait_generation
-            and self._taint_generation == self._last_process_local_nowait_taint_generation
+            and self._taint_generation
+            == self._last_process_local_nowait_taint_generation
         ):
             cache = self._last_process_local_nowait_cache
             native_emit_single = self._native_emit_single_if_unrouted
@@ -4758,34 +4850,25 @@ class Graph:
         native_drop_no_lineage_single_target_python = (
             self._native_emit_single_if_unrouted_and_materializer_drop_python
         )
-        native_emit_with_materializers_drop = (
-            self._native_emit_single_if_unrouted_with_lineage_no_parents_and_materializers_drop
-        )
-        native_emit_with_materializers_drop_python = (
-            self._native_emit_single_if_unrouted_with_lineage_no_parents_and_materializers_drop_python
-        )
-        native_drop_ids = (
-            self._native_emit_single_if_unrouted_with_lineage_ids_no_parents_and_materializers_drop_python
-        )
-        native_drop_single_target_ids = (
-            self._native_emit_single_if_unrouted_with_lineage_ids_no_parents_and_materializer_drop_python
-        )
+        native_emit_with_materializers_drop = self._native_emit_single_if_unrouted_with_lineage_no_parents_and_materializers_drop
+        native_emit_with_materializers_drop_python = self._native_emit_single_if_unrouted_with_lineage_no_parents_and_materializers_drop_python
+        native_drop_ids = self._native_emit_single_if_unrouted_with_lineage_ids_no_parents_and_materializers_drop_python
+        native_drop_single_target_ids = self._native_emit_single_if_unrouted_with_lineage_ids_no_parents_and_materializer_drop_python
         if native_materialize_retention and not parent_events:
             materialized_target_keys = tuple(
                 self._native_materialize_edges_by_source.get(target_key, ())
             )
-            materialized_target_refs = self._native_materialize_route_refs_by_source.get(
-                target_key, {}
+            materialized_target_refs = (
+                self._native_materialize_route_refs_by_source.get(target_key, {})
             )
             single_materialized_target = (
                 materialized_target_refs.get(materialized_target_keys[0])
                 if len(materialized_target_keys) == 1
                 else None
             )
-            delivery_subscribed = (
-                self._route_has_delivery_subscribers(target_key)
-                or self._routes_have_delivery_subscribers(materialized_target_keys)
-            )
+            delivery_subscribed = self._route_has_delivery_subscribers(
+                target_key
+            ) or self._routes_have_delivery_subscribers(materialized_target_keys)
             if not delivery_subscribed:
                 if (
                     producer is None
@@ -4869,10 +4952,7 @@ class Graph:
                             correlation_id=correlation_id,
                         )
                     )
-        if (
-            native_materialize_retention
-            and native_materialized_drop_emitted
-        ):
+        if native_materialize_retention and native_materialized_drop_emitted:
             producer_id = "python" if producer is None else producer.producer_id
             self._record_native_materialized_drop(
                 target_key,
@@ -4892,9 +4972,7 @@ class Graph:
                 self._last_nowait_drop_native_target = native_target
                 self._last_nowait_drop_key = target_key
                 self._last_nowait_drop_target_keys = materialized_target_keys
-                self._last_nowait_drop_materialized_target = (
-                    single_materialized_target
-                )
+                self._last_nowait_drop_materialized_target = single_materialized_target
                 self._last_nowait_drop_generation = self._subscriber_generation
                 self._last_nowait_drop_taint_generation = self._taint_generation
                 if (
@@ -4906,10 +4984,7 @@ class Graph:
                     and single_materialized_target is not None
                 ):
                     profile_key = (target_key, materialized_target_keys)
-                    if (
-                        self._last_nowait_drop_no_lineage_profile_key
-                        != profile_key
-                    ):
+                    if self._last_nowait_drop_no_lineage_profile_key != profile_key:
                         self._release_last_nowait_drop_no_lineage_profile()
                     if self._last_nowait_drop_no_lineage_profile is None:
                         self._last_nowait_drop_no_lineage_profile = (
@@ -4918,9 +4993,7 @@ class Graph:
                                 single_materialized_target,
                             )
                         )
-                        self._last_nowait_drop_no_lineage_profile_emit = (
-                            self._native_emit_no_lineage_materializer_drop_profile_python
-                        )
+                        self._last_nowait_drop_no_lineage_profile_emit = self._native_emit_no_lineage_materializer_drop_profile_python
                         self._last_nowait_drop_no_lineage_profile_key = profile_key
                     self._last_nowait_drop_native_call_kind = "no_lineage_profile"
                     self._last_nowait_drop_explicit_lineage_native = (
@@ -4969,9 +5042,7 @@ class Graph:
                         native_emit_with_materializers_drop
                     )
             return
-        native_emit_with_materializers = (
-            self._native_emit_single_if_unrouted_with_lineage_no_parents_and_materializers
-        )
+        native_emit_with_materializers = self._native_emit_single_if_unrouted_with_lineage_no_parents_and_materializers
         if (
             native_materialize_retention
             and not parent_events
@@ -5769,7 +5840,9 @@ class Graph:
         return PayloadDemandSnapshot(
             route_display=key,
             metadata_events=0 if retention is None else retention.metadata_event_count,
-            payload_open_requests=0 if stats is None else stats["payload_open_requests"],
+            payload_open_requests=0
+            if stats is None
+            else stats["payload_open_requests"],
             lazy_source_opens=0 if stats is None else stats["lazy_source_opens"],
             materialized_payload_bytes=(
                 0 if stats is None else stats["materialized_payload_bytes"]
@@ -6130,7 +6203,9 @@ class Graph:
 
     def writers(self, route_ref: RouteLike) -> Iterator[str]:
         """Return distinct producer ids that have written to a route."""
-        return iter(tuple(sorted(self._recent_writers_for_key(self._route_key(route_ref)))))
+        return iter(
+            tuple(sorted(self._recent_writers_for_key(self._route_key(route_ref))))
+        )
 
     def export_route(
         self, route_ref: RouteLike, *, visibility: str = "exported"
@@ -6461,7 +6536,7 @@ class Graph:
                 raise
             return source_sub
 
-        return rx.create(subscribe)
+        return streams.create(subscribe)
 
     def window(
         self,
@@ -6534,7 +6609,7 @@ class Graph:
                 raise
             return subscription
 
-        return rx.create(subscribe)
+        return streams.create(subscribe)
 
     def window_aggregate(
         self,
@@ -6574,7 +6649,7 @@ class Graph:
                 scheduler=scheduler,
             )
 
-        return rx.create(subscribe)
+        return streams.create(subscribe)
 
     def window_by_time(
         self,
@@ -6732,7 +6807,7 @@ class Graph:
                 raise
             return subscription
 
-        return rx.create(subscribe)
+        return streams.create(subscribe)
 
     def window_aggregate_by_time(
         self,
@@ -6770,7 +6845,7 @@ class Graph:
             )
             return windowed.subscribe(on_window, scheduler=scheduler)
 
-        return rx.create(subscribe)
+        return streams.create(subscribe)
 
     def join_latest(
         self,
@@ -6822,7 +6897,7 @@ class Graph:
                 raise
             return subscription
 
-        return rx.create(subscribe)
+        return streams.create(subscribe)
 
     def lookup_join(
         self,
@@ -6875,7 +6950,7 @@ class Graph:
                 raise
             return subscription
 
-        return rx.create(subscribe)
+        return streams.create(subscribe)
 
     def interval_join(
         self,
@@ -6964,7 +7039,7 @@ class Graph:
 
             return _CompositeSubscription((left_sub, right_sub))
 
-        return rx.create(subscribe)
+        return streams.create(subscribe)
 
     def materialize(
         self,
@@ -7533,7 +7608,9 @@ class Graph:
             return self._last_publish_typed_target
         if isinstance(target, TypedRoute):
             typed_target = target
-        elif isinstance(target, (Source, Sink)) and isinstance(target.route, TypedRoute):
+        elif isinstance(target, (Source, Sink)) and isinstance(
+            target.route, TypedRoute
+        ):
             typed_target = target.route
         else:
             typed_target = None
@@ -7541,7 +7618,9 @@ class Graph:
         self._last_publish_typed_target = typed_target
         return typed_target
 
-    def _typed_publish_target(self, typed_target: TypedRoute[Any]) -> TypedPublishTarget:
+    def _typed_publish_target(
+        self, typed_target: TypedRoute[Any]
+    ) -> TypedPublishTarget:
         target_key = typed_target.route_display
         if (
             self._last_typed_route_runtime_key == target_key
@@ -8420,7 +8499,9 @@ class Graph:
         if payload_policy == "non_replayable" and history_snapshot:
             retained_payload_ids = {history_snapshot[-1].payload_id}
         elif history_snapshot:
-            retained_payload_ids = {envelope.payload_id for envelope in history_snapshot}
+            retained_payload_ids = {
+                envelope.payload_id for envelope in history_snapshot
+            }
         elif route_payload_order is not None:
             retained_payload_ids = set(route_payload_order)
         else:
@@ -8515,9 +8596,15 @@ class Graph:
     ) -> ClosedEnvelope:
         """Persist envelope-derived bookkeeping before notifying observers."""
         native_route = (
-            route_ref if isinstance(route_ref, RouteRef) else self._coerce_route_ref(route_ref)
+            route_ref
+            if isinstance(route_ref, RouteRef)
+            else self._coerce_route_ref(route_ref)
         )
-        key = route_key if route_key is not None else self._route_key_for_ref(native_route)
+        key = (
+            route_key
+            if route_key is not None
+            else self._route_key_for_ref(native_route)
+        )
         retention = self._resolved_retention_by_key.get(key)
         if retention is None:
             retention = self._retention_policy_for_key(native_route, key)
@@ -8659,9 +8746,7 @@ class Graph:
     def _release_last_nowait_drop_no_lineage_profile(self) -> None:
         profile = self._last_nowait_drop_no_lineage_profile
         if profile is not None:
-            release_profile = (
-                self._native_release_no_lineage_materializer_drop_profile
-            )
+            release_profile = self._native_release_no_lineage_materializer_drop_profile
             if release_profile is not None:
                 release_profile(profile)
         self._last_nowait_drop_no_lineage_profile = None
@@ -8832,7 +8917,9 @@ class Graph:
         else:
             native_payload_by_id = self._native_payload_by_id
             native_payload = (
-                None if native_payload_by_id is None else native_payload_by_id(payload_id)
+                None
+                if native_payload_by_id is None
+                else native_payload_by_id(payload_id)
             )
             if native_payload is not None:
                 payload = bytes(native_payload)
@@ -8875,7 +8962,9 @@ class Graph:
             if payload is not None:
                 return TypedEnvelope._trusted(route_ref, envelope, cast(T, payload))
         payload = self._payload_bytes(route_ref, envelope)
-        return TypedEnvelope._trusted(route_ref, envelope, route_ref.schema.decode(payload))
+        return TypedEnvelope._trusted(
+            route_ref, envelope, route_ref.schema.decode(payload)
+        )
 
     def _known_bytes_passthrough_payload(
         self,
@@ -9003,7 +9092,6 @@ class Graph:
     def _default_lineage_parts(route_display: str, seq_source: int) -> LineageParts:
         event_display = f"{route_display}@{seq_source}"
         return (event_display, event_display, None, route_display, seq_source)
-
 
     def _remember_stream_taints(
         self,
@@ -9974,7 +10062,9 @@ class Graph:
         if native_emit is not None:
             return cast(
                 list[ClosedEnvelope],
-                native_emit(route_ref, payload, producer=producer, control_epoch=control_epoch),
+                native_emit(
+                    route_ref, payload, producer=producer, control_epoch=control_epoch
+                ),
             )
         envelope = self._graph.writable_port(route_ref).write(
             payload,
@@ -10087,7 +10177,7 @@ class Graph:
             )
 
         return self._thread_placed_observable(
-            rx.create(subscribe),
+            streams.create(subscribe),
             thread_placement,
         )
 
@@ -10150,7 +10240,7 @@ class Graph:
             )
 
         return self._thread_placed_observable(
-            rx.create(subscribe),
+            streams.create(subscribe),
             thread_placement,
         )
 
@@ -10162,7 +10252,7 @@ class Graph:
         if placement is None:
             return observable
         if placement.kind == "main":
-            return reactive_threads.deliver_on_frame_thread(observable)
+            return datastream_threads.deliver_on_main_thread(observable)
 
         def subscribe(
             observer: ObserverLike[Any],
@@ -10178,24 +10268,24 @@ class Graph:
                 owned_scheduler=thread_scheduler if owns_scheduler else None,
             )
 
-        return rx.create(subscribe)
+        return streams.create(subscribe)
 
     def _thread_scheduler_for(
         self,
         placement: NodeThreadPlacement,
     ) -> tuple[object, bool]:
         if placement.kind == "background":
-            return reactive_threads.background_scheduler(), False
+            return datastream_threads.background_scheduler(), False
         if placement.kind == "pooled":
             if placement.scheduler_name == "blocking_io":
-                return reactive_threads.blocking_io_scheduler(), False
+                return datastream_threads.blocking_io_scheduler(), False
             if placement.scheduler_name == "input":
-                return reactive_threads.input_scheduler(), False
-            return reactive_threads.background_scheduler(), False
+                return datastream_threads.input_scheduler(), False
+            return datastream_threads.background_scheduler(), False
         thread_name = placement.thread_name or self._next_pipeline_node_name("isolated")
         return (
             EventLoopScheduler(
-                thread_factory=reactive_threads.create_default_thread_factory(
+                thread_factory=datastream_threads.create_default_thread_factory(
                     thread_name,
                 )
             ),
@@ -10643,7 +10733,7 @@ class Graph:
 
 
 def _fluent_interval_observable(period: timedelta) -> Observable[int]:
-    period = reactive_threads._require_positive_timedelta(period)
+    period = datastream_threads._require_positive_timedelta(period)
     seconds = period.total_seconds()
 
     def _subscribe(
@@ -10688,7 +10778,7 @@ def _fluent_interval_observable(period: timedelta) -> Observable[int]:
         _schedule_next()
         return Disposable(_dispose)
 
-    return rx.create(_subscribe)
+    return streams.create(_subscribe)
 
 
 def _require_non_empty_text(value: str, field_name: str) -> None:

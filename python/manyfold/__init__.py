@@ -34,9 +34,6 @@ _EXPORTS_BY_MODULE = {
         "bridge_version",
         "parse_sql_statement",
     ),
-    "manyfold._rx.subject": (
-        "BehaviorSubject",
-    ),
     "manyfold.components": (
         "Consensus",
         "ConsensusRoutes",
@@ -155,10 +152,7 @@ _EXPORTS_BY_MODULE = {
         "sink",
         "source",
     ),
-    "manyfold.reactive_threads": (
-        "drain_frame_thread_queue",
-        "shutdown",
-    ),
+    "manyfold.datastream_threads": ("drain_main_thread_queue",),
     "manyfold.reference_examples": (
         "REFERENCE_EXAMPLE_SUITE",
         "ReferenceExample",
@@ -213,9 +207,7 @@ _EXPORTS_BY_MODULE = {
         "sensor_sample_schema",
         "xor_checksum",
     ),
-    "manyfold.stats": (
-        "Average",
-    ),
+    "manyfold.stats": ("Average",),
 }
 
 _ALIASED_EXPORTS = {
@@ -249,7 +241,6 @@ def __dir__() -> list[str]:
 __all__ = (
     "Average",
     "BackoffPolicy",
-    "BehaviorSubject",
     "BoundedRingBuffer",
     "CallbackNode",
     "CallbackObservable",
@@ -420,7 +411,7 @@ __all__ = (
     "dependencies_of",
     "dependency_closure_of",
     "dependents_of",
-    "drain_frame_thread_queue",
+    "drain_main_thread_queue",
     "get_lego",
     "health_status_schema",
     "implemented_reference_examples",
@@ -433,7 +424,6 @@ __all__ = (
     "route",
     "sensor_event_schema",
     "sensor_sample_schema",
-    "shutdown",
     "sink",
     "source",
     "xor_checksum",

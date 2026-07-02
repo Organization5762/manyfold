@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import deque
 from typing import TypedDict
 
-import reactivex as rx
+import manyfold.streams as streams
 from manyfold import (
     Graph,
     Layer,
@@ -41,7 +41,7 @@ def run_example() -> ReadThenWriteNextEpochStepExampleResult:
     )
     step = ReadThenWriteNextEpochStep.map(
         name="ReadThenWriteNextEpochSpeedStep",
-        read=rx.from_iterable([b"slow", b"fast"]),
+        read=streams.from_iterable([b"slow", b"fast"]),
         output=staged_route,
         transform=bytes.upper,
     )

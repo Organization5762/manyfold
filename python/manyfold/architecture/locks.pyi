@@ -22,4 +22,7 @@ class ManyFoldLockLease:
     def __enter__(self) -> ManyFoldLockLease: ...
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None: ...
 
+Lock = ManyFoldLock
+LockLease = ManyFoldLockLease
+
 __all__: list[str]

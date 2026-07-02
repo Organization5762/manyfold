@@ -33,7 +33,6 @@ from ._manyfold_rust import (
     SchemaRef,
     Variant,
 )
-from ._rx import Observable, operators as ops
 
 T = TypeVar("T")
 TAccepted = TypeVar("TAccepted")
@@ -174,6 +173,17 @@ class ProtobufMessageType(Protocol[TProto]):
 @runtime_checkable
 class SubscriptionLike(Protocol):
     def dispose(self) -> None: ...
+
+
+@runtime_checkable
+class StreamLike(Protocol[T]):
+    def subscribe(
+        self,
+        observer: Callable[[T], None] | object | None = None,
+        on_error: Callable[[Exception], None] | None = None,
+        on_completed: Callable[[], None] | None = None,
+        scheduler: object | None = None,
+    ) -> SubscriptionLike: ...
 
 
 @dataclass(frozen=True)
@@ -723,9 +733,9 @@ class ReadThenWriteNextEpochStep(Generic[TRead, TWrite]):
     """Composable shared-stream step with one input stream and one output route."""
 
     name: str
-    read: Observable[TRead]
+    read: StreamLike[TRead]
     output: TypedRoute[TWrite]
-    write: Observable[TWrite]
+    write: StreamLike[TWrite]
     _connect: Callable[[], SubscriptionLike]
     _connection: SubscriptionLike | None = None
 
@@ -745,17 +755,14 @@ class ReadThenWriteNextEpochStep(Generic[TRead, TWrite]):
         cls,
         *,
         name: str,
-        read: Observable[TRead],
+        read: StreamLike[TRead],
         output: TypedRoute[TWrite],
         transform: Callable[[TRead], TWrite],
     ) -> ReadThenWriteNextEpochStep[TRead, TWrite]:
         """Map one observable input into one typed output stream."""
         if not callable(transform):
             raise ValueError("transform must be callable")
-        write_stream = read.pipe(
-            ops.map(transform),
-            ops.publish(),
-        )
+        write_stream = _ConnectableMappedStream(read, transform)
         return cls(
             name=name,
             read=read,
@@ -826,8 +833,8 @@ def _enum_members(enum_type: type[Any]) -> tuple[Any, ...]:
 
 
 def _require_observable(value: object, field: str) -> None:
-    if not isinstance(value, Observable):
-        raise ValueError(f"{field} must be an Observable")
+    if not isinstance(value, StreamLike):
+        raise ValueError(f"{field} must be a subscribable stream")
 
 
 def _require_subscription(value: object, field: str) -> None:
@@ -881,7 +888,9 @@ def _schema_from_type(
 
 def _encode_dataclass_value(value_type: type[T], value: object) -> bytes:
     if not isinstance(value, value_type):
-        raise ValueError(f"dataclass contract values must be {_type_display(value_type)}")
+        raise ValueError(
+            f"dataclass contract values must be {_type_display(value_type)}"
+        )
     payload = {
         field_value.name: getattr(value, field_value.name)
         for field_value in fields(value_type)
@@ -1044,6 +1053,71 @@ def _missing_route_parts(
         ("variant", variant),
     )
     return tuple(name for name, value in parts if value is None)
+
+
+class _CallbackSubscription:
+    def __init__(self, dispose: Callable[[], None]) -> None:
+        self._dispose = dispose
+        self._disposed = False
+
+    def dispose(self) -> None:
+        if self._disposed:
+            return
+        self._disposed = True
+        self._dispose()
+
+
+class _ConnectableMappedStream(Generic[TRead, TWrite]):
+    def __init__(
+        self,
+        source: StreamLike[TRead],
+        transform: Callable[[TRead], TWrite],
+    ) -> None:
+        self._source = source
+        self._transform = transform
+        self._lock = Lock()
+        self._subscribers: dict[int, Callable[[TWrite], None]] = {}
+        self._subscriber_snapshot: tuple[Callable[[TWrite], None], ...] = ()
+        self._next_subscription_id = 0
+
+    def subscribe(
+        self,
+        observer: Callable[[TWrite], None] | object | None = None,
+        on_error: Callable[[Exception], None] | None = None,
+        on_completed: Callable[[], None] | None = None,
+        scheduler: object | None = None,
+    ) -> SubscriptionLike:
+        del on_error, on_completed, scheduler
+        if observer is None:
+
+            def callback(_value: TWrite) -> None:
+                return None
+        elif callable(observer):
+            callback = observer
+        else:
+            callback = getattr(observer, "on_next")
+        with self._lock:
+            subscription_id = self._next_subscription_id
+            self._next_subscription_id += 1
+            self._subscribers[subscription_id] = callback
+            self._subscriber_snapshot = tuple(self._subscribers.values())
+        return _CallbackSubscription(lambda: self._unsubscribe(subscription_id))
+
+    def connect(self) -> SubscriptionLike:
+        return self._source.subscribe(lambda value: self._emit(self._transform(value)))
+
+    def _emit(self, value: TWrite) -> None:
+        with self._lock:
+            subscribers = self._subscriber_snapshot
+        for subscriber in subscribers:
+            subscriber(value)
+
+    def _unsubscribe(self, subscription_id: int) -> None:
+        with self._lock:
+            if subscription_id not in self._subscribers:
+                return
+            self._subscribers.pop(subscription_id)
+            self._subscriber_snapshot = tuple(self._subscribers.values())
 
 
 @dataclass(frozen=True)

@@ -92,6 +92,49 @@ Manyfold-native architecture elements remain available from
 stream API is the primary application surface. Behavior-heavy substrates such
 as PubSub stay backed by the runtime implementation.
 
+## Observability
+
+Metrics and logs use the same architecture shape as application data. The
+Rust runtime owns the observability records, a destination owns PubSub topics,
+and the current process attaches as a Manyfold worker. The default metric
+destination emits OpenTelemetry-compatible histogram records without requiring
+an OpenTelemetry package in-process:
+
+```python
+from manyfold.architecture import default_metrics_destination
+
+metrics = default_metrics_destination()
+metrics.record_histogram(
+    "pubsub.publish.duration",
+    0.004,
+    unit="s",
+    attributes={"topic": "heart.input"},
+)
+```
+
+The default log destination writes ordinary process logs to a rotating local
+file and can collect recent lines into a PubSub log topic. Rotation defaults to
+100 MB per file with 5 backup files:
+
+```python
+import logging
+
+from manyfold.architecture import default_log_destination
+
+logs = default_log_destination()
+handler = logs.configure_root_logger()
+logging.getLogger("heart").info("renderer started")
+handler.flush()
+records = logs.collect_local_logs(limit=1)
+print("renderer started" in records[0].body)
+```
+
+Output:
+
+```text
+True
+```
+
 ## Observe
 
 ```python

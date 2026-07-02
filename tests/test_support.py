@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import json
 import os
 import re
 import struct
 import sys
+import threading
 import time
 import types
 from collections.abc import Iterable
@@ -25,48 +27,10 @@ MODULES_TO_RESET = (
     "manyfold.lego_catalog",
     "manyfold.sensor_io",
     "manyfold.reference_examples",
-    "manyfold.reactive_threads",
+    "manyfold.streams",
+    "manyfold.datastream_threads",
     "manyfold.stats",
-    "manyfold._rx",
-    "manyfold._rx.abc",
-    "manyfold._rx.disposable",
-    "manyfold._rx.operators",
-    "manyfold._rx.scheduler",
-    "manyfold._rx.subject",
-    "manyfold._rx.subject.asyncsubject",
-    "manyfold._rx.subject.behaviorsubject",
-    "manyfold._rx.subject.replaysubject",
-    "manyfold._rx.subject.subject",
-    "manyfold._rx.testing",
-    "manyfold._rx.testing.marbles",
-    "manyfold._rx.typing",
-    "manyfold.rx",
-    "manyfold.rx.abc",
-    "manyfold.rx.disposable",
-    "manyfold.rx.operators",
-    "manyfold.rx.scheduler",
-    "manyfold.rx.subject",
-    "manyfold.rx.subject.asyncsubject",
-    "manyfold.rx.subject.behaviorsubject",
-    "manyfold.rx.subject.replaysubject",
-    "manyfold.rx.subject.subject",
-    "manyfold.rx.testing",
-    "manyfold.rx.testing.marbles",
-    "manyfold.rx.typing",
     "manyfold._manyfold_rust",
-    "reactivex",
-    "reactivex.abc",
-    "reactivex.disposable",
-    "reactivex.scheduler",
-    "reactivex.subject",
-    "reactivex.subject.asyncsubject",
-    "reactivex.subject.behaviorsubject",
-    "reactivex.subject.replaysubject",
-    "reactivex.subject.subject",
-    "reactivex.testing",
-    "reactivex.testing.marbles",
-    "reactivex.typing",
-    "reactivex.operators",
 )
 _MISSING_MODULE = object()
 UV_BIN_DIR = Path(os.environ.get("UV_BIN_DIR", Path.home() / ".local" / "bin"))
@@ -81,318 +45,7 @@ def subprocess_test_env() -> dict[str, str]:
     return env
 
 
-def install_reactivex_stub() -> None:
-    if _reactivex_available():
-        return
-
-    if (
-        "reactivex" in sys.modules
-        and "reactivex.subject" in sys.modules
-        and "reactivex.operators" in sys.modules
-    ):
-        return
-
-    class Disposable:
-        def __init__(self, dispose=None):
-            self._dispose = dispose or (lambda: None)
-
-        def dispose(self) -> None:
-            self._dispose()
-
-    class _CallbackObserver:
-        def __init__(self, on_next, on_error=None, on_completed=None):
-            self.on_next = on_next or (lambda _value: None)
-            self._on_error = on_error
-            self._on_completed = on_completed
-
-        def on_error(self, error):
-            if self._on_error is not None:
-                self._on_error(error)
-                return
-            raise error
-
-        def on_completed(self):
-            if self._on_completed is not None:
-                self._on_completed()
-
-    class Observable:
-        def __init__(self, subscribe):
-            self._subscribe = subscribe
-
-        def __class_getitem__(cls, item):
-            return cls
-
-        def subscribe(
-            self,
-            observer=None,
-            on_error=None,
-            on_completed=None,
-            scheduler=None,
-        ):
-            if callable(observer) and not hasattr(observer, "on_next"):
-                observer = _CallbackObserver(observer, on_error, on_completed)
-            return self._subscribe(observer, scheduler)
-
-        def pipe(self, *transforms):
-            observable = self
-            for transform in transforms:
-                observable = transform(observable)
-            return observable
-
-    class Subject:
-        def __init__(self):
-            self._observers = []
-
-        def subscribe(
-            self,
-            observer=None,
-            on_error=None,
-            on_completed=None,
-            scheduler=None,
-        ):
-            if callable(observer) and not hasattr(observer, "on_next"):
-                observer = _CallbackObserver(observer, on_error, on_completed)
-            self._observers.append(observer)
-
-            def unsubscribe() -> None:
-                if observer in self._observers:
-                    self._observers.remove(observer)
-
-            return Disposable(unsubscribe)
-
-        def on_next(self, value) -> None:
-            for observer in list(self._observers):
-                observer.on_next(value)
-
-    class BehaviorSubject(Subject):
-        def __init__(self, value):
-            super().__init__()
-            self._value = value
-
-        def subscribe(
-            self,
-            observer=None,
-            on_error=None,
-            on_completed=None,
-            scheduler=None,
-        ):
-            subscription = super().subscribe(
-                observer,
-                on_error,
-                on_completed,
-                scheduler=scheduler,
-            )
-            if callable(observer) and not hasattr(observer, "on_next"):
-                observer(self._value)
-            else:
-                observer.on_next(self._value)
-            return subscription
-
-        def on_next(self, value) -> None:
-            self._value = value
-            super().on_next(value)
-
-    class ReplaySubject(Subject):
-        pass
-
-    class AsyncSubject(Subject):
-        pass
-
-    class TimeoutScheduler:
-        pass
-
-    def create(subscribe):
-        return Observable(subscribe)
-
-    def from_iterable(items):
-        def subscribe(observer=None, scheduler=None):
-            for item in items:
-                observer.on_next(item)
-            observer.on_completed()
-            return Disposable()
-
-        return Observable(subscribe)
-
-    def op_map(mapper):
-        def transform(source):
-            def subscribe(observer=None, scheduler=None):
-                return source.subscribe(
-                    lambda item: observer.on_next(mapper(item)),
-                    scheduler=scheduler,
-                )
-
-            return Observable(subscribe)
-
-        return transform
-
-    def op_filter(predicate):
-        def transform(source):
-            def subscribe(observer=None, scheduler=None):
-                return source.subscribe(
-                    lambda item: observer.on_next(item) if predicate(item) else None,
-                    scheduler=scheduler,
-                )
-
-            return Observable(subscribe)
-
-        return transform
-
-    def op_distinct():
-        def transform(source):
-            seen = []
-
-            def subscribe(observer=None, scheduler=None):
-                def on_next(item):
-                    if item not in seen:
-                        seen.append(item)
-                        observer.on_next(item)
-
-                return source.subscribe(on_next, scheduler=scheduler)
-
-            return Observable(subscribe)
-
-        return transform
-
-    def op_publish():
-        class ConnectableObservable(Observable):
-            def __init__(self, source):
-                self._source = source
-                self._observers = []
-                super().__init__(self._subscribe_connectable)
-
-            def connect(self):
-                return self._source.subscribe(
-                    lambda item: [
-                        observer.on_next(item) for observer in list(self._observers)
-                    ]
-                )
-
-            def _subscribe_connectable(self, observer=None, scheduler=None):
-                if callable(observer) and not hasattr(observer, "on_next"):
-                    observer = _CallbackObserver(observer)
-                self._observers.append(observer)
-
-                def unsubscribe() -> None:
-                    if observer in self._observers:
-                        self._observers.remove(observer)
-
-                return Disposable(unsubscribe)
-
-        def transform(source):
-            return ConnectableObservable(source)
-
-        return transform
-
-    rx_module = types.ModuleType("reactivex")
-    rx_module.Observable = Observable
-    rx_module.create = create
-    rx_module.from_iterable = from_iterable
-    for name in (
-        "amb",
-        "case",
-        "catch",
-        "combine_latest",
-        "concat",
-        "defer",
-        "empty",
-        "fork_join",
-        "from_callable",
-        "from_callback",
-        "from_future",
-        "from_marbles",
-        "generate",
-        "generate_with_relative_time",
-        "if_then",
-        "interval",
-        "just",
-        "merge",
-        "never",
-        "of",
-        "pipe",
-        "range",
-        "repeat_value",
-        "return_value",
-        "start",
-        "start_async",
-        "throw",
-        "timer",
-        "to_async",
-        "using",
-        "with_latest_from",
-    ):
-        setattr(
-            rx_module, name, lambda *args, **kwargs: Observable(lambda *_: Disposable())
-        )
-    abc_module = types.ModuleType("reactivex.abc")
-    disposable_module = types.ModuleType("reactivex.disposable")
-    disposable_module.Disposable = Disposable
-    scheduler_module = types.ModuleType("reactivex.scheduler")
-    scheduler_module.TimeoutScheduler = TimeoutScheduler
-    subject_module = types.ModuleType("reactivex.subject")
-    subject_module.Subject = Subject
-    subject_module.BehaviorSubject = BehaviorSubject
-    subject_module.ReplaySubject = ReplaySubject
-    subject_module.AsyncSubject = AsyncSubject
-    subject_subject_module = types.ModuleType("reactivex.subject.subject")
-    subject_subject_module.Subject = Subject
-    behavior_subject_module = types.ModuleType("reactivex.subject.behaviorsubject")
-    behavior_subject_module.BehaviorSubject = BehaviorSubject
-    replay_subject_module = types.ModuleType("reactivex.subject.replaysubject")
-    replay_subject_module.ReplaySubject = ReplaySubject
-    async_subject_module = types.ModuleType("reactivex.subject.asyncsubject")
-    async_subject_module.AsyncSubject = AsyncSubject
-    testing_module = types.ModuleType("reactivex.testing")
-    marbles_module = types.ModuleType("reactivex.testing.marbles")
-
-    def marbles_testing():
-        class MarbleContext:
-            def __enter__(self):
-                return (
-                    lambda source: source,
-                    lambda source: source,
-                    lambda source: source,
-                    lambda expected: expected,
-                )
-
-            def __exit__(self, exc_type, exc, tb):
-                return False
-
-        return MarbleContext()
-
-    marbles_module.marbles_testing = marbles_testing
-    typing_module = types.ModuleType("reactivex.typing")
-    typing_module.StartableTarget = object
-    ops_module = types.ModuleType("reactivex.operators")
-    ops_module.filter = op_filter
-    ops_module.map = op_map
-    ops_module.distinct = op_distinct
-    ops_module.publish = op_publish
-    rx_module.abc = abc_module
-    rx_module.disposable = disposable_module
-    rx_module.operators = ops_module
-    rx_module.scheduler = scheduler_module
-    rx_module.subject = subject_module
-    rx_module.testing = testing_module
-    rx_module.typing = typing_module
-    sys.modules["reactivex"] = rx_module
-    sys.modules["reactivex.abc"] = abc_module
-    sys.modules["reactivex.disposable"] = disposable_module
-    sys.modules["reactivex.scheduler"] = scheduler_module
-    sys.modules["reactivex.subject"] = subject_module
-    sys.modules["reactivex.subject.subject"] = subject_subject_module
-    sys.modules["reactivex.subject.behaviorsubject"] = behavior_subject_module
-    sys.modules["reactivex.subject.replaysubject"] = replay_subject_module
-    sys.modules["reactivex.subject.asyncsubject"] = async_subject_module
-    sys.modules["reactivex.testing"] = testing_module
-    sys.modules["reactivex.testing.marbles"] = marbles_module
-    sys.modules["reactivex.typing"] = typing_module
-    sys.modules["reactivex.operators"] = ops_module
-
-
 def install_manyfold_rust_stub() -> None:
-    if "manyfold._manyfold_rust" in sys.modules:
-        return
-
     rust_module = types.ModuleType("manyfold._manyfold_rust")
 
     def parse_sql_statement(sql: str) -> dict[str, str]:
@@ -519,6 +172,62 @@ def install_manyfold_rust_stub() -> None:
     @dataclass(frozen=True)
     class ClockDomainRef:
         clock_domain_id: str
+
+    class ManyFoldLockLease:
+        def __init__(
+            self,
+            lock: "ManyFoldLock",
+            *,
+            owner: str | None = None,
+        ) -> None:
+            self._lock = lock
+            self.lock_name = lock.name
+            self.owner = owner
+            self.is_released = False
+
+        def __enter__(self) -> "ManyFoldLockLease":
+            return self
+
+        def __exit__(self, *_exc: object) -> None:
+            self.release()
+
+        def release(self) -> None:
+            if self.is_released:
+                return
+            self.is_released = True
+            self._lock._release()
+
+    class ManyFoldLock:
+        _registry: dict[str, "ManyFoldLock"] = {}
+        _registry_lock = threading.Lock()
+
+        def __init__(self, name: str) -> None:
+            self.name = name.strip()
+            self.path = f"stub://manyfold-lock/{self.name}"
+            self._lock = threading.Lock()
+
+        @classmethod
+        def for_resource(cls, name: str) -> "ManyFoldLock":
+            normalized = name.strip()
+            with cls._registry_lock:
+                lock = cls._registry.get(normalized)
+                if lock is None:
+                    lock = cls(normalized)
+                    cls._registry[normalized] = lock
+                return lock
+
+        def take(
+            self,
+            *,
+            owner: str | None = None,
+            blocking: bool = True,
+        ) -> ManyFoldLockLease:
+            if not self._lock.acquire(blocking=blocking):
+                raise RuntimeError(f"lock {self.name!r} is already held")
+            return ManyFoldLockLease(self, owner=owner)
+
+        def _release(self) -> None:
+            self._lock.release()
 
     @dataclass(frozen=True)
     class TaintMark:
@@ -849,7 +558,9 @@ def install_manyfold_rust_stub() -> None:
                 return None
             if any(source == route.display() for source, _ in self._edges):
                 return None
-            if any(mailbox.ingress._route == route for mailbox in self._mailboxes.values()):
+            if any(
+                mailbox.ingress._route == route for mailbox in self._mailboxes.values()
+            ):
                 return None
             return self.writable_port(route).write(
                 payload,
@@ -992,14 +703,16 @@ def install_manyfold_rust_stub() -> None:
             causality_id=None,
             correlation_id=None,
         ):
-            emitted = self.emit_single_if_unrouted_with_lineage_no_parents_and_materializers(
-                route,
-                payload,
-                producer=producer,
-                control_epoch=control_epoch,
-                trace_id=trace_id,
-                causality_id=causality_id,
-                correlation_id=correlation_id,
+            emitted = (
+                self.emit_single_if_unrouted_with_lineage_no_parents_and_materializers(
+                    route,
+                    payload,
+                    producer=producer,
+                    control_epoch=control_epoch,
+                    trace_id=trace_id,
+                    causality_id=causality_id,
+                    correlation_id=correlation_id,
+                )
             )
             return emitted is not None
 
@@ -1453,7 +1166,9 @@ def install_manyfold_rust_stub() -> None:
         def subscribe(self, topic, *, name=None, replay_from_beginning=False):
             subscription_name = name or topic
             self._subscriptions[subscription_name] = topic
-            self._positions[subscription_name] = 0 if replay_from_beginning else len(self._messages)
+            self._positions[subscription_name] = (
+                0 if replay_from_beginning else len(self._messages)
+            )
             return PubSubSubscription(subscription_name, topic)
 
         def publish(self, topic, payload):
@@ -1526,22 +1241,41 @@ def install_manyfold_rust_stub() -> None:
             return [self.ingest(message) for message in messages]
 
         def query(self, sql, parameters=None):
-            latest = self.latest((parameters or {}).get("topic", "sensor.environment.temperature"))
+            requested_topic = (parameters or {}).get(
+                "__manyfold_stream_topic",
+                (parameters or {}).get("topic", "sensor.environment.temperature"),
+            )
+            if "AVG(" in sql:
+                values = [
+                    _decoded_pubsub_fields(record.payload).get("degrees")
+                    for record in self._records
+                    if record.topic == requested_topic
+                ]
+                numeric_values = [
+                    float(value)
+                    for value in values
+                    if isinstance(value, int | float)
+                ]
+                return [
+                    {
+                        "average": (
+                            None
+                            if not numeric_values
+                            else sum(numeric_values) / len(numeric_values)
+                        )
+                    }
+                ]
+            latest = self.latest(requested_topic)
             if latest is None:
                 return []
-            temperature_f = None
-            unit = None
-            if latest.payload:
-                try:
-                    temperature_f, unit = _decode_temperature_flatbuffer(latest.payload)
-                except (IndexError, UnicodeDecodeError, ValueError):
-                    pass
+            fields = _decoded_pubsub_fields(latest.payload)
             return [
                 {
                     "pad_name": latest.pad_name,
                     "seq_source": latest.seq_source,
-                    "temperature_f": temperature_f,
-                    "unit": unit,
+                    "degrees": fields.get("degrees"),
+                    "temperature_f": fields.get("temperature_f"),
+                    "unit": fields.get("unit"),
                     "payload": latest.payload,
                 }
             ]
@@ -1559,10 +1293,15 @@ def install_manyfold_rust_stub() -> None:
     class PubSubRuntime:
         def __init__(self, *, name="pubsub", retained_messages=1024):
             self.pubsub = InMemoryPubSub(retained_messages=retained_messages)
-            self.subscription = self.pubsub.subscribe("*", name=f"{name}.stream_processor")
+            self.subscription = self.pubsub.subscribe(
+                "*", name=f"{name}.stream_processor"
+            )
             self.processor = DataStreamProcessor()
             self.metadata = {}
             self.records = []
+            self._observability = ObservabilityRuntime(
+                retained_records=retained_messages
+            )
 
         def register_flatbuffer_pad(self, pad_name, table):
             return None
@@ -1570,6 +1309,21 @@ def install_manyfold_rust_stub() -> None:
         def publish(self, topic, payload, *, pad_name=None, event_time=None, key=None):
             delivery = self.pubsub.publish(topic, payload)
             self.metadata[(topic, delivery.offset)] = (event_time, key, pad_name)
+            self._observability.record_histogram(
+                "manyfold.pubsub.publish.payload_bytes",
+                len(bytes(payload)),
+                unit="By",
+            )
+            self._observability.record_histogram(
+                "manyfold.pubsub.publish.delivered_subscribers",
+                len(delivery.delivered_to),
+                unit="1",
+            )
+            self._observability.record_log(
+                "INFO",
+                "manyfold.pubsub",
+                f"published topic={topic} offset={delivery.offset}",
+            )
             return delivery
 
         def drain(self):
@@ -1602,22 +1356,40 @@ def install_manyfold_rust_stub() -> None:
 
         def query(self, sql, parameters=None):
             self.drain()
-            topic = (parameters or {}).get("topic", "sensor.environment.temperature")
+            topic = (parameters or {}).get(
+                "__manyfold_stream_topic",
+                (parameters or {}).get("topic", "sensor.environment.temperature"),
+            )
+            if "AVG(" in sql:
+                values = [
+                    _decoded_pubsub_fields(record.payload).get("degrees")
+                    for record in self.records
+                    if record.topic == topic
+                ]
+                numeric_values = [
+                    float(value)
+                    for value in values
+                    if isinstance(value, int | float)
+                ]
+                return [
+                    {
+                        "average": (
+                            None
+                            if not numeric_values
+                            else sum(numeric_values) / len(numeric_values)
+                        )
+                    }
+                ]
             for record in reversed(self.records):
                 if record.topic == topic:
-                    temperature_f = None
-                    unit = None
-                    if record.payload:
-                        try:
-                            temperature_f, unit = _decode_temperature_flatbuffer(record.payload)
-                        except (IndexError, UnicodeDecodeError, ValueError):
-                            pass
+                    fields = _decoded_pubsub_fields(record.payload)
                     return [
                         {
                             "pad_name": record.pad_name,
                             "seq_source": record.seq_source,
-                            "temperature_f": temperature_f,
-                            "unit": unit,
+                            "degrees": fields.get("degrees"),
+                            "temperature_f": fields.get("temperature_f"),
+                            "unit": fields.get("unit"),
                             "payload": record.payload,
                         }
                     ]
@@ -1626,6 +1398,109 @@ def install_manyfold_rust_stub() -> None:
         def query_one(self, sql, parameters=None):
             rows = self.query(sql, parameters)
             return rows[0] if rows else None
+
+        def observability_metrics(self):
+            return self._observability.metrics()
+
+        def observability_logs(self):
+            return self._observability.logs()
+
+    @dataclass(frozen=True)
+    class MetricHistogramRecord:
+        timestamp_ns: int
+        name: str
+        unit: str
+        count: int
+        sum: float
+        min: float
+        max: float
+        explicit_bounds_json: str
+        bucket_counts_json: str
+        attributes_json: str
+
+    @dataclass(frozen=True)
+    class LogRecordEnvelope:
+        timestamp_ns: int
+        severity_text: str
+        logger_name: str
+        body: str
+        file_path: str
+        line_number: int
+        attributes_json: str
+
+    class ObservabilityRuntime:
+        def __init__(self, *, retained_records=1024):
+            self.retained_records = retained_records
+            self._buckets = (0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0)
+            self._metrics = []
+            self._logs = []
+
+        def set_buckets(self, buckets):
+            self._buckets = tuple(float(bucket) for bucket in buckets)
+
+        def record_histogram(
+            self,
+            name,
+            value,
+            *,
+            unit="",
+            attributes_json="{}",
+            timestamp_ns=None,
+        ):
+            numeric_value = float(value)
+            bucket_counts = [0 for _ in range(len(self._buckets) + 1)]
+            bucket_index = 0
+            while (
+                bucket_index < len(self._buckets)
+                and numeric_value > self._buckets[bucket_index]
+            ):
+                bucket_index += 1
+            bucket_counts[bucket_index] = 1
+            record = MetricHistogramRecord(
+                time.time_ns() if timestamp_ns is None else int(timestamp_ns),
+                str(name),
+                str(unit),
+                1,
+                numeric_value,
+                numeric_value,
+                numeric_value,
+                json.dumps(list(self._buckets)),
+                json.dumps(bucket_counts),
+                str(attributes_json),
+            )
+            self._metrics.append(record)
+            del self._metrics[: max(0, len(self._metrics) - self.retained_records)]
+            return record
+
+        def record_log(
+            self,
+            severity_text,
+            logger_name,
+            body,
+            *,
+            file_path="",
+            line_number=0,
+            attributes_json="{}",
+            timestamp_ns=None,
+        ):
+            record = LogRecordEnvelope(
+                time.time_ns() if timestamp_ns is None else int(timestamp_ns),
+                str(severity_text),
+                str(logger_name),
+                str(body),
+                str(file_path),
+                int(line_number),
+                str(attributes_json),
+            )
+            self._logs.append(record)
+            del self._logs[: max(0, len(self._logs) - self.retained_records)]
+            return record
+
+        def metrics(self):
+            return list(self._metrics)
+
+        def logs(self):
+            return list(self._logs)
 
     rust_module.PubSubRuntime = PubSubRuntime
     rust_module.ArchitectureCapacitor = ArchitectureCapacitor
@@ -1650,13 +1525,18 @@ def install_manyfold_rust_stub() -> None:
     rust_module.Graph = Graph
     rust_module.InMemoryPubSub = InMemoryPubSub
     rust_module.Layer = Layer
+    rust_module.LogRecordEnvelope = LogRecordEnvelope
     rust_module.Mailbox = Mailbox
     rust_module.MailboxDescriptor = MailboxDescriptor
+    rust_module.ManyFoldLock = ManyFoldLock
+    rust_module.ManyFoldLockLease = ManyFoldLockLease
     rust_module.NamespaceRef = NamespaceRef
     rust_module.NoLineageMaterializerDropProfile = NoLineageMaterializerDropProfile
     rust_module.MonotonicLogicalClock = MonotonicLogicalClock
     rust_module.NtpTimeProvider = NtpTimeProvider
+    rust_module.MetricHistogramRecord = MetricHistogramRecord
     rust_module.OpenedEnvelope = OpenedEnvelope
+    rust_module.ObservabilityRuntime = ObservabilityRuntime
     rust_module.PayloadRef = PayloadRef
     rust_module.Plane = Plane
     rust_module.PortDescriptor = PortDescriptor
@@ -1692,7 +1572,6 @@ def reset_test_modules() -> None:
 
 def load_manyfold_package():
     reset_test_modules()
-    install_reactivex_stub()
     install_manyfold_rust_stub()
     if str(REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(REPO_ROOT))
@@ -1716,7 +1595,6 @@ def load_manyfold_package():
         "all_legos": lego_catalog.all_legos,
         "Average": stats.Average,
         "BackoffPolicy": sensor_io.BackoffPolicy,
-        "BehaviorSubject": sys.modules["manyfold._rx.subject"].BehaviorSubject,
         "BoundedRingBuffer": sensor_io.BoundedRingBuffer,
         "ChangeFilter": sensor_io.ChangeFilter,
         "Clock": sensor_io.Clock,
@@ -1882,9 +1760,9 @@ def load_manyfold_package():
         "dependency_closure_of": lego_catalog.dependency_closure_of,
         "dependencies_of": lego_catalog.dependencies_of,
         "dependents_of": lego_catalog.dependents_of,
-        "drain_frame_thread_queue": sys.modules[
-            "manyfold.reactive_threads"
-        ].drain_frame_thread_queue,
+        "drain_main_thread_queue": sys.modules[
+            "manyfold.datastream_threads"
+        ].drain_main_thread_queue,
         "get_lego": lego_catalog.get_lego,
         "health_status_schema": sensor_io.health_status_schema,
         "instrument_stream": graph.instrument_stream,
@@ -1894,7 +1772,6 @@ def load_manyfold_package():
         "legos_by_role": lego_catalog.legos_by_role,
         "sensor_event_schema": sensor_io.sensor_event_schema,
         "sensor_sample_schema": sensor_io.sensor_sample_schema,
-        "shutdown": sys.modules["manyfold.reactive_threads"].shutdown,
         "sink": primitives.sink,
         "source": primitives.source,
         "SystemClock": sensor_io.SystemClock,
@@ -1943,17 +1820,34 @@ def load_manyfold_graph_module():
 
 def _decode_temperature_flatbuffer(payload: bytes) -> tuple[float, str]:
     root_offset = struct.unpack_from("<I", payload, 0)[0]
-    temperature = struct.unpack_from("<f", payload, root_offset + 4)[0]
-    string_offset_position = root_offset + 8
-    string_position = string_offset_position + struct.unpack_from(
-        "<I",
-        payload,
-        string_offset_position,
-    )[0]
+    try:
+        temperature = struct.unpack_from("<d", payload, root_offset + 8)[0]
+        string_offset_position = root_offset + 16
+    except struct.error:
+        temperature = struct.unpack_from("<f", payload, root_offset + 4)[0]
+        string_offset_position = root_offset + 8
+    string_position = (
+        string_offset_position
+        + struct.unpack_from(
+            "<I",
+            payload,
+            string_offset_position,
+        )[0]
+    )
     unit_length = struct.unpack_from("<I", payload, string_position)[0]
     unit_start = string_position + 4
     unit = payload[unit_start : unit_start + unit_length].decode("utf-8")
     return temperature, unit
+
+
+def _decoded_pubsub_fields(payload: bytes) -> dict[str, object]:
+    if not payload:
+        return {}
+    try:
+        value, unit = _decode_temperature_flatbuffer(payload)
+    except (IndexError, UnicodeDecodeError, ValueError, struct.error):
+        return {}
+    return {"degrees": value, "temperature_f": value, "unit": unit}
 
 
 def _module_available(module_name: str) -> bool:
@@ -1961,17 +1855,6 @@ def _module_available(module_name: str) -> bool:
         return importlib.util.find_spec(module_name) is not None
     except (ImportError, ValueError):
         return module_name in sys.modules
-
-
-def _reactivex_available() -> bool:
-    return all(
-        _module_available(module_name)
-        for module_name in (
-            "reactivex",
-            "reactivex.operators",
-            "reactivex.subject",
-        )
-    )
 
 
 def _pythonpath_with_repo_python_first(current_pythonpath: str | None) -> str:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Mapping
+from subprocess import Popen
 
 from manyfold._manyfold_rust import (
     InMemoryPubSub as InMemoryPubSub,
@@ -8,6 +9,8 @@ from manyfold._manyfold_rust import (
     PubSubMessage as PubSubMessage,
     PubSubSubscription as PubSubSubscription,
 )
+from manyfold.architecture.callbacks import CallbackPlacement
+from manyfold.architecture.locks import Lock
 
 class StreamRow(Mapping[str, object]):
     def __getitem__(self, name: str) -> object: ...
@@ -21,6 +24,20 @@ class PubSub:
     topic: str
     schema: type | object | None
     schedule: PubSubSchedule | None
+    @staticmethod
+    def spawn_rust_worker(
+        command: str,
+        args: tuple[str, ...] = (),
+        *,
+        cwd: str | None = None,
+        env: Mapping[str, str] | None = None,
+    ) -> Popen[str]: ...
+    @property
+    def value(self) -> PubSubValueSurface: ...
+    def lock(self) -> Lock: ...
+    def clock(self) -> object: ...
+    def observability_metrics(self) -> tuple[object, ...]: ...
+    def observability_logs(self) -> tuple[object, ...]: ...
     def __init__(
         self,
         *,
@@ -43,6 +60,7 @@ class PubSub:
         self,
         callback: Callable[[StreamRow], object],
         *,
+        callback_placement: CallbackPlacement | None = None,
         name: str | None = None,
         replay_latest: bool = False,
     ) -> PubSubCallbackSubscription: ...
@@ -58,6 +76,7 @@ class PubSub:
         on_completed: Callable[[], object] | None = None,
         scheduler: object | None = None,
         *,
+        callback_placement: CallbackPlacement | None = None,
         on_next: Callable[[StreamRow], object] | None = None,
         replay_latest: bool = False,
     ) -> PubSubCallbackSubscription: ...
@@ -81,6 +100,13 @@ class PubSub:
         seed: object = ...,
     ) -> PubSubObservable: ...
     def with_latest_from(self, *others: object) -> PubSubObservable: ...
+    def combine_latest(self, *others: object) -> PubSubObservable: ...
+    def deliver_on(self, placement: CallbackPlacement) -> PubSubObservable: ...
+    def state(
+        self,
+        initial: object,
+        reducer: Callable[[object, StreamRow], object],
+    ) -> PubSubObservable: ...
     def do_action(
         self,
         action: Callable[[StreamRow], object] | None = None,
@@ -100,7 +126,9 @@ class PubSub:
         self,
         field: str | None = None,
     ) -> list[StreamRow] | PubSubObservable: ...
-    def pairwise(self, field: str | None = None) -> list[StreamRow] | PubSubObservable: ...
+    def pairwise(
+        self, field: str | None = None
+    ) -> list[StreamRow] | PubSubObservable: ...
     def latest_join(
         self,
         other: PubSub,
@@ -144,6 +172,21 @@ class PubSubFabric:
     ) -> None: ...
     def topic(self, topic: str, *, schema: type | None = None) -> PubSub: ...
 
+class PubSubValueSurface:
+    @property
+    def stream(self) -> PubSub: ...
+    @property
+    def current(self) -> PubSubCurrentValueSurface: ...
+    def latest(self) -> object: ...
+    def historical(self, *, retained_values: int = 1024) -> object: ...
+    def history(self, retained_values: int) -> object: ...
+    def new_values(self) -> object: ...
+
+class PubSubCurrentValueSurface:
+    @property
+    def stream(self) -> PubSub: ...
+    def latest(self) -> object: ...
+
 def PubSubTopic(
     name: str | None = None,
     *,
@@ -162,6 +205,8 @@ class PubSubCallbackSubscription:
     def dispose(self) -> bool: ...
 
 class PubSubObservable:
+    @classmethod
+    def merge(cls, *sources: object) -> PubSubObservable: ...
     def subscribe(
         self,
         callback: Callable[[object], object] | object | None = None,
@@ -169,6 +214,7 @@ class PubSubObservable:
         on_completed: Callable[[], object] | None = None,
         scheduler: object | None = None,
         *,
+        callback_placement: CallbackPlacement | None = None,
         on_next: Callable[[object], object] | None = None,
         replay_latest: bool = False,
     ) -> PubSubCallbackSubscription: ...
@@ -176,9 +222,11 @@ class PubSubObservable:
         self,
         callback: Callable[[object], object],
         *,
+        callback_placement: CallbackPlacement | None = None,
         name: str | None = None,
         replay_latest: bool = False,
     ) -> PubSubCallbackSubscription: ...
+    def deliver_on(self, placement: CallbackPlacement) -> PubSubObservable: ...
     def pipe(
         self,
         *operators: Callable[[PubSubObservable], PubSubObservable],
@@ -204,6 +252,12 @@ class PubSubObservable:
         seed: object = ...,
     ) -> PubSubObservable: ...
     def with_latest_from(self, *others: object) -> PubSubObservable: ...
+    def combine_latest(self, *others: object) -> PubSubObservable: ...
+    def state(
+        self,
+        initial: object,
+        reducer: Callable[[object, object], object],
+    ) -> PubSubObservable: ...
     def do_action(
         self,
         action: Callable[[object], object] | None = None,

@@ -45,7 +45,7 @@ RUNTIME_ASSERT_ROOTS = (
 HOT_PATH_PYTHON_PATHS = (
     PROJECT_ROOT / "python" / "manyfold" / "graph.py",
     PROJECT_ROOT / "python" / "manyfold" / "memory_benchmarks.py",
-    PROJECT_ROOT / "python" / "manyfold" / "reactive_threads.py",
+    PROJECT_ROOT / "python" / "manyfold" / "datastream_threads.py",
     PROJECT_ROOT
     / "python"
     / "manyfold"
@@ -77,7 +77,7 @@ DECLARATION_ORDER = {
 DECLARATION_ORDER_EXCEPTIONS = frozenset(
     {
         ("python/manyfold/graph.py", "_ThreadPlaceableNode"),
-        ("python/manyfold/reactive_threads.py", "_NoStartingValue"),
+        ("python/manyfold/datastream_threads.py", "_NoStartingValue"),
     }
 )
 
@@ -214,7 +214,9 @@ class ProjectMetadataTests(unittest.TestCase):
         for module_name in sorted(PRIVATE_PROFILING_MODULES):
             with self.subTest(module=module_name):
                 self.assertFalse(
-                    (PROJECT_ROOT / "python" / "manyfold" / f"{module_name}.py").exists()
+                    (
+                        PROJECT_ROOT / "python" / "manyfold" / f"{module_name}.py"
+                    ).exists()
                 )
                 self.assertTrue(
                     (
@@ -263,7 +265,9 @@ class ProjectMetadataTests(unittest.TestCase):
         self.assertIn("Check Rust formatting", workflow)
         self.assertIn("cargo fmt --check", workflow)
         self.assertIn("Run Clippy", workflow)
-        self.assertIn("cargo clippy --all-targets --all-features -- -D warnings", workflow)
+        self.assertIn(
+            "cargo clippy --all-targets --all-features -- -D warnings", workflow
+        )
         self.assertIn("Check benchmark baselines", workflow)
         self.assertIn("uv run manyfold-benchmark-baselines-check", workflow)
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TypedDict
 
-import reactivex as rx
+import manyfold.streams as streams
 from manyfold import (
     Graph,
     Layer,
@@ -44,7 +44,7 @@ def run_example() -> PipeRouteExampleResult:
         capacity=1,
         immediate=True,
     )
-    graph.pipe(rx.from_iterable([b"slow", b"fast"]), staged_route)
+    graph.pipe(streams.from_iterable([b"slow", b"fast"]), staged_route)
 
     latest = graph.latest(command_route)
     assert latest is not None

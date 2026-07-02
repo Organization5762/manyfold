@@ -1,0 +1,7 @@
+{
+  "workload": "ipc_echo_worker",
+  "protocol": "u32_le_length_prefixed_echo",
+  "payload_bytes": 1024,
+  "round_trips": 1000,
+  "notes": "Baseline metadata for the IPC echo helper used by Python process-boundary benchmarks."
+}
