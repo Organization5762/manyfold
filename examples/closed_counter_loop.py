@@ -34,11 +34,17 @@ def run_example() -> ClosedCounterLoopExampleResult:
     assert desired_latest is not None
     assert effective_latest is not None
     assert ack_latest is not None
+    desired_payload = graph.open_payload(desired_latest)
+    effective_payload = graph.open_payload(effective_latest)
+    ack_payload = graph.open_payload(ack_latest)
+    assert desired_payload is not None
+    assert effective_payload is not None
+    assert ack_payload is not None
 
     return {
-        "desired_latest": desired_latest.payload_ref.inline_bytes,
-        "effective_latest": effective_latest.payload_ref.inline_bytes,
-        "ack_latest": ack_latest.payload_ref.inline_bytes,
+        "desired_latest": desired_payload,
+        "effective_latest": effective_payload,
+        "ack_latest": ack_payload,
         "coherence_taints": shadow.coherence_taints,
     }
 

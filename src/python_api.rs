@@ -11,7 +11,8 @@ use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::architecture::{
-    InMemoryPubSubCore, PubSubDeliveryCore, PubSubMessageCore, PubSubSubscriptionCore,
+    InMemoryPubSubCore, LogRecordEnvelopeCore, MetricHistogramRecordCore, ObservabilityRuntimeCore,
+    PubSubDeliveryCore, PubSubMessageCore, PubSubSubscriptionCore,
 };
 use crate::core::{
     ClockDomainRefCore, ClosedEnvelopeCore, ControlLoopCore, CreditSnapshotCore, DeliveryMode,
@@ -3438,6 +3439,7 @@ impl DataStreamProcessorState {
 #[pyclass(module = "manyfold._manyfold_rust")]
 pub struct PubSubRuntime {
     pubsub: InMemoryPubSubCore,
+    observability: ObservabilityRuntimeCore,
     processor: Arc<Mutex<DataStreamProcessorState>>,
     metadata_by_message: BTreeMap<StreamMessageKey, StreamMessageMetadata>,
     flatbuffer_tables_by_pad: BTreeMap<String, FlatBufferTable>,
@@ -3460,6 +3462,204 @@ enum QueryCell {
     Blob(Vec<u8>),
 }
 
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust", frozen, skip_from_py_object)]
+#[derive(Clone)]
+pub struct LogRecordEnvelope {
+    inner: LogRecordEnvelopeCore,
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pymethods]
+impl LogRecordEnvelope {
+    #[getter]
+    fn timestamp_ns(&self) -> u64 {
+        self.inner.timestamp_ns
+    }
+
+    #[getter]
+    fn severity_text(&self) -> &str {
+        &self.inner.severity_text
+    }
+
+    #[getter]
+    fn logger_name(&self) -> &str {
+        &self.inner.logger_name
+    }
+
+    #[getter]
+    fn body(&self) -> &str {
+        &self.inner.body
+    }
+
+    #[getter]
+    fn file_path(&self) -> &str {
+        &self.inner.file_path
+    }
+
+    #[getter]
+    fn line_number(&self) -> u64 {
+        self.inner.line_number
+    }
+
+    #[getter]
+    fn attributes_json(&self) -> &str {
+        &self.inner.attributes_json
+    }
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust", frozen, skip_from_py_object)]
+#[derive(Clone)]
+pub struct MetricHistogramRecord {
+    inner: MetricHistogramRecordCore,
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pymethods]
+impl MetricHistogramRecord {
+    #[getter]
+    fn timestamp_ns(&self) -> u64 {
+        self.inner.timestamp_ns
+    }
+
+    #[getter]
+    fn name(&self) -> &str {
+        &self.inner.name
+    }
+
+    #[getter]
+    fn unit(&self) -> &str {
+        &self.inner.unit
+    }
+
+    #[getter]
+    fn count(&self) -> u64 {
+        self.inner.count
+    }
+
+    #[getter]
+    fn sum(&self) -> f64 {
+        self.inner.sum
+    }
+
+    #[getter]
+    fn min(&self) -> f64 {
+        self.inner.min
+    }
+
+    #[getter]
+    fn max(&self) -> f64 {
+        self.inner.max
+    }
+
+    #[getter]
+    fn explicit_bounds_json(&self) -> &str {
+        &self.inner.explicit_bounds_json
+    }
+
+    #[getter]
+    fn bucket_counts_json(&self) -> &str {
+        &self.inner.bucket_counts_json
+    }
+
+    #[getter]
+    fn attributes_json(&self) -> &str {
+        &self.inner.attributes_json
+    }
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pyclass)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pyclass(module = "manyfold._manyfold_rust")]
+pub struct ObservabilityRuntime {
+    inner: ObservabilityRuntimeCore,
+}
+
+#[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
+#[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
+#[pymethods]
+impl ObservabilityRuntime {
+    #[new]
+    #[pyo3(signature = (*, retained_records=1024))]
+    fn new(retained_records: usize) -> PyResult<Self> {
+        Ok(Self {
+            inner: ObservabilityRuntimeCore::new(retained_records)
+                .map_err(PyValueError::new_err)?,
+        })
+    }
+
+    #[pyo3(signature = (name, value, *, unit="".to_string(), attributes_json="{}".to_string(), timestamp_ns=None))]
+    fn record_histogram(
+        &mut self,
+        name: String,
+        value: f64,
+        unit: String,
+        attributes_json: String,
+        timestamp_ns: Option<u64>,
+    ) -> PyResult<MetricHistogramRecord> {
+        Ok(MetricHistogramRecord {
+            inner: self
+                .inner
+                .record_histogram(name, value, unit, attributes_json, timestamp_ns)
+                .map_err(PyValueError::new_err)?,
+        })
+    }
+
+    fn set_buckets(&mut self, buckets: Vec<f64>) -> PyResult<()> {
+        self.inner
+            .set_buckets(buckets)
+            .map_err(PyValueError::new_err)
+    }
+
+    #[pyo3(signature = (severity_text, logger_name, body, *, file_path="".to_string(), line_number=0, attributes_json="{}".to_string(), timestamp_ns=None))]
+    fn record_log(
+        &mut self,
+        severity_text: String,
+        logger_name: String,
+        body: String,
+        file_path: String,
+        line_number: u64,
+        attributes_json: String,
+        timestamp_ns: Option<u64>,
+    ) -> PyResult<LogRecordEnvelope> {
+        Ok(LogRecordEnvelope {
+            inner: self
+                .inner
+                .record_log(
+                    severity_text,
+                    logger_name,
+                    body,
+                    file_path,
+                    line_number,
+                    attributes_json,
+                    timestamp_ns,
+                )
+                .map_err(PyValueError::new_err)?,
+        })
+    }
+
+    fn metrics(&self) -> Vec<MetricHistogramRecord> {
+        self.inner
+            .metrics()
+            .into_iter()
+            .map(|inner| MetricHistogramRecord { inner })
+            .collect()
+    }
+
+    fn logs(&self) -> Vec<LogRecordEnvelope> {
+        self.inner
+            .logs()
+            .into_iter()
+            .map(|inner| LogRecordEnvelope { inner })
+            .collect()
+    }
+}
+
 #[cfg_attr(feature = "stub-gen", pyo3_stub_gen_derive::gen_stub_pymethods)]
 #[cfg_attr(not(feature = "stub-gen"), pyo3_stub_gen_derive::remove_gen_stub)]
 #[pymethods]
@@ -3476,6 +3676,8 @@ impl PubSubRuntime {
             .map_err(PyValueError::new_err)?;
         Ok(Self {
             pubsub,
+            observability: ObservabilityRuntimeCore::new(retained_messages)
+                .map_err(PyValueError::new_err)?,
             processor: Arc::new(Mutex::new(DataStreamProcessorState::new(
                 retained_messages,
             )?)),
@@ -3507,8 +3709,11 @@ impl PubSubRuntime {
     ) -> PyResult<PubSubDelivery> {
         let delivery = self
             .pubsub
-            .publish(topic, payload)
+            .publish(topic, payload.clone())
             .map_err(PyValueError::new_err)?;
+        self.observability
+            .record_pubsub_publish(&delivery.topic, payload.len(), delivery.delivered_to.len())
+            .map_err(PyRuntimeError::new_err)?;
         self.metadata_by_message.insert(
             (delivery.topic.clone(), delivery.offset),
             (event_time, key, pad_name),
@@ -3570,6 +3775,22 @@ impl PubSubRuntime {
     fn latest(&mut self, topic: String) -> PyResult<Option<DataStreamRecord>> {
         self.drain()?;
         lock_stream_processor(&self.processor)?.latest_core(&topic)
+    }
+
+    fn observability_metrics(&self) -> Vec<MetricHistogramRecord> {
+        self.observability
+            .metrics()
+            .into_iter()
+            .map(|inner| MetricHistogramRecord { inner })
+            .collect()
+    }
+
+    fn observability_logs(&self) -> Vec<LogRecordEnvelope> {
+        self.observability
+            .logs()
+            .into_iter()
+            .map(|inner| LogRecordEnvelope { inner })
+            .collect()
     }
 }
 
@@ -4486,6 +4707,9 @@ fn _manyfold_rust(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()>
     module.add_class::<FlatBufferTable>()?;
     module.add_class::<DataStreamRecord>()?;
     module.add_class::<DataStreamProcessor>()?;
+    module.add_class::<LogRecordEnvelope>()?;
+    module.add_class::<MetricHistogramRecord>()?;
+    module.add_class::<ObservabilityRuntime>()?;
     module.add_class::<PubSubRuntime>()?;
     module.add_class::<PubSubMessage>()?;
     module.add_class::<PubSubSubscription>()?;

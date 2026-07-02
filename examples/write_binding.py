@@ -16,11 +16,13 @@ def run_example() -> dict[str, bytes]:
 
     graph.publish(binding, b"42")
     desired = graph.latest(binding.desired)
+    desired_payload = graph.open_payload(desired)
 
     assert desired is not None
+    assert desired_payload is not None
     return {
         "request_payload": b"42",
-        "desired_payload": bytes(desired.payload_ref.inline_bytes),
+        "desired_payload": desired_payload,
     }
 
 

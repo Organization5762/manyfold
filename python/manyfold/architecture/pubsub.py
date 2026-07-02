@@ -145,6 +145,14 @@ class PubSub:
         """Return this PubSub runtime's canonical infrastructure clock."""
         return Clock()
 
+    def observability_metrics(self) -> tuple[object, ...]:
+        """Return Rust-recorded observability metrics emitted by this PubSub."""
+        return tuple(self._runtime.observability_metrics())
+
+    def observability_logs(self) -> tuple[object, ...]:
+        """Return Rust-recorded observability logs emitted by this PubSub."""
+        return tuple(self._runtime.observability_logs())
+
     def publish(
         self,
         payload: object | None = None,

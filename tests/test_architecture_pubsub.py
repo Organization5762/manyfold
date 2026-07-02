@@ -256,6 +256,26 @@ class PubSubStreamTests(unittest.TestCase):
         self.assertIsNone(unscheduled.schedule)
         self.assertIsNone(without_discovery.schedule.service_discovery)
 
+    def test_pubsub_publish_declares_rust_observability_records(self) -> None:
+        stream = PubSub(topic="heart.observed")
+
+        stream.publish(b"payload")
+
+        metrics = stream.observability_metrics()
+        logs = stream.observability_logs()
+        self.assertEqual(
+            [metric.name for metric in metrics],
+            [
+                "manyfold.pubsub.publish.payload_bytes",
+                "manyfold.pubsub.publish.delivered_subscribers",
+            ],
+        )
+        self.assertEqual(metrics[0].unit, "By")
+        self.assertEqual(metrics[0].sum, 7.0)
+        self.assertIn('"topic":"heart.observed"', metrics[0].attributes_json)
+        self.assertEqual(len(logs), 1)
+        self.assertIn("published topic=heart.observed", logs[0].body)
+
     def test_pubsub_topic_boots_shared_fabric_once_for_many_topics(self) -> None:
         temperature = PubSubTopic(
             "temperature",

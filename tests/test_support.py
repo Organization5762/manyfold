@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import json
 import os
 import re
 import struct
@@ -29,6 +30,7 @@ MODULES_TO_RESET = (
     "manyfold.streams",
     "manyfold.datastream_threads",
     "manyfold.stats",
+    "manyfold._manyfold_rust",
 )
 _MISSING_MODULE = object()
 UV_BIN_DIR = Path(os.environ.get("UV_BIN_DIR", Path.home() / ".local" / "bin"))
@@ -44,9 +46,6 @@ def subprocess_test_env() -> dict[str, str]:
 
 
 def install_manyfold_rust_stub() -> None:
-    if "manyfold._manyfold_rust" in sys.modules:
-        return
-
     rust_module = types.ModuleType("manyfold._manyfold_rust")
 
     def parse_sql_statement(sql: str) -> dict[str, str]:
@@ -1242,24 +1241,41 @@ def install_manyfold_rust_stub() -> None:
             return [self.ingest(message) for message in messages]
 
         def query(self, sql, parameters=None):
-            latest = self.latest(
-                (parameters or {}).get("topic", "sensor.environment.temperature")
+            requested_topic = (parameters or {}).get(
+                "__manyfold_stream_topic",
+                (parameters or {}).get("topic", "sensor.environment.temperature"),
             )
+            if "AVG(" in sql:
+                values = [
+                    _decoded_pubsub_fields(record.payload).get("degrees")
+                    for record in self._records
+                    if record.topic == requested_topic
+                ]
+                numeric_values = [
+                    float(value)
+                    for value in values
+                    if isinstance(value, int | float)
+                ]
+                return [
+                    {
+                        "average": (
+                            None
+                            if not numeric_values
+                            else sum(numeric_values) / len(numeric_values)
+                        )
+                    }
+                ]
+            latest = self.latest(requested_topic)
             if latest is None:
                 return []
-            temperature_f = None
-            unit = None
-            if latest.payload:
-                try:
-                    temperature_f, unit = _decode_temperature_flatbuffer(latest.payload)
-                except (IndexError, UnicodeDecodeError, ValueError):
-                    pass
+            fields = _decoded_pubsub_fields(latest.payload)
             return [
                 {
                     "pad_name": latest.pad_name,
                     "seq_source": latest.seq_source,
-                    "temperature_f": temperature_f,
-                    "unit": unit,
+                    "degrees": fields.get("degrees"),
+                    "temperature_f": fields.get("temperature_f"),
+                    "unit": fields.get("unit"),
                     "payload": latest.payload,
                 }
             ]
@@ -1283,6 +1299,9 @@ def install_manyfold_rust_stub() -> None:
             self.processor = DataStreamProcessor()
             self.metadata = {}
             self.records = []
+            self._observability = ObservabilityRuntime(
+                retained_records=retained_messages
+            )
 
         def register_flatbuffer_pad(self, pad_name, table):
             return None
@@ -1290,6 +1309,21 @@ def install_manyfold_rust_stub() -> None:
         def publish(self, topic, payload, *, pad_name=None, event_time=None, key=None):
             delivery = self.pubsub.publish(topic, payload)
             self.metadata[(topic, delivery.offset)] = (event_time, key, pad_name)
+            self._observability.record_histogram(
+                "manyfold.pubsub.publish.payload_bytes",
+                len(bytes(payload)),
+                unit="By",
+            )
+            self._observability.record_histogram(
+                "manyfold.pubsub.publish.delivered_subscribers",
+                len(delivery.delivered_to),
+                unit="1",
+            )
+            self._observability.record_log(
+                "INFO",
+                "manyfold.pubsub",
+                f"published topic={topic} offset={delivery.offset}",
+            )
             return delivery
 
         def drain(self):
@@ -1322,24 +1356,40 @@ def install_manyfold_rust_stub() -> None:
 
         def query(self, sql, parameters=None):
             self.drain()
-            topic = (parameters or {}).get("topic", "sensor.environment.temperature")
+            topic = (parameters or {}).get(
+                "__manyfold_stream_topic",
+                (parameters or {}).get("topic", "sensor.environment.temperature"),
+            )
+            if "AVG(" in sql:
+                values = [
+                    _decoded_pubsub_fields(record.payload).get("degrees")
+                    for record in self.records
+                    if record.topic == topic
+                ]
+                numeric_values = [
+                    float(value)
+                    for value in values
+                    if isinstance(value, int | float)
+                ]
+                return [
+                    {
+                        "average": (
+                            None
+                            if not numeric_values
+                            else sum(numeric_values) / len(numeric_values)
+                        )
+                    }
+                ]
             for record in reversed(self.records):
                 if record.topic == topic:
-                    temperature_f = None
-                    unit = None
-                    if record.payload:
-                        try:
-                            temperature_f, unit = _decode_temperature_flatbuffer(
-                                record.payload
-                            )
-                        except (IndexError, UnicodeDecodeError, ValueError):
-                            pass
+                    fields = _decoded_pubsub_fields(record.payload)
                     return [
                         {
                             "pad_name": record.pad_name,
                             "seq_source": record.seq_source,
-                            "temperature_f": temperature_f,
-                            "unit": unit,
+                            "degrees": fields.get("degrees"),
+                            "temperature_f": fields.get("temperature_f"),
+                            "unit": fields.get("unit"),
                             "payload": record.payload,
                         }
                     ]
@@ -1348,6 +1398,109 @@ def install_manyfold_rust_stub() -> None:
         def query_one(self, sql, parameters=None):
             rows = self.query(sql, parameters)
             return rows[0] if rows else None
+
+        def observability_metrics(self):
+            return self._observability.metrics()
+
+        def observability_logs(self):
+            return self._observability.logs()
+
+    @dataclass(frozen=True)
+    class MetricHistogramRecord:
+        timestamp_ns: int
+        name: str
+        unit: str
+        count: int
+        sum: float
+        min: float
+        max: float
+        explicit_bounds_json: str
+        bucket_counts_json: str
+        attributes_json: str
+
+    @dataclass(frozen=True)
+    class LogRecordEnvelope:
+        timestamp_ns: int
+        severity_text: str
+        logger_name: str
+        body: str
+        file_path: str
+        line_number: int
+        attributes_json: str
+
+    class ObservabilityRuntime:
+        def __init__(self, *, retained_records=1024):
+            self.retained_records = retained_records
+            self._buckets = (0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0)
+            self._metrics = []
+            self._logs = []
+
+        def set_buckets(self, buckets):
+            self._buckets = tuple(float(bucket) for bucket in buckets)
+
+        def record_histogram(
+            self,
+            name,
+            value,
+            *,
+            unit="",
+            attributes_json="{}",
+            timestamp_ns=None,
+        ):
+            numeric_value = float(value)
+            bucket_counts = [0 for _ in range(len(self._buckets) + 1)]
+            bucket_index = 0
+            while (
+                bucket_index < len(self._buckets)
+                and numeric_value > self._buckets[bucket_index]
+            ):
+                bucket_index += 1
+            bucket_counts[bucket_index] = 1
+            record = MetricHistogramRecord(
+                time.time_ns() if timestamp_ns is None else int(timestamp_ns),
+                str(name),
+                str(unit),
+                1,
+                numeric_value,
+                numeric_value,
+                numeric_value,
+                json.dumps(list(self._buckets)),
+                json.dumps(bucket_counts),
+                str(attributes_json),
+            )
+            self._metrics.append(record)
+            del self._metrics[: max(0, len(self._metrics) - self.retained_records)]
+            return record
+
+        def record_log(
+            self,
+            severity_text,
+            logger_name,
+            body,
+            *,
+            file_path="",
+            line_number=0,
+            attributes_json="{}",
+            timestamp_ns=None,
+        ):
+            record = LogRecordEnvelope(
+                time.time_ns() if timestamp_ns is None else int(timestamp_ns),
+                str(severity_text),
+                str(logger_name),
+                str(body),
+                str(file_path),
+                int(line_number),
+                str(attributes_json),
+            )
+            self._logs.append(record)
+            del self._logs[: max(0, len(self._logs) - self.retained_records)]
+            return record
+
+        def metrics(self):
+            return list(self._metrics)
+
+        def logs(self):
+            return list(self._logs)
 
     rust_module.PubSubRuntime = PubSubRuntime
     rust_module.ArchitectureCapacitor = ArchitectureCapacitor
@@ -1372,6 +1525,7 @@ def install_manyfold_rust_stub() -> None:
     rust_module.Graph = Graph
     rust_module.InMemoryPubSub = InMemoryPubSub
     rust_module.Layer = Layer
+    rust_module.LogRecordEnvelope = LogRecordEnvelope
     rust_module.Mailbox = Mailbox
     rust_module.MailboxDescriptor = MailboxDescriptor
     rust_module.ManyFoldLock = ManyFoldLock
@@ -1380,7 +1534,9 @@ def install_manyfold_rust_stub() -> None:
     rust_module.NoLineageMaterializerDropProfile = NoLineageMaterializerDropProfile
     rust_module.MonotonicLogicalClock = MonotonicLogicalClock
     rust_module.NtpTimeProvider = NtpTimeProvider
+    rust_module.MetricHistogramRecord = MetricHistogramRecord
     rust_module.OpenedEnvelope = OpenedEnvelope
+    rust_module.ObservabilityRuntime = ObservabilityRuntime
     rust_module.PayloadRef = PayloadRef
     rust_module.Plane = Plane
     rust_module.PortDescriptor = PortDescriptor
@@ -1664,8 +1820,12 @@ def load_manyfold_graph_module():
 
 def _decode_temperature_flatbuffer(payload: bytes) -> tuple[float, str]:
     root_offset = struct.unpack_from("<I", payload, 0)[0]
-    temperature = struct.unpack_from("<f", payload, root_offset + 4)[0]
-    string_offset_position = root_offset + 8
+    try:
+        temperature = struct.unpack_from("<d", payload, root_offset + 8)[0]
+        string_offset_position = root_offset + 16
+    except struct.error:
+        temperature = struct.unpack_from("<f", payload, root_offset + 4)[0]
+        string_offset_position = root_offset + 8
     string_position = (
         string_offset_position
         + struct.unpack_from(
@@ -1678,6 +1838,16 @@ def _decode_temperature_flatbuffer(payload: bytes) -> tuple[float, str]:
     unit_start = string_position + 4
     unit = payload[unit_start : unit_start + unit_length].decode("utf-8")
     return temperature, unit
+
+
+def _decoded_pubsub_fields(payload: bytes) -> dict[str, object]:
+    if not payload:
+        return {}
+    try:
+        value, unit = _decode_temperature_flatbuffer(payload)
+    except (IndexError, UnicodeDecodeError, ValueError, struct.error):
+        return {}
+    return {"degrees": value, "temperature_f": value, "unit": unit}
 
 
 def _module_available(module_name: str) -> bool:
