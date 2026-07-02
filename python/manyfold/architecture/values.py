@@ -9,6 +9,8 @@ from typing import Generic, TypeVar, final
 
 T = TypeVar("T")
 _VALUE_STREAM_FACTORY: Callable[..., object] | None = None
+_VALUE_OBSERVABLE_FACTORY: Callable[[object], object] | None = None
+_NO_SCAN_INITIAL = object()
 
 
 @final
@@ -84,6 +86,83 @@ class NewValues(Generic[T]):
         del on_error, on_completed, scheduler
         return self.observe(callback, on_next=on_next)
 
+    def pipe(self, *operators: Callable[[object], object]) -> object:
+        """Apply live-stream operators to future values."""
+        return self._observable().pipe(*operators)
+
+    def map(
+        self, transform: Callable[[T], object], *, name: str | None = None
+    ) -> object:
+        """Return a live stream view that transforms future values."""
+        return self._observable().map(transform, name=name)
+
+    def filter(
+        self,
+        predicate: Callable[[T], bool],
+        *,
+        name: str | None = None,
+    ) -> object:
+        """Return a live stream view that keeps accepted future values."""
+        return self._observable().filter(predicate, name=name)
+
+    def scan(
+        self,
+        reducer: Callable[[object, T], object],
+        initial: object = _NO_SCAN_INITIAL,
+        *,
+        seed: object = _NO_SCAN_INITIAL,
+    ) -> object:
+        """Return a live stream of accumulated reducer state."""
+        observable = self._observable()
+        if initial is _NO_SCAN_INITIAL:
+            if seed is _NO_SCAN_INITIAL:
+                return observable.scan(reducer)
+            return observable.scan(reducer, seed=seed)
+        if seed is not _NO_SCAN_INITIAL:
+            return observable.scan(reducer, initial, seed=seed)
+        return observable.scan(reducer, initial)
+
+    def start_with(self, *values: object) -> object:
+        """Return a live stream that emits initial values before future values."""
+        return self._observable().start_with(*values)
+
+    def with_latest_from(self, *others: object) -> object:
+        """Return a live stream combined with the latest values from others."""
+        return self._observable().with_latest_from(*others)
+
+    def do_action(
+        self,
+        action: Callable[[T], object] | None = None,
+        *_args: object,
+        on_next: Callable[[T], object] | None = None,
+        **_kwargs: object,
+    ) -> object:
+        """Run a side effect for each future value and forward it."""
+        return self._observable().do_action(action, on_next=on_next)
+
+    def distinct_until_changed(
+        self,
+        key: Callable[[T], object] | None = None,
+    ) -> object:
+        """Forward future values whose comparison key changed."""
+        return self._observable().distinct_until_changed(key)
+
+    def pairwise(self) -> object:
+        """Forward adjacent future value pairs."""
+        return self._observable().pairwise()
+
+    def take(self, count: int) -> object:
+        """Forward at most ``count`` future values."""
+        return self._observable().take(count)
+
+    def flat_map(self, mapper: Callable[[T], object]) -> object:
+        """Expand each future value into an inner live stream."""
+        return self._observable().flat_map(mapper)
+
+    def switch_latest(self, mapper: Callable[[T], object] | None = None) -> object:
+        """Forward values from only the latest inner live stream."""
+        return self._observable().switch_latest(mapper)
+
     def from_stream(
         self,
         stream: object | None = None,
@@ -103,6 +182,11 @@ class NewValues(Generic[T]):
             ),
             schema=schema,
         )
+
+    def _observable(self) -> object:
+        if _VALUE_OBSERVABLE_FACTORY is None:
+            raise RuntimeError("no architecture value observable factory is registered")
+        return _VALUE_OBSERVABLE_FACTORY(self)
 
 
 class ImmutableValue(Generic[T]):
@@ -410,6 +494,11 @@ def _validate_optional_name(name: str | None) -> str | None:
 def _register_value_stream_factory(factory: Callable[..., object]) -> None:
     global _VALUE_STREAM_FACTORY
     _VALUE_STREAM_FACTORY = factory
+
+
+def _register_value_observable_factory(factory: Callable[[object], object]) -> None:
+    global _VALUE_OBSERVABLE_FACTORY
+    _VALUE_OBSERVABLE_FACTORY = factory
 
 
 class _SubscriberRegistry(Generic[T]):

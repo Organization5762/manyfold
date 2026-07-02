@@ -843,6 +843,21 @@ class PubSubStreamTests(unittest.TestCase):
 
         self.assertEqual(observed, [6, 20])
 
+    def test_pubsub_observable_combine_latest_accepts_value_handles(self) -> None:
+        frames = PubSub(topic="heart.value.combine.frames", schema=FrameTick)
+        current_scale = Value.initialized(2)
+        observed: list[tuple[int, int]] = []
+
+        frames.combine_latest(current_scale).subscribe(
+            lambda latest: observed.append((latest[0].frame_index, latest[1]))
+        )
+
+        frames.publish(FrameTick(event_time=1, frame_index=3, delta_ms=16.0))
+        current_scale.set(4)
+        frames.publish(FrameTick(event_time=2, frame_index=5, delta_ms=16.0))
+
+        self.assertEqual(observed, [(3, 2), (3, 4), (5, 4)])
+
     def test_pubsub_observable_merge_accepts_future_only_value_handles(self) -> None:
         frames = PubSub(topic="heart.new-values.frames", schema=FrameTick)
         injected = NewValues[int]()
@@ -940,6 +955,80 @@ class PubSubStreamTests(unittest.TestCase):
         )
 
         self.assertEqual(observed, [(2, 1.0), (3, 4.0)])
+
+    def test_pubsub_live_stream_combine_latest_emits_after_all_sources_update(
+        self,
+    ) -> None:
+        frames = PubSub(topic="heart.frames.combine", schema=FrameTick)
+        acceleration = PubSub(topic="heart.acceleration.combine", schema=Acceleration)
+        temperature = PubSub(topic="heart.temperature.combine", schema=Temperature)
+        observed: list[tuple[int, float, float]] = []
+
+        frames.combine_latest(acceleration, temperature).subscribe(
+            lambda latest: observed.append(
+                (latest[0].frame_index, latest[1].x, latest[2].degrees)
+            )
+        )
+
+        frames.publish(
+            FrameTick(event_time=10, frame_index=1, delta_ms=16.0), event_time=10
+        )
+        acceleration.publish(
+            Acceleration(event_time=15, x=1.0, y=2.0, z=3.0), event_time=15
+        )
+        temperature.publish(Temperature(degrees=72.4, unit="F"), event_time=20)
+        acceleration.publish(
+            Acceleration(event_time=25, x=4.0, y=5.0, z=6.0), event_time=25
+        )
+        frames.publish(
+            FrameTick(event_time=30, frame_index=2, delta_ms=17.0), event_time=30
+        )
+
+        self.assertEqual(
+            observed,
+            [(1, 1.0, 72.4), (1, 4.0, 72.4), (2, 4.0, 72.4)],
+        )
+
+    def test_pubsub_observable_combine_latest_can_be_called_from_class(
+        self,
+    ) -> None:
+        left = PubSub(topic="heart.combine.class.left", schema=Temperature)
+        right = PubSub(topic="heart.combine.class.right", schema=Temperature)
+        observed: list[tuple[float, float]] = []
+
+        PubSubObservable.combine_latest(left, right).subscribe(
+            lambda latest: observed.append((latest[0].degrees, latest[1].degrees))
+        )
+
+        left.publish(Temperature(degrees=70.0, unit="F"))
+        right.publish(Temperature(degrees=80.0, unit="F"))
+        right.publish(Temperature(degrees=81.0, unit="F"))
+
+        self.assertEqual(observed, [(70.0, 80.0), (70.0, 81.0)])
+
+    def test_pubsub_observable_share_uses_one_upstream_subscription(self) -> None:
+        values = NewValues[int]()
+        upstream_observations = 0
+        observed_a: list[int] = []
+        observed_b: list[int] = []
+
+        def record(value: int) -> int:
+            nonlocal upstream_observations
+            upstream_observations += 1
+            return value * 10
+
+        shared = values.map(record).share()
+        subscription_a = shared.subscribe(observed_a.append)
+        subscription_b = shared.subscribe(observed_b.append)
+        values.publish(1)
+        subscription_a.dispose()
+        values.publish(2)
+        subscription_b.dispose()
+        values.publish(3)
+
+        self.assertEqual(observed_a, [10])
+        self.assertEqual(observed_b, [10, 20])
+        self.assertEqual(upstream_observations, 2)
 
     def test_pubsub_live_stream_with_latest_from_accepts_multiple_sources(
         self,

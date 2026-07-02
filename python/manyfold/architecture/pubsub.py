@@ -8,7 +8,7 @@ from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, is_dataclass
 from inspect import Parameter, signature
 from subprocess import Popen
-from threading import get_ident
+from threading import Lock as ThreadLock, get_ident
 from time import time_ns
 from types import NoneType
 from typing import Union, get_args, get_origin, get_type_hints
@@ -31,6 +31,7 @@ from manyfold.architecture.values import (
     ImmutableValue,
     NewValues,
     Value,
+    _register_value_observable_factory,
     _register_value_stream_factory,
 )
 
@@ -296,6 +297,10 @@ class PubSub:
     def with_latest_from(self, *others: object) -> "PubSubObservable":
         """Return a live stream of ``(value, latest_other)`` tuples."""
         return PubSubObservable(self).with_latest_from(*others)
+
+    def combine_latest(self, *others: object) -> "PubSubObservable":
+        """Return a live stream that emits when any input changes."""
+        return PubSubObservable(self).combine_latest(*others)
 
     def deliver_on(self, placement: CallbackPlacement) -> "PubSubObservable":
         """Return a stream view that delivers callbacks using ``placement``."""
@@ -721,6 +726,51 @@ class PubSubObservable:
                 raise TypeError("pipe operators must return PubSubObservable")
         return stream
 
+    def share(self) -> "PubSubObservable":
+        """Share one upstream subscription across downstream subscribers."""
+        lock = ThreadLock()
+        callbacks: dict[int, Callable[[object], object]] = {}
+        next_id = 0
+        source_subscription: PubSubCallbackSubscription | None = None
+
+        def publish(value: object) -> None:
+            with lock:
+                snapshot = tuple(callbacks.values())
+            for callback in snapshot:
+                callback(value)
+
+        def subscribe(
+            callback: Callable[[object], object],
+            replay_latest: bool,
+        ) -> PubSubCallbackSubscription:
+            nonlocal next_id, source_subscription
+            with lock:
+                subscription_id = next_id
+                next_id += 1
+                callbacks[subscription_id] = callback
+                if source_subscription is None:
+                    source_subscription = self.subscribe(
+                        publish,
+                        replay_latest=replay_latest,
+                    )
+
+            def dispose() -> bool:
+                nonlocal source_subscription
+                with lock:
+                    if subscription_id not in callbacks:
+                        return False
+                    callbacks.pop(subscription_id)
+                    if callbacks or source_subscription is None:
+                        return True
+                    subscription = source_subscription
+                    source_subscription = None
+                subscription.dispose()
+                return True
+
+            return PubSubCallbackSubscription(dispose)
+
+        return PubSubObservable(subscribe_factory=subscribe)
+
     def start_with(self, *values: object) -> "PubSubObservable":
         """Emit initial values before subscribing to source rows."""
 
@@ -849,6 +899,41 @@ class PubSubObservable:
 
             source_subscription = self.subscribe(receive, replay_latest=replay_latest)
             return _composite_subscription(source_subscription, *other_subscriptions)
+
+        return PubSubObservable(subscribe_factory=subscribe)
+
+    def combine_latest(self, *others: object) -> "PubSubObservable":
+        """Combine latest values and emit when any input changes."""
+        if not others:
+            raise ValueError("combine_latest requires at least one source")
+        streams = tuple(_as_pubsub_observable(source) for source in (self, *others))
+
+        def subscribe(
+            callback: Callable[[object], object],
+            replay_latest: bool,
+        ) -> PubSubCallbackSubscription:
+            latest: list[object] = [None] * len(streams)
+            ready = [False] * len(streams)
+            lock = ThreadLock()
+
+            def remember(value: object, index: int) -> None:
+                with lock:
+                    latest[index] = value
+                    ready[index] = True
+                    if all(ready):
+                        combined = tuple(latest)
+                    else:
+                        return
+                callback(combined)
+
+            subscriptions = tuple(
+                stream.subscribe(
+                    lambda value, index=index: remember(value, index),
+                    replay_latest=True,
+                )
+                for index, stream in enumerate(streams)
+            )
+            return _composite_subscription(*subscriptions)
 
         return PubSubObservable(subscribe_factory=subscribe)
 
@@ -1242,7 +1327,15 @@ def _as_pubsub_observable(value: object) -> PubSubObservable:
         ) -> PubSubCallbackSubscription:
             source_subscribe = value.subscribe  # type: ignore[attr-defined]
             if _accepts_keyword(source_subscribe, "replay_latest"):
-                subscription = source_subscribe(callback, replay_latest=replay_latest)
+                try:
+                    subscription = source_subscribe(
+                        callback,
+                        replay_latest=replay_latest,
+                    )
+                except TypeError as error:
+                    if "replay_latest" not in str(error):
+                        raise
+                    subscription = source_subscribe(callback)
             else:
                 subscription = source_subscribe(callback)
             dispose = getattr(subscription, "dispose", None)
@@ -1445,6 +1538,7 @@ def _pubsub_value_stream_factory(
 
 
 _register_value_stream_factory(_pubsub_value_stream_factory)
+_register_value_observable_factory(PubSubObservable.merge)
 
 
 def _sql_alias_prefix(topic: str) -> str:

@@ -79,6 +79,21 @@ class ArchitectureValueTests(unittest.TestCase):
         observer_subscription.dispose()
         self.assertEqual(values.subscriber_count, 0)
 
+    def test_new_values_live_operators_delegate_to_pubsub_observable(self) -> None:
+        values = NewValues[int]()
+        observed: list[int] = []
+
+        subscription = (
+            values.scan(lambda total, value: total + value, seed=10)
+            .map(lambda total: total * 2)
+            .subscribe(observed.append)
+        )
+        values.publish(1)
+        values.publish(2)
+
+        self.assertEqual(observed, [22, 26])
+        self.assertTrue(subscription.dispose())
+
     def test_value_replays_latest_to_late_subscribers(self) -> None:
         value = Value.initialized("first")
         observed: list[str] = []
