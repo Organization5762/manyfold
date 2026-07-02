@@ -726,51 +726,6 @@ class PubSubObservable:
                 raise TypeError("pipe operators must return PubSubObservable")
         return stream
 
-    def share(self) -> "PubSubObservable":
-        """Share one upstream subscription across downstream subscribers."""
-        lock = ThreadLock()
-        callbacks: dict[int, Callable[[object], object]] = {}
-        next_id = 0
-        source_subscription: PubSubCallbackSubscription | None = None
-
-        def publish(value: object) -> None:
-            with lock:
-                snapshot = tuple(callbacks.values())
-            for callback in snapshot:
-                callback(value)
-
-        def subscribe(
-            callback: Callable[[object], object],
-            replay_latest: bool,
-        ) -> PubSubCallbackSubscription:
-            nonlocal next_id, source_subscription
-            with lock:
-                subscription_id = next_id
-                next_id += 1
-                callbacks[subscription_id] = callback
-                if source_subscription is None:
-                    source_subscription = self.subscribe(
-                        publish,
-                        replay_latest=replay_latest,
-                    )
-
-            def dispose() -> bool:
-                nonlocal source_subscription
-                with lock:
-                    if subscription_id not in callbacks:
-                        return False
-                    callbacks.pop(subscription_id)
-                    if callbacks or source_subscription is None:
-                        return True
-                    subscription = source_subscription
-                    source_subscription = None
-                subscription.dispose()
-                return True
-
-            return PubSubCallbackSubscription(dispose)
-
-        return PubSubObservable(subscribe_factory=subscribe)
-
     def start_with(self, *values: object) -> "PubSubObservable":
         """Emit initial values before subscribing to source rows."""
 

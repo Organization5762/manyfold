@@ -1006,30 +1006,6 @@ class PubSubStreamTests(unittest.TestCase):
 
         self.assertEqual(observed, [(70.0, 80.0), (70.0, 81.0)])
 
-    def test_pubsub_observable_share_uses_one_upstream_subscription(self) -> None:
-        values = NewValues[int]()
-        upstream_observations = 0
-        observed_a: list[int] = []
-        observed_b: list[int] = []
-
-        def record(value: int) -> int:
-            nonlocal upstream_observations
-            upstream_observations += 1
-            return value * 10
-
-        shared = values.map(record).share()
-        subscription_a = shared.subscribe(observed_a.append)
-        subscription_b = shared.subscribe(observed_b.append)
-        values.publish(1)
-        subscription_a.dispose()
-        values.publish(2)
-        subscription_b.dispose()
-        values.publish(3)
-
-        self.assertEqual(observed_a, [10])
-        self.assertEqual(observed_b, [10, 20])
-        self.assertEqual(upstream_observations, 2)
-
     def test_pubsub_live_stream_with_latest_from_accepts_multiple_sources(
         self,
     ) -> None:
