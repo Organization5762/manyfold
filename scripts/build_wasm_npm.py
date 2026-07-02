@@ -12,12 +12,23 @@ import tomllib
 
 DEFAULT_OUT_DIR = pathlib.Path("dist/npm/manyfold")
 DEFAULT_PACKAGE_NAME = "@organization5762/manyfold"
+DEFAULT_WASM_PACK_TARGETS = ("bundler", "web", "nodejs")
 
 
 def _main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--out-dir", type=pathlib.Path, default=DEFAULT_OUT_DIR)
     parser.add_argument("--package-name", default=DEFAULT_PACKAGE_NAME)
+    parser.add_argument(
+        "--wasm-pack-target",
+        action="append",
+        choices=DEFAULT_WASM_PACK_TARGETS,
+        dest="wasm_pack_targets",
+        help=(
+            "wasm-pack target to include. Repeat to select multiple targets. "
+            "Defaults to bundler, web, and nodejs."
+        ),
+    )
     args = parser.parse_args()
 
     root = pathlib.Path(__file__).resolve().parents[1]
@@ -27,23 +38,11 @@ def _main() -> None:
     if out_dir.exists():
         shutil.rmtree(out_dir)
     out_dir.parent.mkdir(parents=True, exist_ok=True)
+    out_dir.mkdir(parents=True)
 
-    _run(
-        [
-            "wasm-pack",
-            "build",
-            str(root),
-            "--target",
-            "bundler",
-            "--release",
-            "--out-dir",
-            str(out_dir),
-            "--",
-            "--no-default-features",
-            "--features",
-            "wasm",
-        ]
-    )
+    wasm_pack_targets = tuple(args.wasm_pack_targets or DEFAULT_WASM_PACK_TARGETS)
+    for target in wasm_pack_targets:
+        _build_wasm_pack_target(root, out_dir / target, target)
 
     cargo = tomllib.loads((root / "Cargo.toml").read_text())
     pyproject = tomllib.loads((root / "pyproject.toml").read_text())
@@ -56,42 +55,127 @@ def _main() -> None:
             f"{python_version!r}"
         )
 
-    package_path = out_dir / "package.json"
-    package = json.loads(package_path.read_text())
-    package.update(
-        {
-            "name": args.package_name,
-            "version": cargo_version,
-            "description": "Manyfold worker proxy WebAssembly adapter.",
-            "license": cargo["package"]["license"],
-            "homepage": cargo["package"]["homepage"],
-            "repository": {
-                "type": "git",
-                "url": f"git+{cargo['package']['repository']}.git",
-                "directory": ".",
-            },
-            "keywords": [
-                "manyfold",
-                "wasm",
-                "webassembly",
-                "worker",
-                "pubsub",
-            ],
-            "sideEffects": False,
-            "files": [
-                "*.js",
-                "*.d.ts",
-                "*.wasm",
-                "LICENSE",
-                "README.md",
-                "package.json",
-            ],
-        }
+    module_name = cargo["lib"]["name"]
+    package = _package_metadata(
+        cargo=cargo,
+        package_name=args.package_name,
+        version=cargo_version,
+        module_name=module_name,
+        wasm_pack_targets=wasm_pack_targets,
     )
+    package_path = out_dir / "package.json"
     package_path.write_text(json.dumps(package, indent=2, sort_keys=True) + "\n")
     shutil.copyfile(root / "LICENSE", out_dir / "LICENSE")
-    shutil.copyfile(root / "npm" / "manyfold" / "README.md", out_dir / "README.md")
-    print(f"built npm package {args.package_name}@{cargo_version} in {out_dir}")
+    shutil.copyfile(root / "scripts" / "wasm_npm" / "README.md", out_dir / "README.md")
+    print(
+        "built npm package "
+        f"{args.package_name}@{cargo_version} in {out_dir} "
+        f"with wasm-pack targets {', '.join(wasm_pack_targets)}"
+    )
+
+
+def _build_wasm_pack_target(root: pathlib.Path, out_dir: pathlib.Path, target: str) -> None:
+    _run(
+        [
+            "wasm-pack",
+            "build",
+            str(root),
+            "--target",
+            target,
+            "--release",
+            "--out-dir",
+            str(out_dir),
+            "--",
+            "--no-default-features",
+            "--features",
+            "wasm",
+        ]
+    )
+    generated_package = out_dir / "package.json"
+    if generated_package.exists():
+        generated_package.unlink()
+    for generated_metadata in ("LICENSE", "README.md", ".gitignore"):
+        metadata_path = out_dir / generated_metadata
+        if metadata_path.exists():
+            metadata_path.unlink()
+
+
+def _package_metadata(
+    *,
+    cargo: dict[str, object],
+    package_name: str,
+    version: str,
+    module_name: str,
+    wasm_pack_targets: tuple[str, ...],
+) -> dict[str, object]:
+    exports: dict[str, object] = {
+        "./package.json": "./package.json",
+    }
+    if "bundler" in wasm_pack_targets:
+        exports["."] = _esm_export("bundler", module_name)
+    elif "web" in wasm_pack_targets:
+        exports["."] = _esm_export("web", module_name)
+    elif "nodejs" in wasm_pack_targets:
+        exports["."] = _node_export("nodejs", module_name)
+    for target in wasm_pack_targets:
+        exports[f"./{target}"] = (
+            _node_export(target, module_name)
+            if target == "nodejs"
+            else _esm_export(target, module_name)
+        )
+
+    return {
+        "name": package_name,
+        "version": version,
+        "description": "Manyfold WebAssembly PubSub runtime adapter.",
+        "license": cargo["package"]["license"],
+        "homepage": cargo["package"]["homepage"],
+        "repository": {
+            "type": "git",
+            "url": f"git+{cargo['package']['repository']}.git",
+            "directory": ".",
+        },
+        "keywords": [
+            "manyfold",
+            "wasm",
+            "webassembly",
+            "worker",
+            "pubsub",
+        ],
+        "main": f"./nodejs/{module_name}.js"
+        if "nodejs" in wasm_pack_targets
+        else f"./{wasm_pack_targets[0]}/{module_name}.js",
+        "module": f"./bundler/{module_name}.js"
+        if "bundler" in wasm_pack_targets
+        else f"./{wasm_pack_targets[0]}/{module_name}.js",
+        "types": f"./{wasm_pack_targets[0]}/{module_name}.d.ts",
+        "exports": exports,
+        "sideEffects": False,
+        "files": [
+            "bundler/**",
+            "web/**",
+            "nodejs/**",
+            "LICENSE",
+            "README.md",
+            "package.json",
+        ],
+    }
+
+
+def _esm_export(target: str, module_name: str) -> dict[str, str]:
+    return {
+        "types": f"./{target}/{module_name}.d.ts",
+        "import": f"./{target}/{module_name}.js",
+        "default": f"./{target}/{module_name}.js",
+    }
+
+
+def _node_export(target: str, module_name: str) -> dict[str, str]:
+    return {
+        "types": f"./{target}/{module_name}.d.ts",
+        "require": f"./{target}/{module_name}.js",
+        "default": f"./{target}/{module_name}.js",
+    }
 
 
 def _run(command: list[str]) -> None:

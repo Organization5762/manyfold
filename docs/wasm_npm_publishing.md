@@ -20,11 +20,28 @@ The package is generated into:
 dist/npm/manyfold
 ```
 
+Package-generation inputs live under `scripts/`: `scripts/build_wasm_npm.py`
+builds the package and `scripts/wasm_npm/README.md` is copied into the generated
+npm package.
+
 Build it locally with:
 
 ```sh
 python scripts/build_wasm_npm.py
 ```
+
+The generated package includes three wasm-pack host targets by default:
+
+- `@organization5762/manyfold` and `@organization5762/manyfold/bundler` for
+  bundlers such as Vite, Webpack, and Electron renderer builds.
+- `@organization5762/manyfold/web` for direct browser loading.
+- `@organization5762/manyfold/nodejs` for Node.js and Electron main-process
+  code.
+
+These are host-loader targets, not CPU architecture targets.
+`wasm32-unknown-unknown` is the portable WebAssembly compile target; the package
+split exists because each host needs different JavaScript glue around the same
+Rust/WASM core.
 
 This requires `wasm-pack`:
 

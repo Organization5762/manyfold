@@ -23,6 +23,14 @@ const messages = input.poll("browser");
 console.log(messages[0].payload);
 ```
 
+The default import uses the bundler build. Host-specific builds are also
+published when an application needs different wasm-pack loader glue:
+
+```js
+import { PubSub } from "@organization5762/manyfold/web";
+import { PubSub as NodePubSub } from "@organization5762/manyfold/nodejs";
+```
+
 Callback subscriptions are available for client code that wants Manyfold to
 deliver new messages directly. Inline callbacks run during `publish()`,
 `mainThread()` callbacks are scheduled through `queueMicrotask`, and
@@ -87,6 +95,6 @@ const child = input.spawnRustWorker("/usr/local/bin/manyfold-worker", [
 ]);
 ```
 
-The initial package supports raw PubSub endpoints, lock take/release, and clock
-tick/time reads. SQL and Variable endpoints are part of the core worker protocol
-and will be added as runtime-backed endpoints.
+The initial package supports raw PubSub endpoints, callback subscriptions, lock
+take/release, and clock tick/time reads. SQL and Variable endpoints are part of
+the core worker protocol and will be added as runtime-backed endpoints.
