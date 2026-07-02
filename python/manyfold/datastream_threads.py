@@ -8,61 +8,39 @@ opt in to the data-processing thread lifecycle explicitly.
 
 from __future__ import annotations
 
-import logging
-import math
 import os
-import time
 from collections import deque
-from collections.abc import Callable, Iterable, Iterator
-from contextlib import contextmanager
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import timedelta
 from enum import IntEnum
 from functools import partial
 from itertools import count
 from queue import Full, PriorityQueue
-from threading import Event, Lock, Thread, get_ident
+from threading import Lock, Thread, get_ident
 from typing import Any, TypeVar
 
 from . import streams
 from .streams import (
     Disposable,
     EventLoopScheduler,
-    NewThreadScheduler,
     Observable,
     SchedulerBase,
     Subject,
     ThreadPoolScheduler,
     TimeoutScheduler,
     operators as ops,
-    pipe,
 )
 
-DisposableBase = Disposable
-
 T = TypeVar("T")
-
-TStarting = TypeVar("TStarting")
 
 StartableTarget = Callable[..., None]
 
 DataStreamPriorityResolver = Callable[[], "DataStreamPriority"]
 
 
-logger = logging.getLogger(__name__)
-
-MAIN_THREAD_DATASTREAM_LATENCY = "main_thread_datastream_handoff"
-
-DEFAULT_DELIVERY_LATENCY_HISTORY_SIZE = 2048
 DEFAULT_MAIN_THREAD_DATASTREAM_QUEUE_LIMIT = 2048
 DEFAULT_BACKGROUND_PRIORITY_QUEUE_LIMIT = 2048
-
-
-class _NoStartingValue:
-    pass
-
-
-_NO_STARTING_VALUE = _NoStartingValue()
 
 
 def background_scheduler() -> SchedulerBase:
@@ -128,12 +106,6 @@ def coalesce_scheduler() -> SchedulerBase:
     return _COALESCE_SCHEDULER
 
 
-def replay_scheduler() -> TimeoutScheduler:
-    """Return a fresh timeout scheduler for replay subjects."""
-
-    return TimeoutScheduler()
-
-
 def create_default_thread_factory(name: str) -> Callable[[StartableTarget], Thread]:
     """Build a non-daemon thread factory for datastream event-loop schedulers."""
 
@@ -151,7 +123,7 @@ def interval_in_background(
     name: str | None = None,
     scheduler: SchedulerBase | None = None,
 ) -> Observable[int]:
-    """Emit integer ticks on a background scheduler until ``shutdown_signal`` fires."""
+    """Emit integer ticks on a background scheduler until test reset shutdown fires."""
 
     period = _require_positive_timedelta(period)
     thread_name = None if name is None else _require_thread_name(name)
@@ -161,14 +133,8 @@ def interval_in_background(
         else interval_scheduler()
     )
     return streams.interval(period=period, scheduler=resolved_scheduler).pipe(
-        ops.take_until(shutdown_signal),
+        ops.take_until(_interval_reset_signal),
     )
-
-
-def delivery_latency_snapshot() -> dict[str, DeliveryLatencyStats]:
-    """Return latency summaries for queued main-thread deliveries."""
-
-    return _LATENCY_RECORDER.snapshot()
 
 
 def drain_main_thread_queue(max_items: int | None = None) -> int:
@@ -189,12 +155,8 @@ def drain_main_thread_queue(max_items: int | None = None) -> int:
         with _MAIN_THREAD_QUEUE_LOCK:
             if not _MAIN_THREAD_QUEUE:
                 break
-            task = _MAIN_THREAD_QUEUE.popleft()
-        _LATENCY_RECORDER.record(
-            MAIN_THREAD_DATASTREAM_LATENCY,
-            time.monotonic() - task.enqueued_monotonic,
-        )
-        task.callback()
+            callback = _MAIN_THREAD_QUEUE.popleft()
+        callback()
         drained += 1
         if max_items is not None and drained >= max_items:
             break
@@ -214,7 +176,7 @@ def deliver_on_main_thread(source: Observable[T]) -> Observable[T]:
     def _subscribe(
         observer: Any,
         scheduler: SchedulerBase | None = None,
-    ) -> DisposableBase:
+    ) -> Disposable:
         disposed = False
         dispose_lock = Lock()
         pending_kind: str | None = None
@@ -293,7 +255,7 @@ def deliver_on_background(
     def _subscribe(
         observer: Any,
         scheduler: SchedulerBase | None = None,
-    ) -> DisposableBase:
+    ) -> Disposable:
         disposed = False
         dispose_lock = Lock()
         pending_kind: str | None = None
@@ -381,117 +343,11 @@ def deliver_on_background(
     return streams.create(_subscribe)
 
 
-def start_with_once(value: TStarting) -> Callable[[Observable[T]], Observable[Any]]:
-    """Prepend one value to a datastream for each subscription."""
-
-    def _start(source: Observable[T]) -> Observable[Any]:
-        return source.pipe(ops.start_with(value))
-
-    return _start
-
-
-def pipe_on_background(
-    source: Observable[T],
-    *operators: Any,
-    starting_value: TStarting | _NoStartingValue = _NO_STARTING_VALUE,
-) -> Observable[Any]:
-    """Apply operators to a source observable."""
-
-    _require_observable(source, "source")
-    logger.debug("Building background pipeline.")
-    resolved_operators = operators
-    if not isinstance(starting_value, _NoStartingValue):
-        resolved_operators = (*operators, start_with_once(starting_value))
-    return pipe(source, *resolved_operators)
-
-
-def pipe_on_main_thread(source: Observable[T], *operators: Any) -> Observable[Any]:
-    """Deliver source emissions on the main thread and apply operators."""
-
-    _require_observable(source, "source")
-    logger.debug("Building main-thread pipeline.")
-    return pipe(deliver_on_main_thread(source), *operators)
-
-
-def pipe_to_background_event_loop(
-    source: Observable[T],
-    name: str,
-    *operators: Any,
-) -> Observable[Any]:
-    """Pipe a datastream through an event loop running on a background thread."""
-
-    _require_observable(source, "source")
-    scheduler = EventLoopScheduler(
-        thread_factory=partial(_run_on_thread, name=_require_thread_name(name))
-    )
-    return pipe(source, ops.observe_on(scheduler), *operators)
-
-
-def pipe_to_background_thread(
-    source: Observable[T],
-    name: str,
-    *operators: Any,
-) -> Observable[Any]:
-    """Pipe a datastream through a dedicated background thread executor."""
-
-    _require_observable(source, "source")
-    scheduler = NewThreadScheduler(
-        thread_factory=partial(_run_on_thread, name=_require_thread_name(name))
-    )
-    return pipe(source, ops.observe_on(scheduler), *operators)
-
-
-@contextmanager
-def background_datastream_observable(
-    observable: Observable[T],
-    name: str,
-) -> Iterator[Observable[T]]:
-    """Subscribe to a data observable on a daemon thread and yield its subject."""
-
-    _require_observable(observable, "observable")
-    thread_name = _require_thread_name(name)
-    logger.debug("Starting background datastream thread %s", thread_name)
-    subject: Subject[T] = Subject()
-    ready = Event()
-    run = _BackgroundObservableRun()
-    thread = Thread(
-        name=thread_name,
-        target=_run_background_observable,
-        args=(subject, observable, ready, run),
-        daemon=True,
-    )
-    thread.start()
-    ready.wait()
-    if run.error is not None:
-        raise run.error
-    try:
-        yield subject
-    finally:
-        if run.subscription is not None:
-            run.subscription.dispose()
-        subject.on_completed()
-
-
-def scheduler_diagnostics() -> dict[str, int | None]:
-    """Return max-worker settings for initialized shared schedulers."""
-
-    with _MAIN_THREAD_QUEUE_LOCK:
-        main_thread_queue_depth = len(_MAIN_THREAD_QUEUE)
-    return {
-        "background_max_workers": _BACKGROUND_SCHEDULER.max_workers,
-        "background_priority_queue_limit": _BACKGROUND_PRIORITY_QUEUE.maxsize,
-        "blocking_io_max_workers": _BLOCKING_IO_SCHEDULER.max_workers,
-        "main_thread_queue_depth": main_thread_queue_depth,
-        "main_thread_queue_limit": _MAIN_THREAD_QUEUE_LIMIT,
-        "input_max_workers": _INPUT_SCHEDULER.max_workers,
-    }
-
-
 def reset_datastream_delivery_for_tests() -> None:
-    """Reset module-level schedulers, queues, shutdown_signal, and latency state."""
+    """Reset module-level schedulers, queues, interval shutdown state."""
 
     global _BACKGROUND_PRIORITY_QUEUE, _MAIN_THREAD_IDENT, _MAIN_THREAD_QUEUE_LIMIT
-    global shutdown_signal
+    global _interval_reset_signal
     for state in (
         _BACKGROUND_SCHEDULER,
         _BLOCKING_IO_SCHEDULER,
@@ -510,17 +366,7 @@ def reset_datastream_delivery_for_tests() -> None:
         _stop_background_priority_worker_locked()
         _BACKGROUND_PRIORITY_QUEUE = _new_background_priority_queue()
     _MAIN_THREAD_IDENT = None
-    _LATENCY_RECORDER.clear()
-    shutdown_signal = Subject()
-
-
-def materialize_sequence(sequence: Iterable[T]) -> Observable[T]:
-    """Return a materialized observable over an iterable sequence."""
-
-    if not isinstance(sequence, Iterable):
-        raise ValueError("sequence must be iterable")
-    snapshot = tuple(sequence)
-    return streams.from_iterable(snapshot)
+    _interval_reset_signal = Subject()
 
 
 class DataStreamPriority(IntEnum):
@@ -529,31 +375,6 @@ class DataStreamPriority(IntEnum):
     HIGH = 0
     NORMAL = 10
     LOW = 20
-
-
-@dataclass(frozen=True, slots=True)
-class DeliveryLatencyStats:
-    """Percentile summary of datastream delivery latency."""
-
-    count: int
-    p50_ms: float
-    p95_ms: float
-    p99_ms: float
-    max_ms: float
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.count, int) or isinstance(self.count, bool):
-            raise ValueError("count must be an integer")
-        if self.count <= 0:
-            raise ValueError("count must be positive")
-        values = (
-            _require_finite_non_negative_number(self.p50_ms, "p50_ms"),
-            _require_finite_non_negative_number(self.p95_ms, "p95_ms"),
-            _require_finite_non_negative_number(self.p99_ms, "p99_ms"),
-            _require_finite_non_negative_number(self.max_ms, "max_ms"),
-        )
-        if values != tuple(sorted(values)):
-            raise ValueError("latency percentiles must be ordered")
 
 
 def _require_non_empty_string(value: Any, field: str) -> str:
@@ -571,21 +392,6 @@ def _require_thread_name(value: Any) -> str:
 def _require_observable(value: Any, field: str) -> None:
     if not isinstance(value, Observable):
         raise ValueError(f"{field} must be an Observable")
-
-
-def _require_number(value: Any, field: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"{field} must be a number")
-    return float(value)
-
-
-def _require_finite_non_negative_number(value: Any, field: str) -> float:
-    value = _require_number(value, field)
-    if not math.isfinite(value):
-        raise ValueError(f"{field} must be finite")
-    if value < 0.0:
-        raise ValueError(f"{field} must not be negative")
-    return value
 
 
 def _require_positive_timedelta(value: Any) -> timedelta:
@@ -620,22 +426,6 @@ def _require_datastream_priority_resolver(
         return _resolve
     priority = _require_datastream_priority(value)
     return lambda: priority
-
-
-def _latency_stats(values: tuple[float, ...]) -> DeliveryLatencyStats:
-    ordered = sorted(values)
-    return DeliveryLatencyStats(
-        count=len(ordered),
-        p50_ms=_percentile_ms(ordered, 0.50),
-        p95_ms=_percentile_ms(ordered, 0.95),
-        p99_ms=_percentile_ms(ordered, 0.99),
-        max_ms=ordered[-1] * 1000.0,
-    )
-
-
-def _percentile_ms(ordered_values: list[float], percentile: float) -> float:
-    index = max(0, math.ceil(percentile * len(ordered_values)) - 1)
-    return ordered_values[index] * 1000.0
 
 
 def _env_int(
@@ -688,14 +478,10 @@ def _run_on_thread(target: StartableTarget, name: str) -> Thread:
 
 
 def _enqueue_main_thread_task(callback: Callable[[], None]) -> bool:
-    task = _MainThreadTask(
-        callback=callback,
-        enqueued_monotonic=time.monotonic(),
-    )
     with _MAIN_THREAD_QUEUE_LOCK:
         if len(_MAIN_THREAD_QUEUE) >= _MAIN_THREAD_QUEUE_LIMIT:
             return False
-        _MAIN_THREAD_QUEUE.append(task)
+        _MAIN_THREAD_QUEUE.append(callback)
     return True
 
 
@@ -779,31 +565,11 @@ def _main_thread_queue_limit() -> int:
     )
 
 
-def _run_background_observable(
-    subject: Subject[T],
-    observable: Observable[T],
-    ready: Event,
-    run: _BackgroundObservableRun,
-) -> None:
-    try:
-        run.subscription = observable.subscribe(subject)
-    except BaseException as exc:
-        run.error = exc
-    finally:
-        ready.set()
-
-
 @dataclass
 class _SchedulerState:
     lock: Lock
     scheduler: SchedulerBase | None = None
     max_workers: int | None = None
-
-
-@dataclass
-class _MainThreadTask:
-    callback: Callable[[], None]
-    enqueued_monotonic: float
 
 
 @dataclass(order=True)
@@ -815,57 +581,8 @@ class _BackgroundPriorityTask:
 
 
 @dataclass
-class _BackgroundObservableRun:
-    subscription: DisposableBase | None = None
-    error: BaseException | None = None
-
-
-@dataclass
 class _BackgroundPriorityWorker:
     thread: Thread | None = None
-
-
-class _LatencyRecorder:
-    def __init__(
-        self, history_size: int = DEFAULT_DELIVERY_LATENCY_HISTORY_SIZE
-    ) -> None:
-        if (
-            not isinstance(history_size, int)
-            or isinstance(history_size, bool)
-            or history_size <= 0
-        ):
-            raise ValueError("history_size must be a positive integer")
-        self._history_size = history_size
-        self._history: dict[str, deque[float]] = {}
-        self._lock = Lock()
-
-    def record(self, stream_name: str, delay_s: float) -> None:
-        stream_name = _require_non_empty_string(stream_name, "stream_name")
-        delay_s = _require_number(delay_s, "delay_s")
-        if not math.isfinite(delay_s):
-            delay_s = 0.0
-        with self._lock:
-            history = self._history.get(stream_name)
-            if history is None:
-                history = deque(maxlen=self._history_size)
-                self._history[stream_name] = history
-            history.append(max(delay_s, 0.0))
-
-    def snapshot(self) -> dict[str, DeliveryLatencyStats]:
-        with self._lock:
-            history = {
-                stream_name: tuple(values)
-                for stream_name, values in self._history.items()
-                if values
-            }
-        return {
-            stream_name: _latency_stats(values)
-            for stream_name, values in sorted(history.items())
-        }
-
-    def clear(self) -> None:
-        with self._lock:
-            self._history.clear()
 
 
 _COALESCE_SCHEDULER = TimeoutScheduler()
@@ -886,7 +603,7 @@ _INPUT_SCHEDULER = _SchedulerState(lock=Lock())
 
 _INTERVAL_SCHEDULER = _SchedulerState(lock=Lock())
 
-_MAIN_THREAD_QUEUE: deque[_MainThreadTask] = deque()
+_MAIN_THREAD_QUEUE: deque[Callable[[], None]] = deque()
 
 _MAIN_THREAD_QUEUE_LIMIT = _main_thread_queue_limit()
 
@@ -894,39 +611,23 @@ _MAIN_THREAD_QUEUE_LOCK = Lock()
 
 _MAIN_THREAD_IDENT: int | None = None
 
-_LATENCY_RECORDER = _LatencyRecorder()
-
-shutdown_signal: Subject[Any] = Subject()
+_interval_reset_signal: Subject[Any] = Subject()
 
 
 __all__ = (
     "DEFAULT_BACKGROUND_PRIORITY_QUEUE_LIMIT",
-    "DEFAULT_DELIVERY_LATENCY_HISTORY_SIZE",
     "DEFAULT_MAIN_THREAD_DATASTREAM_QUEUE_LIMIT",
     "DataStreamPriority",
-    "DeliveryLatencyStats",
-    "MAIN_THREAD_DATASTREAM_LATENCY",
-    "background_datastream_observable",
     "background_scheduler",
     "blocking_io_scheduler",
     "coalesce_scheduler",
     "create_default_thread_factory",
     "deliver_on_background",
     "deliver_on_main_thread",
-    "delivery_latency_snapshot",
     "drain_main_thread_queue",
     "input_scheduler",
     "interval_in_background",
     "interval_scheduler",
-    "materialize_sequence",
     "on_main_thread",
-    "pipe_on_background",
-    "pipe_on_main_thread",
-    "pipe_to_background_event_loop",
-    "pipe_to_background_thread",
-    "replay_scheduler",
     "reset_datastream_delivery_for_tests",
-    "scheduler_diagnostics",
-    "shutdown_signal",
-    "start_with_once",
 )

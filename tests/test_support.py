@@ -1616,7 +1616,6 @@ def load_manyfold_package():
         "legos_by_role": lego_catalog.legos_by_role,
         "sensor_event_schema": sensor_io.sensor_event_schema,
         "sensor_sample_schema": sensor_io.sensor_sample_schema,
-        "shutdown_signal": sys.modules["manyfold.datastream_threads"].shutdown_signal,
         "sink": primitives.sink,
         "source": primitives.source,
         "SystemClock": sensor_io.SystemClock,

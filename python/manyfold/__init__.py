@@ -152,10 +152,7 @@ _EXPORTS_BY_MODULE = {
         "sink",
         "source",
     ),
-    "manyfold.datastream_threads": (
-        "drain_main_thread_queue",
-        "shutdown_signal",
-    ),
+    "manyfold.datastream_threads": ("drain_main_thread_queue",),
     "manyfold.reference_examples": (
         "REFERENCE_EXAMPLE_SUITE",
         "ReferenceExample",
@@ -427,7 +424,6 @@ __all__ = (
     "route",
     "sensor_event_schema",
     "sensor_sample_schema",
-    "shutdown_signal",
     "sink",
     "source",
     "xor_checksum",

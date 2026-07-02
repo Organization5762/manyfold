@@ -47,7 +47,6 @@ from .components import (
 )
 from .datastream_threads import (
     drain_main_thread_queue as drain_main_thread_queue,
-    shutdown_signal as shutdown_signal,
 )
 from .embedded import (
     EmbeddedBulkSensor as EmbeddedBulkSensor,
@@ -397,7 +396,6 @@ __all__ = (
     "route",
     "sensor_event_schema",
     "sensor_sample_schema",
-    "shutdown_signal",
     "sink",
     "source",
     "xor_checksum",
