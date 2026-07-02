@@ -32,7 +32,7 @@ from typing import (
     runtime_checkable,
 )
 
-from . import stream_threads, streams
+from . import datastream_threads, streams
 from ._manyfold_rust import (
     ClosedEnvelope,
     ControlLoop as NativeControlLoop,
@@ -498,7 +498,7 @@ class CoalesceLatestNode(Generic[T]):
                 cancel_timers()
                 generation += 1
                 scheduled_generation = generation
-                timer = stream_threads.coalesce_scheduler().schedule_relative(
+                timer = datastream_threads.coalesce_scheduler().schedule_relative(
                     window_seconds,
                     lambda *_: flush(scheduled_generation),
                 )
@@ -535,7 +535,7 @@ class CoalesceLatestNode(Generic[T]):
                 on_next,
                 on_error,
                 on_completed,
-                scheduler=stream_threads.coalesce_scheduler(),
+                scheduler=datastream_threads.coalesce_scheduler(),
             )
 
             def dispose() -> None:
@@ -680,12 +680,12 @@ class EmptyNode(Generic[T]):
 
 @dataclass(frozen=True)
 class MainThreadNode(Generic[T]):
-    """Deliver an observable through Manyfold's frame-thread queue."""
+    """Deliver an observable through Manyfold's main-thread queue."""
 
     name: str = "main-thread"
 
     def observable(self, source: ObservableLike[T]) -> Observable[T]:
-        return stream_threads.deliver_on_frame_thread(cast(Observable[T], source))
+        return datastream_threads.deliver_on_main_thread(cast(Observable[T], source))
 
 
 @dataclass(frozen=True)
@@ -776,7 +776,7 @@ class IntervalNode:
     period: timedelta
 
     def observable(self) -> Observable[int]:
-        return stream_threads.interval_in_background(self.period, name=self.name)
+        return datastream_threads.interval_in_background(self.period, name=self.name)
 
 
 class FluentStream(Generic[T]):
@@ -785,10 +785,10 @@ class FluentStream(Generic[T]):
 
     def then_on_background_thread(self, *, isolated: bool = False) -> "FluentStream[T]":
         del isolated
-        return FluentStream(stream_threads.observe_on_background(self._observable))
+        return FluentStream(datastream_threads.deliver_on_background(self._observable))
 
     def then_on_main_thread(self) -> "FluentStream[T]":
-        return FluentStream(stream_threads.deliver_on_frame_thread(self._observable))
+        return FluentStream(datastream_threads.deliver_on_main_thread(self._observable))
 
     def then_on_isolated_thread(self, name: str | None = None) -> "FluentStream[T]":
         del name
@@ -1055,7 +1055,7 @@ class NodeThreadPlacement:
 
     @classmethod
     def main_thread(cls) -> NodeThreadPlacement:
-        """Return a placement that queues node work onto the main frame thread."""
+        """Return a placement that queues node work onto the main main thread."""
         return cls("main")
 
     @classmethod
@@ -3362,7 +3362,7 @@ class _ThreadPlaceableNode:
         return replace(self, thread_placement=placement)
 
     def on_main_thread(self) -> Any:
-        """Run this node on the main frame thread."""
+        """Run this node on the main main thread."""
         return self.with_thread_placement(NodeThreadPlacement.main_thread())
 
     def on_background_thread(self, *, isolated: bool = False) -> Any:
@@ -3629,7 +3629,7 @@ class RoutePipeline(Generic[T]):
         )
 
     def on_main_thread(self) -> RoutePipeline[T]:
-        """Schedule all following pipeline nodes on the main frame thread."""
+        """Schedule all following pipeline nodes on the main main thread."""
         return self._with_thread_placement(NodeThreadPlacement.main_thread())
 
     def on_background_thread(self, *, isolated: bool = False) -> RoutePipeline[T]:
@@ -10252,7 +10252,7 @@ class Graph:
         if placement is None:
             return observable
         if placement.kind == "main":
-            return stream_threads.deliver_on_frame_thread(observable)
+            return datastream_threads.deliver_on_main_thread(observable)
 
         def subscribe(
             observer: ObserverLike[Any],
@@ -10275,17 +10275,17 @@ class Graph:
         placement: NodeThreadPlacement,
     ) -> tuple[object, bool]:
         if placement.kind == "background":
-            return stream_threads.background_scheduler(), False
+            return datastream_threads.background_scheduler(), False
         if placement.kind == "pooled":
             if placement.scheduler_name == "blocking_io":
-                return stream_threads.blocking_io_scheduler(), False
+                return datastream_threads.blocking_io_scheduler(), False
             if placement.scheduler_name == "input":
-                return stream_threads.input_scheduler(), False
-            return stream_threads.background_scheduler(), False
+                return datastream_threads.input_scheduler(), False
+            return datastream_threads.background_scheduler(), False
         thread_name = placement.thread_name or self._next_pipeline_node_name("isolated")
         return (
             EventLoopScheduler(
-                thread_factory=stream_threads.create_default_thread_factory(
+                thread_factory=datastream_threads.create_default_thread_factory(
                     thread_name,
                 )
             ),
@@ -10733,7 +10733,7 @@ class Graph:
 
 
 def _fluent_interval_observable(period: timedelta) -> Observable[int]:
-    period = stream_threads._require_positive_timedelta(period)
+    period = datastream_threads._require_positive_timedelta(period)
     seconds = period.total_seconds()
 
     def _subscribe(

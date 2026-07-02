@@ -194,7 +194,9 @@ EXAMPLE_CATALOG: tuple[ExampleCatalogEntry, ...] = (
         readme_order=2,
     ),
     ExampleCatalogEntry("observe_publish", "Observe a route while publishing updates."),
-    ExampleCatalogEntry("pipe_route", "Pipe an Rx source directly into a route."),
+    ExampleCatalogEntry(
+        "pipe_route", "Pipe a local data source directly into a route."
+    ),
     ExampleCatalogEntry(
         "read_then_write_next_epoch_step",
         "Install a read/transform/write step with a shared write stream.",

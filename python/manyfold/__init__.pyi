@@ -45,6 +45,10 @@ from .components import (
     SnapshotStoreRoutes as SnapshotStoreRoutes,
     StoreEntry as StoreEntry,
 )
+from .datastream_threads import (
+    drain_main_thread_queue as drain_main_thread_queue,
+    shutdown_signal as shutdown_signal,
+)
 from .embedded import (
     EmbeddedBulkSensor as EmbeddedBulkSensor,
     EmbeddedDeviceProfile as EmbeddedDeviceProfile,
@@ -206,10 +210,6 @@ from .sensor_io import (
     xor_checksum as xor_checksum,
 )
 from .stats import Average as Average
-from .stream_threads import (
-    drain_frame_thread_queue as drain_frame_thread_queue,
-    shutdown as shutdown,
-)
 
 __all__ = (
     "Average",
@@ -384,7 +384,7 @@ __all__ = (
     "dependencies_of",
     "dependency_closure_of",
     "dependents_of",
-    "drain_frame_thread_queue",
+    "drain_main_thread_queue",
     "get_lego",
     "health_status_schema",
     "implemented_reference_examples",
@@ -397,7 +397,7 @@ __all__ = (
     "route",
     "sensor_event_schema",
     "sensor_sample_schema",
-    "shutdown",
+    "shutdown_signal",
     "sink",
     "source",
     "xor_checksum",

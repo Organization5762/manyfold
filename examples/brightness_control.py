@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TypedDict
 
-import reactivex as rx
+import manyfold.streams as streams
 from manyfold import (
     Graph,
     Layer,
@@ -41,7 +41,7 @@ def run_example() -> BrightnessControlExampleResult:
     )
     step = ReadThenWriteNextEpochStep.map(
         name="BrightnessToPwm",
-        read=rx.from_iterable([0, 32, 255]),
+        read=streams.from_iterable([0, 32, 255]),
         output=staged_pwm_route,
         transform=lambda value: bytes([value]),
     )

@@ -45,7 +45,7 @@ RUNTIME_ASSERT_ROOTS = (
 HOT_PATH_PYTHON_PATHS = (
     PROJECT_ROOT / "python" / "manyfold" / "graph.py",
     PROJECT_ROOT / "python" / "manyfold" / "memory_benchmarks.py",
-    PROJECT_ROOT / "python" / "manyfold" / "stream_threads.py",
+    PROJECT_ROOT / "python" / "manyfold" / "datastream_threads.py",
     PROJECT_ROOT
     / "python"
     / "manyfold"
@@ -77,7 +77,7 @@ DECLARATION_ORDER = {
 DECLARATION_ORDER_EXCEPTIONS = frozenset(
     {
         ("python/manyfold/graph.py", "_ThreadPlaceableNode"),
-        ("python/manyfold/stream_threads.py", "_NoStartingValue"),
+        ("python/manyfold/datastream_threads.py", "_NoStartingValue"),
     }
 )
 

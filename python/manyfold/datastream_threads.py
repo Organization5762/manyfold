@@ -1,9 +1,9 @@
-"""Threading helpers for ManyFold-backed Manyfold streams.
+"""Threading helpers for ManyFold data-stream processing.
 
 This module carries the process-local scheduling patterns used by applications
-that need to hand stream emissions between worker threads and a frame thread.
+that need to hand data-stream emissions between worker threads and a main thread.
 It intentionally lives outside the top-level ``manyfold`` namespace so callers
-opt in to the thread lifecycle surface explicitly.
+opt in to the data-processing thread lifecycle explicitly.
 """
 
 from __future__ import annotations
@@ -46,15 +46,15 @@ TStarting = TypeVar("TStarting")
 
 StartableTarget = Callable[..., None]
 
-StreamPriorityResolver = Callable[[], "StreamPriority"]
+DataStreamPriorityResolver = Callable[[], "DataStreamPriority"]
 
 
 logger = logging.getLogger(__name__)
 
-FRAME_THREAD_LATENCY_STREAM = "frame_thread_handoff"
+MAIN_THREAD_DATASTREAM_LATENCY = "main_thread_datastream_handoff"
 
 DEFAULT_DELIVERY_LATENCY_HISTORY_SIZE = 2048
-DEFAULT_FRAME_THREAD_QUEUE_LIMIT = 2048
+DEFAULT_MAIN_THREAD_DATASTREAM_QUEUE_LIMIT = 2048
 DEFAULT_BACKGROUND_PRIORITY_QUEUE_LIMIT = 2048
 
 
@@ -66,11 +66,11 @@ _NO_STARTING_VALUE = _NoStartingValue()
 
 
 def background_scheduler() -> SchedulerBase:
-    """Return the shared scheduler for CPU-light background stream work."""
+    """Return the shared scheduler for CPU-light background datastream work."""
 
     max_workers = _env_int(
-        "MANYFOLD_STREAM_BACKGROUND_MAX_WORKERS",
-        legacy_name="HEART_RX_BACKGROUND_MAX_WORKERS",
+        "MANYFOLD_DATASTREAM_BACKGROUND_MAX_WORKERS",
+        legacy_name="HEART_DATASTREAM_BACKGROUND_MAX_WORKERS",
         default=4,
     )
     return _build_scheduler(
@@ -81,11 +81,11 @@ def background_scheduler() -> SchedulerBase:
 
 
 def blocking_io_scheduler() -> SchedulerBase:
-    """Return the shared scheduler for blocking stream adapters."""
+    """Return the shared scheduler for blocking data adapters."""
 
     max_workers = _env_int(
-        "MANYFOLD_STREAM_BLOCKING_IO_MAX_WORKERS",
-        legacy_name="HEART_RX_BLOCKING_IO_MAX_WORKERS",
+        "MANYFOLD_DATASTREAM_BLOCKING_IO_MAX_WORKERS",
+        legacy_name="HEART_DATASTREAM_BLOCKING_IO_MAX_WORKERS",
         default=2,
     )
     return _build_scheduler(
@@ -96,11 +96,11 @@ def blocking_io_scheduler() -> SchedulerBase:
 
 
 def input_scheduler() -> SchedulerBase:
-    """Return the shared scheduler for human-input streams."""
+    """Return the shared scheduler for human-input datastreams."""
 
     max_workers = _env_int(
-        "MANYFOLD_STREAM_INPUT_MAX_WORKERS",
-        legacy_name="HEART_RX_INPUT_MAX_WORKERS",
+        "MANYFOLD_DATASTREAM_INPUT_MAX_WORKERS",
+        legacy_name="HEART_DATASTREAM_INPUT_MAX_WORKERS",
         default=2,
     )
     return _build_scheduler(
@@ -111,19 +111,19 @@ def input_scheduler() -> SchedulerBase:
 
 
 def interval_scheduler() -> SchedulerBase:
-    """Return the shared event-loop scheduler used by interval streams."""
+    """Return the shared event-loop scheduler used by interval datastreams."""
 
     return _build_scheduler(
         _INTERVAL_SCHEDULER,
         constructor=partial(
             EventLoopScheduler,
-            thread_factory=create_default_thread_factory("stream-interval"),
+            thread_factory=create_default_thread_factory("datastream-interval"),
         ),
     )
 
 
 def coalesce_scheduler() -> SchedulerBase:
-    """Return the scheduler used for timer-based stream coalescing."""
+    """Return the scheduler used for timer-based datastream coalescing."""
 
     return _COALESCE_SCHEDULER
 
@@ -135,7 +135,7 @@ def replay_scheduler() -> TimeoutScheduler:
 
 
 def create_default_thread_factory(name: str) -> Callable[[StartableTarget], Thread]:
-    """Build a non-daemon thread factory for stream event-loop schedulers."""
+    """Build a non-daemon thread factory for datastream event-loop schedulers."""
 
     thread_name = _require_thread_name(name)
 
@@ -151,7 +151,7 @@ def interval_in_background(
     name: str | None = None,
     scheduler: SchedulerBase | None = None,
 ) -> Observable[int]:
-    """Emit integer ticks on a background scheduler until ``shutdown`` fires."""
+    """Emit integer ticks on a background scheduler until ``shutdown_signal`` fires."""
 
     period = _require_positive_timedelta(period)
     thread_name = None if name is None else _require_thread_name(name)
@@ -161,18 +161,18 @@ def interval_in_background(
         else interval_scheduler()
     )
     return streams.interval(period=period, scheduler=resolved_scheduler).pipe(
-        ops.take_until(shutdown),
+        ops.take_until(shutdown_signal),
     )
 
 
 def delivery_latency_snapshot() -> dict[str, DeliveryLatencyStats]:
-    """Return latency summaries for queued frame-thread deliveries."""
+    """Return latency summaries for queued main-thread deliveries."""
 
     return _LATENCY_RECORDER.snapshot()
 
 
-def drain_frame_thread_queue(max_items: int | None = None) -> int:
-    """Run pending frame-thread callbacks and return the number drained."""
+def drain_main_thread_queue(max_items: int | None = None) -> int:
+    """Run pending main-thread callbacks and return the number drained."""
 
     if max_items is not None:
         if isinstance(max_items, bool) or not isinstance(max_items, int):
@@ -182,16 +182,16 @@ def drain_frame_thread_queue(max_items: int | None = None) -> int:
         if max_items == 0:
             return 0
 
-    global _FRAME_THREAD_IDENT
-    _FRAME_THREAD_IDENT = get_ident()
+    global _MAIN_THREAD_IDENT
+    _MAIN_THREAD_IDENT = get_ident()
     drained = 0
     while True:
-        with _FRAME_THREAD_QUEUE_LOCK:
-            if not _FRAME_THREAD_QUEUE:
+        with _MAIN_THREAD_QUEUE_LOCK:
+            if not _MAIN_THREAD_QUEUE:
                 break
-            task = _FRAME_THREAD_QUEUE.popleft()
+            task = _MAIN_THREAD_QUEUE.popleft()
         _LATENCY_RECORDER.record(
-            FRAME_THREAD_LATENCY_STREAM,
+            MAIN_THREAD_DATASTREAM_LATENCY,
             time.monotonic() - task.enqueued_monotonic,
         )
         task.callback()
@@ -201,14 +201,14 @@ def drain_frame_thread_queue(max_items: int | None = None) -> int:
     return drained
 
 
-def on_frame_thread() -> bool:
-    """Return whether the current thread last drained the frame-thread queue."""
+def on_main_thread() -> bool:
+    """Return whether the current thread last drained the main-thread queue."""
 
-    return _FRAME_THREAD_IDENT == get_ident()
+    return _MAIN_THREAD_IDENT == get_ident()
 
 
-def deliver_on_frame_thread(source: Observable[T]) -> Observable[T]:
-    """Queue source emissions until ``drain_frame_thread_queue`` is called."""
+def deliver_on_main_thread(source: Observable[T]) -> Observable[T]:
+    """Queue source emissions until ``drain_main_thread_queue`` is called."""
     _require_observable(source, "source")
 
     def _subscribe(
@@ -252,12 +252,12 @@ def deliver_on_frame_thread(source: Observable[T]) -> Observable[T]:
                 elif kind_to_run == "completed":
                     observer.on_completed()
 
-            if not _enqueue_frame_thread_task(_run):
+            if not _enqueue_main_thread_task(_run):
                 with dispose_lock:
                     pending_kind = None
                     pending_value = None
                     pending_enqueued = False
-                observer.on_error(RuntimeError("frame thread queue is full"))
+                observer.on_error(RuntimeError("main thread queue is full"))
 
         subscription = source.subscribe(
             on_next=lambda value: _deliver("next", value),
@@ -280,15 +280,15 @@ def deliver_on_frame_thread(source: Observable[T]) -> Observable[T]:
     return streams.create(_subscribe)
 
 
-def observe_on_background(
+def deliver_on_background(
     source: Observable[T],
     *,
-    priority: StreamPriority | StreamPriorityResolver | None = None,
+    priority: DataStreamPriority | DataStreamPriorityResolver | None = None,
 ) -> Observable[T]:
-    """Queue source emissions onto a priority-aware background stream worker."""
+    """Queue source emissions onto a priority-aware background datastream worker."""
 
     _require_observable(source, "source")
-    priority_resolver = _require_stream_priority_resolver(priority)
+    priority_resolver = _require_datastream_priority_resolver(priority)
 
     def _subscribe(
         observer: Any,
@@ -300,7 +300,7 @@ def observe_on_background(
         pending_value: Any = None
         pending_enqueued = False
         pending_generation = 0
-        queued_priority: StreamPriority | None = None
+        queued_priority: DataStreamPriority | None = None
 
         def _deliver(kind: str, value: Any = None) -> None:
             nonlocal pending_kind, pending_value, pending_enqueued
@@ -382,7 +382,7 @@ def observe_on_background(
 
 
 def start_with_once(value: TStarting) -> Callable[[Observable[T]], Observable[Any]]:
-    """Prepend one value to a stream for each subscription."""
+    """Prepend one value to a datastream for each subscription."""
 
     def _start(source: Observable[T]) -> Observable[Any]:
         return source.pipe(ops.start_with(value))
@@ -390,7 +390,7 @@ def start_with_once(value: TStarting) -> Callable[[Observable[T]], Observable[An
     return _start
 
 
-def pipe_in_background(
+def pipe_on_background(
     source: Observable[T],
     *operators: Any,
     starting_value: TStarting | _NoStartingValue = _NO_STARTING_VALUE,
@@ -405,12 +405,12 @@ def pipe_in_background(
     return pipe(source, *resolved_operators)
 
 
-def pipe_in_main_thread(source: Observable[T], *operators: Any) -> Observable[Any]:
-    """Deliver source emissions on the frame thread and apply operators."""
+def pipe_on_main_thread(source: Observable[T], *operators: Any) -> Observable[Any]:
+    """Deliver source emissions on the main thread and apply operators."""
 
     _require_observable(source, "source")
-    logger.debug("Building frame-thread pipeline.")
-    return pipe(deliver_on_frame_thread(source), *operators)
+    logger.debug("Building main-thread pipeline.")
+    return pipe(deliver_on_main_thread(source), *operators)
 
 
 def pipe_to_background_event_loop(
@@ -418,7 +418,7 @@ def pipe_to_background_event_loop(
     name: str,
     *operators: Any,
 ) -> Observable[Any]:
-    """Pipe a stream through an event loop running on a background thread."""
+    """Pipe a datastream through an event loop running on a background thread."""
 
     _require_observable(source, "source")
     scheduler = EventLoopScheduler(
@@ -432,7 +432,7 @@ def pipe_to_background_thread(
     name: str,
     *operators: Any,
 ) -> Observable[Any]:
-    """Pipe a stream through a dedicated background thread executor."""
+    """Pipe a datastream through a dedicated background thread executor."""
 
     _require_observable(source, "source")
     scheduler = NewThreadScheduler(
@@ -442,15 +442,15 @@ def pipe_to_background_thread(
 
 
 @contextmanager
-def background_threaded_observable(
+def background_datastream_observable(
     observable: Observable[T],
     name: str,
 ) -> Iterator[Observable[T]]:
-    """Subscribe to an observable on a daemon thread and yield its subject."""
+    """Subscribe to a data observable on a daemon thread and yield its subject."""
 
     _require_observable(observable, "observable")
     thread_name = _require_thread_name(name)
-    logger.debug("Starting background stream thread %s", thread_name)
+    logger.debug("Starting background datastream thread %s", thread_name)
     subject: Subject[T] = Subject()
     ready = Event()
     run = _BackgroundObservableRun()
@@ -475,23 +475,23 @@ def background_threaded_observable(
 def scheduler_diagnostics() -> dict[str, int | None]:
     """Return max-worker settings for initialized shared schedulers."""
 
-    with _FRAME_THREAD_QUEUE_LOCK:
-        frame_thread_queue_depth = len(_FRAME_THREAD_QUEUE)
+    with _MAIN_THREAD_QUEUE_LOCK:
+        main_thread_queue_depth = len(_MAIN_THREAD_QUEUE)
     return {
         "background_max_workers": _BACKGROUND_SCHEDULER.max_workers,
         "background_priority_queue_limit": _BACKGROUND_PRIORITY_QUEUE.maxsize,
         "blocking_io_max_workers": _BLOCKING_IO_SCHEDULER.max_workers,
-        "frame_thread_queue_depth": frame_thread_queue_depth,
-        "frame_thread_queue_limit": _FRAME_THREAD_QUEUE_LIMIT,
+        "main_thread_queue_depth": main_thread_queue_depth,
+        "main_thread_queue_limit": _MAIN_THREAD_QUEUE_LIMIT,
         "input_max_workers": _INPUT_SCHEDULER.max_workers,
     }
 
 
-def reset_stream_threading_state_for_tests() -> None:
-    """Reset module-level schedulers, queues, shutdown, and latency state."""
+def reset_datastream_delivery_for_tests() -> None:
+    """Reset module-level schedulers, queues, shutdown_signal, and latency state."""
 
-    global _BACKGROUND_PRIORITY_QUEUE, _FRAME_THREAD_IDENT, _FRAME_THREAD_QUEUE_LIMIT
-    global shutdown
+    global _BACKGROUND_PRIORITY_QUEUE, _MAIN_THREAD_IDENT, _MAIN_THREAD_QUEUE_LIMIT
+    global shutdown_signal
     for state in (
         _BACKGROUND_SCHEDULER,
         _BLOCKING_IO_SCHEDULER,
@@ -503,15 +503,15 @@ def reset_stream_threading_state_for_tests() -> None:
             state.scheduler = None
             state.max_workers = None
         _dispose_scheduler(scheduler)
-    with _FRAME_THREAD_QUEUE_LOCK:
-        _FRAME_THREAD_QUEUE.clear()
-        _FRAME_THREAD_QUEUE_LIMIT = _frame_thread_queue_limit()
+    with _MAIN_THREAD_QUEUE_LOCK:
+        _MAIN_THREAD_QUEUE.clear()
+        _MAIN_THREAD_QUEUE_LIMIT = _main_thread_queue_limit()
     with _BACKGROUND_PRIORITY_LOCK:
         _stop_background_priority_worker_locked()
         _BACKGROUND_PRIORITY_QUEUE = _new_background_priority_queue()
-    _FRAME_THREAD_IDENT = None
+    _MAIN_THREAD_IDENT = None
     _LATENCY_RECORDER.clear()
-    shutdown = Subject()
+    shutdown_signal = Subject()
 
 
 def materialize_sequence(sequence: Iterable[T]) -> Observable[T]:
@@ -523,8 +523,8 @@ def materialize_sequence(sequence: Iterable[T]) -> Observable[T]:
     return streams.from_iterable(snapshot)
 
 
-class StreamPriority(IntEnum):
-    """Priority for queued stream handoffs."""
+class DataStreamPriority(IntEnum):
+    """Priority for queued data handoffs."""
 
     HIGH = 0
     NORMAL = 10
@@ -533,7 +533,7 @@ class StreamPriority(IntEnum):
 
 @dataclass(frozen=True, slots=True)
 class DeliveryLatencyStats:
-    """Percentile summary of stream delivery latency."""
+    """Percentile summary of datastream delivery latency."""
 
     count: int
     p50_ms: float
@@ -596,29 +596,29 @@ def _require_positive_timedelta(value: Any) -> timedelta:
     return value
 
 
-def _require_stream_priority(value: Any) -> StreamPriority:
-    if isinstance(value, StreamPriority):
+def _require_datastream_priority(value: Any) -> DataStreamPriority:
+    if isinstance(value, DataStreamPriority):
         return value
     if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError("priority must be a StreamPriority")
+        raise ValueError("priority must be a DataStreamPriority")
     try:
-        return StreamPriority(value)
+        return DataStreamPriority(value)
     except ValueError as exc:
-        raise ValueError("priority must be a StreamPriority") from exc
+        raise ValueError("priority must be a DataStreamPriority") from exc
 
 
-def _require_stream_priority_resolver(
-    value: StreamPriority | StreamPriorityResolver | None,
-) -> StreamPriorityResolver:
+def _require_datastream_priority_resolver(
+    value: DataStreamPriority | DataStreamPriorityResolver | None,
+) -> DataStreamPriorityResolver:
     if value is None:
-        return lambda: StreamPriority.NORMAL
+        return lambda: DataStreamPriority.NORMAL
     if callable(value):
 
-        def _resolve() -> StreamPriority:
-            return _require_stream_priority(value())
+        def _resolve() -> DataStreamPriority:
+            return _require_datastream_priority(value())
 
         return _resolve
-    priority = _require_stream_priority(value)
+    priority = _require_datastream_priority(value)
     return lambda: priority
 
 
@@ -687,22 +687,22 @@ def _run_on_thread(target: StartableTarget, name: str) -> Thread:
     return Thread(target=target, daemon=False, name=_require_thread_name(name))
 
 
-def _enqueue_frame_thread_task(callback: Callable[[], None]) -> bool:
-    task = _FrameThreadTask(
+def _enqueue_main_thread_task(callback: Callable[[], None]) -> bool:
+    task = _MainThreadTask(
         callback=callback,
         enqueued_monotonic=time.monotonic(),
     )
-    with _FRAME_THREAD_QUEUE_LOCK:
-        if len(_FRAME_THREAD_QUEUE) >= _FRAME_THREAD_QUEUE_LIMIT:
+    with _MAIN_THREAD_QUEUE_LOCK:
+        if len(_MAIN_THREAD_QUEUE) >= _MAIN_THREAD_QUEUE_LIMIT:
             return False
-        _FRAME_THREAD_QUEUE.append(task)
+        _MAIN_THREAD_QUEUE.append(task)
     return True
 
 
 def _enqueue_background_priority_task(
     callback: Callable[[], None],
     *,
-    priority: StreamPriority,
+    priority: DataStreamPriority,
 ) -> bool:
     _ensure_background_priority_worker()
     task = _BackgroundPriorityTask(
@@ -750,7 +750,7 @@ def _stop_background_priority_worker_locked() -> None:
         return
     _BACKGROUND_PRIORITY_QUEUE.put(
         _BackgroundPriorityTask(
-            priority=int(StreamPriority.HIGH),
+            priority=int(DataStreamPriority.HIGH),
             sequence=next(_BACKGROUND_PRIORITY_SEQUENCE),
             callback=lambda: None,
             stop=True,
@@ -764,18 +764,18 @@ def _stop_background_priority_worker_locked() -> None:
 def _new_background_priority_queue() -> PriorityQueue[_BackgroundPriorityTask]:
     return PriorityQueue(
         maxsize=_env_int(
-            "MANYFOLD_STREAM_BACKGROUND_PRIORITY_QUEUE_LIMIT",
-            legacy_name="HEART_RX_BACKGROUND_PRIORITY_QUEUE_LIMIT",
+            "MANYFOLD_DATASTREAM_BACKGROUND_PRIORITY_QUEUE_LIMIT",
+            legacy_name="HEART_DATASTREAM_BACKGROUND_PRIORITY_QUEUE_LIMIT",
             default=DEFAULT_BACKGROUND_PRIORITY_QUEUE_LIMIT,
         )
     )
 
 
-def _frame_thread_queue_limit() -> int:
+def _main_thread_queue_limit() -> int:
     return _env_int(
-        "MANYFOLD_STREAM_FRAME_THREAD_QUEUE_LIMIT",
-        legacy_name="HEART_RX_FRAME_THREAD_QUEUE_LIMIT",
-        default=DEFAULT_FRAME_THREAD_QUEUE_LIMIT,
+        "MANYFOLD_DATASTREAM_MAIN_THREAD_QUEUE_LIMIT",
+        legacy_name="HEART_DATASTREAM_MAIN_THREAD_QUEUE_LIMIT",
+        default=DEFAULT_MAIN_THREAD_DATASTREAM_QUEUE_LIMIT,
     )
 
 
@@ -801,7 +801,7 @@ class _SchedulerState:
 
 
 @dataclass
-class _FrameThreadTask:
+class _MainThreadTask:
     callback: Callable[[], None]
     enqueued_monotonic: float
 
@@ -886,47 +886,47 @@ _INPUT_SCHEDULER = _SchedulerState(lock=Lock())
 
 _INTERVAL_SCHEDULER = _SchedulerState(lock=Lock())
 
-_FRAME_THREAD_QUEUE: deque[_FrameThreadTask] = deque()
+_MAIN_THREAD_QUEUE: deque[_MainThreadTask] = deque()
 
-_FRAME_THREAD_QUEUE_LIMIT = _frame_thread_queue_limit()
+_MAIN_THREAD_QUEUE_LIMIT = _main_thread_queue_limit()
 
-_FRAME_THREAD_QUEUE_LOCK = Lock()
+_MAIN_THREAD_QUEUE_LOCK = Lock()
 
-_FRAME_THREAD_IDENT: int | None = None
+_MAIN_THREAD_IDENT: int | None = None
 
 _LATENCY_RECORDER = _LatencyRecorder()
 
-shutdown: Subject[Any] = Subject()
+shutdown_signal: Subject[Any] = Subject()
 
 
 __all__ = (
     "DEFAULT_BACKGROUND_PRIORITY_QUEUE_LIMIT",
     "DEFAULT_DELIVERY_LATENCY_HISTORY_SIZE",
-    "DEFAULT_FRAME_THREAD_QUEUE_LIMIT",
+    "DEFAULT_MAIN_THREAD_DATASTREAM_QUEUE_LIMIT",
+    "DataStreamPriority",
     "DeliveryLatencyStats",
-    "FRAME_THREAD_LATENCY_STREAM",
-    "StreamPriority",
+    "MAIN_THREAD_DATASTREAM_LATENCY",
+    "background_datastream_observable",
     "background_scheduler",
-    "background_threaded_observable",
     "blocking_io_scheduler",
     "coalesce_scheduler",
     "create_default_thread_factory",
-    "deliver_on_frame_thread",
+    "deliver_on_background",
+    "deliver_on_main_thread",
     "delivery_latency_snapshot",
-    "drain_frame_thread_queue",
+    "drain_main_thread_queue",
     "input_scheduler",
     "interval_in_background",
     "interval_scheduler",
     "materialize_sequence",
-    "observe_on_background",
-    "on_frame_thread",
-    "pipe_in_background",
-    "pipe_in_main_thread",
+    "on_main_thread",
+    "pipe_on_background",
+    "pipe_on_main_thread",
     "pipe_to_background_event_loop",
     "pipe_to_background_thread",
     "replay_scheduler",
-    "reset_stream_threading_state_for_tests",
+    "reset_datastream_delivery_for_tests",
     "scheduler_diagnostics",
-    "shutdown",
+    "shutdown_signal",
     "start_with_once",
 )

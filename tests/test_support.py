@@ -27,7 +27,7 @@ MODULES_TO_RESET = (
     "manyfold.sensor_io",
     "manyfold.reference_examples",
     "manyfold.streams",
-    "manyfold.stream_threads",
+    "manyfold.datastream_threads",
     "manyfold.stats",
 )
 _MISSING_MODULE = object()
@@ -1604,9 +1604,9 @@ def load_manyfold_package():
         "dependency_closure_of": lego_catalog.dependency_closure_of,
         "dependencies_of": lego_catalog.dependencies_of,
         "dependents_of": lego_catalog.dependents_of,
-        "drain_frame_thread_queue": sys.modules[
-            "manyfold.stream_threads"
-        ].drain_frame_thread_queue,
+        "drain_main_thread_queue": sys.modules[
+            "manyfold.datastream_threads"
+        ].drain_main_thread_queue,
         "get_lego": lego_catalog.get_lego,
         "health_status_schema": sensor_io.health_status_schema,
         "instrument_stream": graph.instrument_stream,
@@ -1616,7 +1616,7 @@ def load_manyfold_package():
         "legos_by_role": lego_catalog.legos_by_role,
         "sensor_event_schema": sensor_io.sensor_event_schema,
         "sensor_sample_schema": sensor_io.sensor_sample_schema,
-        "shutdown": sys.modules["manyfold.stream_threads"].shutdown,
+        "shutdown_signal": sys.modules["manyfold.datastream_threads"].shutdown_signal,
         "sink": primitives.sink,
         "source": primitives.source,
         "SystemClock": sensor_io.SystemClock,
