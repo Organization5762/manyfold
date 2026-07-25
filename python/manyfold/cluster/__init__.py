@@ -13,6 +13,16 @@ from .dev_cluster import (
     DevelopmentCluster as DevelopmentCluster,
     HttpResponse as HttpResponse,
 )
+from .runtime import (
+    DiagnosticSeverity as DiagnosticSeverity,
+    NodeConfig as NodeConfig,
+    NodeDiagnostic as NodeDiagnostic,
+    NodePeerSnapshot as NodePeerSnapshot,
+    NodePhase as NodePhase,
+    NodeRuntime as NodeRuntime,
+    NodeSnapshot as NodeSnapshot,
+    NodeStartError as NodeStartError,
+)
 
 __all__ = [
     "ClusterConfig",
@@ -20,8 +30,16 @@ __all__ = [
     "ControlCommand",
     "CoordinatorStatus",
     "DevelopmentCluster",
+    "DiagnosticSeverity",
     "HttpResponse",
     "MAX_COMMAND_BYTES",
     "MemberConfig",
+    "NodeConfig",
+    "NodeDiagnostic",
+    "NodePeerSnapshot",
+    "NodePhase",
+    "NodeRuntime",
+    "NodeSnapshot",
+    "NodeStartError",
     "PersistentRaftCoordinator",
 ]
