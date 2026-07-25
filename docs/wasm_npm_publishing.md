@@ -28,6 +28,9 @@ Build it locally with:
 
 ```sh
 python scripts/build_wasm_npm.py
+npm test --prefix dist/npm/manyfold
+npm run example --prefix dist/npm/manyfold
+npm pack --dry-run --prefix dist/npm/manyfold
 ```
 
 The generated package includes three wasm-pack host targets by default:

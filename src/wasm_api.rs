@@ -15,7 +15,7 @@ const DEFAULT_RETAINED_MESSAGES: usize = 1024;
 const DEFAULT_CALLBACK_QUEUE_LIMIT: usize = 2048;
 
 #[derive(Clone)]
-struct WorkerProxy {
+pub(crate) struct WorkerProxy {
     state: Rc<RefCell<WorkerProxyState>>,
 }
 
@@ -24,7 +24,10 @@ impl WorkerProxy {
         Self::with_runtime("wasm-runtime".to_string(), retained_messages)
     }
 
-    fn with_runtime(runtime_id: String, retained_messages: usize) -> Result<Self, JsValue> {
+    pub(crate) fn with_runtime(
+        runtime_id: String,
+        retained_messages: usize,
+    ) -> Result<Self, JsValue> {
         Ok(Self {
             state: Rc::new(RefCell::new(WorkerProxyState {
                 proxy: WorkerProxyCore::pubsub(runtime_id.clone(), retained_messages)
@@ -35,12 +38,14 @@ impl WorkerProxy {
                     kind: WorkerEndpointKind::RawData,
                 },
                 desktop_spawner: None,
+                thread_scheduler: None,
                 next_request_id: 1,
+                is_closed: false,
             })),
         })
     }
 
-    fn pubsub(&self, topic: String) -> PubSub {
+    pub(crate) fn pubsub(&self, topic: String) -> PubSub {
         PubSub {
             topic,
             proxy: self.clone(),
@@ -62,12 +67,30 @@ impl WorkerProxy {
         }
     }
 
-    fn set_desktop_spawner(&self, spawner: &Function) {
-        self.state.borrow_mut().desktop_spawner = Some(spawner.clone());
+    pub(crate) fn set_desktop_spawner(&self, spawner: Option<&Function>) {
+        self.state.borrow_mut().desktop_spawner = spawner.cloned();
     }
 
     fn clear_desktop_spawner(&self) {
         self.state.borrow_mut().desktop_spawner = None;
+    }
+
+    pub(crate) fn set_thread_scheduler(&self, scheduler: Option<&Function>) {
+        self.state.borrow_mut().thread_scheduler = scheduler.cloned();
+    }
+
+    pub(crate) fn close(&self) -> Result<bool, JsValue> {
+        let mut state = self.state.borrow_mut();
+        if state.is_closed {
+            return Ok(false);
+        }
+        let runtime_id = state.raw_endpoint.runtime_id.clone();
+        let retained_messages = state.proxy.retained_messages();
+        state.proxy = WorkerProxyCore::pubsub(runtime_id, retained_messages).map_err(js_error)?;
+        state.desktop_spawner = None;
+        state.thread_scheduler = None;
+        state.is_closed = true;
+        Ok(true)
     }
 
     fn spawn_rust_worker(&self, command: String, args: Array) -> Result<JsValue, JsValue> {
@@ -111,9 +134,9 @@ pub struct PubSub {
 #[wasm_bindgen]
 #[derive(Clone)]
 pub struct CallbackPlacement {
-    kind: String,
-    thread_name: Option<String>,
-    queue_limit: usize,
+    pub(crate) kind: String,
+    pub(crate) thread_name: Option<String>,
+    pub(crate) queue_limit: usize,
 }
 
 #[wasm_bindgen]
@@ -377,7 +400,7 @@ impl PubSub {
 
     #[wasm_bindgen(js_name = setDesktopSpawner)]
     pub fn set_desktop_spawner(&self, spawner: &Function) {
-        self.proxy.set_desktop_spawner(spawner);
+        self.proxy.set_desktop_spawner(Some(spawner));
     }
 
     #[wasm_bindgen(js_name = clearDesktopSpawner)]
@@ -567,6 +590,7 @@ impl PubSub {
             delivery.1,
             self.callbacks.clone(),
             callback_id,
+            self.proxy.thread_scheduler(),
         )
     }
 
@@ -594,7 +618,9 @@ struct WorkerProxyState {
     proxy: WorkerProxyCore,
     raw_endpoint: WorkerEndpointRefCore,
     desktop_spawner: Option<Function>,
+    thread_scheduler: Option<Function>,
     next_request_id: u64,
+    is_closed: bool,
 }
 
 #[derive(Default)]
@@ -617,6 +643,10 @@ struct PubSubCallback {
 }
 
 impl WorkerProxy {
+    fn thread_scheduler(&self) -> Option<Function> {
+        self.state.borrow().thread_scheduler.clone()
+    }
+
     fn handle_endpoint(
         &self,
         kind: WorkerEndpointKind,
@@ -626,6 +656,9 @@ impl WorkerProxy {
         arguments: BTreeMap<String, String>,
     ) -> Result<WorkerResponseCore, JsValue> {
         let mut state = self.state.borrow_mut();
+        if state.is_closed {
+            return Err(JsValue::from_str("Manyfold runtime is shut down"));
+        }
         let request_id = format!("wasm-request-{}", state.next_request_id);
         state.next_request_id += 1;
         let endpoint = WorkerEndpointRefCore {
@@ -733,11 +766,26 @@ fn deliver_js_callback(
     placement: CallbackPlacement,
     callbacks: Rc<RefCell<PubSubCallbackState>>,
     callback_id: u64,
+    thread_scheduler: Option<Function>,
 ) -> Result<(), JsValue> {
     match placement.kind.as_str() {
         "inline" => run_js_callback(callback, message, callbacks, callback_id),
         "main" => schedule_js_callback("queueMicrotask", callback, message, callbacks, callback_id),
-        "thread" => schedule_js_timeout(callback, message, callbacks, callback_id),
+        "thread" => schedule_host_thread_callback(
+            thread_scheduler.ok_or_else(|| {
+                JsValue::from_str(
+                    "thread callback placement requires a host-provided thread scheduler",
+                )
+            })?,
+            placement
+                .thread_name
+                .as_deref()
+                .expect("thread placement validates a thread name"),
+            callback,
+            message,
+            callbacks,
+            callback_id,
+        ),
         _ => Err(JsValue::from_str(
             "callback placement kind must be inline, main, or thread",
         )),
@@ -766,25 +814,31 @@ fn schedule_js_callback(
     Ok(())
 }
 
-fn schedule_js_timeout(
+fn schedule_host_thread_callback(
+    scheduler: Function,
+    thread_name: &str,
     callback: Function,
     message: JsValue,
     callbacks: Rc<RefCell<PubSubCallbackState>>,
     callback_id: u64,
 ) -> Result<(), JsValue> {
-    let global = js_sys::global();
-    let scheduler = Reflect::get(&global, &JsValue::from_str("setTimeout"))?;
-    if !scheduler.is_function() {
-        return schedule_js_callback("queueMicrotask", callback, message, callbacks, callback_id);
-    }
-    let scheduler = scheduler.dyn_into::<Function>()?;
+    let pending_callbacks = callbacks.clone();
     let closure = Closure::once_into_js(move || {
         if let Err(error) = run_js_callback(callback, message, callbacks, callback_id) {
             wasm_bindgen::throw_val(error);
         }
     });
-    scheduler.call2(&global, &closure, &JsValue::from_f64(0.0))?;
-    Ok(())
+    match scheduler.call2(
+        &JsValue::UNDEFINED,
+        &JsValue::from_str(thread_name),
+        &closure,
+    ) {
+        Ok(_) => Ok(()),
+        Err(error) => {
+            clear_pending_callback(pending_callbacks, callback_id);
+            Err(error)
+        }
+    }
 }
 
 fn run_js_callback(

@@ -77,7 +77,10 @@ jobs:
             --out-dir dist/npm/manyfold
 
       - name: Verify npm package contents
-        run: npm pack --dry-run
+        run: |
+          npm test
+          npm run example
+          npm pack --dry-run
         working-directory: dist/npm/manyfold
 
       - name: Upload npm package artifact

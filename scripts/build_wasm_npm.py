@@ -67,6 +67,8 @@ def _main() -> None:
     package_path.write_text(json.dumps(package, indent=2, sort_keys=True) + "\n")
     shutil.copyfile(root / "LICENSE", out_dir / "LICENSE")
     shutil.copyfile(root / "scripts" / "wasm_npm" / "README.md", out_dir / "README.md")
+    shutil.copytree(root / "scripts" / "wasm_npm" / "examples", out_dir / "examples")
+    shutil.copytree(root / "scripts" / "wasm_npm" / "tests", out_dir / "tests")
     print(
         "built npm package "
         f"{args.package_name}@{cargo_version} in {out_dir} "
@@ -149,6 +151,10 @@ def _package_metadata(
         if "bundler" in wasm_pack_targets
         else f"./{wasm_pack_targets[0]}/{module_name}.js",
         "types": f"./{wasm_pack_targets[0]}/{module_name}.d.ts",
+        "scripts": {
+            "example": "node examples/client_initialization.cjs",
+            "test": "node --test tests/*.test.cjs",
+        },
         "exports": exports,
         "sideEffects": False,
         "files": [
@@ -158,6 +164,8 @@ def _package_metadata(
             "LICENSE",
             "README.md",
             "package.json",
+            "examples/**",
+            "tests/**",
         ],
     }
 

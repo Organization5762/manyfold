@@ -41,6 +41,7 @@ Use the smallest command that covers the changed surface:
 cargo fmt --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test
+cargo clippy --lib --target wasm32-unknown-unknown --no-default-features --features wasm -- -D warnings
 uv run ruff check
 uv run python -m unittest discover -s tests -p 'test_*.py'
 uv run manyfold-benchmark-baselines-check
@@ -49,6 +50,10 @@ uv run manyfold-example-catalog --check
 uv run manyfold-example-catalog --list reference
 uv run python -m examples.catalog --check-manifest
 uv run python -m examples.catalog --check-readme
+uv run python scripts/build_wasm_npm.py
+npm test --prefix dist/npm/manyfold
+npm run example --prefix dist/npm/manyfold
+npm pack --dry-run --prefix dist/npm/manyfold
 ```
 
 For focused Python tests, use:
