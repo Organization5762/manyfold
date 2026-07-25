@@ -61,9 +61,11 @@ mDNS is link-local: it does not discover peers across routed networks, VLANs,
 or a tailnet. Deployments using a platform-specific browser can inject it
 through the narrow `DnsSdResolver` protocol.
 
-Every discovery pass returns a bounded `DiscoveryReport`. Composite discovery
-deduplicates endpoints, preserves partial successes, and reports source
-failures without treating them as identity failures.
+Every built-in discovery pass returns a bounded `DiscoveryReport`. Composite
+discovery deduplicates endpoints, preserves partial successes, and reports
+source failures without treating them as identity failures. Configured DNS
+seeds, composite sources, candidates, mDNS services, and accumulated failures
+all have explicit hard limits.
 
 ## Membership
 

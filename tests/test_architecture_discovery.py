@@ -5,6 +5,7 @@ import unittest
 
 from manyfold.architecture import (
     CompositeDiscovery,
+    DiscoveryFailure,
     DiscoveryReport,
     DnsDiscovery,
     DnsSdService,
@@ -105,6 +106,26 @@ class ArchitectureDiscoveryTests(unittest.TestCase):
         self.assertEqual(report.failures[0].source, "broken")
         self.assertIn("resolver unavailable", report.failures[0].message)
 
+    def test_composite_bounds_sources_and_accumulated_failures(self) -> None:
+        with self.assertRaisesRegex(ValueError, "sources.*at most 2"):
+            CompositeDiscovery(
+                (_BrokenDiscovery(), _BrokenDiscovery(), _BrokenDiscovery()),
+                max_sources=2,
+            )
+
+        report = CompositeDiscovery(
+            (_ManyFailuresDiscovery(),),
+            max_failures=3,
+        ).discover()
+
+        self.assertEqual(len(report.failures), 3)
+
+    def test_dns_discovery_bounds_retained_seed_configuration(self) -> None:
+        seeds = tuple(DnsSeed(f"node-{index}.example", 7443) for index in range(3))
+
+        with self.assertRaisesRegex(ValueError, "seeds.*at most 2"):
+            DnsDiscovery(seeds, max_seeds=2)
+
 
 class _ResolvedDnsSd:
     def __init__(self, services: tuple[DnsSdService, ...]) -> None:
@@ -132,6 +153,20 @@ class _BrokenDiscovery:
 
     def discover(self) -> DiscoveryReport:
         raise OSError("resolver unavailable")
+
+
+class _ManyFailuresDiscovery:
+    @property
+    def source_name(self) -> str:
+        return "many-failures"
+
+    def discover(self) -> DiscoveryReport:
+        return DiscoveryReport(
+            failures=tuple(
+                DiscoveryFailure(source=self.source_name, message=str(index))
+                for index in range(100)
+            )
+        )
 
 
 if __name__ == "__main__":
