@@ -289,7 +289,19 @@ class DnsDiscovery:
                 )
                 continue
             for address in addresses:
-                endpoint = PeerEndpoint(_canonical_ip(address), seed.port)
+                try:
+                    endpoint = PeerEndpoint(_canonical_ip(address), seed.port)
+                except (TypeError, ValueError) as error:
+                    failures.append(
+                        DiscoveryFailure(
+                            source=f"dns:{seed.hostname}",
+                            message=(
+                                f"invalid resolved address {address!r}: "
+                                f"{type(error).__name__}: {error}"
+                            ),
+                        )
+                    )
+                    continue
                 if endpoint in seen:
                     continue
                 seen.add(endpoint)
@@ -405,11 +417,25 @@ class MdnsDiscovery:
             )
 
         candidates: list[PeerCandidate] = []
+        failures: list[DiscoveryFailure] = []
         seen: set[PeerEndpoint] = set()
         for service in services:
             hosts = service.addresses or (service.target,)
             for host in hosts:
-                endpoint = PeerEndpoint(host, service.port)
+                try:
+                    endpoint_host = _canonical_ip(host) if service.addresses else host
+                    endpoint = PeerEndpoint(endpoint_host, service.port)
+                except (TypeError, ValueError) as error:
+                    failures.append(
+                        DiscoveryFailure(
+                            source=f"mdns:{service.instance}",
+                            message=(
+                                f"invalid resolved address {host!r}: "
+                                f"{type(error).__name__}: {error}"
+                            ),
+                        )
+                    )
+                    continue
                 if endpoint in seen:
                     continue
                 seen.add(endpoint)
@@ -421,8 +447,8 @@ class MdnsDiscovery:
                     )
                 )
                 if len(candidates) == self._max_candidates:
-                    return DiscoveryReport(tuple(candidates))
-        return DiscoveryReport(tuple(candidates))
+                    return DiscoveryReport(tuple(candidates), tuple(failures))
+        return DiscoveryReport(tuple(candidates), tuple(failures))
 
 
 def _canonical_dns_name(name: str) -> str:
