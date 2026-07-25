@@ -21,7 +21,7 @@ Generated from `docs/rfc/wiregraph_rfc_rev2.md` by `manyfold-rfc-checklist`.
 - [x] 21. Embedded device profile (Embedded firmware profile helpers and embedded-rule validation now cover scalar and bulk device routes.)
 - [x] 22. API design constraints (The public API already prefers typed refs over ad hoc string identities.)
 - [x] 23. Reference example suite (The repository now ships a named RFC reference example suite, with runnable coverage for all 10 examples.)
-- [x] 24. Recommended Python-facing SDK shape (Python wrapper ergonomics now include Rx-style observe/publish composition helpers.)
+- [x] 24. Recommended Python-facing SDK shape (Python wrapper ergonomics include callback stream and publish composition helpers.)
 
 ## Appendix F Acceptance Criteria
 - [x] Common framework for flashed devices over serial, BLE, radio, USB, shared memory, and IP links (Link registration now covers the RFC transport families as typed capability-bearing scaffolds.)

@@ -103,7 +103,7 @@ CHECKLIST_STATUS = {
     ),
     "24": (
         "x",
-        "Python wrapper ergonomics now include Rx-style observe/publish composition helpers.",
+        "Python wrapper ergonomics include callback stream and publish composition helpers.",
     ),
 }
 

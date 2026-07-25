@@ -137,7 +137,7 @@ logger = logging.getLogger(__name__)
 
 
 def stream_from(
-    source: ObservableLike[T],
+    source: Subscribable[T],
     *,
     unwrap_envelopes: bool = False,
 ) -> Observable[Any]:
@@ -165,7 +165,7 @@ def stream_from(
 
 
 def instrument_stream(
-    source: ObservableLike[T],
+    source: Subscribable[T],
     *,
     stream_name: str,
     log_interval_ms: int,
@@ -191,7 +191,7 @@ class ObserverLike(Protocol[T]):
 
 
 @runtime_checkable
-class ObservableLike(Protocol[T]):
+class Subscribable(Protocol[T]):
     def subscribe(
         self,
         observer: ObserverLike[T] | Callable[[T], None] | None = None,
@@ -201,7 +201,6 @@ class ObservableLike(Protocol[T]):
     ) -> SubscriptionLike: ...
 
 
-StreamNode: TypeAlias = ObservableLike[T]
 SubscribeCallback: TypeAlias = Callable[
     [ObserverLike[T], object | None], SubscriptionLike
 ]
@@ -331,116 +330,6 @@ class CallbackObservable(Generic[T]):
         return stream_from(self)
 
 
-class EventStream(Generic[T]):
-    """Hot push stream for callback-driven event producers."""
-
-    def __init__(self) -> None:
-        self._lock = Lock()
-        self._subscribers: dict[int, ObserverLike[T]] = {}
-        self._subscriber_snapshot: tuple[ObserverLike[T], ...] = ()
-        self._next_subscription_id = 0
-
-    @property
-    def lock(self) -> Lock:
-        return self._lock
-
-    def emit(self, value: T) -> None:
-        with self._lock:
-            subscribers = self._subscriber_snapshot
-        for subscriber in subscribers:
-            subscriber.on_next(value)
-
-    def on_next(self, value: T) -> None:
-        self.emit(value)
-
-    def observable(self) -> StreamNode[T]:
-        return cast(StreamNode[T], self)
-
-    def subscribe(
-        self,
-        observer: ObserverLike[T] | Callable[[T], None] | None = None,
-        on_error: Callable[[Exception], None] | None = None,
-        on_completed: Callable[[], None] | None = None,
-        scheduler: object | None = None,
-        *,
-        on_next: Callable[[T], None] | None = None,
-    ) -> SubscriptionLike:
-        del scheduler
-        callback = on_next or observer
-        if callback is None:
-            resolved_observer: ObserverLike[T] = CallableObserver(
-                lambda _value: None,
-                on_error,
-                on_completed,
-            )
-        elif callable(callback):
-            resolved_observer = CallableObserver(callback, on_error, on_completed)
-        else:
-            resolved_observer = callback
-        with self._lock:
-            subscription_id = self._next_subscription_id
-            self._next_subscription_id += 1
-            self._subscribers[subscription_id] = resolved_observer
-            self._subscriber_snapshot = tuple(self._subscribers.values())
-        return CallbackSubscription(lambda: self._remove_subscription(subscription_id))
-
-    def on_error(self, error: Exception) -> None:
-        with self._lock:
-            subscribers = self._subscriber_snapshot
-        for subscriber in subscribers:
-            subscriber.on_error(error)
-
-    def on_completed(self) -> None:
-        with self._lock:
-            subscribers = self._subscriber_snapshot
-        for subscriber in subscribers:
-            subscriber.on_completed()
-
-    def _remove_subscription(self, subscription_id: int) -> None:
-        with self._lock:
-            if subscription_id not in self._subscribers:
-                return
-            self._subscribers.pop(subscription_id)
-            self._subscriber_snapshot = tuple(self._subscribers.values())
-
-
-class ReplayValueStream(EventStream[T]):
-    """Hot stream that replays its current value to each new subscriber."""
-
-    def __init__(self, value: T) -> None:
-        super().__init__()
-        self.value = value
-
-    def emit(self, value: T) -> None:
-        self.value = value
-        super().emit(value)
-
-    def subscribe(
-        self,
-        observer: ObserverLike[T] | Callable[[T], None] | None = None,
-        on_error: Callable[[Exception], None] | None = None,
-        on_completed: Callable[[], None] | None = None,
-        scheduler: object | None = None,
-        *,
-        on_next: Callable[[T], None] | None = None,
-    ) -> SubscriptionLike:
-        subscription = super().subscribe(
-            observer,
-            on_error,
-            on_completed,
-            scheduler,
-            on_next=on_next,
-        )
-        callback = on_next or observer
-        if callback is None:
-            return subscription
-        if callable(callback):
-            callback(self.value)
-        else:
-            callback.on_next(self.value)
-        return subscription
-
-
 @dataclass(frozen=True)
 class CoalesceLatestNode(Generic[T]):
     """Coalesce bursty stream updates to the latest value per time window."""
@@ -454,7 +343,7 @@ class CoalesceLatestNode(Generic[T]):
         _require_optional_non_empty_text(self.stream_name, "coalesce stream_name")
         _require_non_negative_integer(self.window_ms, "coalesce window_ms")
 
-    def observable(self, source: ObservableLike[T]) -> Observable[T]:
+    def observable(self, source: Subscribable[T]) -> Observable[T]:
         if self.window_ms <= 0:
             return cast(Observable[T], source)
 
@@ -564,7 +453,7 @@ class LoggingNode(Generic[T]):
         _require_non_empty_text(self.stream_name, "logging stream_name")
         _require_non_negative_integer(self.interval_ms, "logging interval_ms")
 
-    def observable(self, source: ObservableLike[T]) -> Observable[T]:
+    def observable(self, source: Subscribable[T]) -> Observable[T]:
         if self.interval_ms <= 0:
             return cast(Observable[T], source)
 
@@ -650,8 +539,8 @@ class ConstantNode(Generic[T]):
     value: T
     name: str = "constant"
 
-    def observable(self) -> StreamNode[T]:
-        return ReplayValueStream(self.value)
+    def observable(self) -> Subscribable[T]:
+        return _ReplayValueSource(self.value)
 
 
 @dataclass(frozen=True)
@@ -660,7 +549,7 @@ class EmptyNode(Generic[T]):
 
     name: str = "empty"
 
-    def observable(self) -> StreamNode[T]:
+    def observable(self) -> Subscribable[T]:
         return streams.empty()
 
     def subscribe(
@@ -684,7 +573,7 @@ class MainThreadNode(Generic[T]):
 
     name: str = "main-thread"
 
-    def observable(self, source: ObservableLike[T]) -> Observable[T]:
+    def observable(self, source: Subscribable[T]) -> Observable[T]:
         return datastream_threads.deliver_on_main_thread(cast(Observable[T], source))
 
 
@@ -695,11 +584,11 @@ class MergeNode(Generic[T]):
     name: str = "merge"
 
     @classmethod
-    def merge(cls, *sources: ObservableLike[T]) -> StreamNode[T]:
+    def merge(cls, *sources: Subscribable[T]) -> Subscribable[T]:
         """Merge several stream sources without explicitly constructing a node."""
         return cls().observable(*sources)
 
-    def observable(self, *sources: ObservableLike[T]) -> StreamNode[T]:
+    def observable(self, *sources: Subscribable[T]) -> Subscribable[T]:
         def subscribe(
             observer: ObserverLike[T], scheduler: object | None = None
         ) -> SubscriptionLike:
@@ -723,7 +612,7 @@ class CombineLatestNode(Generic[T]):
 
     name: str = "combine-latest"
 
-    def observable(self, *sources: ObservableLike[Any]) -> StreamNode[tuple[Any, ...]]:
+    def observable(self, *sources: Subscribable[Any]) -> Subscribable[tuple[Any, ...]]:
         def subscribe(
             observer: ObserverLike[tuple[Any, ...]],
             scheduler: object | None = None,
@@ -734,7 +623,7 @@ class CombineLatestNode(Generic[T]):
             completed = [False] * source_count
             lock = Lock()
 
-            def subscribe_source(index: int, source: ObservableLike[Any]) -> Any:
+            def subscribe_source(index: int, source: Subscribable[Any]) -> Any:
                 def on_next(value: Any) -> None:
                     with lock:
                         values[index] = value
@@ -3152,8 +3041,8 @@ class ControlLoops:
         )
 
 
-class ReactiveReadablePort:
-    """Readable port facade with a live Rx stream for route updates."""
+class ReadablePortView:
+    """Readable port facade with a live stream of route updates."""
 
     def __init__(
         self, graph: Graph, route_ref: RouteRef, native: NativeReadablePort
@@ -3195,8 +3084,8 @@ class ReactiveReadablePort:
         return streams.create(subscribe)
 
 
-class ReactiveWritablePort:
-    """Writable port facade that can act as an Rx observer."""
+class WritablePortView:
+    """Writable port facade that accepts streamed values."""
 
     def __init__(
         self, graph: Graph, route_ref: RouteRef, native: NativeWritablePort
@@ -3244,7 +3133,7 @@ class ReactiveWritablePort:
 
     def bind(
         self,
-        source: ObservableLike[bytes],
+        source: Subscribable[bytes],
         *,
         producer: ProducerRef | None = None,
         control_epoch: int | None = None,
@@ -3445,7 +3334,7 @@ class PipelineLoggingNode(_ThreadPlaceableNode, Generic[T]):
         _require_non_negative_integer(self.interval_ms, "logging interval_ms")
         _require_optional_thread_placement(self.thread_placement)
 
-    def observable(self, source: ObservableLike[T]) -> Observable[T]:
+    def observable(self, source: Subscribable[T]) -> Observable[T]:
         return LoggingNode(
             name=self.name,
             stream_name=self.stream_name,
@@ -3675,7 +3564,7 @@ class RoutePipeline(Generic[T]):
         on_completed: Callable[[], None] | None = None,
         scheduler: object | None = None,
     ) -> SubscriptionLike:
-        """Compatibility shim for existing Rx-style callers."""
+        """Subscribe a callback or observer to route values."""
         return self._graph._observe_observable(
             self._route_ref,
             replay_latest=self._replay_latest,
@@ -3811,7 +3700,7 @@ class Graph:
             self._native_emit_calls.unregister_materialize_bytes
         )
         self._native_payload_by_id = self._native_emit_calls.payload_by_id
-        self._subjects: dict[str, EventStream[ClosedEnvelope]] = {}
+        self._subjects: dict[str, _EventSource[ClosedEnvelope]] = {}
         self._direct_envelope_subscribers: dict[str, dict[int, EnvelopeCallback]] = {}
         self._direct_envelope_snapshots: dict[str, tuple[EnvelopeCallback, ...]] = {}
         self._direct_envelope_subscription_sequence = 0
@@ -4077,7 +3966,7 @@ class Graph:
 
     def pipe(
         self,
-        source: ObservableLike[TIn] | ObservableLike[bytes],
+        source: Subscribable[TIn] | Subscribable[bytes],
         target: RouteLike,
         *,
         producer: ProducerRef | None = None,
@@ -6510,8 +6399,8 @@ class Graph:
         """Emit only the source values that satisfy `predicate`.
 
         This keeps filtering explicit in the graph-facing API instead of forcing
-        callers to drop into raw Rx operators for a core RFC composition
-        primitive. Typed routes deliver decoded values to the predicate, while
+        callers to compose a lower-level callback pipeline. Typed routes deliver
+        decoded values to the predicate, while
         raw route refs continue to expose payload bytes.
         """
         _require_callable(predicate, "filter predicate")
@@ -8168,10 +8057,10 @@ class Graph:
     def _recent_writers_for_key(self, route_display: str) -> tuple[str, ...]:
         return tuple(dict.fromkeys(self._writers.get(route_display, ())))
 
-    def _subject_for(self, route_ref: RouteLike) -> EventStream[ClosedEnvelope]:
+    def _subject_for(self, route_ref: RouteLike) -> _EventSource[ClosedEnvelope]:
         key = self._route_key(route_ref)
         if key not in self._subjects:
-            self._subjects[key] = EventStream()
+            self._subjects[key] = _EventSource()
         return self._subjects[key]
 
     def _direct_envelope_subscription(
@@ -10030,11 +9919,11 @@ class Graph:
             )
         raise ValueError(f"unsupported query command: {request.command}")
 
-    def _read_port(self, route_ref: RouteLike) -> ReactiveReadablePort:
+    def _read_port(self, route_ref: RouteLike) -> ReadablePortView:
         native_route = self._coerce_route_ref(route_ref)
-        return ReactiveReadablePort(self, native_route, self._graph.read(native_route))
+        return ReadablePortView(self, native_route, self._graph.read(native_route))
 
-    def _write_port(self, target: WriteTarget) -> WriteBinding | ReactiveWritablePort:
+    def _write_port(self, target: WriteTarget) -> WriteBinding | WritablePortView:
         if isinstance(target, LifecycleBinding):
             self._write_bindings[target.request.display()] = target.binding
             self._lifecycle_bindings[target.request.display()] = target
@@ -10045,7 +9934,7 @@ class Graph:
             self._write_bindings[target.request.display()] = target
             return self._graph.register_binding(target.request.display(), target)
         native_route = self._coerce_route_ref(target)
-        return ReactiveWritablePort(
+        return WritablePortView(
             self, native_route, self._graph.writable_port(native_route)
         )
 
@@ -10983,6 +10872,116 @@ def _parent_event_parts(parent: ParentEventLike) -> tuple[str, int]:
         return (parent.route_display, parent.seq_source)
     route_display, seq_source = parent
     return (route_display, seq_source)
+
+
+class _EventSource(Generic[T]):
+    """Hot push stream for callback-driven event producers."""
+
+    def __init__(self) -> None:
+        self._lock = Lock()
+        self._subscribers: dict[int, ObserverLike[T]] = {}
+        self._subscriber_snapshot: tuple[ObserverLike[T], ...] = ()
+        self._next_subscription_id = 0
+
+    @property
+    def lock(self) -> Lock:
+        return self._lock
+
+    def emit(self, value: T) -> None:
+        with self._lock:
+            subscribers = self._subscriber_snapshot
+        for subscriber in subscribers:
+            subscriber.on_next(value)
+
+    def on_next(self, value: T) -> None:
+        self.emit(value)
+
+    def observable(self) -> Subscribable[T]:
+        return cast(Subscribable[T], self)
+
+    def subscribe(
+        self,
+        observer: ObserverLike[T] | Callable[[T], None] | None = None,
+        on_error: Callable[[Exception], None] | None = None,
+        on_completed: Callable[[], None] | None = None,
+        scheduler: object | None = None,
+        *,
+        on_next: Callable[[T], None] | None = None,
+    ) -> SubscriptionLike:
+        del scheduler
+        callback = on_next or observer
+        if callback is None:
+            resolved_observer: ObserverLike[T] = CallableObserver(
+                lambda _value: None,
+                on_error,
+                on_completed,
+            )
+        elif callable(callback):
+            resolved_observer = CallableObserver(callback, on_error, on_completed)
+        else:
+            resolved_observer = callback
+        with self._lock:
+            subscription_id = self._next_subscription_id
+            self._next_subscription_id += 1
+            self._subscribers[subscription_id] = resolved_observer
+            self._subscriber_snapshot = tuple(self._subscribers.values())
+        return CallbackSubscription(lambda: self._remove_subscription(subscription_id))
+
+    def on_error(self, error: Exception) -> None:
+        with self._lock:
+            subscribers = self._subscriber_snapshot
+        for subscriber in subscribers:
+            subscriber.on_error(error)
+
+    def on_completed(self) -> None:
+        with self._lock:
+            subscribers = self._subscriber_snapshot
+        for subscriber in subscribers:
+            subscriber.on_completed()
+
+    def _remove_subscription(self, subscription_id: int) -> None:
+        with self._lock:
+            if subscription_id not in self._subscribers:
+                return
+            self._subscribers.pop(subscription_id)
+            self._subscriber_snapshot = tuple(self._subscribers.values())
+
+
+class _ReplayValueSource(_EventSource[T]):
+    """Hot stream that replays its current value to each new subscriber."""
+
+    def __init__(self, value: T) -> None:
+        super().__init__()
+        self.value = value
+
+    def emit(self, value: T) -> None:
+        self.value = value
+        super().emit(value)
+
+    def subscribe(
+        self,
+        observer: ObserverLike[T] | Callable[[T], None] | None = None,
+        on_error: Callable[[Exception], None] | None = None,
+        on_completed: Callable[[], None] | None = None,
+        scheduler: object | None = None,
+        *,
+        on_next: Callable[[T], None] | None = None,
+    ) -> SubscriptionLike:
+        subscription = super().subscribe(
+            observer,
+            on_error,
+            on_completed,
+            scheduler,
+            on_next=on_next,
+        )
+        callback = on_next or observer
+        if callback is None:
+            return subscription
+        if callable(callback):
+            callback(self.value)
+        else:
+            callback.on_next(self.value)
+        return subscription
 
 
 class _TrackedSubscription:

@@ -184,23 +184,6 @@ class GraphReactiveTests(unittest.TestCase):
 
         self.assertEqual(observed, [b"frame"])
 
-    def test_event_stream_reuses_subscriber_snapshot_between_emits(self) -> None:
-        graph_module = load_graph_module()
-        stream = graph_module.EventStream()
-        observed: list[int] = []
-
-        subscription = stream.subscribe(observed.append)
-        snapshot = stream._subscriber_snapshot
-
-        for value in range(100):
-            stream.emit(value)
-
-        self.assertIs(stream._subscriber_snapshot, snapshot)
-        self.assertEqual(observed, list(range(100)))
-
-        subscription.dispose()
-        self.assertEqual(stream._subscriber_snapshot, ())
-
     def test_graph_route_fanout_reuses_subscriber_snapshot_between_publishes(
         self,
     ) -> None:
@@ -1437,7 +1420,7 @@ else:
             stream_name="numbers",
         )
         seen: list[int] = []
-        source = graph_module.EventStream()
+        source = graph_module._EventSource()
 
         node.observable(source).subscribe(seen.append)
         source.on_next(1)
@@ -1460,7 +1443,7 @@ else:
             stream_name="numbers",
         )
         seen: list[int] = []
-        source = graph_module.EventStream()
+        source = graph_module._EventSource()
 
         try:
             node.observable(source).subscribe(seen.append)
@@ -1961,7 +1944,7 @@ else:
 
     def test_instrument_stream_logs_periodic_delivery_stats(self) -> None:
         graph_module = load_graph_module()
-        source = graph_module.EventStream()
+        source = graph_module._EventSource()
         seen: list[int] = []
 
         with self.assertLogs("manyfold.graph", level="DEBUG") as logs:
