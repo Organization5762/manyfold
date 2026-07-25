@@ -107,22 +107,28 @@ active TCP session. Mutual-TLS links additionally advertise
 `encrypted=True, authenticated=True`; the explicitly insecure development mode
 does not. Neither mode is replayable.
 
-## Production boundary
+## Integrated production layers
 
-This module is a transport foundation, not a complete distributed PubSub or RPC
-service. Production integration still needs:
+The architecture package exports the complete transport stack. Each higher
+layer owns a dedicated `TcpTransport` receive stream, so PubSub, durable
+delivery, and RPC links are separate when a process uses more than one:
 
-- certificate issuance, rotation, revocation, and policy that binds mutual-TLS
-  certificate identities to the expected Manyfold cluster and node IDs.
-- application acknowledgements, durable replay, and a defined retry/deduplication
-  policy for process crashes; a successful local `sendall` is not proof that the
-  remote application handled a frame.
-- service discovery and routing when a node needs more than one simultaneous
-  peer.
-- PubSub subscription propagation and coordinator RPC request tracking,
-  serialization contracts, authorization, cancellation, and deadlines.
-- deployment-specific capacity, latency, failure-injection, and security
-  validation.
+| Layer | Production responsibility |
+| --- | --- |
+| [`transport_pki`](transport_pki.md) | Load verified client/server contexts, enforce key permissions and optional CRLs, and rotate contexts with last-known-good fallback. |
+| [`transport_delivery`](transport_delivery.md) | Persist bounded outbox/inbox state, retry stable message IDs, suppress duplicates, and exchange ACK/NACK/confirmation records across crashes and reconnects. |
+| [`transport_mesh`](transport_mesh.md) | Own a bounded peer set, apply typed discovery snapshots, propagate subscriptions, route PubSub publications, suppress loops, and resynchronize reconnecting peers. |
+| [`transport_rpc`](transport_rpc.md) | Track bounded coordinator calls and workers with typed request/response/error/cancel records, deadlines, cancellation, reconnect isolation, and health counters. |
 
-Those concerns can consume `TransportMessage` directly without replacing the
-bounded framing, lifecycle, identity, reconnect, or health mechanisms here.
+The base transport and every integrated layer use bounded queues or journals,
+publish immutable health snapshots, and provide explicit disposal. None claims
+that a local socket write proves remote application handling; use
+`DurableDelivery` when application acknowledgement and crash replay are
+required.
+
+Deployment remains responsible for certificate issuance and secure delivery,
+revocation-list publication, service/method authorization, domain payload
+schemas and versions, idempotency of mutating RPC handlers, metrics/alert
+export, and environment-specific capacity, latency, and fault-injection gates.
+Those policies depend on the deployment trust model and workload and therefore
+remain explicit integration inputs rather than transport defaults.

@@ -189,9 +189,7 @@ class TcpTransport:
                 "insecure local-development transport requires a loopback address"
             )
         if config.security.mode is TransportSecurityMode.MUTUAL_TLS:
-            context = config.security.ssl_context
-            if context is None:
-                raise ValueError("mutual TLS requires an SSLContext")
+            context = config.security.resolve_ssl_context()
             if mode is _Mode.CONNECTOR and not context.check_hostname:
                 raise ValueError(
                     "connector mutual TLS SSLContext must enable hostname checking"
@@ -732,9 +730,12 @@ class TcpTransport:
         security = self.config.security
         if security.mode is TransportSecurityMode.INSECURE_LOCAL_DEVELOPMENT:
             return connection
-        context = security.ssl_context
-        if context is None:
-            raise TransportError("mutual TLS SSLContext is unavailable")
+        try:
+            context = security.resolve_ssl_context()
+        except (TypeError, ValueError) as error:
+            raise TransportError(
+                f"mutual TLS SSLContext is unavailable: {error}"
+            ) from error
         return context.wrap_socket(
             connection,
             server_side=server_side,

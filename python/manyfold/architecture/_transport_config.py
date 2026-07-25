@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import ssl
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from urllib.parse import quote
+
+SslContextProvider = Callable[[], ssl.SSLContext]
 
 DEFAULT_QUEUE_LIMIT = 1024
 DEFAULT_MAX_PAYLOAD_BYTES = 16 * 1024 * 1024
@@ -24,6 +27,11 @@ class TransportSecurity:
 
     mode: TransportSecurityMode
     ssl_context: ssl.SSLContext | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
+    ssl_context_provider: SslContextProvider | None = field(
         default=None,
         repr=False,
         compare=False,
@@ -49,16 +57,46 @@ class TransportSecurity:
         """Allow cleartext only on a loopback address for local development."""
         return cls(TransportSecurityMode.INSECURE_LOCAL_DEVELOPMENT)
 
+    @classmethod
+    def mutual_tls_provider(
+        cls,
+        ssl_context_provider: SslContextProvider,
+        *,
+        server_hostname: str | None = None,
+    ) -> "TransportSecurity":
+        """Resolve the current verified context for each new connection."""
+        return cls(
+            TransportSecurityMode.MUTUAL_TLS,
+            ssl_context_provider=ssl_context_provider,
+            server_hostname=server_hostname,
+        )
+
+    def resolve_ssl_context(self) -> ssl.SSLContext:
+        """Return and validate the context for a new mutual-TLS session."""
+        context = (
+            self.ssl_context_provider()
+            if self.ssl_context_provider is not None
+            else self.ssl_context
+        )
+        if not isinstance(context, ssl.SSLContext):
+            raise ValueError("mutual TLS requires an SSLContext")
+        if context.verify_mode != ssl.CERT_REQUIRED:
+            raise ValueError("mutual TLS SSLContext verify_mode must be CERT_REQUIRED")
+        return context
+
     def __post_init__(self) -> None:
         if not isinstance(self.mode, TransportSecurityMode):
             raise ValueError("security mode must be a TransportSecurityMode")
         if self.mode is TransportSecurityMode.MUTUAL_TLS:
-            if not isinstance(self.ssl_context, ssl.SSLContext):
-                raise ValueError("mutual TLS requires an SSLContext")
-            if self.ssl_context.verify_mode != ssl.CERT_REQUIRED:
+            if self.ssl_context is not None and self.ssl_context_provider is not None:
                 raise ValueError(
-                    "mutual TLS SSLContext verify_mode must be CERT_REQUIRED"
+                    "mutual TLS accepts one SSLContext or SSLContext provider"
                 )
+            if self.ssl_context_provider is not None and not callable(
+                self.ssl_context_provider
+            ):
+                raise TypeError("ssl_context_provider must be callable")
+            self.resolve_ssl_context()
             if self.server_hostname is not None:
                 object.__setattr__(
                     self,
@@ -66,7 +104,11 @@ class TransportSecurity:
                     _require_text(self.server_hostname, "server_hostname"),
                 )
             return
-        if self.ssl_context is not None or self.server_hostname is not None:
+        if (
+            self.ssl_context is not None
+            or self.ssl_context_provider is not None
+            or self.server_hostname is not None
+        ):
             raise ValueError(
                 "insecure local-development security cannot include TLS settings"
             )
