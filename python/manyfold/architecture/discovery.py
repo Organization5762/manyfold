@@ -7,11 +7,14 @@ import socket
 from collections.abc import Sequence
 from dataclasses import dataclass
 from threading import Event, Lock
-from typing import Protocol, final
+from typing import Protocol, TypeVar, final
 
 from zeroconf import IPVersion, ServiceBrowser, ServiceListener, Zeroconf
 
+_T = TypeVar("_T")
+
 DEFAULT_DISCOVERY_LIMIT = 128
+DEFAULT_DISCOVERY_SOURCE_LIMIT = 128
 DEFAULT_MDNS_SERVICE = "_manyfold._tcp.local."
 DEFAULT_MDNS_TIMEOUT_SECONDS = 1.0
 
@@ -139,12 +142,19 @@ class CompositeDiscovery:
         sources: Sequence[PeerDiscovery],
         *,
         max_candidates: int = DEFAULT_DISCOVERY_LIMIT,
+        max_failures: int = DEFAULT_DISCOVERY_LIMIT,
+        max_sources: int = DEFAULT_DISCOVERY_SOURCE_LIMIT,
     ) -> None:
-        self._sources = tuple(sources)
+        self._sources = _bounded_sequence(
+            sources,
+            limit=_require_positive_int(max_sources, "max_sources"),
+            field="sources",
+        )
         self._max_candidates = _require_positive_int(
             max_candidates,
             "max_candidates",
         )
+        self._max_failures = _require_positive_int(max_failures, "max_failures")
 
     @property
     def source_name(self) -> str:
@@ -160,14 +170,16 @@ class CompositeDiscovery:
             try:
                 report = source.discover()
             except Exception as error:
-                failures.append(
-                    DiscoveryFailure(
-                        source=source.source_name,
-                        message=f"{type(error).__name__}: {error}",
+                if len(failures) < self._max_failures:
+                    failures.append(
+                        DiscoveryFailure(
+                            source=source.source_name,
+                            message=f"{type(error).__name__}: {error}",
+                        )
                     )
-                )
                 continue
-            failures.extend(report.failures)
+            remaining_failures = self._max_failures - len(failures)
+            failures.extend(report.failures[:remaining_failures])
             for candidate in report.candidates:
                 if candidate.endpoint in seen:
                     continue
@@ -242,8 +254,13 @@ class DnsDiscovery:
         *,
         resolver: AddressResolver | None = None,
         max_candidates: int = DEFAULT_DISCOVERY_LIMIT,
+        max_seeds: int = DEFAULT_DISCOVERY_SOURCE_LIMIT,
     ) -> None:
-        self._seeds = tuple(seeds)
+        self._seeds = _bounded_sequence(
+            seeds,
+            limit=_require_positive_int(max_seeds, "max_seeds"),
+            field="seeds",
+        )
         self._resolver = resolver or SystemAddressResolver()
         self._max_candidates = _require_positive_int(
             max_candidates,
@@ -421,6 +438,17 @@ def _canonical_ip(address: str) -> str:
     return ipaddress.ip_address(address).compressed
 
 
+def _bounded_sequence(
+    values: Sequence[_T],
+    *,
+    limit: int,
+    field: str,
+) -> tuple[_T, ...]:
+    if len(values) > limit:
+        raise ValueError(f"{field} must contain at most {limit} values")
+    return tuple(values)
+
+
 def _deduplicate_endpoints(
     endpoints: Sequence[PeerEndpoint],
     *,
@@ -502,6 +530,7 @@ __all__ = [
     "AddressResolver",
     "CompositeDiscovery",
     "DEFAULT_DISCOVERY_LIMIT",
+    "DEFAULT_DISCOVERY_SOURCE_LIMIT",
     "DEFAULT_MDNS_SERVICE",
     "DEFAULT_MDNS_TIMEOUT_SECONDS",
     "DiscoveryFailure",
