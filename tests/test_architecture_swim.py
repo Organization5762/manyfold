@@ -39,7 +39,13 @@ class ArchitectureSwimTransportTests(unittest.TestCase):
         endpoint_a = PeerEndpoint("127.0.0.1", 17001)
         endpoint_b = PeerEndpoint("127.0.0.1", 17002)
         transport_a = _transport(network, endpoint_a, "node-a", ("node-b",))
-        transport_b = _transport(network, endpoint_b, "node-b", ("node-a",))
+        credentials_b = _credentials("node-b", endpoint_b, ("node-a",))
+        transport_b = HmacDatagramTransport(
+            network.open("node-b", endpoint_b),
+            credentials_b,
+            config=HmacTransportConfig(max_datagram_bytes=4096),
+            identifier_source=_SequenceIdentifiers("wire-node-b"),
+        )
         self.addCleanup(transport_a.close)
         self.addCleanup(transport_b.close)
         network.duplicate_next = True
@@ -50,6 +56,10 @@ class ArchitectureSwimTransportTests(unittest.TestCase):
         self.assertEqual(len(received), 1)
         self.assertEqual(received[0].payload, b"hello")
         self.assertEqual(received[0].session.identity.node_id, "node-b")
+        self.assertEqual(
+            received[0].session.identity.instance_id,
+            credentials_b.local_identity.instance_id,
+        )
         self.assertEqual(received[0].session.incarnation, 3)
         self.assertEqual(transport_a.stats.dropped_replay, 1)
 
@@ -151,6 +161,10 @@ class ArchitectureSwimProtocolTests(unittest.TestCase):
         self.assertEqual(
             cluster["node-a"].membership.member("node-b").state,
             MemberState.ALIVE,
+        )
+        self.assertEqual(
+            cluster["node-a"].membership.member("node-b").identity.instance_id,
+            "node-b-instance",
         )
         self.assertEqual(cluster["node-a"].stats.seeds, 0)
 
@@ -425,7 +439,7 @@ def _credentials(
     peers: tuple[str, ...],
 ) -> HmacPeerCredentials:
     return HmacPeerCredentials(
-        NodeIdentity(_CLUSTER_ID, node_id),
+        NodeIdentity(_CLUSTER_ID, node_id, f"{node_id}-instance"),
         advertised_endpoint,
         _key(node_id),
         {peer: _key(peer) for peer in peers},
@@ -457,6 +471,7 @@ def _wire_update(
         "cluster": _CLUSTER_ID,
         "endpoint": {"host": endpoint.host, "port": endpoint.port},
         "incarnation": incarnation,
+        "instance": f"{node_id}-instance",
         "node": node_id,
         "state": state.value,
     }
@@ -473,7 +488,7 @@ def _protocol_message(
             "probe_id": probe_id,
             "type": message_type,
             "updates": updates,
-            "version": 1,
+            "version": 2,
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -686,7 +701,7 @@ class _Cluster:
                 identifier_source=_SequenceIdentifiers(f"wire-{node_id}"),
             )
             membership = MembershipTable(
-                NodeIdentity(_CLUSTER_ID, node_id),
+                NodeIdentity(_CLUSTER_ID, node_id, f"{node_id}-instance"),
                 self.endpoints[node_id],
                 config=MembershipConfig(
                     lease_seconds=60,
@@ -726,7 +741,11 @@ class _Cluster:
                 if authenticated_bootstrap:
                     engine.add_peer(
                         AuthenticatedPeerSession(
-                            NodeIdentity(_CLUSTER_ID, peer_node_id),
+                            NodeIdentity(
+                                _CLUSTER_ID,
+                                peer_node_id,
+                                f"{peer_node_id}-instance",
+                            ),
                             self.endpoints[peer_node_id],
                             0,
                         )
@@ -734,7 +753,11 @@ class _Cluster:
                 else:
                     engine.add_seed(
                         SwimPeerSeed(
-                            NodeIdentity(_CLUSTER_ID, peer_node_id),
+                            NodeIdentity(
+                                _CLUSTER_ID,
+                                peer_node_id,
+                                f"{peer_node_id}-instance",
+                            ),
                             self.endpoints[peer_node_id],
                         )
                     )

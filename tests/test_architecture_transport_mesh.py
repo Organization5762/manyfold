@@ -179,6 +179,43 @@ class ArchitectureTransportMeshTests(unittest.TestCase):
         )
         subscription.dispose()
 
+    def test_new_peer_instance_replaces_stale_subscription_ids(self) -> None:
+        node_a = self._mesh("a")
+        first_node_b = self._mesh("b", instance_id="b-first")
+        address = first_node_b.listen("a")
+        node_a.apply_discovery((PeerDiscovery("b", address),))
+        self.assertTrue(_wait_connected(node_a, first_node_b))
+        first_node_b.subscribe("events.reconnect")
+        self.assertTrue(
+            _wait_for(
+                lambda: node_a.health().remote_subscriptions == 1,
+                timeout=2.0,
+            )
+        )
+
+        first_node_b.close()
+        self.assertTrue(
+            _wait_for(
+                lambda: node_a.peer_health()[0].link.state.value == "reconnecting",
+                timeout=1.0,
+            )
+        )
+        second_node_b = self._mesh("b", instance_id="b-second")
+        second_node_b.listen("a", address)
+        second_node_b.subscribe("events.reconnect")
+
+        self.assertTrue(_wait_connected(node_a, second_node_b))
+        self.assertTrue(
+            _wait_for(
+                lambda: node_a.health().remote_subscriptions == 1,
+                timeout=2.0,
+            )
+        )
+        self.assertEqual(
+            node_a.peer_health()[0].link.remote_identity.instance_id,
+            "b-second",
+        )
+
     def test_peer_and_subscription_limits_fail_before_retention(self) -> None:
         mesh = self._mesh(
             "bounded",
@@ -320,6 +357,7 @@ class ArchitectureTransportMeshTests(unittest.TestCase):
         self,
         node_id: str,
         *,
+        instance_id: str | None = None,
         outbound_queue_limit: int = 16,
         mesh_config: MeshConfig | None = None,
     ) -> TransportMesh:
@@ -327,7 +365,11 @@ class ArchitectureTransportMeshTests(unittest.TestCase):
             outbound_queue_limit=outbound_queue_limit
         )
         mesh = TransportMesh(
-            NodeIdentity("mesh-tests", node_id, f"{node_id}-instance"),
+            NodeIdentity(
+                "mesh-tests",
+                node_id,
+                instance_id or f"{node_id}-instance",
+            ),
             connector_config=transport_config,
             listener_config=transport_config,
             config=mesh_config,

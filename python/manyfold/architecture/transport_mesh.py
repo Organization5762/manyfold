@@ -630,22 +630,22 @@ class TransportMesh:
                 peer = self._peers.get(peer_node_id)
                 if self._closed or peer is None or peer.transport is not transport:
                     return
-            health = transport.health()
-            if (
-                health.state is LinkState.CONNECTED
-                and health.connections_established > synchronized_connections
-            ):
-                try:
-                    self._synchronize_peer(peer_node_id)
-                except MeshError as error:
-                    self._record_peer_error(peer_node_id, error)
-                synchronized_connections = health.connections_established
+            synchronized_connections = self._synchronize_connection(
+                peer_node_id,
+                transport,
+                synchronized_connections,
+            )
             try:
                 message = transport.receive(timeout=0.1)
             except TimeoutError:
                 continue
             except TransportClosed:
                 return
+            synchronized_connections = self._synchronize_connection(
+                peer_node_id,
+                transport,
+                synchronized_connections,
+            )
             try:
                 self._process_peer_message(peer_node_id, message)
             except MeshCapacityError as error:
@@ -895,6 +895,44 @@ class TransportMesh:
                 accepted_peers=accepted,
                 rejected_peers=rejected,
             )
+
+    def _synchronize_connection(
+        self,
+        peer_node_id: str,
+        transport: TcpTransport,
+        synchronized_connections: int,
+    ) -> int:
+        health = transport.health()
+        if (
+            health.state is not LinkState.CONNECTED
+            or health.connections_established <= synchronized_connections
+        ):
+            return synchronized_connections
+        self._reset_peer_routes(peer_node_id)
+        try:
+            self._synchronize_peer(peer_node_id)
+        except MeshError as error:
+            self._record_peer_error(peer_node_id, error)
+        return health.connections_established
+
+    def _reset_peer_routes(self, peer_node_id: str) -> None:
+        with self._lock:
+            removed = tuple(
+                (subscription_id, subscription.topic)
+                for subscription_id, subscription in self._remote_subscriptions.items()
+                if subscription.next_hop == peer_node_id
+            )
+            for subscription_id, _ in removed:
+                del self._remote_subscriptions[subscription_id]
+        for subscription_id, topic in removed:
+            try:
+                self._fanout_control(
+                    _protocol.CONTROL_UNSUBSCRIBE,
+                    _protocol.encode_subscription(subscription_id, topic),
+                    exclude={peer_node_id},
+                )
+            except MeshBackpressureError as error:
+                self._record_error(error)
 
     def _request_sync(self, *, exclude: set[str]) -> None:
         try:

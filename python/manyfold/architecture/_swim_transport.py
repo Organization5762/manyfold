@@ -26,7 +26,7 @@ DEFAULT_MAX_INBOUND_DATAGRAMS = 64
 DEFAULT_MAX_PEER_CREDENTIALS = 256
 DEFAULT_MAX_REPLAY_MESSAGES = 4096
 MIN_HMAC_KEY_BYTES = 32
-_WIRE_VERSION = 1
+_WIRE_VERSION = 2
 
 
 class IdentifierSource(Protocol):
@@ -377,6 +377,7 @@ class HmacDatagramTransport:
                 local_incarnation,
                 "local_incarnation",
             ),
+            "instance": self._credentials.local_identity.instance_id,
             "message_id": _require_text(
                 self._identifier_source.next_id(),
                 "message_id",
@@ -439,6 +440,7 @@ class HmacDatagramTransport:
                 "cluster",
                 "endpoint",
                 "incarnation",
+                "instance",
                 "mac",
                 "message_id",
                 "payload",
@@ -469,6 +471,11 @@ class HmacDatagramTransport:
             incarnation = _require_nonnegative_int(
                 envelope["incarnation"],
                 "incarnation",
+            )
+            instance_id = _require_text(
+                envelope["instance"],
+                "instance",
+                max_length=256,
             )
             mac = _require_hex_digest(envelope["mac"])
             payload_text = _require_text(
@@ -509,7 +516,7 @@ class HmacDatagramTransport:
         self._accepted += 1
         return AuthenticatedDatagram(
             session=AuthenticatedPeerSession(
-                identity=NodeIdentity(cluster_id, sender),
+                identity=NodeIdentity(cluster_id, sender, instance_id),
                 endpoint=advertised_endpoint,
                 incarnation=incarnation,
             ),
