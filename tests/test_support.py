@@ -1252,9 +1252,7 @@ def install_manyfold_rust_stub() -> None:
                     if record.topic == requested_topic
                 ]
                 numeric_values = [
-                    float(value)
-                    for value in values
-                    if isinstance(value, int | float)
+                    float(value) for value in values if isinstance(value, int | float)
                 ]
                 return [
                     {
@@ -1367,9 +1365,7 @@ def install_manyfold_rust_stub() -> None:
                     if record.topic == topic
                 ]
                 numeric_values = [
-                    float(value)
-                    for value in values
-                    if isinstance(value, int | float)
+                    float(value) for value in values if isinstance(value, int | float)
                 ]
                 return [
                     {
@@ -1632,7 +1628,6 @@ def load_manyfold_package():
         "DoubleBuffer": sensor_io.DoubleBuffer,
         "DuplexSensorPeripheral": sensor_io.DuplexSensorPeripheral,
         "EmptyNode": graph.EmptyNode,
-        "EventStream": graph.EventStream,
         "FilterNode": graph.FilterNode,
         "FlowPolicy": graph.FlowPolicy,
         "FlowSnapshot": graph.FlowSnapshot,
@@ -1741,7 +1736,7 @@ def load_manyfold_package():
         "Source": primitives.Source,
         "StopToken": sensor_io.StopToken,
         "StoreEntry": components.StoreEntry,
-        "StreamNode": graph.StreamNode,
+        "Subscribable": graph.Subscribable,
         "StreamFamily": primitives.StreamFamily,
         "StreamName": primitives.StreamName,
         "TaintDomain": rust.TaintDomain,
