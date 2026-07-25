@@ -753,23 +753,31 @@ class TcpTransport:
     ) -> None:
         with self._condition:
             active = self._connection
-            if connection is None or active is connection:
+            if active is not None and connection is not None and active is not connection:
+                # A writer can observe an error from the previous socket after the
+                # supervisor has already installed its replacement.
+                stale_connection = True
+            else:
+                stale_connection = False
+            if stale_connection:
+                connection_to_close = connection
+            else:
+                connection_to_close = active
                 self._connection = None
                 self._connection_ready.clear()
-            self._last_error = f"{type(error).__name__}: {error}"
-            if self._state is not LinkState.CLOSED:
-                self._state = (
-                    LinkState.LISTENING
-                    if self._mode is _Mode.LISTENER
-                    else LinkState.RECONNECTING
-                )
-            self._generation += 1
-            self._changed_at = time()
-            self._condition.notify_all()
+                self._last_error = f"{type(error).__name__}: {error}"
+                if self._state is not LinkState.CLOSED:
+                    self._state = (
+                        LinkState.LISTENING
+                        if self._mode is _Mode.LISTENER
+                        else LinkState.RECONNECTING
+                    )
+                self._generation += 1
+                self._changed_at = time()
+                self._condition.notify_all()
         _wire.close_socket(connection)
-        if active is not connection and connection is not None:
-            return
-        _wire.close_socket(active)
+        if connection_to_close is not connection:
+            _wire.close_socket(connection_to_close)
 
     def _set_state(
         self,
