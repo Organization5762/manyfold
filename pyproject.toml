@@ -31,6 +31,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
+    "zeroconf>=0.150,<0.151",
 ]
 
 [project.urls]
