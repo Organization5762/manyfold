@@ -237,7 +237,17 @@ os._exit(0)
             )
         )
         self.assertTrue(sender_transport.wait_until_connected(timeout=2.0))
-        received = replacement.receive(timeout=2.0)
+        try:
+            received = replacement.receive(timeout=2.0)
+        except TimeoutError as error:
+            self.fail(
+                "durable reconnect timed out; "
+                f"sender_transport={sender_transport.health()!r}; "
+                f"sender_delivery={sender.health()!r}; "
+                f"replacement_transport={replacement_transport.health()!r}; "
+                f"replacement_delivery={replacement.health()!r}; "
+                f"cause={error}"
+            )
         replacement.ack(received.message_id)
 
         self.assertEqual(received.message_id, "reconnect-1")
