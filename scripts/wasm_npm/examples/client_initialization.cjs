@@ -10,11 +10,16 @@ const {
 async function run() {
   const host = new HostCapabilities("browser");
   host.setDiscovery(({ staticPeers }) => staticPeers);
-  host.setEnrollment(({ candidate }) => ({
+  host.setEnrollmentCredentialIssuer(({ purpose }) => ({
+    purpose,
+    token: "example-host-issued-credential",
+    expiresAtUnixMs: Date.now() + 60_000,
+  }));
+  host.setEnrollment(({ candidate, credential }) => ({
     authenticated: true,
     identity: {
       clusterId: "heart",
-      nodeId: `peer-at-${candidate.host}`,
+      nodeId: `peer-at-${candidate.host}-${credential.purpose}`,
       instanceId: "example-peer-instance",
     },
   }));

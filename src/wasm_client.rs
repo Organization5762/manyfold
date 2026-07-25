@@ -17,6 +17,7 @@ use start::{run_start, ClientCallback, ClientCallbackState, ClientState, StartOu
 const DEFAULT_MAX_PEERS: usize = 128;
 const DEFAULT_RETAINED_MESSAGES: usize = 1024;
 const MAX_STATUS_CALLBACKS: usize = 128;
+const ENROLLMENT_CREDENTIAL_PURPOSE: &str = "manyfold.peer-enrollment.v1";
 
 thread_local! {
     static NEXT_INSTANCE_ID: Cell<u64> = const { Cell::new(1) };
@@ -56,6 +57,7 @@ pub struct ClientConfig {
 pub struct HostCapabilities {
     kind: String,
     discover: Option<Function>,
+    issue_enrollment_credential: Option<Function>,
     enroll: Option<Function>,
     thread_scheduler: Option<Function>,
     native_worker_spawner: Option<Function>,
@@ -225,6 +227,7 @@ impl HostCapabilities {
         Ok(Self {
             kind,
             discover: None,
+            issue_enrollment_credential: None,
             enroll: None,
             thread_scheduler: None,
             native_worker_spawner: None,
@@ -240,6 +243,11 @@ impl HostCapabilities {
     #[wasm_bindgen(js_name = setDiscovery)]
     pub fn set_discovery(&mut self, callback: &Function) {
         self.discover = Some(callback.clone());
+    }
+
+    #[wasm_bindgen(js_name = setEnrollmentCredentialIssuer)]
+    pub fn set_enrollment_credential_issuer(&mut self, callback: &Function) {
+        self.issue_enrollment_credential = Some(callback.clone());
     }
 
     #[wasm_bindgen(js_name = setEnrollment)]
@@ -271,6 +279,11 @@ impl HostCapabilities {
     #[wasm_bindgen(getter, js_name = hasDiscovery)]
     pub fn has_discovery(&self) -> bool {
         self.discover.is_some()
+    }
+
+    #[wasm_bindgen(getter, js_name = hasEnrollmentCredentialIssuer)]
+    pub fn has_enrollment_credential_issuer(&self) -> bool {
+        self.issue_enrollment_credential.is_some()
     }
 
     #[wasm_bindgen(getter, js_name = hasEnrollment)]
@@ -659,6 +672,7 @@ fn discovery_request_to_js(
 fn enrollment_request_to_js(
     identity: &NodeIdentity,
     peer: &PeerEndpoint,
+    credential: Option<&JsValue>,
     state: Rc<RefCell<ClientState>>,
 ) -> Result<JsValue, JsValue> {
     let request = Object::new();
@@ -672,6 +686,9 @@ fn enrollment_request_to_js(
         &JsValue::from_str("candidate"),
         &peer_to_js(peer)?,
     )?;
+    if let Some(credential) = credential {
+        Reflect::set(&request, &JsValue::from_str("credential"), credential)?;
+    }
     Reflect::set(
         &request,
         &JsValue::from_str("isCancelled"),

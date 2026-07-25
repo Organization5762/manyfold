@@ -15,9 +15,10 @@ function makeClient({
   host = new HostCapabilities("browser"),
   placement = CallbackPlacement.inline(),
   staticPeers = [],
+  maxPeers = 8,
 } = {}) {
   const identity = new NodeIdentity("test-cluster", "browser-a", "instance-a");
-  const config = new ClientConfig(identity, placement, staticPeers, 32, 8);
+  const config = new ClientConfig(identity, placement, staticPeers, 32, maxPeers);
   return new ManyfoldClient(config, host);
 }
 
@@ -79,6 +80,126 @@ test("uses host discovery results only after host enrollment authenticates them"
     Array.from(client.authenticatedPeers()).map((identity) => identity.nodeId),
     ["peer-1", "peer-2"],
   );
+  await client.shutdown();
+});
+
+test("passes a purpose-bound host credential into enrollment", async () => {
+  const host = new HostCapabilities("browser");
+  const peer = new PeerEndpoint("credentialed.example", 7443);
+  host.setEnrollmentCredentialIssuer((request) => {
+    assert.equal(request.purpose, "manyfold.peer-enrollment.v1");
+    assert.equal(request.identity.nodeId, "browser-a");
+    assert.equal(request.candidate.host, "credentialed.example");
+    assert.equal("bytes" in request, false);
+    return {
+      purpose: request.purpose,
+      token: "opaque-short-lived-credential",
+      expiresAtUnixMs: Date.now() + 60_000,
+    };
+  });
+  host.setEnrollment((request) => {
+    assert.equal(request.credential.purpose, "manyfold.peer-enrollment.v1");
+    assert.equal(request.credential.token, "opaque-short-lived-credential");
+    return {
+      authenticated: true,
+      identity: {
+        clusterId: "test-cluster",
+        nodeId: "credentialed-peer",
+        instanceId: "credentialed-peer-instance",
+      },
+    };
+  });
+  const client = makeClient({ host, staticPeers: [peer] });
+
+  const status = await client.start();
+
+  assert.equal(host.hasEnrollmentCredentialIssuer, true);
+  assert.equal(status.state, "ready");
+  assert.equal(status.authenticatedPeerCount, 1);
+  assert.equal("machineSignerSocket" in host, false);
+  assert.equal("sign" in host, false);
+  await client.shutdown();
+});
+
+test("reports an unavailable host signer as degraded", async () => {
+  const host = new HostCapabilities("electron");
+  let enrollmentCalls = 0;
+  host.setEnrollmentCredentialIssuer(() => {
+    throw new Error("machine signer socket is unavailable");
+  });
+  host.setEnrollment(() => {
+    enrollmentCalls += 1;
+    throw new Error("must not enroll without a credential");
+  });
+  const client = makeClient({
+    host,
+    staticPeers: [new PeerEndpoint("desktop-peer.example", 7443)],
+  });
+
+  const status = await client.start();
+
+  assert.equal(status.state, "degraded");
+  assert.equal(status.authenticatedPeerCount, 0);
+  assert.equal(status.failureCount, 1);
+  assert.match(status.failures[0], /enrollment signer unavailable/);
+  assert.match(status.failures[0], /machine signer socket is unavailable/);
+  assert.equal(enrollmentCalls, 0);
+  await client.shutdown();
+});
+
+test("rejects credentials from another signing purpose without logging them", async () => {
+  const host = new HostCapabilities("desktop");
+  let enrollmentCalls = 0;
+  host.setEnrollmentCredentialIssuer(() => ({
+    purpose: "generic-signing.v1",
+    token: "secret-that-must-not-reach-diagnostics",
+    expiresAtUnixMs: Date.now() + 60_000,
+  }));
+  host.setEnrollment(() => {
+    enrollmentCalls += 1;
+    throw new Error("must not enroll with another signing purpose");
+  });
+  const client = makeClient({
+    host,
+    staticPeers: [new PeerEndpoint("wrong-purpose.example", 7443)],
+  });
+
+  const status = await client.start();
+
+  assert.equal(status.state, "degraded");
+  assert.match(status.failures[0], /credential purpose/);
+  assert.doesNotMatch(status.failures[0], /secret-that-must-not/);
+  assert.equal(enrollmentCalls, 0);
+  await client.shutdown();
+});
+
+test("bounds expired-credential diagnostics and skips enrollment", async () => {
+  const host = new HostCapabilities("browser");
+  const peers = Array.from(
+    { length: 140 },
+    (_, index) => new PeerEndpoint(`expired-${index}.example`, 7443),
+  );
+  let enrollmentCalls = 0;
+  host.setDiscovery(() => peers);
+  host.setEnrollmentCredentialIssuer((request) => ({
+    purpose: request.purpose,
+    token: "expired-credential",
+    expiresAtUnixMs: Date.now() - 1,
+  }));
+  host.setEnrollment(() => {
+    enrollmentCalls += 1;
+    throw new Error("must not enroll with an expired credential");
+  });
+  const client = makeClient({ host, maxPeers: peers.length });
+
+  const status = await client.start();
+
+  assert.equal(status.state, "degraded");
+  assert.equal(status.discoveredPeerCount, peers.length);
+  assert.equal(status.failureCount, 128);
+  assert.equal(status.failures.length, 128);
+  assert.match(status.failures[0], /enrollment credential expired/);
+  assert.equal(enrollmentCalls, 0);
   await client.shutdown();
 });
 

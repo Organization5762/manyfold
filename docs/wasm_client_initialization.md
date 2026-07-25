@@ -17,6 +17,16 @@ credential-bound `NodeIdentity`. Manyfold rejects another cluster, the local
 node ID, malformed results, and unauthenticated results. Any such failure starts
 the local runtime in `degraded` state without admitting the candidate.
 
+Enrollment is the host trust boundary. A host may either perform the complete
+purpose-specific enrollment operation itself or install
+`setEnrollmentCredentialIssuer(...)`. The issuer receives structured identity
+and candidate fields plus the fixed `manyfold.peer-enrollment.v1` purpose; it
+does not receive arbitrary bytes to sign. Its opaque credential is accepted
+only when it repeats that purpose, is at most 16 KiB, and expires within five
+minutes, then it is passed to `setEnrollment(...)`. Signer unavailability,
+malformed credentials, and expired credentials skip that candidate and produce
+bounded `degraded` diagnostics without retaining or printing the token.
+
 The lifecycle is:
 
 1. Construct `NodeIdentity`, `ClientConfig`, and `HostCapabilities`.
@@ -32,21 +42,25 @@ Calling `start()` while startup is active or after it reaches `ready` or
 enrollment callbacks receive an `isCancelled()` function so they can stop their
 own work promptly. A cancelled pass returns to `stopped` and may be retried.
 
-All retained collections are bounded by `maxPeers`, PubSub retention, or
-callback queue limits. Shutdown clears authenticated peers, status callbacks,
-host callbacks, worker-spawn hooks, and retained PubSub state. Existing PubSub
-handles then fail with a shutdown error.
+All retained collections are bounded by `maxPeers`, PubSub retention, callback
+queue limits, or the hard 128-entry degraded-diagnostic limit. Shutdown clears
+authenticated peers, status callbacks, host callbacks, credential issuers,
+worker-spawn hooks, and retained PubSub state. Existing PubSub handles then fail
+with a shutdown error.
 
 ## Host differences
 
 | Host | Built into WASM | Host injection |
 | --- | --- | --- |
-| Browser | In-process PubSub, identity validation, lifecycle, static peers, readiness/degraded status, main-event-loop callbacks | Application discovery, credential enrollment, optional real callback scheduler |
-| Electron | Same WASM core | Renderer/main-process bridge for discovery and enrollment, optional native worker spawning, callback scheduling, cleanup |
-| Desktop/Node | Same WASM core | Native discovery such as mDNS or DNS, authenticated TCP/session enrollment, optional native worker spawning, callback scheduling, cleanup |
+| Browser | In-process PubSub, identity validation, lifecycle, static peers, readiness/degraded status, main-event-loop callbacks | Application discovery, complete enrollment or short-lived enrollment credentials, optional real callback scheduler |
+| Electron | Same WASM core | Renderer/main-process bridge for discovery, enrollment, and optional machine-local credential issuance; optional native worker spawning, callback scheduling, cleanup |
+| Desktop/Node | Same WASM core | Native discovery such as mDNS or DNS, authenticated TCP/session enrollment, optional machine-local credential issuance, native worker spawning, callback scheduling, cleanup |
 
 The WASM module never performs mDNS, opens arbitrary TCP sockets, or spawns a
-native process. Browser hosts cannot register a native worker spawner.
+native process. It exposes neither a machine-signer socket nor arbitrary
+`sign(bytes)`. Browser hosts cannot register a native worker spawner.
+Electron/desktop code may bridge its injected, purpose-specific credential
+issuer to a machine-local signer, but that socket remains owned by the host.
 `CallbackPlacement.spawnedThread(...)` requires a host scheduler and does not
 fall back to `setTimeout`.
 
@@ -58,7 +72,10 @@ The WASM contract preserves that split:
 
 - `PeerEndpoint` is an untrusted host/port/server-name candidate.
 - `setDiscovery(...)` returns only candidates.
-- `setEnrollment(...)` performs host transport and credential work.
+- `setEnrollmentCredentialIssuer(...)` may provide a purpose-bound, short-lived
+  opaque credential without exposing a signing primitive.
+- `setEnrollment(...)` performs host transport and credential work, using the
+  issued credential when one is configured.
 - `authenticatedPeers()` exposes only identities returned by a successful
   enrollment callback and validated against the local cluster.
 
@@ -72,6 +89,9 @@ A production Electron or desktop host must still provide:
 - mDNS/DNS/static discovery appropriate to its network.
 - mutual-TLS or equivalent authenticated sessions that bind credentials to the
   returned cluster and node identity.
+- a purpose-specific enrollment implementation or credential issuer. Desktop
+  and Electron hosts may bridge to a protected machine signer socket; browser
+  hosts must receive enrollment or short-lived credentials from their host.
 - actual PubSub frame routing and subscription propagation across enrolled
   sessions; initialization currently records authenticated peers but keeps the
   WASM PubSub store process-local.

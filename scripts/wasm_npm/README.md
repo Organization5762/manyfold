@@ -26,11 +26,16 @@ import {
 
 const host = new HostCapabilities("browser");
 host.setDiscovery(({ staticPeers }) => staticPeers);
-host.setEnrollment(({ candidate }) => ({
+host.setEnrollmentCredentialIssuer(({ purpose }) => ({
+  purpose,
+  token: "opaque-host-issued-credential",
+  expiresAtUnixMs: Date.now() + 60_000,
+}));
+host.setEnrollment(({ candidate, credential }) => ({
   authenticated: true,
   identity: {
     clusterId: "heart",
-    nodeId: `peer-at-${candidate.host}`,
+    nodeId: `peer-at-${candidate.host}-${credential.purpose}`,
     instanceId: "peer-instance",
   },
 }));
@@ -70,15 +75,21 @@ npm run example
 ```
 
 Browser WASM does not perform mDNS, open arbitrary TCP sockets, or create native
-worker processes. A browser host may inject application discovery and
-credential enrollment callbacks. Electron and desktop hosts may additionally
-inject a native worker spawner. `spawnedThread(name)` callback placement also
-requires a host scheduler; WASM no longer labels a timer callback as a thread.
+worker processes. It also has no API for a machine signer socket or arbitrary
+`sign(bytes)`. A browser host may inject complete enrollment or a
+`setEnrollmentCredentialIssuer(...)` callback that returns an opaque,
+short-lived credential for the fixed `manyfold.peer-enrollment.v1` purpose.
+Electron and desktop hosts can implement that same callback by bridging to a
+machine-local signer, and may additionally inject a native worker spawner.
+`spawnedThread(name)` callback placement also requires a host scheduler; WASM
+no longer labels a timer callback as a thread.
 
 Discovery and enrollment may return promises. `cancelStart()` marks the active
 pass as cancelled and exposes `isCancelled()` to host callbacks. `start()`
 resolves to `ready` when every configured operation succeeds and `degraded`
-when discovery or authentication has a non-fatal failure. `shutdown()` is the
+when discovery or authentication has a non-fatal failure. An unavailable
+credential issuer or an expired credential also produces a bounded degraded
+diagnostic and the candidate is not sent to enrollment. `shutdown()` is the
 permanent disposal boundary: it cancels startup, invokes host cleanup, clears
 authenticated peers and callbacks, and invalidates PubSub handles created by
 the client.

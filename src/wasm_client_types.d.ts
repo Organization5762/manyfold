@@ -1,4 +1,5 @@
 export type ClientHostKind = "browser" | "electron" | "desktop";
+export type EnrollmentCredentialPurpose = "manyfold.peer-enrollment.v1";
 export type ClientLifecycleState =
   | "stopped"
   | "starting"
@@ -23,7 +24,21 @@ export interface DiscoveryRequest {
 export interface EnrollmentRequest {
   readonly identity: DiscoveryRequest["identity"];
   readonly candidate: DiscoveryRequest["staticPeers"][number];
+  readonly credential?: EnrollmentCredential;
   readonly isCancelled: () => boolean;
+}
+
+export interface EnrollmentCredentialRequest {
+  readonly purpose: EnrollmentCredentialPurpose;
+  readonly identity: DiscoveryRequest["identity"];
+  readonly candidate: DiscoveryRequest["staticPeers"][number];
+  readonly isCancelled: () => boolean;
+}
+
+export interface EnrollmentCredential {
+  readonly purpose: EnrollmentCredentialPurpose;
+  readonly token: string;
+  readonly expiresAtUnixMs: number;
 }
 
 export interface EnrollmentResult {
@@ -38,6 +53,9 @@ export type DiscoverPeers = (
 export type EnrollPeer = (
   request: EnrollmentRequest,
 ) => Promise<EnrollmentResult> | EnrollmentResult;
+export type IssueEnrollmentCredential = (
+  request: EnrollmentCredentialRequest,
+) => Promise<EnrollmentCredential> | EnrollmentCredential;
 export type ScheduleThreadCallback = (
   threadName: string,
   callback: () => void,
@@ -55,6 +73,7 @@ export type ShutdownHost = (request: {
 
 export interface HostCapabilities {
   setDiscovery(callback: DiscoverPeers): void;
+  setEnrollmentCredentialIssuer(callback: IssueEnrollmentCredential): void;
   setEnrollment(callback: EnrollPeer): void;
   setThreadScheduler(callback: ScheduleThreadCallback): void;
   setNativeWorkerSpawner(callback: SpawnNativeWorker): void;
