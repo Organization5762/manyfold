@@ -41,6 +41,7 @@ Issues = "https://github.com/Organization5762/manyfold/issues"
 Repository = "https://github.com/Organization5762/manyfold"
 
 [project.scripts]
+manyfold = "manyfold.cli:_main"
 manyfold-benchmark-baselines-check = "manyfold.private.profiling.benchmark_baselines:_main"
 manyfold-benchmark-log-verify = "manyfold.benchmark_artifacts:_main"
 manyfold-cluster = "manyfold.cluster.dev_cluster:_main"
