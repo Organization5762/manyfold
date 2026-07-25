@@ -17,6 +17,8 @@ from manyfold.architecture import (
     StaticSeedDiscovery,
     TcpAddress,
     TcpTransport,
+    TransportConfig,
+    TransportSecurity,
 )
 from manyfold.architecture.swim import (
     HmacDatagramTransport,
@@ -371,7 +373,17 @@ def _node_config(
             (StaticSeedDiscovery(peers, max_candidates=max_peers),),
             max_candidates=max_peers,
         ),
-        transport_security_provider=(LocalDevelopmentTransportSecurityProvider()),
+        transport_security_provider=LocalDevelopmentTransportSecurityProvider(
+            TransportConfig(
+                security=TransportSecurity.insecure_local_development(),
+                outbound_queue_limit=8,
+                inbound_queue_limit=8,
+                connect_timeout=0.1,
+                handshake_timeout=0.2,
+                heartbeat_interval=0.05,
+                peer_timeout=0.3,
+            )
+        ),
         membership=MembershipConfig(
             lease_seconds=0.3,
             suspect_seconds=0.1,

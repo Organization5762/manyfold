@@ -61,8 +61,25 @@ class ProcessTransportSecurity:
 
 
 @final
+@dataclass(frozen=True, slots=True)
 class LocalDevelopmentTransportSecurityProvider:
     """Create process-local cleartext config for loopback development only."""
+
+    transport: TransportConfig = TransportConfig(
+        security=TransportSecurity.insecure_local_development()
+    )
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.transport, TransportConfig):
+            raise ValueError("transport must be a TransportConfig")
+        if (
+            self.transport.security.mode
+            is not TransportSecurityMode.INSECURE_LOCAL_DEVELOPMENT
+        ):
+            raise ValueError(
+                "local development provider requires insecure local-development "
+                "transport security"
+            )
 
     def acquire(
         self,
@@ -79,12 +96,9 @@ class LocalDevelopmentTransportSecurityProvider:
             minimum_lifetime_seconds,
             "minimum_lifetime_seconds",
         )
-        transport = TransportConfig(
-            security=TransportSecurity.insecure_local_development(),
-        )
         return ProcessTransportSecurity(
-            listener_transport=transport,
-            connector_transport=transport,
+            listener_transport=self.transport,
+            connector_transport=self.transport,
             expires_at_epoch_seconds=None,
         )
 

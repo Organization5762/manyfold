@@ -70,8 +70,9 @@ uv run manyfold node start \
 The CLI is a thin adapter: it parses endpoints, constructs `NodeConfig` with
 `LocalDevelopmentTransportSecurityProvider`, calls `NodeRuntime.start()`,
 prints `NodeSnapshot`, and calls `stop()` on termination. The local provider is
-stateless and creates keyless loopback-only configuration. Secure deployments
-inject their machine-signer client through the typed API.
+keyless and accepts only loopback-development transport configuration, including
+explicit queue, heartbeat, peer-timeout, and reconnect bounds. Secure
+deployments inject their machine-signer client through the typed API.
 
 ## Typed API
 

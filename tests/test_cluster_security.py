@@ -17,6 +17,7 @@ from manyfold.architecture import (
 from manyfold.architecture.swim import SwimConfig
 from manyfold.cluster import (
     CredentialExpiredError,
+    LocalDevelopmentTransportSecurityProvider,
     NodeConfig,
     NodePhase,
     NodeRuntime,
@@ -149,6 +150,29 @@ class ClusterSecurityTests(unittest.TestCase):
                 swim=SwimConfig(),
                 max_peers=4,
             )
+
+    def test_local_provider_preserves_bounded_transport_lifecycle_policy(
+        self,
+    ) -> None:
+        transport = TransportConfig(
+            security=TransportSecurity.insecure_local_development(),
+            outbound_queue_limit=8,
+            inbound_queue_limit=8,
+            connect_timeout=0.1,
+            handshake_timeout=0.2,
+            heartbeat_interval=0.05,
+            peer_timeout=0.3,
+        )
+        provider = LocalDevelopmentTransportSecurityProvider(transport)
+
+        process_security = provider.acquire(
+            NodeIdentity("development", "node-a"),
+            timeout_seconds=0.2,
+            minimum_lifetime_seconds=30,
+        )
+
+        self.assertIs(process_security.listener_transport, transport)
+        self.assertIs(process_security.connector_transport, transport)
 
     def test_provider_errors_remain_public_for_signer_client_integrations(
         self,
