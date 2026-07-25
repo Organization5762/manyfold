@@ -14,4 +14,10 @@ pub use python_api::stub_info;
 mod wasm_api;
 
 #[cfg(feature = "wasm")]
+mod wasm_client;
+
+#[cfg(feature = "wasm")]
 pub use wasm_api::*;
+
+#[cfg(feature = "wasm")]
+pub use wasm_client::*;
