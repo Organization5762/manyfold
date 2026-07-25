@@ -62,7 +62,7 @@ DEFAULT_MAX_SEEN_REQUESTS = 4096
 DEFAULT_PING_TIMEOUT_SECONDS = 0.25
 DEFAULT_PROBE_INTERVAL_SECONDS = 1.0
 DEFAULT_RETRANSMIT_LIMIT = 4
-_PROTOCOL_VERSION = 1
+_PROTOCOL_VERSION = 2
 
 
 @final
@@ -789,6 +789,7 @@ def _encode_update(update: MembershipUpdate) -> dict[str, object]:
             "port": update.endpoint.port,
         },
         "incarnation": update.incarnation,
+        "instance": update.identity.instance_id,
         "node": update.identity.node_id,
         "state": update.state.value,
     }
@@ -797,7 +798,14 @@ def _encode_update(update: MembershipUpdate) -> dict[str, object]:
 def _decode_update(value: object) -> MembershipUpdate:
     if not isinstance(value, dict):
         raise ValueError("membership update must be an object")
-    if set(value) != {"cluster", "endpoint", "incarnation", "node", "state"}:
+    if set(value) != {
+        "cluster",
+        "endpoint",
+        "incarnation",
+        "instance",
+        "node",
+        "state",
+    }:
         raise ValueError("membership update fields do not match the protocol")
     endpoint = value["endpoint"]
     if not isinstance(endpoint, dict) or set(endpoint) != {"host", "port"}:
@@ -806,6 +814,7 @@ def _decode_update(value: object) -> MembershipUpdate:
         identity=NodeIdentity(
             _require_text(value["cluster"], "cluster", max_length=256),
             _require_text(value["node"], "node", max_length=256),
+            _require_text(value["instance"], "instance", max_length=256),
         ),
         endpoint=PeerEndpoint(
             _require_text(endpoint["host"], "host", max_length=512),
