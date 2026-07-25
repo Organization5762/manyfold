@@ -131,6 +131,31 @@ class MembershipChange:
     reason: str
 
 
+@final
+@dataclass(frozen=True)
+class MembershipUpdate:
+    """One incarnation-aware membership claim received from a trusted peer.
+
+    The authenticated sender vouches for this claim, but the subject identity
+    is not necessarily the sender. Callers must therefore pass only updates
+    decoded from an authenticated cluster-member transport.
+    """
+
+    identity: NodeIdentity
+    endpoint: PeerEndpoint
+    incarnation: int
+    state: MemberState
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "incarnation",
+            _require_nonnegative_int(self.incarnation, "incarnation"),
+        )
+        if not isinstance(self.state, MemberState):
+            raise ValueError("state must be a MemberState")
+
+
 class MembershipError(RuntimeError):
     """Base error for membership operations."""
 
@@ -223,6 +248,13 @@ class MembershipTable:
         with self._lock:
             self._require_open()
             return self._next_sequence - 1
+
+    @property
+    def local_record(self) -> MemberRecord:
+        """Return the local incarnation and state."""
+        with self._lock:
+            self._require_open()
+            return self._members[self._local_identity.node_id]
 
     def heartbeat(self, session: AuthenticatedPeerSession) -> MemberRecord:
         """Admit or renew an authenticated peer lease.
@@ -327,6 +359,102 @@ class MembershipTable:
                 reason="failure-confirmed",
             )
             return True
+
+    def observe_authenticated_session(
+        self,
+        session: AuthenticatedPeerSession,
+    ) -> MembershipChange | None:
+        """Admit a directly authenticated sender without a lease deadline.
+
+        SWIM owns failure-detection deadlines itself. A same-incarnation
+        observation updates a live peer's authenticated source endpoint, but it
+        does not override suspicion, death, or an explicit leave.
+        """
+        with self._lock:
+            self._require_participating()
+            self._validate_session(session)
+            now = self._now()
+            self._expire_locked(now)
+            existing = self._members.get(session.identity.node_id)
+            if existing is None:
+                if len(self._members) >= self._config.max_members:
+                    raise MembershipCapacityError(
+                        "cannot admit peer "
+                        f"{session.identity.node_id!r}: membership limit "
+                        f"{self._config.max_members} reached"
+                    )
+            elif session.incarnation < existing.incarnation:
+                return None
+            elif session.incarnation == existing.incarnation and (
+                existing.state is not MemberState.ALIVE
+                or existing.endpoint == session.endpoint
+            ):
+                return None
+
+            record = MemberRecord(
+                identity=session.identity,
+                endpoint=session.endpoint,
+                incarnation=session.incarnation,
+                state=MemberState.ALIVE,
+                state_changed_at=now,
+                deadline=None,
+            )
+            self._members[session.identity.node_id] = record
+            return self._append_change(record, "authenticated-session-observed")
+
+    def apply_update(
+        self,
+        update: MembershipUpdate,
+    ) -> MembershipChange | None:
+        """Apply one authenticated-peer claim using SWIM precedence.
+
+        Higher incarnations always supersede lower incarnations. At one
+        incarnation, ``left`` outranks ``dead``, which outranks ``suspect``,
+        which outranks ``alive``. A local suspect/dead claim is refuted by
+        advancing beyond the claimed incarnation and emitting ``alive``.
+        """
+        with self._lock:
+            self._require_participating()
+            self._validate_update(update)
+            now = self._now()
+            self._expire_locked(now)
+            existing = self._members.get(update.identity.node_id)
+
+            if update.identity.node_id == self._local_identity.node_id:
+                if update.state not in (MemberState.SUSPECT, MemberState.DEAD):
+                    return None
+                if existing is None or update.incarnation < existing.incarnation:
+                    return None
+                record = replace(
+                    existing,
+                    incarnation=update.incarnation + 1,
+                    state=MemberState.ALIVE,
+                    state_changed_at=now,
+                    deadline=None,
+                )
+                self._members[update.identity.node_id] = record
+                return self._append_change(record, "local-refuted-state")
+
+            if existing is None:
+                if len(self._members) >= self._config.max_members:
+                    raise MembershipCapacityError(
+                        "cannot apply update for peer "
+                        f"{update.identity.node_id!r}: membership limit "
+                        f"{self._config.max_members} reached"
+                    )
+            elif not _update_supersedes(update, existing):
+                return None
+
+            record = MemberRecord(
+                identity=update.identity,
+                endpoint=update.endpoint,
+                incarnation=update.incarnation,
+                state=update.state,
+                state_changed_at=now,
+                deadline=self._deadline_for_state(update.state, now),
+            )
+            self._members[update.identity.node_id] = record
+            return self._append_change(record, "peer-update-applied")
 
     def leave_peer(self, session: AuthenticatedPeerSession) -> bool:
         """Record an authenticated peer's explicit leave."""
@@ -511,6 +639,27 @@ class MembershipTable:
                 f"{self._local_identity.node_id!r}"
             )
 
+    def _validate_update(self, update: MembershipUpdate) -> None:
+        if not isinstance(update, MembershipUpdate):
+            raise ValueError("update must be a MembershipUpdate")
+        if update.identity.cluster_id != self._local_identity.cluster_id:
+            raise PeerIdentityError(
+                "membership update belongs to cluster "
+                f"{update.identity.cluster_id!r}; expected "
+                f"{self._local_identity.cluster_id!r}"
+            )
+
+    def _deadline_for_state(
+        self,
+        state: MemberState,
+        now: float,
+    ) -> float | None:
+        if state is MemberState.SUSPECT:
+            return now + self._config.suspect_seconds
+        if state in (MemberState.DEAD, MemberState.LEFT):
+            return now + self._config.dead_retention_seconds
+        return None
+
     def _now(self) -> float:
         return _require_nonnegative_number(self._clock.now(), "clock value")
 
@@ -560,6 +709,21 @@ def _require_text(value: str, field: str) -> str:
     return value.strip()
 
 
+def _update_supersedes(
+    update: MembershipUpdate,
+    existing: MemberRecord,
+) -> bool:
+    if update.incarnation != existing.incarnation:
+        return update.incarnation > existing.incarnation
+    precedence = {
+        MemberState.ALIVE: 0,
+        MemberState.SUSPECT: 1,
+        MemberState.DEAD: 2,
+        MemberState.LEFT: 3,
+    }
+    return precedence[update.state] > precedence[existing.state]
+
+
 __all__ = [
     "AuthenticatedPeerSession",
     "DEFAULT_DEAD_RETENTION_SECONDS",
@@ -576,6 +740,7 @@ __all__ = [
     "MembershipError",
     "MembershipHistoryGap",
     "MembershipTable",
+    "MembershipUpdate",
     "MonotonicClock",
     "PeerIdentityError",
     "SystemMonotonicClock",

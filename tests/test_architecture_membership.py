@@ -14,6 +14,7 @@ from manyfold.architecture import (
     PeerEndpoint,
     PeerIdentityError,
 )
+from manyfold.architecture.membership import MembershipUpdate
 
 
 class ArchitectureMembershipTests(unittest.TestCase):
@@ -182,6 +183,56 @@ class ArchitectureMembershipTests(unittest.TestCase):
 
         self.assertTrue(membership.is_closed)
 
+    def test_swim_update_precedence_rejects_stale_and_weaker_claims(self) -> None:
+        membership = _membership(_ManualClock())
+        membership.observe_authenticated_session(_peer(incarnation=2))
+
+        suspect = membership.apply_update(
+            _update(incarnation=2, state=MemberState.SUSPECT)
+        )
+        stale_alive = membership.apply_update(
+            _update(incarnation=2, state=MemberState.ALIVE)
+        )
+        stale_dead = membership.apply_update(
+            _update(incarnation=1, state=MemberState.DEAD)
+        )
+        left = membership.apply_update(
+            _update(incarnation=2, state=MemberState.LEFT)
+        )
+
+        self.assertIsNotNone(suspect)
+        self.assertIsNone(stale_alive)
+        self.assertIsNone(stale_dead)
+        self.assertIsNotNone(left)
+        self.assertEqual(membership.member("node-b").state, MemberState.LEFT)
+
+    def test_local_suspicion_self_refutes_above_reported_incarnation(self) -> None:
+        membership = _membership(_ManualClock())
+
+        change = membership.apply_update(
+            MembershipUpdate(
+                NodeIdentity("cluster-a", "node-a"),
+                PeerEndpoint("10.0.0.1", 7443),
+                incarnation=7,
+                state=MemberState.SUSPECT,
+            )
+        )
+
+        self.assertIsNotNone(change)
+        self.assertEqual(change.reason, "local-refuted-state")
+        self.assertEqual(membership.local_record.incarnation, 8)
+        self.assertEqual(membership.local_record.state, MemberState.ALIVE)
+
+    def test_authenticated_observation_does_not_clear_swim_suspicion(self) -> None:
+        membership = _membership(_ManualClock())
+        membership.observe_authenticated_session(_peer(incarnation=2))
+        membership.apply_update(_update(incarnation=2, state=MemberState.SUSPECT))
+
+        change = membership.observe_authenticated_session(_peer(incarnation=2))
+
+        self.assertIsNone(change)
+        self.assertEqual(membership.member("node-b").state, MemberState.SUSPECT)
+
 
 def _membership(
     clock: _ManualClock,
@@ -208,6 +259,15 @@ def _peer(*, incarnation: int = 0) -> AuthenticatedPeerSession:
         NodeIdentity("cluster-a", "node-b"),
         PeerEndpoint("10.0.0.2", 7443),
         incarnation,
+    )
+
+
+def _update(*, incarnation: int, state: MemberState) -> MembershipUpdate:
+    return MembershipUpdate(
+        NodeIdentity("cluster-a", "node-b"),
+        PeerEndpoint("10.0.0.2", 7443),
+        incarnation,
+        state,
     )
 
 

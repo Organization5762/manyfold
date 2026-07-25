@@ -5,7 +5,6 @@ import unittest
 
 from manyfold.architecture import (
     CompositeDiscovery,
-    DiscoveryFailure,
     DiscoveryReport,
     DnsDiscovery,
     DnsSdService,
@@ -15,6 +14,7 @@ from manyfold.architecture import (
     PeerEndpoint,
     StaticSeedDiscovery,
 )
+from manyfold.architecture.discovery import DiscoveryFailure
 
 
 class ArchitectureDiscoveryTests(unittest.TestCase):
