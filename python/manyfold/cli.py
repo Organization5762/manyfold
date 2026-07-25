@@ -19,10 +19,13 @@ from manyfold.architecture import (
     PeerEndpoint,
     StaticSeedDiscovery,
     TcpAddress,
-    TransportConfig,
-    TransportSecurity,
 )
-from manyfold.cluster import DevelopmentCluster, NodeConfig, NodeRuntime
+from manyfold.cluster import (
+    DevelopmentCluster,
+    LocalDevelopmentTransportSecurityProvider,
+    NodeConfig,
+    NodeRuntime,
+)
 
 DEFAULT_NODE_PORT = 7443
 
@@ -104,9 +107,6 @@ def _start_node(args: argparse.Namespace) -> None:
         sources.append(MdnsDiscovery())
 
     identity = NodeIdentity(args.cluster_id, args.node_id)
-    transport = TransportConfig(
-        security=TransportSecurity.insecure_local_development(),
-    )
     state_root = (
         args.state_root
         if args.state_root is not None
@@ -122,8 +122,7 @@ def _start_node(args: argparse.Namespace) -> None:
             identity=identity,
             listen_address=TcpAddress(args.listen_host, args.listen_port),
             discovery=CompositeDiscovery(tuple(sources), max_candidates=args.max_peers),
-            listener_transport=transport,
-            connector_transport=transport,
+            transport_security_provider=(LocalDevelopmentTransportSecurityProvider()),
             membership=MembershipConfig(max_members=args.max_peers + 1),
             development_cluster=development_cluster,
             max_peers=args.max_peers,
@@ -158,10 +157,11 @@ def _summary(node: NodeRuntime) -> dict[str, object]:
         "node_id": snapshot.identity.node_id,
         "instance_id": snapshot.identity.instance_id,
         "phase": snapshot.phase.value,
+        "credential_expires_at_epoch_seconds": (
+            snapshot.credential_expires_at_epoch_seconds
+        ),
         "endpoint": (
-            None
-            if endpoint is None
-            else {"host": endpoint.host, "port": endpoint.port}
+            None if endpoint is None else {"host": endpoint.host, "port": endpoint.port}
         ),
         "members": [
             {
@@ -192,9 +192,7 @@ def _parse_endpoint(value: str) -> PeerEndpoint:
     if value.startswith("["):
         close = value.find("]")
         if close < 0 or close + 1 >= len(value) or value[close + 1] != ":":
-            raise argparse.ArgumentTypeError(
-                f"endpoint {value!r} must be [IPv6]:PORT"
-            )
+            raise argparse.ArgumentTypeError(f"endpoint {value!r} must be [IPv6]:PORT")
         host = value[1:close]
         port_text = value[close + 2 :]
     else:

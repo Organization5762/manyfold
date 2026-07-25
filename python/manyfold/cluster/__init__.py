@@ -23,15 +23,26 @@ from .runtime import (
     NodeSnapshot as NodeSnapshot,
     NodeStartError as NodeStartError,
 )
+from .security import (
+    CredentialExpiredError as CredentialExpiredError,
+    LocalDevelopmentTransportSecurityProvider as LocalDevelopmentTransportSecurityProvider,
+    ProcessTransportSecurity as ProcessTransportSecurity,
+    SignerLockedError as SignerLockedError,
+    SignerUnavailableError as SignerUnavailableError,
+    TransportSecurityProvider as TransportSecurityProvider,
+    TransportSecurityProviderError as TransportSecurityProviderError,
+)
 
 __all__ = [
     "ClusterConfig",
     "CommittedCommand",
     "ControlCommand",
     "CoordinatorStatus",
+    "CredentialExpiredError",
     "DevelopmentCluster",
     "DiagnosticSeverity",
     "HttpResponse",
+    "LocalDevelopmentTransportSecurityProvider",
     "MAX_COMMAND_BYTES",
     "MemberConfig",
     "NodeConfig",
@@ -42,4 +53,9 @@ __all__ = [
     "NodeSnapshot",
     "NodeStartError",
     "PersistentRaftCoordinator",
+    "ProcessTransportSecurity",
+    "SignerLockedError",
+    "SignerUnavailableError",
+    "TransportSecurityProvider",
+    "TransportSecurityProviderError",
 ]

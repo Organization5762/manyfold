@@ -17,11 +17,10 @@ from manyfold.architecture import (
     StaticSeedDiscovery,
     TcpAddress,
     TcpTransport,
-    TransportConfig,
-    TransportSecurity,
 )
 from manyfold.cluster import (
     DevelopmentCluster,
+    LocalDevelopmentTransportSecurityProvider,
     NodeConfig,
     NodePhase,
     NodeRuntime,
@@ -64,10 +63,7 @@ class ClusterRuntimeIntegrationTests(unittest.TestCase):
                 )
                 self.assertIn(
                     NodePhase.DISCOVERING,
-                    {
-                        diagnostic.phase
-                        for diagnostic in node.snapshot().diagnostics
-                    },
+                    {diagnostic.phase for diagnostic in node.snapshot().diagnostics},
                 )
             finally:
                 node.stop()
@@ -100,10 +96,7 @@ class ClusterRuntimeIntegrationTests(unittest.TestCase):
             self.assertEqual(first.phase, NodePhase.DEGRADED)
             self.assertIn(
                 "node-degraded",
-                {
-                    diagnostic.code
-                    for diagnostic in first.snapshot().diagnostics
-                },
+                {diagnostic.code for diagnostic in first.snapshot().diagnostics},
             )
 
             second.start()
@@ -120,8 +113,10 @@ class ClusterRuntimeIntegrationTests(unittest.TestCase):
             )
             self.assertTrue(
                 _wait_until(
-                    lambda: first.phase is NodePhase.READY
-                    and second.phase is NodePhase.READY,
+                    lambda: (
+                        first.phase is NodePhase.READY
+                        and second.phase is NodePhase.READY
+                    ),
                     timeout=2.0,
                 )
             )
@@ -304,15 +299,6 @@ def _node_config(
     max_peers: int = 4,
     diagnostic_limit: int = 32,
 ) -> NodeConfig:
-    transport = TransportConfig(
-        security=TransportSecurity.insecure_local_development(),
-        outbound_queue_limit=8,
-        inbound_queue_limit=8,
-        connect_timeout=0.1,
-        handshake_timeout=0.2,
-        heartbeat_interval=0.05,
-        peer_timeout=0.3,
-    )
     return NodeConfig(
         identity=NodeIdentity("test-cluster", node_id),
         listen_address=TcpAddress("127.0.0.1", port),
@@ -320,8 +306,7 @@ def _node_config(
             (StaticSeedDiscovery(peers, max_candidates=max_peers),),
             max_candidates=max_peers,
         ),
-        listener_transport=transport,
-        connector_transport=transport,
+        transport_security_provider=(LocalDevelopmentTransportSecurityProvider()),
         membership=MembershipConfig(
             lease_seconds=0.3,
             suspect_seconds=0.1,
@@ -351,9 +336,7 @@ def _reserve_ports(count: int) -> tuple[int, ...]:
             reservation.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             reservation.bind(("127.0.0.1", 0))
             reservations.append(reservation)
-        return tuple(
-            int(reservation.getsockname()[1]) for reservation in reservations
-        )
+        return tuple(int(reservation.getsockname()[1]) for reservation in reservations)
     finally:
         for reservation in reservations:
             reservation.close()

@@ -2,17 +2,21 @@
 
 `manyfold.cluster.NodeRuntime` is the client-side release-candidate bootstrap
 for one ManyFold node. One `NodeConfig` supplies the existing architecture
-objects and hard bounds; one `start()` call binds the node, starts its optional
-development control plane, discovers endpoints, authenticates transport
-sessions, joins authenticated peers to membership, and begins continuous
-reconciliation.
+objects, a process-scoped `TransportSecurityProvider`, and hard bounds; one
+`start()` call acquires short-lived transport security, binds the node, starts
+its optional development control plane, discovers endpoints, authenticates
+transport sessions, joins authenticated peers to membership, and begins
+continuous reconciliation.
 
 The runtime coordinates these concrete objects rather than replacing them:
 
 - `NodeIdentity` remains the transport identity.
 - `CompositeDiscovery` composes `StaticSeedDiscovery`, `DnsDiscovery`, and
   `MdnsDiscovery`.
-- `TcpTransport` owns the listener and bounded reconnecting peer links.
+- `TransportSecurityProvider` acquires per-process transport configuration from
+  an externally owned signer client.
+- `TcpTransport` owns the listener and bounded reconnecting peer links created
+  from that process configuration.
 - `MembershipTable` owns bounded authenticated member state.
 - `DevelopmentCluster` remains the optional fixed three-process local control
   plane.
@@ -61,11 +65,11 @@ uv run manyfold node start \
   --mdns
 ```
 
-The CLI is a thin adapter: it parses endpoints, constructs `NodeConfig`, calls
-`NodeRuntime.start()`, prints `NodeSnapshot`, and calls `stop()` on termination.
-Use mutual-TLS `TransportConfig` objects from Python for non-loopback
-deployments; the CLI deliberately exposes only the safe local-development
-security mode today.
+The CLI is a thin adapter: it parses endpoints, constructs `NodeConfig` with
+`LocalDevelopmentTransportSecurityProvider`, calls `NodeRuntime.start()`,
+prints `NodeSnapshot`, and calls `stop()` on termination. The local provider is
+stateless and creates keyless loopback-only configuration. Secure deployments
+inject their machine-signer client through the typed API.
 
 ## Typed API
 
@@ -77,14 +81,14 @@ from manyfold.architecture import (
     PeerEndpoint,
     StaticSeedDiscovery,
     TcpAddress,
-    TransportConfig,
-    TransportSecurity,
 )
-from manyfold.cluster import DevelopmentCluster, NodeConfig, NodeRuntime
+from manyfold.cluster import (
+    DevelopmentCluster,
+    LocalDevelopmentTransportSecurityProvider,
+    NodeConfig,
+    NodeRuntime,
+)
 
-transport = TransportConfig(
-    security=TransportSecurity.insecure_local_development(),
-)
 config = NodeConfig(
     identity=NodeIdentity("development", "node-a"),
     listen_address=TcpAddress("127.0.0.1", 7443),
@@ -95,8 +99,7 @@ config = NodeConfig(
             ),
         )
     ),
-    listener_transport=transport,
-    connector_transport=transport,
+    transport_security_provider=LocalDevelopmentTransportSecurityProvider(),
     membership=MembershipConfig(max_members=33),
     development_cluster=DevelopmentCluster.create(
         ".manyfold-node/node-a/control"
@@ -123,12 +126,43 @@ An empty `CompositeDiscovery(())` reaches `ready` as a local-only node.
 `True` only for the first stop, releases resources in reverse ownership order,
 and leaves the runtime restartable.
 
+## Secure signer integration
+
+Secure `NodeRuntime` configurations require a `TransportSecurityProvider`.
+Implement that narrow protocol in the signer client owned by the secure
+enrollment package:
+
+```python
+def acquire(
+    identity: NodeIdentity,
+    *,
+    timeout_seconds: float,
+    minimum_lifetime_seconds: float,
+) -> ProcessTransportSecurity:
+    ...
+```
+
+The response contains listener and connector `TransportConfig` objects plus an
+absolute credential expiration. Secure responses must use mutual TLS and must
+remain valid for `minimum_lifetime_seconds`. The provider should communicate
+with one externally managed machine-local signer shared by all local ManyFold
+processes.
+
+`NodeRuntime` neither reads long-lived private-key files nor starts, stops,
+unlocks, or persists the signer. It does not call a provider close method.
+Stopping a node only releases that process's transports and drops its
+short-lived response. A second local process may independently acquire another
+response through the same signer client or service.
+
 ## Phases and diagnostics
 
 `NodePhase` makes initialization and ongoing health explicit:
 
 | Phase | Meaning |
 | --- | --- |
+| `signer_unavailable` | The shared machine signer could not be reached before the configured timeout. |
+| `signer_locked` | The signer requires local unlock or enrollment before issuance. |
+| `credential_expired` | Issued credentials are expired or do not meet the minimum remaining lifetime. |
 | `discovering` | A bounded pass is collecting untrusted endpoints. |
 | `authenticating` | A bounded `TcpTransport` is handshaking or reconnecting. |
 | `joining` | A transport-authenticated identity is renewing membership. |
@@ -140,12 +174,14 @@ and leaves the runtime restartable.
 values. Each diagnostic includes a stable code, severity, phase, message,
 suggested action, and optional peer endpoint. `NodeConfig` also bounds peers,
 membership records and history, transport queues and frame sizes, discovery
-candidates, reconcile timing, peer absence, and shutdown waiting.
+candidates, signer acquisition and minimum lifetime, reconcile timing, peer
+absence, and shutdown waiting.
 
-Startup constructs resources in ownership order. Any listener, membership, or
-development-cluster failure closes every resource already acquired and returns
-the runtime to `stopped`. The single supervisor owns reconciliation; transport
-retry delays are capped by each connector's existing `ReconnectPolicy`.
+Startup acquires signer security before constructing owned resources. Signer,
+listener, membership, or development-cluster failure records its actionable
+phase, closes every resource already acquired, and returns the runtime to
+`stopped`. The single supervisor owns reconciliation; transport retry delays
+are capped by each connector's existing `ReconnectPolicy`.
 
 ## Current boundary
 
@@ -153,8 +189,14 @@ This API bootstraps and monitors authenticated links; it does not turn the
 process-local PubSub implementation into a replicated mesh.
 
 - Mutual TLS authenticates production peer identity. The explicit loopback
-  development mode validates claimed cluster and node fields but does not
+  development provider validates claimed cluster and node fields but does not
   credential-authenticate them.
+- The bootstrap defines the signer-client contract but implements no signer
+  daemon, key database, enrollment store, unlock flow, or duplicated credential
+  persistence.
+- Credentials are checked during startup. Automatic live certificate rotation
+  is not implemented; deployments must issue credentials sized for the process
+  lifetime or restart cleanly to reacquire them.
 - The development cluster is a fixed, local three-process Raft control plane.
   Bootstrap does not add dynamic Raft membership or join one node's local
   harness to another node's harness.

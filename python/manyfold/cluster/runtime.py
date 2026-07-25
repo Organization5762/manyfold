@@ -11,7 +11,6 @@ from enum import Enum
 from typing import final
 
 from manyfold.architecture.discovery import (
-    CompositeDiscovery,
     DiscoveryFailure,
     PeerCandidate,
     PeerEndpoint,
@@ -20,7 +19,6 @@ from manyfold.architecture.membership import (
     AuthenticatedPeerSession,
     MemberRecord,
     MembershipChange,
-    MembershipConfig,
     MembershipTable,
     MemberState,
 )
@@ -34,14 +32,25 @@ from manyfold.architecture.transport import (
     TransportSecurityMode,
 )
 
+from ._node_config import (
+    DEFAULT_DIAGNOSTIC_LIMIT,
+    DEFAULT_MAX_PEERS,
+    DEFAULT_MINIMUM_CREDENTIAL_LIFETIME_SECONDS,
+    DEFAULT_PEER_ABSENCE_SECONDS,
+    DEFAULT_RECONCILE_INTERVAL_SECONDS,
+    DEFAULT_SHUTDOWN_TIMEOUT_SECONDS,
+    DEFAULT_SIGNER_TIMEOUT_SECONDS,
+    DEFAULT_STARTUP_PEER_TIMEOUT_SECONDS,
+    NodeConfig,
+)
 from .dev_cluster import DevelopmentCluster
-
-DEFAULT_DIAGNOSTIC_LIMIT = 128
-DEFAULT_MAX_PEERS = 32
-DEFAULT_PEER_ABSENCE_SECONDS = 15.0
-DEFAULT_RECONCILE_INTERVAL_SECONDS = 1.0
-DEFAULT_SHUTDOWN_TIMEOUT_SECONDS = 5.0
-DEFAULT_STARTUP_PEER_TIMEOUT_SECONDS = 2.0
+from .security import (
+    CredentialExpiredError,
+    ProcessTransportSecurity,
+    SignerLockedError,
+    SignerUnavailableError,
+    _acquire_process_transport_security,
+)
 
 
 @final
@@ -50,6 +59,9 @@ class NodePhase(str, Enum):
 
     STOPPED = "stopped"
     STARTING = "starting"
+    SIGNER_UNAVAILABLE = "signer_unavailable"
+    SIGNER_LOCKED = "signer_locked"
+    CREDENTIAL_EXPIRED = "credential_expired"
     DISCOVERING = "discovering"
     AUTHENTICATING = "authenticating"
     JOINING = "joining"
@@ -100,73 +112,10 @@ class NodeSnapshot:
     phase: NodePhase
     identity: NodeIdentity
     endpoint: PeerEndpoint | None
+    credential_expires_at_epoch_seconds: float | None
     members: tuple[MemberRecord, ...]
     peers: tuple[NodePeerSnapshot, ...]
     diagnostics: tuple[NodeDiagnostic, ...]
-
-
-@final
-@dataclass(frozen=True, slots=True)
-class NodeConfig:
-    """Typed production objects and hard bounds required to start one node."""
-
-    identity: NodeIdentity
-    listen_address: TcpAddress
-    discovery: CompositeDiscovery
-    listener_transport: TransportConfig
-    connector_transport: TransportConfig
-    membership: MembershipConfig = MembershipConfig()
-    development_cluster: DevelopmentCluster | None = None
-    local_incarnation: int = 0
-    max_peers: int = DEFAULT_MAX_PEERS
-    diagnostic_limit: int = DEFAULT_DIAGNOSTIC_LIMIT
-    reconcile_interval_seconds: float = DEFAULT_RECONCILE_INTERVAL_SECONDS
-    startup_peer_timeout_seconds: float = DEFAULT_STARTUP_PEER_TIMEOUT_SECONDS
-    peer_absence_seconds: float = DEFAULT_PEER_ABSENCE_SECONDS
-    shutdown_timeout_seconds: float = DEFAULT_SHUTDOWN_TIMEOUT_SECONDS
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.identity, NodeIdentity):
-            raise ValueError("identity must be a NodeIdentity")
-        if not isinstance(self.listen_address, TcpAddress):
-            raise ValueError("listen_address must be a TcpAddress")
-        if not isinstance(self.discovery, CompositeDiscovery):
-            raise ValueError("discovery must be a CompositeDiscovery")
-        if not isinstance(self.listener_transport, TransportConfig):
-            raise ValueError("listener_transport must be a TransportConfig")
-        if not isinstance(self.connector_transport, TransportConfig):
-            raise ValueError("connector_transport must be a TransportConfig")
-        if not isinstance(self.membership, MembershipConfig):
-            raise ValueError("membership must be a MembershipConfig")
-        if self.development_cluster is not None and not isinstance(
-            self.development_cluster,
-            DevelopmentCluster,
-        ):
-            raise ValueError("development_cluster must be a DevelopmentCluster")
-        _require_nonnegative_int(self.local_incarnation, "local_incarnation")
-        _require_positive_int(self.max_peers, "max_peers")
-        _require_positive_int(self.diagnostic_limit, "diagnostic_limit")
-        _require_positive_number(
-            self.reconcile_interval_seconds,
-            "reconcile_interval_seconds",
-        )
-        _require_nonnegative_number(
-            self.startup_peer_timeout_seconds,
-            "startup_peer_timeout_seconds",
-        )
-        _require_positive_number(
-            self.peer_absence_seconds,
-            "peer_absence_seconds",
-        )
-        _require_positive_number(
-            self.shutdown_timeout_seconds,
-            "shutdown_timeout_seconds",
-        )
-        if self.max_peers >= self.membership.max_members:
-            raise ValueError(
-                "max_peers must be smaller than membership.max_members because "
-                "membership also retains the local node"
-            )
 
 
 @final
@@ -187,10 +136,9 @@ class NodeRuntime:
         self._phase = NodePhase.STOPPED
         self._generation = 0
         self._next_diagnostic_sequence = 1
-        self._diagnostics: deque[NodeDiagnostic] = deque(
-            maxlen=config.diagnostic_limit
-        )
+        self._diagnostics: deque[NodeDiagnostic] = deque(maxlen=config.diagnostic_limit)
         self._has_discovery_failures = False
+        self._process_transport_security: ProcessTransportSecurity | None = None
         self._listener: TcpTransport | None = None
         self._membership: MembershipTable | None = None
         self._peers: dict[PeerEndpoint, _PeerLink] = {}
@@ -255,10 +203,19 @@ class NodeRuntime:
                 "Wait for ready or degraded, then inspect retained diagnostics.",
             )
             try:
+                process_security = _acquire_process_transport_security(
+                    self.config.identity,
+                    self.config.transport_security_provider,
+                    timeout_seconds=self.config.signer_timeout_seconds,
+                    minimum_lifetime_seconds=(
+                        self.config.minimum_credential_lifetime_seconds
+                    ),
+                )
+                self._process_transport_security = process_security
                 listener = TcpTransport.listen(
                     self.config.identity,
                     self.config.listen_address,
-                    config=self.config.listener_transport,
+                    config=process_security.listener_transport,
                 )
                 self._listener = listener
                 local_endpoint = PeerEndpoint(
@@ -274,6 +231,7 @@ class NodeRuntime:
                 if self.config.development_cluster is not None:
                     self.config.development_cluster.start()
             except Exception as error:
+                self._record_security_failure_locked(error)
                 self._rollback_start_locked(error)
                 raise NodeStartError(
                     f"could not start node {self.config.identity.node_id!r}: {error}"
@@ -287,10 +245,7 @@ class NodeRuntime:
                     return self
                 supervisor = threading.Thread(
                     target=self._run_supervisor,
-                    name=(
-                        "manyfold-node-"
-                        f"{self.config.identity.node_id}-supervisor"
-                    ),
+                    name=(f"manyfold-node-{self.config.identity.node_id}-supervisor"),
                     daemon=True,
                 )
                 self._supervisor = supervisor
@@ -323,6 +278,7 @@ class NodeRuntime:
             self._membership = None
             listener = self._listener
             self._listener = None
+            self._process_transport_security = None
 
         for peer in peers:
             try:
@@ -352,9 +308,7 @@ class NodeRuntime:
                 errors.append(
                     "supervisor did not exit before the configured shutdown deadline"
                 )
-            severity = (
-                DiagnosticSeverity.WARNING if errors else DiagnosticSeverity.INFO
-            )
+            severity = DiagnosticSeverity.WARNING if errors else DiagnosticSeverity.INFO
             self._set_phase_locked(NodePhase.STOPPED)
             self._record_locked(
                 severity,
@@ -378,6 +332,7 @@ class NodeRuntime:
             membership = self._membership
             members = () if membership is None else membership.snapshot()
             listener = self._listener
+            process_security = self._process_transport_security
             endpoint = (
                 None
                 if listener is None
@@ -399,6 +354,11 @@ class NodeRuntime:
                 phase=self._phase,
                 identity=self.config.identity,
                 endpoint=endpoint,
+                credential_expires_at_epoch_seconds=(
+                    None
+                    if process_security is None
+                    else process_security.expires_at_epoch_seconds
+                ),
                 members=members,
                 peers=peers,
                 diagnostics=tuple(self._diagnostics),
@@ -443,9 +403,7 @@ class NodeRuntime:
                 if len(members) >= minimum:
                     return members
                 remaining = (
-                    None
-                    if deadline is None
-                    else max(0.0, deadline - time.monotonic())
+                    None if deadline is None else max(0.0, deadline - time.monotonic())
                 )
                 if remaining == 0.0 or not self._condition.wait(remaining):
                     raise TimeoutError(
@@ -509,9 +467,7 @@ class NodeRuntime:
         with self._condition:
             if not self._peers or self._phase is NodePhase.READY:
                 return
-        deadline = (
-            time.monotonic() + self.config.startup_peer_timeout_seconds
-        )
+        deadline = time.monotonic() + self.config.startup_peer_timeout_seconds
         while not self._stop.is_set() and time.monotonic() < deadline:
             self._reconcile_links()
             self._settle_phase(
@@ -565,6 +521,9 @@ class NodeRuntime:
                     )
                     continue
                 try:
+                    connector_security = (
+                        self._require_process_transport_security_locked()
+                    )
                     transport = TcpTransport.connect(
                         self.config.identity,
                         TcpAddress(
@@ -572,7 +531,7 @@ class NodeRuntime:
                             candidate.endpoint.port,
                         ),
                         config=_connector_config(
-                            self.config.connector_transport,
+                            connector_security.connector_transport,
                             candidate,
                         ),
                     )
@@ -676,7 +635,10 @@ class NodeRuntime:
 
                 if peer.is_joined and not peer.is_unavailable:
                     self._mark_peer_unavailable_locked(peer, "transport-disconnected")
-                if health.last_error is not None and health.last_error != peer.last_error:
+                if (
+                    health.last_error is not None
+                    and health.last_error != peer.last_error
+                ):
                     peer.last_error = health.last_error
                     self._record_locked(
                         DiagnosticSeverity.WARNING,
@@ -702,10 +664,7 @@ class NodeRuntime:
         self._record_locked(
             DiagnosticSeverity.WARNING,
             "peer-unavailable",
-            (
-                f"peer endpoint {peer.candidate.endpoint} became unavailable "
-                f"({reason})"
-            ),
+            (f"peer endpoint {peer.candidate.endpoint} became unavailable ({reason})"),
             "The connector will retry while discovery continues to return the peer.",
             endpoint=peer.candidate.endpoint,
         )
@@ -806,6 +765,7 @@ class NodeRuntime:
         self._membership = None
         listener = self._listener
         self._listener = None
+        self._process_transport_security = None
         self._stop.set()
         cleanup_errors: list[str] = []
         for peer in peers:
@@ -847,6 +807,37 @@ class NodeRuntime:
                 if cleanup_errors
                 else "Correct the reported failure and call start() again."
             ),
+        )
+
+    def _require_process_transport_security_locked(
+        self,
+    ) -> ProcessTransportSecurity:
+        process_security = self._process_transport_security
+        if process_security is None:
+            raise RuntimeError("process transport security is not initialized")
+        return process_security
+
+    def _record_security_failure_locked(self, error: Exception) -> None:
+        if isinstance(error, SignerLockedError):
+            phase = NodePhase.SIGNER_LOCKED
+            code = "signer-locked"
+            action = "Unlock or enroll the shared machine signer, then retry."
+        elif isinstance(error, CredentialExpiredError):
+            phase = NodePhase.CREDENTIAL_EXPIRED
+            code = "credential-expired"
+            action = "Renew signer enrollment or issuance policy, then retry."
+        elif isinstance(error, SignerUnavailableError):
+            phase = NodePhase.SIGNER_UNAVAILABLE
+            code = "signer-unavailable"
+            action = "Start or repair the shared machine signer, then retry."
+        else:
+            return
+        self._set_phase_locked(phase)
+        self._record_locked(
+            DiagnosticSeverity.ERROR,
+            code,
+            str(error),
+            action,
         )
 
     def _set_phase_locked(self, phase: NodePhase) -> None:
@@ -968,9 +959,11 @@ class _PeerLink:
 __all__ = [
     "DEFAULT_DIAGNOSTIC_LIMIT",
     "DEFAULT_MAX_PEERS",
+    "DEFAULT_MINIMUM_CREDENTIAL_LIFETIME_SECONDS",
     "DEFAULT_PEER_ABSENCE_SECONDS",
     "DEFAULT_RECONCILE_INTERVAL_SECONDS",
     "DEFAULT_SHUTDOWN_TIMEOUT_SECONDS",
+    "DEFAULT_SIGNER_TIMEOUT_SECONDS",
     "DEFAULT_STARTUP_PEER_TIMEOUT_SECONDS",
     "DiagnosticSeverity",
     "NodeConfig",
