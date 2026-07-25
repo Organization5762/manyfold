@@ -12,7 +12,7 @@ import math
 import os
 import re
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, final
 
@@ -23,6 +23,12 @@ from pysyncobj import (
     SyncObjConsumer,
     SyncObjException,
     replicated,
+)
+
+from .network import (
+    NetworkProtocolConfig,
+    RaftNetworkProtocol,
+    resolve_network_protocol,
 )
 
 MAX_COMMAND_BYTES = 64 * 1024
@@ -39,6 +45,8 @@ _RAFT_ROLE_BY_STATE = {
 }
 _NODE_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 _COMMAND_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:/-]*\Z")
+_RAFT_JOURNAL_HEADER_BYTES = 40
+_RAFT_JOURNAL_MAGIC = b"PYSYNCOBJ"
 
 
 @final
@@ -74,6 +82,11 @@ class MemberConfig:
         return f"{self.host}:{self.raft_port}"
 
     @property
+    def raft_identity(self) -> str:
+        """Return the explicit address-bound Raft identity."""
+        return self.raft_address
+
+    @property
     def api_address(self) -> str:
         """Return the coordinator HTTP address."""
         return f"{self.host}:{self.api_port}"
@@ -89,6 +102,7 @@ class MemberConfig:
             "node_id": self.node_id,
             "host": self.host,
             "raft_port": self.raft_port,
+            "raft_identity": self.raft_identity,
             "api_port": self.api_port,
         }
 
@@ -96,29 +110,34 @@ class MemberConfig:
 @final
 @dataclass(frozen=True)
 class ClusterConfig:
-    """A fixed three-member coordinator configuration."""
+    """A fixed-membership coordinator configuration of any positive size."""
 
     members: tuple[MemberConfig, ...]
+    network: NetworkProtocolConfig = field(default_factory=NetworkProtocolConfig)
 
     def __post_init__(self) -> None:
-        if not isinstance(self.members, tuple) or len(self.members) != 3:
-            raise ValueError("a coordinator cluster must contain exactly 3 members")
+        if not isinstance(self.members, tuple) or not self.members:
+            raise ValueError("a coordinator cluster must contain at least 1 member")
+        if not all(isinstance(member, MemberConfig) for member in self.members):
+            raise ValueError("cluster members must be MemberConfig values")
+        if not isinstance(self.network, NetworkProtocolConfig):
+            raise ValueError("cluster network must be a NetworkProtocolConfig")
         node_ids = {member.node_id for member in self.members}
-        raft_addresses = {member.raft_address for member in self.members}
+        raft_identities = {member.raft_identity for member in self.members}
         api_addresses = {member.api_address for member in self.members}
-        ports = {
-            port
+        bound_addresses = {
+            address
             for member in self.members
-            for port in (member.raft_port, member.api_port)
+            for address in (member.raft_address, member.api_address)
         }
         if len(node_ids) != len(self.members):
             raise ValueError("coordinator node_id values must be unique")
-        if len(raft_addresses) != len(self.members):
-            raise ValueError("coordinator Raft addresses must be unique")
+        if len(raft_identities) != len(self.members):
+            raise ValueError("coordinator Raft identities must be unique")
         if len(api_addresses) != len(self.members):
             raise ValueError("coordinator API addresses must be unique")
-        if len(ports) != len(self.members) * 2:
-            raise ValueError("all one-host coordinator ports must be distinct")
+        if len(bound_addresses) != len(self.members) * 2:
+            raise ValueError("coordinator Raft and API addresses must be distinct")
 
     def member(self, node_id: str) -> MemberConfig:
         """Return one member by stable application identity."""
@@ -136,7 +155,10 @@ class ClusterConfig:
 
     def to_dict(self) -> dict[str, object]:
         """Return the stable JSON representation."""
-        return {"members": [member.to_dict() for member in self.members]}
+        return {
+            "members": [member.to_dict() for member in self.members],
+            "network": self.network.to_dict(),
+        }
 
     def save(self, path: str | Path) -> None:
         """Persist this configuration atomically."""
@@ -157,7 +179,8 @@ class ClusterConfig:
         if not isinstance(value, dict) or not isinstance(value.get("members"), list):
             raise ValueError("cluster config must contain a members list")
         members = tuple(_member_from_json(member) for member in value["members"])
-        return cls(members)
+        network = NetworkProtocolConfig.from_json(value.get("network"))
+        return cls(members, network)
 
 
 @final
@@ -237,6 +260,7 @@ class CoordinatorStatus:
     """A stable status view over PySyncObj's Raft metrics."""
 
     node_id: str
+    raft_identity: str
     role: str
     leader: MemberConfig | None
     term: int
@@ -250,6 +274,7 @@ class CoordinatorStatus:
         """Return a JSON-compatible status object."""
         return {
             "node_id": self.node_id,
+            "raft_identity": self.raft_identity,
             "role": self.role,
             "leader": self.leader.to_dict() if self.leader is not None else None,
             "term": self.term,
@@ -281,6 +306,15 @@ class CoordinatorUnavailableError(RuntimeError):
 
 
 @final
+class CorruptCoordinatorStateError(RuntimeError):
+    """Raised when durable coordinator state fails integrity validation."""
+
+    def __init__(self, path: Path, detail: str) -> None:
+        self.path = path
+        super().__init__(f"coordinator state is corrupt at {path}: {detail}")
+
+
+@final
 class PersistentRaftCoordinator:
     """A persistent, fixed-membership Raft coordinator for control commands."""
 
@@ -289,16 +323,23 @@ class PersistentRaftCoordinator:
         config: ClusterConfig,
         node_id: str,
         state_directory: str | Path,
+        network_protocol: RaftNetworkProtocol | None = None,
     ) -> None:
         self.config = config
         self.member = config.member(node_id)
         self.state_directory = Path(state_directory).resolve()
         self.state_directory.mkdir(parents=True, exist_ok=True)
         _verify_state_identity(self.state_directory, config, self.member)
+        _validate_raft_journal(self.state_directory / "raft.journal")
 
         self._database_path = self.state_directory / "committed.sqlite3"
         _initialize_database(self._database_path)
         self._control_log = _ControlPlaneLog(self._database_path)
+        protocol = (
+            network_protocol
+            if network_protocol is not None
+            else resolve_network_protocol(config.network)
+        )
         raft_config = SyncObjConf(
             autoTick=True,
             appendEntriesBatchSizeBytes=64 * 1024,
@@ -321,15 +362,17 @@ class PersistentRaftCoordinator:
             useFork=False,
         )
         peer_addresses = [
-            member.raft_address
+            member.raft_identity
             for member in config.members
             if member.node_id != node_id
         ]
         self._raft = SyncObj(
-            self.member.raft_address,
+            self.member.raft_identity,
             peer_addresses,
             conf=raft_config,
             consumers=[self._control_log],
+            nodeClass=protocol.node_class,
+            transportClass=protocol.transport_factory(self.state_directory),
         )
         self._closed = False
 
@@ -341,6 +384,7 @@ class PersistentRaftCoordinator:
         leader = self.member if state == _RAFT_LEADER_STATE else self._known_leader()
         return CoordinatorStatus(
             node_id=self.member.node_id,
+            raft_identity=self.member.raft_identity,
             role=role,
             leader=leader,
             term=int(raw_status["raft_term"]),
@@ -489,12 +533,20 @@ def _load_payload_json(payload_json: str) -> dict[str, object]:
 def _member_from_json(value: object) -> MemberConfig:
     if not isinstance(value, dict):
         raise ValueError("each cluster member must be a JSON object")
-    return MemberConfig(
+    member = MemberConfig(
         node_id=value.get("node_id"),  # type: ignore[arg-type]
         host=value.get("host"),  # type: ignore[arg-type]
         raft_port=value.get("raft_port"),  # type: ignore[arg-type]
         api_port=value.get("api_port"),  # type: ignore[arg-type]
     )
+    configured_identity = value.get("raft_identity")
+    if configured_identity is not None and configured_identity != member.raft_identity:
+        raise ValueError(
+            f"member {member.node_id!r} raft_identity "
+            f"{configured_identity!r} does not match address-bound identity "
+            f"{member.raft_identity!r}"
+        )
+    return member
 
 
 def _verify_state_identity(
@@ -505,7 +557,7 @@ def _verify_state_identity(
     identity_path = state_directory / "identity.json"
     expected = {
         "node_id": member.node_id,
-        "raft_address": member.raft_address,
+        "raft_identity": member.raft_identity,
         "cluster": config.to_dict(),
     }
     if identity_path.exists():
@@ -544,7 +596,60 @@ def _connect_database(path: Path) -> sqlite3.Connection:
     return connection
 
 
+def _validate_raft_journal(path: Path) -> None:
+    if not path.exists():
+        return
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as stream:
+            header = stream.read(_RAFT_JOURNAL_HEADER_BYTES)
+    except OSError as error:
+        raise CorruptCoordinatorStateError(
+            path,
+            f"failed to read Raft journal header: {error}",
+        ) from error
+    if size < _RAFT_JOURNAL_HEADER_BYTES or len(header) < _RAFT_JOURNAL_HEADER_BYTES:
+        raise CorruptCoordinatorStateError(
+            path,
+            f"Raft journal is {size} bytes; expected at least "
+            f"{_RAFT_JOURNAL_HEADER_BYTES}",
+        )
+    application_name = header[:24].rstrip(b"\0")
+    if application_name != _RAFT_JOURNAL_MAGIC:
+        raise CorruptCoordinatorStateError(
+            path,
+            f"Raft journal magic is {application_name!r}; expected "
+            f"{_RAFT_JOURNAL_MAGIC!r}",
+        )
+    last_record_offset = int.from_bytes(header[36:40], "little")
+    if not _RAFT_JOURNAL_HEADER_BYTES <= last_record_offset <= size:
+        raise CorruptCoordinatorStateError(
+            path,
+            f"Raft journal last-record offset {last_record_offset} is outside "
+            f"{_RAFT_JOURNAL_HEADER_BYTES}..{size}",
+        )
+
+
+def _validate_database(path: Path) -> None:
+    if not path.exists():
+        return
+    try:
+        with _connect_database(path) as connection:
+            rows = connection.execute("PRAGMA quick_check").fetchall()
+    except sqlite3.DatabaseError as error:
+        raise CorruptCoordinatorStateError(
+            path,
+            f"SQLite quick_check failed: {error}",
+        ) from error
+    if rows != [("ok",)]:
+        raise CorruptCoordinatorStateError(
+            path,
+            f"SQLite quick_check returned {rows!r}",
+        )
+
+
 def _initialize_database(path: Path) -> None:
+    _validate_database(path)
     with _connect_database(path) as connection:
         connection.execute("PRAGMA journal_mode = WAL")
         connection.execute(
@@ -714,6 +819,7 @@ __all__ = [
     "ControlCommand",
     "CoordinatorStatus",
     "CoordinatorUnavailableError",
+    "CorruptCoordinatorStateError",
     "DEFAULT_COMMAND_TIMEOUT_SECONDS",
     "MAX_COMMAND_BYTES",
     "MemberConfig",

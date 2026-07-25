@@ -146,10 +146,12 @@ class _CoordinatorRequestHandler(BaseHTTPRequestHandler):
                     HTTPStatus.OK,
                     {
                         **self._coordinator.status().to_dict(),
+                        "member_count": len(self._coordinator.config.members),
                         "members": [
                             member.to_dict()
                             for member in self._coordinator.config.members
                         ],
+                        "network": self._coordinator.config.network.to_dict(),
                     },
                 )
                 return
@@ -271,6 +273,7 @@ class _CoordinatorRequestHandler(BaseHTTPRequestHandler):
             "members": [
                 member.to_dict() for member in self._coordinator.config.members
             ],
+            "network": self._coordinator.config.network.to_dict(),
         }
         if leader is None:
             self._write_json(
