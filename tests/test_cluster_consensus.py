@@ -5,15 +5,21 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from manyfold.cluster.consensus import (
+from manyfold.cluster import (
     MAX_COMMAND_BYTES,
     ClusterConfig,
     ControlCommand,
+    DevelopmentCluster,
     MemberConfig,
 )
 
 
 class ClusterConfigTests(unittest.TestCase):
+    def test_development_cluster_rejects_non_loopback_http_binding(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ValueError, "must be loopback"):
+                DevelopmentCluster.create(directory, host="0.0.0.0")
+
     def test_cluster_config_round_trip_preserves_distinct_identities(self) -> None:
         config = _cluster_config()
 

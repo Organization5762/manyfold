@@ -16,12 +16,15 @@ distributed consensus implementation.
 From the repository root:
 
 ```sh
-uv run python -m manyfold.cluster.dev_cluster \
+uv run manyfold-cluster \
   --root .manyfold-dev-cluster
 ```
 
 The command starts three child processes, waits for a quorum-backed leader, and
 prints the generated identities and ports:
+
+The development harness only binds loopback hosts. Its HTTP control API is not
+authenticated and cannot be exposed on a LAN or tailnet.
 
 ```json
 {

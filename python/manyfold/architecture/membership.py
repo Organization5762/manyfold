@@ -11,6 +11,7 @@ from enum import Enum
 from typing import Protocol, final
 
 from .discovery import PeerEndpoint
+from .transport import NodeIdentity
 
 DEFAULT_DEAD_RETENTION_SECONDS = 300.0
 DEFAULT_LEASE_SECONDS = 15.0
@@ -45,23 +46,6 @@ class MemberState(str, Enum):
 
 @final
 @dataclass(frozen=True)
-class PeerIdentity:
-    """Cluster and node identity proven by an authenticated transport."""
-
-    cluster_id: str
-    node_id: str
-
-    def __post_init__(self) -> None:
-        object.__setattr__(
-            self,
-            "cluster_id",
-            _require_text(self.cluster_id, "cluster_id"),
-        )
-        object.__setattr__(self, "node_id", _require_text(self.node_id, "node_id"))
-
-
-@final
-@dataclass(frozen=True)
 class AuthenticatedPeerSession:
     """Identity and endpoint output from a successful peer authentication.
 
@@ -70,7 +54,7 @@ class AuthenticatedPeerSession:
     credentials before producing it.
     """
 
-    identity: PeerIdentity
+    identity: NodeIdentity
     endpoint: PeerEndpoint
     incarnation: int
 
@@ -129,7 +113,7 @@ class MembershipConfig:
 class MemberRecord:
     """Current state and bounded lifecycle deadline of one member."""
 
-    identity: PeerIdentity
+    identity: NodeIdentity
     endpoint: PeerEndpoint
     incarnation: int
     state: MemberState
@@ -182,7 +166,7 @@ class MembershipTable:
 
     def __init__(
         self,
-        local_identity: PeerIdentity,
+        local_identity: NodeIdentity,
         local_endpoint: PeerEndpoint,
         *,
         local_incarnation: int = 0,
@@ -217,7 +201,7 @@ class MembershipTable:
         self._append_change(local_record, "local-started")
 
     @property
-    def local_identity(self) -> PeerIdentity:
+    def local_identity(self) -> NodeIdentity:
         """Return the local authenticated identity."""
         return self._local_identity
 
@@ -593,7 +577,6 @@ __all__ = [
     "MembershipHistoryGap",
     "MembershipTable",
     "MonotonicClock",
-    "PeerIdentity",
     "PeerIdentityError",
     "SystemMonotonicClock",
 ]

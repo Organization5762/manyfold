@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from manyfold.cluster.dev_cluster import DevelopmentCluster
+from manyfold.cluster import DevelopmentCluster
 
 
 class ClusterProcessIntegrationTests(unittest.TestCase):

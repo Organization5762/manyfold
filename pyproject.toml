@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "manyfold"
-version = "0.1.41"
+version = "0.1.42"
 description = "PyO3-backed Manyfold RFC scaffolding and in-memory runtime."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -43,6 +43,7 @@ Repository = "https://github.com/Organization5762/manyfold"
 [project.scripts]
 manyfold-benchmark-baselines-check = "manyfold.private.profiling.benchmark_baselines:_main"
 manyfold-benchmark-log-verify = "manyfold.benchmark_artifacts:_main"
+manyfold-cluster = "manyfold.cluster.dev_cluster:_main"
 manyfold-example-catalog = "manyfold_example_catalog:_main"
 manyfold-heart-benchmark = "manyfold.heart_benchmarks:_main"
 manyfold-heart-monitor-verify = "manyfold.heart_benchmarks:_verify_main"

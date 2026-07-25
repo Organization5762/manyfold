@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from manyfold.architecture.discovery import PeerEndpoint
-from manyfold.architecture.membership import (
+from manyfold.architecture import (
     AuthenticatedPeerSession,
     MembershipCapacityError,
     MembershipClosedError,
@@ -11,7 +10,8 @@ from manyfold.architecture.membership import (
     MembershipHistoryGap,
     MembershipTable,
     MemberState,
-    PeerIdentity,
+    NodeIdentity,
+    PeerEndpoint,
     PeerIdentityError,
 )
 
@@ -72,7 +72,7 @@ class ArchitectureMembershipTests(unittest.TestCase):
         with self.assertRaisesRegex(PeerIdentityError, "other-cluster"):
             membership.heartbeat(
                 AuthenticatedPeerSession(
-                    PeerIdentity("other-cluster", "node-b"),
+                    NodeIdentity("other-cluster", "node-b"),
                     PeerEndpoint("10.0.0.2", 7443),
                     0,
                 )
@@ -80,7 +80,7 @@ class ArchitectureMembershipTests(unittest.TestCase):
         with self.assertRaisesRegex(PeerIdentityError, "local node_id"):
             membership.heartbeat(
                 AuthenticatedPeerSession(
-                    PeerIdentity("cluster-a", "node-a"),
+                    NodeIdentity("cluster-a", "node-a"),
                     PeerEndpoint("10.0.0.9", 7443),
                     0,
                 )
@@ -120,7 +120,7 @@ class ArchitectureMembershipTests(unittest.TestCase):
         with self.assertRaisesRegex(MembershipCapacityError, "limit 2"):
             membership.heartbeat(
                 AuthenticatedPeerSession(
-                    PeerIdentity("cluster-a", "node-c"),
+                    NodeIdentity("cluster-a", "node-c"),
                     PeerEndpoint("10.0.0.3", 7443),
                     0,
                 )
@@ -150,7 +150,7 @@ class ArchitectureMembershipTests(unittest.TestCase):
 
         admitted = membership.heartbeat(
             AuthenticatedPeerSession(
-                PeerIdentity("cluster-a", "node-c"),
+                NodeIdentity("cluster-a", "node-c"),
                 PeerEndpoint("10.0.0.3", 7443),
                 0,
             )
@@ -189,7 +189,7 @@ def _membership(
     config: MembershipConfig | None = None,
 ) -> MembershipTable:
     return MembershipTable(
-        PeerIdentity("cluster-a", "node-a"),
+        NodeIdentity("cluster-a", "node-a"),
         PeerEndpoint("10.0.0.1", 7443),
         config=config
         or MembershipConfig(
@@ -205,7 +205,7 @@ def _membership(
 
 def _peer(*, incarnation: int = 0) -> AuthenticatedPeerSession:
     return AuthenticatedPeerSession(
-        PeerIdentity("cluster-a", "node-b"),
+        NodeIdentity("cluster-a", "node-b"),
         PeerEndpoint("10.0.0.2", 7443),
         incarnation,
     )

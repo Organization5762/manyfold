@@ -5,11 +5,8 @@ block: a bounded, single-peer TCP link for PubSub payloads and coordinator RPC
 messages. It uses only the Python standard library and performs real socket I/O;
 it is not a graph-only transport declaration.
 
-The module is intentionally imported directly until the package integration
-change exports it:
-
 ```python
-from manyfold.architecture.transport import (
+from manyfold.architecture import (
     FrameKind,
     NodeIdentity,
     TcpTransport,

@@ -53,6 +53,7 @@ class DevelopmentCluster:
         host: str = DEFAULT_HOST,
     ) -> DevelopmentCluster:
         """Create or reopen a durable one-host three-member configuration."""
+        _require_loopback_host(host)
         cluster_root = Path(root).resolve()
         cluster_root.mkdir(parents=True, exist_ok=True)
         config_path = cluster_root / "cluster.json"
@@ -409,6 +410,14 @@ def _reserve_ports(count: int, host: str) -> tuple[int, ...]:
     finally:
         for reservation in reservations:
             reservation.close()
+
+
+def _require_loopback_host(host: str) -> None:
+    if host not in {"127.0.0.1", "localhost"}:
+        raise ValueError(
+            "development cluster host must be loopback because its HTTP API "
+            "is not authenticated"
+        )
 
 
 def _parse_args(arguments: tuple[str, ...] | None = None) -> argparse.Namespace:

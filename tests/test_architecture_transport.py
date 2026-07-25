@@ -10,8 +10,7 @@ import time
 import unittest
 from pathlib import Path
 
-from manyfold.architecture import _transport_wire as transport_wire
-from manyfold.architecture.transport import (
+from manyfold.architecture import (
     FrameKind,
     LinkState,
     NodeIdentity,
@@ -23,6 +22,7 @@ from manyfold.architecture.transport import (
     TransportMessage,
     TransportQueueFull,
     TransportSecurity,
+    _transport_wire as transport_wire,
 )
 
 from tests.test_support import subprocess_test_env

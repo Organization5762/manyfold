@@ -3,7 +3,7 @@ from __future__ import annotations
 import socket
 import unittest
 
-from manyfold.architecture.discovery import (
+from manyfold.architecture import (
     CompositeDiscovery,
     DiscoveryReport,
     DnsDiscovery,

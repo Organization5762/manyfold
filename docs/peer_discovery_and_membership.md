@@ -70,16 +70,16 @@ failures without treating them as identity failures.
 The membership API lives in `manyfold.architecture.membership`.
 
 ```python
-from manyfold.architecture.discovery import PeerEndpoint
-from manyfold.architecture.membership import (
+from manyfold.architecture import (
     AuthenticatedPeerSession,
     MembershipConfig,
     MembershipTable,
-    PeerIdentity,
+    NodeIdentity,
+    PeerEndpoint,
 )
 
 membership = MembershipTable(
-    PeerIdentity("production", "node-a"),
+    NodeIdentity("production", "node-a"),
     PeerEndpoint("10.0.0.11", 7443),
     local_incarnation=7,
     config=MembershipConfig(
@@ -93,7 +93,7 @@ membership = MembershipTable(
 
 # Construct this only after the transport authenticates both identity fields.
 session = AuthenticatedPeerSession(
-    PeerIdentity("production", "node-b"),
+    NodeIdentity("production", "node-b"),
     PeerEndpoint("10.0.0.12", 7443),
     incarnation=3,
 )
