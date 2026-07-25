@@ -31,6 +31,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
+    "cryptography>=44,<50",
     "pysyncobj==0.3.15",
     "zeroconf>=0.150,<0.151",
 ]
@@ -45,12 +46,14 @@ manyfold = "manyfold.cli:_main"
 manyfold-benchmark-baselines-check = "manyfold.private.profiling.benchmark_baselines:_main"
 manyfold-benchmark-log-verify = "manyfold.benchmark_artifacts:_main"
 manyfold-cluster = "manyfold.cluster.dev_cluster:_main"
+manyfold-enrollment = "manyfold.architecture.enrollment_cli:_main"
 manyfold-example-catalog = "manyfold_example_catalog:_main"
 manyfold-heart-benchmark = "manyfold.heart_benchmarks:_main"
 manyfold-heart-monitor-verify = "manyfold.heart_benchmarks:_verify_main"
 manyfold-ipc-benchmark = "manyfold.private.profiling.ipc_benchmarks:_main"
 manyfold-jemalloc-leak-check = "manyfold.private.profiling.jemalloc_leak_check:_main"
 manyfold-jemalloc-verify = "manyfold.private.profiling.jemalloc_leak_check:_verify_main"
+manyfold-machine-signer = "manyfold.architecture.machine_signer_cli:_main"
 manyfold-memory-benchmark = "manyfold.memory_benchmarks:_main"
 manyfold-monitor-verify = "manyfold.monitor_artifacts:_main"
 manyfold-native-profiler = "manyfold.private.profiling.native_profilers:_main"
