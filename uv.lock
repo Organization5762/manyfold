@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.10"
 
 [[package]]
@@ -16,6 +16,7 @@ name = "manyfold"
 version = "0.1.41"
 source = { editable = "." }
 dependencies = [
+    { name = "pysyncobj" },
     { name = "zeroconf" },
 ]
 
@@ -26,13 +27,22 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "zeroconf", specifier = ">=0.150,<0.151" }]
+requires-dist = [
+    { name = "pysyncobj", specifier = "==0.3.15" },
+    { name = "zeroconf", specifier = ">=0.150,<0.151" },
+]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "ruff", specifier = ">=0.15.12" },
     { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.0.0" },
 ]
+
+[[package]]
+name = "pysyncobj"
+version = "0.3.15"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/5d/48/5f96d7f8c46446f1a1a660a594c06906b59185a1b19e334180f72fc0dc0e/pysyncobj-0.3.15.tar.gz", hash = "sha256:7b98f523bc7810203763f5a6ef569ff2dd5de889fb7f5f0ccc8c8b6c87df9680", size = 41987, upload-time = "2026-03-17T21:50:24.39Z" }
 
 [[package]]
 name = "ruff"
