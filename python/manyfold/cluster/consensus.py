@@ -14,7 +14,7 @@ import re
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, final
+from typing import Any, Protocol, final
 
 from pysyncobj import (
     FAIL_REASON,
@@ -47,6 +47,7 @@ _NODE_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 _COMMAND_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:/-]*\Z")
 _RAFT_JOURNAL_HEADER_BYTES = 40
 _RAFT_JOURNAL_MAGIC = b"PYSYNCOBJ"
+_CONTROL_LOG_WRITE = "control_log_append"
 
 
 @final
@@ -314,6 +315,16 @@ class CorruptCoordinatorStateError(RuntimeError):
         super().__init__(f"coordinator state is corrupt at {path}: {detail}")
 
 
+class DurableWriteBoundary(Protocol):
+    """Observe durable transaction stages for controlled fault injection."""
+
+    def before_write(self, path: Path, operation: str) -> None:
+        """Run immediately before a durable write starts."""
+
+    def before_commit(self, path: Path, operation: str) -> None:
+        """Run after mutation but before the durable transaction commits."""
+
+
 @final
 class PersistentRaftCoordinator:
     """A persistent, fixed-membership Raft coordinator for control commands."""
@@ -324,6 +335,7 @@ class PersistentRaftCoordinator:
         node_id: str,
         state_directory: str | Path,
         network_protocol: RaftNetworkProtocol | None = None,
+        durable_write_boundary: DurableWriteBoundary | None = None,
     ) -> None:
         self.config = config
         self.member = config.member(node_id)
@@ -334,7 +346,14 @@ class PersistentRaftCoordinator:
 
         self._database_path = self.state_directory / "committed.sqlite3"
         _initialize_database(self._database_path)
-        self._control_log = _ControlPlaneLog(self._database_path)
+        self._control_log = _ControlPlaneLog(
+            self._database_path,
+            (
+                durable_write_boundary
+                if durable_write_boundary is not None
+                else _DIRECT_DURABLE_WRITE
+            ),
+        )
         protocol = (
             network_protocol
             if network_protocol is not None
@@ -678,8 +697,10 @@ def _insert_command(
     path: Path,
     command: CommittedCommand,
     payload_json: str,
+    boundary: DurableWriteBoundary,
 ) -> None:
     with _connect_database(path) as connection:
+        boundary.before_write(path, _CONTROL_LOG_WRITE)
         connection.execute(
             """
             INSERT INTO committed_commands (
@@ -696,6 +717,7 @@ def _insert_command(
                 payload_json,
             ),
         )
+        boundary.before_commit(path, _CONTROL_LOG_WRITE)
 
 
 def _read_command_by_id(path: Path, command_id: str) -> _StoredCommand | None:
@@ -774,8 +796,13 @@ def _committed_command_from_mapping(value: dict[str, Any]) -> CommittedCommand:
 class _ControlPlaneLog(SyncObjConsumer):
     """Replicated state machine that applies committed commands to SQLite."""
 
-    def __init__(self, database_path: Path) -> None:
+    def __init__(
+        self,
+        database_path: Path,
+        durable_write_boundary: DurableWriteBoundary,
+    ) -> None:
         self._database_path = database_path
+        self._durable_write_boundary = durable_write_boundary
         super().__init__()
         self._next_sequence = _database_max_sequence(database_path)
 
@@ -801,7 +828,12 @@ class _ControlPlaneLog(SyncObjConsumer):
             kind=kind,
             payload=_load_payload_json(payload_json),
         )
-        _insert_command(self._database_path, command, payload_json)
+        _insert_command(
+            self._database_path,
+            command,
+            payload_json,
+            self._durable_write_boundary,
+        )
         self._next_sequence = next_sequence
         return command.to_dict()
 
@@ -813,6 +845,18 @@ class _StoredCommand:
     payload_json: str
 
 
+@final
+class _DirectDurableWrite:
+    def before_write(self, path: Path, operation: str) -> None:
+        del path, operation
+
+    def before_commit(self, path: Path, operation: str) -> None:
+        del path, operation
+
+
+_DIRECT_DURABLE_WRITE = _DirectDurableWrite()
+
+
 __all__ = [
     "ClusterConfig",
     "CommittedCommand",
@@ -821,6 +865,7 @@ __all__ = [
     "CoordinatorUnavailableError",
     "CorruptCoordinatorStateError",
     "DEFAULT_COMMAND_TIMEOUT_SECONDS",
+    "DurableWriteBoundary",
     "MAX_COMMAND_BYTES",
     "MemberConfig",
     "NotLeaderError",
