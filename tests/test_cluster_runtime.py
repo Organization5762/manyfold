@@ -18,6 +18,15 @@ from manyfold.architecture import (
     TcpAddress,
     TcpTransport,
 )
+from manyfold.architecture.swim import (
+    HmacDatagramTransport,
+    HmacPeerCredentials,
+    HmacTransportConfig,
+    SwimConfig,
+    SwimMembership,
+    SwimMessageTransport,
+    UdpDatagramSocket,
+)
 from manyfold.cluster import (
     DevelopmentCluster,
     LocalDevelopmentTransportSecurityProvider,
@@ -125,6 +134,59 @@ class ClusterRuntimeIntegrationTests(unittest.TestCase):
             }
             self.assertIn(NodePhase.AUTHENTICATING, diagnostic_phases)
             self.assertIn(NodePhase.JOINING, diagnostic_phases)
+        finally:
+            second.stop()
+            first.stop()
+
+    def test_nodes_use_public_swim_membership_and_restart_cleanly(self) -> None:
+        first_port, second_port = _reserve_ports(2)
+        keys = {
+            "node-a": b"a" * 32,
+            "node-b": b"b" * 32,
+        }
+        swim_transport_factory = _swim_transport_factory(keys)
+        first = NodeRuntime(
+            _node_config(
+                "node-a",
+                first_port,
+                (PeerEndpoint("127.0.0.1", second_port),),
+                swim_transport_factory=swim_transport_factory,
+            )
+        )
+        second = NodeRuntime(
+            _node_config(
+                "node-b",
+                second_port,
+                (PeerEndpoint("127.0.0.1", first_port),),
+                swim_transport_factory=swim_transport_factory,
+            )
+        )
+        try:
+            first.start()
+            second.start()
+            first.wait_for_members(2, timeout=3.0)
+            second.wait_for_members(2, timeout=3.0)
+            first_swim = first.swim_membership
+
+            self.assertIsInstance(first_swim, SwimMembership)
+            self.assertIsInstance(second.swim_membership, SwimMembership)
+            self.assertTrue(
+                _wait_until(
+                    lambda: (
+                        first.swim_membership is not None
+                        and first.swim_membership.stats.successful_probes > 0
+                    ),
+                    timeout=3.0,
+                )
+            )
+
+            second.stop()
+            first.stop()
+            first.start()
+            second.start()
+            first.wait_for_members(2, timeout=3.0)
+
+            self.assertIsNot(first.swim_membership, first_swim)
         finally:
             second.stop()
             first.stop()
@@ -296,6 +358,9 @@ def _node_config(
     peers: tuple[PeerEndpoint, ...],
     *,
     development_cluster: DevelopmentCluster | None = None,
+    swim_transport_factory: (
+        Callable[[NodeIdentity, PeerEndpoint], SwimMessageTransport] | None
+    ) = None,
     max_peers: int = 4,
     diagnostic_limit: int = 32,
 ) -> NodeConfig:
@@ -315,6 +380,25 @@ def _node_config(
             max_changes=16,
         ),
         development_cluster=development_cluster,
+        swim=(
+            None
+            if swim_transport_factory is None
+            else SwimConfig(
+                probe_interval_seconds=0.05,
+                ping_timeout_seconds=0.02,
+                indirect_timeout_seconds=0.02,
+                helper_count=1,
+                max_pending_probes=4,
+                max_pending_relays=4,
+                max_seeds=4,
+                max_seen_requests=32,
+                max_dissemination_updates=16,
+                max_piggyback_updates=4,
+                retransmit_limit=2,
+                max_message_bytes=512,
+            )
+        ),
+        swim_transport_factory=swim_transport_factory,
         max_peers=max_peers,
         diagnostic_limit=diagnostic_limit,
         reconcile_interval_seconds=0.05,
@@ -322,6 +406,36 @@ def _node_config(
         peer_absence_seconds=0.2,
         shutdown_timeout_seconds=2.0,
     )
+
+
+def _swim_transport_factory(
+    keys: dict[str, bytes],
+) -> Callable[[NodeIdentity, PeerEndpoint], SwimMessageTransport]:
+    def create(
+        identity: NodeIdentity,
+        endpoint: PeerEndpoint,
+    ) -> SwimMessageTransport:
+        return HmacDatagramTransport(
+            UdpDatagramSocket(endpoint),
+            HmacPeerCredentials(
+                local_identity=identity,
+                advertised_endpoint=endpoint,
+                local_key=keys[identity.node_id],
+                peer_keys={
+                    node_id: key
+                    for node_id, key in keys.items()
+                    if node_id != identity.node_id
+                },
+                max_peers=len(keys),
+            ),
+            config=HmacTransportConfig(
+                max_datagram_bytes=1200,
+                max_inbound_datagrams=16,
+                max_replay_messages=64,
+            ),
+        )
+
+    return create
 
 
 def _reserve_port() -> int:

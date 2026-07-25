@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import ipaddress
 import threading
 import time
 from collections import deque
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from enum import Enum
 from typing import final
 
@@ -22,14 +21,13 @@ from manyfold.architecture.membership import (
     MembershipTable,
     MemberState,
 )
+from manyfold.architecture.swim import SwimMembership
 from manyfold.architecture.transport import (
     LinkHealth,
     LinkState,
     NodeIdentity,
     TcpAddress,
     TcpTransport,
-    TransportConfig,
-    TransportSecurityMode,
 )
 
 from ._node_config import (
@@ -43,6 +41,7 @@ from ._node_config import (
     DEFAULT_STARTUP_PEER_TIMEOUT_SECONDS,
     NodeConfig,
 )
+from ._node_runtime_support import _connector_config, _is_local_candidate
 from .dev_cluster import DevelopmentCluster
 from .security import (
     CredentialExpiredError,
@@ -141,6 +140,7 @@ class NodeRuntime:
         self._process_transport_security: ProcessTransportSecurity | None = None
         self._listener: TcpTransport | None = None
         self._membership: MembershipTable | None = None
+        self._swim: SwimMembership | None = None
         self._peers: dict[PeerEndpoint, _PeerLink] = {}
         self._supervisor: threading.Thread | None = None
 
@@ -170,6 +170,12 @@ class NodeRuntime:
         """Return the concrete membership table owned by this runtime."""
         with self._condition:
             return self._membership
+
+    @property
+    def swim_membership(self) -> SwimMembership | None:
+        """Return the configured public SWIM owner while the node is running."""
+        with self._condition:
+            return self._swim
 
     @property
     def peer_transports(self) -> tuple[TcpTransport, ...]:
@@ -228,6 +234,16 @@ class NodeRuntime:
                     local_incarnation=self.config.local_incarnation,
                     config=self.config.membership,
                 )
+                if self.config.swim_transport_factory is not None:
+                    swim_transport = self.config.swim_transport_factory(
+                        self.config.identity,
+                        local_endpoint,
+                    )
+                    self._swim = SwimMembership(
+                        self._membership,
+                        swim_transport,
+                        config=self.config.swim,
+                    )
                 if self.config.development_cluster is not None:
                     self.config.development_cluster.start()
             except Exception as error:
@@ -276,6 +292,8 @@ class NodeRuntime:
             self._peers.clear()
             membership = self._membership
             self._membership = None
+            swim = self._swim
+            self._swim = None
             listener = self._listener
             self._listener = None
             self._process_transport_security = None
@@ -285,7 +303,15 @@ class NodeRuntime:
                 peer.transport.close()
             except Exception as error:
                 errors.append(f"peer {peer.candidate.endpoint}: {error}")
-        if membership is not None:
+        if swim is not None:
+            try:
+                try:
+                    swim.leave()
+                finally:
+                    swim.close()
+            except Exception as error:
+                errors.append(f"SWIM membership: {error}")
+        elif membership is not None:
             try:
                 if membership.is_participating:
                     membership.leave_local()
@@ -456,8 +482,12 @@ class NodeRuntime:
         membership = self._membership
         if membership is None:
             return
-        changes = membership.expire()
-        self._record_membership_changes(changes)
+        swim = self._swim
+        if swim is None:
+            changes = membership.expire()
+            self._record_membership_changes(changes)
+        else:
+            swim.tick()
         self._settle_phase(
             has_discovery_failures=self._has_discovery_failures,
             candidate_count=len(self._peers),
@@ -589,7 +619,11 @@ class NodeRuntime:
                         peer.candidate.endpoint,
                         0,
                     )
-                    membership.heartbeat(session)
+                    swim = self._swim
+                    if swim is None:
+                        membership.heartbeat(session)
+                    else:
+                        swim.add_peer(session)
                     identity_changed = (
                         peer.remote_identity is not None
                         and peer.remote_identity != health.remote_identity
@@ -658,7 +692,11 @@ class NodeRuntime:
     ) -> None:
         membership = self._membership
         remote_identity = peer.remote_identity
-        if membership is not None and remote_identity is not None:
+        if (
+            membership is not None
+            and self._swim is None
+            and remote_identity is not None
+        ):
             membership.mark_suspect(remote_identity.node_id, incarnation=0)
         peer.is_unavailable = True
         self._record_locked(
@@ -763,6 +801,8 @@ class NodeRuntime:
         self._peers.clear()
         membership = self._membership
         self._membership = None
+        swim = self._swim
+        self._swim = None
         listener = self._listener
         self._listener = None
         self._process_transport_security = None
@@ -775,7 +815,12 @@ class NodeRuntime:
                 cleanup_errors.append(
                     f"peer {peer.candidate.endpoint}: {cleanup_error}"
                 )
-        if membership is not None:
+        if swim is not None:
+            try:
+                swim.close()
+            except Exception as cleanup_error:
+                cleanup_errors.append(f"SWIM membership: {cleanup_error}")
+        elif membership is not None:
             try:
                 membership.close()
             except Exception as cleanup_error:
@@ -884,46 +929,6 @@ class NodeRuntime:
         self._condition.notify_all()
 
 
-def _connector_config(
-    config: TransportConfig,
-    candidate: PeerCandidate,
-) -> TransportConfig:
-    security = config.security
-    if (
-        security.mode is TransportSecurityMode.MUTUAL_TLS
-        and candidate.server_name is not None
-        and security.server_hostname != candidate.server_name
-    ):
-        security = replace(security, server_hostname=candidate.server_name)
-        return replace(config, security=security)
-    return config
-
-
-def _is_local_candidate(
-    candidate: PeerEndpoint,
-    local: PeerEndpoint,
-) -> bool:
-    if candidate.port != local.port:
-        return False
-    if candidate.host.casefold() == local.host.casefold():
-        return True
-    return _is_loopback(candidate.host) and _is_loopback(local.host)
-
-
-def _is_loopback(host: str) -> bool:
-    if host.casefold() == "localhost":
-        return True
-    try:
-        return ipaddress.ip_address(host.split("%", 1)[0]).is_loopback
-    except ValueError:
-        return False
-
-
-def _require_nonnegative_int(value: int, field: str) -> None:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise ValueError(f"{field} must be a non-negative integer")
-
-
 def _require_nonnegative_number(value: float, field: str) -> None:
     if isinstance(value, bool) or not isinstance(value, int | float) or value < 0:
         raise ValueError(f"{field} must be a non-negative number")
@@ -937,11 +942,6 @@ def _require_optional_timeout(value: float | None) -> None:
 def _require_positive_int(value: int, field: str) -> None:
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         raise ValueError(f"{field} must be a positive integer")
-
-
-def _require_positive_number(value: float, field: str) -> None:
-    if isinstance(value, bool) or not isinstance(value, int | float) or value <= 0:
-        raise ValueError(f"{field} must be a positive number")
 
 
 @final

@@ -14,6 +14,7 @@ from manyfold.architecture import (
     TransportConfig,
     TransportSecurity,
 )
+from manyfold.architecture.swim import SwimConfig
 from manyfold.cluster import (
     CredentialExpiredError,
     NodeConfig,
@@ -131,6 +132,23 @@ class ClusterSecurityTests(unittest.TestCase):
         self.assertNotIn("listener_transport", field_names)
         self.assertNotIn("connector_transport", field_names)
         self.assertIn("transport_security_provider", field_names)
+
+    def test_swim_configuration_requires_restartable_transport_factory(self) -> None:
+        with self.assertRaisesRegex(
+            ValueError,
+            "swim and swim_transport_factory must be configured together",
+        ):
+            NodeConfig(
+                identity=NodeIdentity("secure-cluster", "node-a"),
+                listen_address=TcpAddress("127.0.0.1", _reserve_port()),
+                discovery=CompositeDiscovery(()),
+                transport_security_provider=_SignerClient(
+                    _mutual_tls_security(time.time() + 300)
+                ),
+                membership=MembershipConfig(max_members=5),
+                swim=SwimConfig(),
+                max_peers=4,
+            )
 
     def test_provider_errors_remain_public_for_signer_client_integrations(
         self,

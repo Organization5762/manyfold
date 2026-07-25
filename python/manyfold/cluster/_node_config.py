@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import final
 
-from manyfold.architecture.discovery import CompositeDiscovery
+from manyfold.architecture.discovery import CompositeDiscovery, PeerEndpoint
 from manyfold.architecture.membership import MembershipConfig
+from manyfold.architecture.swim import SwimConfig, SwimMessageTransport
 from manyfold.architecture.transport import NodeIdentity, TcpAddress
 
 from .dev_cluster import DevelopmentCluster
@@ -33,6 +35,10 @@ class NodeConfig:
     transport_security_provider: TransportSecurityProvider
     membership: MembershipConfig = MembershipConfig()
     development_cluster: DevelopmentCluster | None = None
+    swim: SwimConfig | None = None
+    swim_transport_factory: (
+        Callable[[NodeIdentity, PeerEndpoint], SwimMessageTransport] | None
+    ) = None
     local_incarnation: int = 0
     max_peers: int = DEFAULT_MAX_PEERS
     diagnostic_limit: int = DEFAULT_DIAGNOSTIC_LIMIT
@@ -66,6 +72,16 @@ class NodeConfig:
             DevelopmentCluster,
         ):
             raise ValueError("development_cluster must be a DevelopmentCluster")
+        if self.swim is not None and not isinstance(self.swim, SwimConfig):
+            raise ValueError("swim must be a SwimConfig")
+        if self.swim_transport_factory is not None and not callable(
+            self.swim_transport_factory
+        ):
+            raise ValueError("swim_transport_factory must be callable")
+        if (self.swim is None) != (self.swim_transport_factory is None):
+            raise ValueError(
+                "swim and swim_transport_factory must be configured together"
+            )
         _require_nonnegative_int(self.local_incarnation, "local_incarnation")
         _require_positive_int(self.max_peers, "max_peers")
         _require_positive_int(self.diagnostic_limit, "diagnostic_limit")

@@ -18,10 +18,12 @@ The runtime coordinates these concrete objects rather than replacing them:
 - `TcpTransport` owns the listener and bounded reconnecting peer links created
   from that process configuration.
 - `MembershipTable` owns bounded authenticated member state.
+- `SwimMembership` optionally owns failure detection and dissemination over a
+  caller-supplied public `SwimMessageTransport`.
 - `DevelopmentCluster` remains the optional fixed three-process local control
   plane.
 
-All five are available directly on the running `NodeRuntime`.
+The running `NodeRuntime` exposes each configured concrete owner directly.
 
 ## Start a local node
 
@@ -123,7 +125,7 @@ ready
 
 An empty `CompositeDiscovery(())` reaches `ready` as a local-only node.
 `start()` returns the same running object on duplicate calls. `stop()` returns
-`True` only for the first stop, releases resources in reverse ownership order,
+`True` only for the first stop, releases resources in a deterministic order,
 and leaves the runtime restartable.
 
 ## Secure signer integration
@@ -154,6 +156,27 @@ Stopping a node only releases that process's transports and drops its
 short-lived response. A second local process may independently acquire another
 response through the same signer client or service.
 
+## Optional SWIM membership
+
+The canonical public SWIM implementation is available when a deployment can
+create an authenticated `SwimMessageTransport`. Configure `NodeConfig.swim`
+and `NodeConfig.swim_transport_factory` together. The factory receives the
+local identity and the concrete bound endpoint and must return a new transport
+on every call so the same `NodeRuntime` can restart cleanly.
+
+When configured, `NodeRuntime` constructs the public `SwimMembership`, passes
+each TCP-authenticated peer session to `add_peer()`, calls `tick()` from the
+bounded reconciliation supervisor, and lets SWIM own the membership table and
+its transport lifecycle. `NodeRuntime.swim_membership` exposes that concrete
+owner for stats and operational inspection.
+
+The merged architecture package includes the production
+`HmacDatagramTransport`. Deployments may construct it from credentials supplied
+by their approved secret system. Bootstrap neither copies nor persists those
+keys; the supplied factory owns their lifecycle. A signer-backed
+established-session transport must wait for the signer package's concrete
+provider API; bootstrap does not guess that API or add a second signer store.
+
 ## Phases and diagnostics
 
 `NodePhase` makes initialization and ongoing health explicit:
@@ -178,15 +201,17 @@ candidates, signer acquisition and minimum lifetime, reconcile timing, peer
 absence, and shutdown waiting.
 
 Startup acquires signer security before constructing owned resources. Signer,
-listener, membership, or development-cluster failure records its actionable
-phase, closes every resource already acquired, and returns the runtime to
-`stopped`. The single supervisor owns reconciliation; transport retry delays
-are capped by each connector's existing `ReconnectPolicy`.
+listener, membership, SWIM transport factory, or development-cluster failure
+records its actionable phase, closes every resource already acquired, and
+returns the runtime to `stopped`. The single supervisor owns reconciliation;
+transport retry delays are capped by each connector's existing
+`ReconnectPolicy`.
 
 ## Current boundary
 
-This API bootstraps and monitors authenticated links; it does not turn the
-process-local PubSub implementation into a replicated mesh.
+This API bootstraps and monitors authenticated links. Although the architecture
+layer now provides a transport mesh, `NodeRuntime` does not instantiate it and
+does not claim replicated PubSub.
 
 - Mutual TLS authenticates production peer identity. The explicit loopback
   development provider validates claimed cluster and node fields but does not
@@ -194,9 +219,13 @@ process-local PubSub implementation into a replicated mesh.
 - The bootstrap defines the signer-client contract but implements no signer
   daemon, key database, enrollment store, unlock flow, or duplicated credential
   persistence.
-- Credentials are checked during startup. Automatic live certificate rotation
-  is not implemented; deployments must issue credentials sized for the process
-  lifetime or restart cleanly to reacquire them.
+- Credentials are checked during startup. The canonical transport can resolve
+  a provider-backed TLS context on reconnect, but bootstrap does not invent
+  signer renewal policy; deployments must use the signer provider's concrete
+  rotation contract when it is available or restart cleanly to reacquire.
+- SWIM is active only when both its public config and a restart-safe
+  authenticated transport factory are supplied. The CLI does not manufacture
+  HMAC or signer credentials.
 - The development cluster is a fixed, local three-process Raft control plane.
   Bootstrap does not add dynamic Raft membership or join one node's local
   harness to another node's harness.
