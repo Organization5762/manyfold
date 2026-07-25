@@ -1,11 +1,11 @@
 # Persistent coordinator development cluster
 
-ManyFold's cluster coordinator is a persistent, three-member Raft control
+ManyFold's cluster coordinator is a persistent, static N-member Raft control
 plane. It uses [PySyncObj 0.3.15](https://pypi.org/project/pysyncobj/) for the
 Raft protocol, election, replication, quorum, journal, and snapshot behavior.
-ManyFold adds stable process configuration, identity-bound state directories, a
-durable SQLite applied log, a bounded HTTP API, leader discovery, and the local
-process harness.
+ManyFold adds explicit address-bound identities, composable network protocols,
+identity-bound state directories, a durable SQLite applied log, a bounded HTTP
+API, leader discovery, fault injection, and the local process harness.
 
 This coordinator is separate from `manyfold.components.Consensus`. That graph
 component remains useful as Raft-shaped example wiring, but it is not a
@@ -17,11 +17,12 @@ From the repository root:
 
 ```sh
 uv run manyfold-cluster \
-  --root .manyfold-dev-cluster
+  --root .manyfold-dev-cluster \
+  --nodes 5
 ```
 
-The command starts three child processes, waits for a quorum-backed leader, and
-prints the generated identities and ports:
+The harness accepts 1–9 local members. The command starts five child processes,
+waits for a quorum-backed leader, and prints the generated identities and ports:
 
 The development harness only binds loopback hosts. Its HTTP control API is not
 authenticated and cannot be exposed on a LAN or tailnet.
@@ -35,17 +36,24 @@ authenticated and cannot be exposed on a LAN or tailnet.
       "host": "127.0.0.1",
       "node_id": "node-1",
       "pid": 41001,
+      "raft_identity": "127.0.0.1:53100",
       "raft_port": 53100,
       "state_directory": "/workspace/.manyfold-dev-cluster/nodes/node-1"
     }
   ],
+  "network": {
+    "layers": [],
+    "raft_transport": "tcp"
+  },
+  "node_count": 5,
   "root": "/workspace/.manyfold-dev-cluster"
 }
 ```
 
-The other two member records have the same shape with distinct process IDs,
-state directories, Raft ports, and API ports. Press Ctrl-C for an orderly
-shutdown. Run the same command again to reuse the identities and durable state.
+The other member records have the same shape with distinct process IDs, state
+directories, address-bound Raft identities, Raft ports, and API ports. Press
+Ctrl-C for an orderly shutdown. Run the same command with the same node count
+and network options to reuse the identities and durable state.
 
 Each node directory contains:
 
@@ -60,6 +68,39 @@ nodes/node-1/
 
 `raft.snapshot` appears after log compaction. The identity file prevents a
 state directory from being opened as a different member or cluster.
+
+## Network protocols
+
+`NetworkProtocolConfig` independently records the base Raft transport and its
+ordered layers. The built-in stack uses PySyncObj TCP. Embedders can inject a
+different `RaftNetworkProtocol` into `PersistentRaftCoordinator`; the adapter
+provides the node identity class and transport factory without changing
+consensus, storage, or the HTTP control plane.
+
+The development fault stack composes marker-controlled disconnects around TCP:
+
+```sh
+uv run manyfold-cluster \
+  --root .manyfold-fault-cluster \
+  --nodes 5 \
+  --disconnect-faults
+```
+
+Sample configuration:
+
+```json
+{
+  "layers": [
+    "disconnect_faults"
+  ],
+  "raft_transport": "tcp"
+}
+```
+
+`DevelopmentCluster.disconnect_node()` closes and removes all Raft peer
+connections while leaving the coordinator process and HTTP status API alive.
+`reconnect_node()` removes the marker and re-adds the same peers. This tests a
+real transport partition without privileged firewall rules or a process kill.
 
 ## Coordinator API
 
@@ -113,7 +154,7 @@ configuration, ownership, and topology decisions. Hot PubSub frames, sensor
 samples, payload envelopes, and debug streams must never be submitted to the
 coordinator. Those stay on ManyFold's data plane.
 
-The development node uses:
+Each development node uses:
 
 - one PySyncObj tick thread;
 - a 128-command Raft submission queue;
@@ -128,20 +169,22 @@ queues. Raft snapshots compact its protocol journal. The SQLite control log is
 intentionally retained in full for audit and recovery in this development
 cluster.
 
-## Recovery proof
+## Recovery and fault proofs
 
-Run the focused process test:
+Run the focused process and fault tests:
 
 ```sh
-uv run python -m unittest tests.test_cluster_processes
+uv run python -m unittest \
+  tests.test_cluster_processes \
+  tests.test_cluster_faults
 ```
 
 Expected output:
 
 ```text
-.
+...
 ----------------------------------------------------------------------
-Ran 1 test in ...s
+Ran 3 tests in ...s
 
 OK
 ```
@@ -152,20 +195,29 @@ elect a new leader, commits another command, restarts the killed member against
 its original state directory, and verifies that all three durable logs contain
 the same ordered commands.
 
+The fault suite also starts five real processes, disconnects two followers
+without changing their PIDs, commits through the remaining three-node quorum,
+reconnects the followers, and verifies catch-up. Separate disk faults overwrite
+the SQLite control log and Raft journal headers; restart must fail fast with the
+exact corrupt path rather than silently resetting state.
+
 ## Production limitations
 
 This is a real persistent Raft cluster and a development harness, not yet a
 production deployment system:
 
-- membership is fixed at three nodes and a Raft identity is bound to its
-  configured address;
-- the harness supports one IPv4/DNS host and allocates ephemeral local ports;
+- membership is static after bootstrap, and each Raft identity remains bound to
+  its configured address;
+- the bounded harness supports 1–9 processes on one IPv4/DNS host and allocates
+  ephemeral local ports;
+- TCP is the only built-in Raft base transport and HTTP is the only built-in
+  control API, although the Raft protocol adapter is injectable;
 - the HTTP and Raft transports have no authentication, authorization, or TLS;
 - replacing a lost state directory, dynamic membership, and cross-host
   bootstrap are not implemented;
-- crash recovery is process-kill tested, but filesystem corruption, sudden
-  power loss, disk-full behavior, and forced snapshot-install recovery still
-  need fault-injection coverage;
+- crash recovery and targeted control-log/journal corruption are tested, but
+  broader filesystem corruption, sudden power loss, disk-full behavior, repair,
+  and forced snapshot-install recovery still need fault-injection coverage;
 - the single-request HTTP surface favors bounded behavior and clear semantics
   over control-plane throughput; and
 - operational metrics, alerts, backup, restore, and rolling-upgrade procedures

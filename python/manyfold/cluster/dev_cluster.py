@@ -1,4 +1,4 @@
-"""Run a persistent three-process ManyFold coordinator cluster on one host."""
+"""Run a persistent N-process ManyFold coordinator cluster on one host."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import argparse
 import http.client
 import json
 import logging
+import os
 import signal
 import socket
 import subprocess
@@ -18,10 +19,23 @@ from pathlib import Path
 from typing import IO, final
 
 from .consensus import ClusterConfig, MemberConfig
+from .network import (
+    DISCONNECT_FAULT_LAYER,
+    DISCONNECT_MARKER_FILENAME,
+    NetworkProtocolConfig,
+)
 
 DEFAULT_HOST = "127.0.0.1"
+DEFAULT_NODE_COUNT = 3
+MAX_DEVELOPMENT_NODES = 9
 DEFAULT_START_TIMEOUT_SECONDS = 15.0
 DEFAULT_OPERATION_TIMEOUT_SECONDS = 10.0
+CONTROL_LOG_FAULT_TARGET = "control_log"
+RAFT_JOURNAL_FAULT_TARGET = "raft_journal"
+_FAULT_TARGET_FILENAMES = {
+    CONTROL_LOG_FAULT_TARGET: "committed.sqlite3",
+    RAFT_JOURNAL_FAULT_TARGET: "raft.journal",
+}
 _LOG = logging.getLogger(__name__)
 
 
@@ -37,7 +51,7 @@ class HttpResponse:
 
 @final
 class DevelopmentCluster:
-    """Own three coordinator subprocesses with isolated durable state."""
+    """Own a bounded set of coordinator subprocesses with durable state."""
 
     def __init__(self, root: str | Path, config: ClusterConfig) -> None:
         self.root = Path(root).resolve()
@@ -51,9 +65,22 @@ class DevelopmentCluster:
         root: str | Path,
         *,
         host: str = DEFAULT_HOST,
+        node_count: int = DEFAULT_NODE_COUNT,
+        network: NetworkProtocolConfig | None = None,
     ) -> DevelopmentCluster:
-        """Create or reopen a durable one-host three-member configuration."""
+        """Create or reopen a bounded N-member one-host configuration."""
         _require_loopback_host(host)
+        if (
+            isinstance(node_count, bool)
+            or not isinstance(node_count, int)
+            or not 1 <= node_count <= MAX_DEVELOPMENT_NODES
+        ):
+            raise ValueError(
+                f"node_count must be an integer from 1 through {MAX_DEVELOPMENT_NODES}"
+            )
+        requested_network = network if network is not None else NetworkProtocolConfig()
+        if not isinstance(requested_network, NetworkProtocolConfig):
+            raise ValueError("network must be a NetworkProtocolConfig")
         cluster_root = Path(root).resolve()
         cluster_root.mkdir(parents=True, exist_ok=True)
         config_path = cluster_root / "cluster.json"
@@ -65,8 +92,18 @@ class DevelopmentCluster:
                     f"existing cluster uses hosts {sorted(configured_hosts)!r}, "
                     f"not requested host {host!r}"
                 )
+            if len(config.members) != node_count:
+                raise ValueError(
+                    f"existing cluster has {len(config.members)} members, "
+                    f"not requested node_count {node_count}"
+                )
+            if config.network != requested_network:
+                raise ValueError(
+                    f"existing cluster uses network {config.network!r}, "
+                    f"not requested network {requested_network!r}"
+                )
         else:
-            ports = _reserve_ports(6, host)
+            ports = _reserve_ports(node_count * 2, host)
             config = ClusterConfig(
                 tuple(
                     MemberConfig(
@@ -75,8 +112,9 @@ class DevelopmentCluster:
                         raft_port=ports[index * 2],
                         api_port=ports[index * 2 + 1],
                     )
-                    for index in range(3)
-                )
+                    for index in range(node_count)
+                ),
+                requested_network,
             )
             config.save(config_path)
         return cls(cluster_root, config)
@@ -173,6 +211,58 @@ class DevelopmentCluster:
         node_process.process.wait(timeout=5.0)
         node_process.close_log()
         del self._processes[node_id]
+
+    def wait_for_node_exit(
+        self,
+        node_id: str,
+        *,
+        timeout_seconds: float = 5.0,
+    ) -> int:
+        """Wait for one node process to exit and release its log handle."""
+        node_process = self._processes.get(node_id)
+        if node_process is None:
+            raise RuntimeError(f"coordinator {node_id!r} has not been started")
+        return_code = node_process.process.wait(timeout=timeout_seconds)
+        node_process.close_log()
+        del self._processes[node_id]
+        return return_code
+
+    def disconnect_node(self, node_id: str) -> None:
+        """Disconnect a live node's Raft transport without stopping its process."""
+        self._require_disconnect_faults()
+        self._require_running_process(node_id)
+        marker_path = self.state_directory(node_id) / DISCONNECT_MARKER_FILENAME
+        _write_bytes_durable(marker_path, b"disconnect\n")
+
+    def reconnect_node(self, node_id: str) -> None:
+        """Remove a node's Raft disconnect fault marker."""
+        self._require_disconnect_faults()
+        self.config.member(node_id)
+        marker_path = self.state_directory(node_id) / DISCONNECT_MARKER_FILENAME
+        marker_path.unlink(missing_ok=True)
+
+    def corrupt_state(self, node_id: str, target: str) -> Path:
+        """Corrupt one stopped node's selected durable state file."""
+        self.config.member(node_id)
+        if self.process_id(node_id) is not None:
+            raise RuntimeError(
+                f"coordinator {node_id!r} must be stopped before disk corruption"
+            )
+        filename = _FAULT_TARGET_FILENAMES.get(target)
+        if filename is None:
+            raise ValueError(
+                f"unknown corruption target {target!r}; expected one of "
+                f"{sorted(_FAULT_TARGET_FILENAMES)!r}"
+            )
+        path = self.state_directory(node_id) / filename
+        if not path.is_file():
+            raise RuntimeError(f"cannot corrupt missing coordinator state file {path}")
+        with path.open("r+b") as stream:
+            stream.seek(0)
+            stream.write(b"MANYFOLD_CORRUPT")
+            stream.flush()
+            os.fsync(stream.fileno())
+        return path
 
     def process_id(self, node_id: str) -> int | None:
         """Return a running member PID, or ``None``."""
@@ -397,6 +487,12 @@ class DevelopmentCluster:
             raise RuntimeError(f"coordinator {node_id!r} is not running")
         return node_process
 
+    def _require_disconnect_faults(self) -> None:
+        if not self.config.network.supports_disconnect_faults:
+            raise RuntimeError(
+                "cluster network does not include the disconnect_faults layer"
+            )
+
 
 def _reserve_ports(count: int, host: str) -> tuple[int, ...]:
     reservations: list[socket.socket] = []
@@ -410,6 +506,14 @@ def _reserve_ports(count: int, host: str) -> tuple[int, ...]:
     finally:
         for reservation in reservations:
             reservation.close()
+
+
+def _write_bytes_durable(path: Path, value: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("wb") as stream:
+        stream.write(value)
+        stream.flush()
+        os.fsync(stream.fileno())
 
 
 def _require_loopback_host(host: str) -> None:
@@ -433,6 +537,17 @@ def _parse_args(arguments: tuple[str, ...] | None = None) -> argparse.Namespace:
         default=DEFAULT_HOST,
         help=f"one-host bind address (default: {DEFAULT_HOST})",
     )
+    parser.add_argument(
+        "--nodes",
+        type=int,
+        default=DEFAULT_NODE_COUNT,
+        help=f"member count, 1-{MAX_DEVELOPMENT_NODES} (default: 3)",
+    )
+    parser.add_argument(
+        "--disconnect-faults",
+        action="store_true",
+        help="compose marker-controlled disconnects around TCP",
+    )
     return parser.parse_args(arguments)
 
 
@@ -442,7 +557,13 @@ def _main(arguments: tuple[str, ...] | None = None) -> None:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
-    cluster = DevelopmentCluster.create(args.root, host=args.host)
+    layers = (DISCONNECT_FAULT_LAYER,) if args.disconnect_faults else ()
+    cluster = DevelopmentCluster.create(
+        args.root,
+        host=args.host,
+        node_count=args.nodes,
+        network=NetworkProtocolConfig(layers=layers),
+    )
     stop_event = threading.Event()
     previous_handlers = {
         signal_number: signal.getsignal(signal_number)
@@ -459,6 +580,8 @@ def _main(arguments: tuple[str, ...] | None = None) -> None:
         leader = cluster.wait_for_leader()
         summary = {
             "leader": leader,
+            "network": cluster.config.network.to_dict(),
+            "node_count": len(cluster.members),
             "root": str(cluster.root),
             "members": [
                 {

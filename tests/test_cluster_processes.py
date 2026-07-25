@@ -115,6 +115,10 @@ class ClusterProcessIntegrationTests(unittest.TestCase):
                     )
                     status = cluster.status(node_id)
                     self.assertEqual(status["node_id"], node_id)
+                    self.assertEqual(
+                        status["raft_identity"],
+                        cluster.config.member(node_id).raft_address,
+                    )
                     self.assertGreaterEqual(status["control_log_sequence"], 2)
 
                 restarted_state = cluster.state_directory(first_leader)

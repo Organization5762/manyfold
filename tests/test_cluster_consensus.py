@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 import tempfile
 import unittest
@@ -11,6 +12,10 @@ from manyfold.cluster import (
     ControlCommand,
     DevelopmentCluster,
     MemberConfig,
+)
+from manyfold.cluster.network import (
+    DISCONNECT_FAULT_LAYER,
+    NetworkProtocolConfig,
 )
 
 
@@ -48,8 +53,48 @@ class ClusterConfigTests(unittest.TestCase):
         members = list(_cluster_config().members)
         members[2] = MemberConfig("node-3", "127.0.0.1", 21004, 21006)
 
-        with self.assertRaisesRegex(ValueError, "ports must be distinct"):
+        with self.assertRaisesRegex(ValueError, "addresses must be distinct"):
             ClusterConfig(tuple(members))
+
+    def test_cluster_config_supports_n_members_and_composed_network(self) -> None:
+        members = tuple(
+            MemberConfig(
+                f"node-{index}",
+                "127.0.0.1",
+                22000 + index * 2,
+                22001 + index * 2,
+            )
+            for index in range(1, 6)
+        )
+        config = ClusterConfig(
+            members,
+            NetworkProtocolConfig(layers=(DISCONNECT_FAULT_LAYER,)),
+        )
+
+        self.assertEqual(len(config.members), 5)
+        self.assertTrue(config.network.supports_disconnect_faults)
+        self.assertEqual(
+            {member.raft_identity for member in config.members},
+            {member.raft_address for member in config.members},
+        )
+        self.assertEqual(
+            NetworkProtocolConfig.from_json(config.network.to_dict()),
+            config.network,
+        )
+
+    def test_cluster_config_rejects_identity_not_bound_to_address(self) -> None:
+        value = _cluster_config().to_dict()
+        members = value["members"]
+        assert isinstance(members, list)
+        assert isinstance(members[0], dict)
+        members[0]["raft_identity"] = "127.0.0.1:1"
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "cluster.json"
+            path.write_text(json.dumps(value), encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "address-bound identity"):
+                ClusterConfig.load(path)
 
 
 class ControlCommandTests(unittest.TestCase):
