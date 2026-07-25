@@ -172,6 +172,8 @@ concepts from Diego Ongaro and John Ousterhout's
 - [Using Manyfold](docs/using_manyfold.md): routes, graphs, observation, flow components, and examples.
 - [Performance](docs/performance.md): how to represent performance concerns as graph concerns.
 - [Node bootstrap](docs/node_bootstrap.md): typed local start, peer reconciliation, phases, diagnostics, and current distributed boundaries.
+- [Secure node enrollment](docs/secure_node_enrollment.md): closed-by-default
+  node identity, mTLS trust bootstrap, rotation, and revocation.
 - [Distributed systems catalog](docs/distributed_systems_lego_catalog.md): higher-level component ideas.
 - [v1.0.0 Vision](docs/v1_0_0_vision.md): a far-off but reachable target for distributed graph computing and primitive building.
 - [Wiregraph RFC](docs/rfc/wiregraph_rfc_rev2.md): the larger design target.

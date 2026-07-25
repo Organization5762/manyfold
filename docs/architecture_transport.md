@@ -115,6 +115,7 @@ delivery, and RPC links are separate when a process uses more than one:
 
 | Layer | Production responsibility |
 | --- | --- |
+| [`secure_node_enrollment`](secure_node_enrollment.md) | Bootstrap a closed cluster, pin its CA, enroll durable node identities, and keep machine keys behind a local signer that supplies short-lived process credentials. |
 | [`transport_pki`](transport_pki.md) | Load verified client/server contexts, enforce key permissions and optional CRLs, and rotate contexts with last-known-good fallback. |
 | [`transport_delivery`](transport_delivery.md) | Persist bounded outbox/inbox state, retry stable message IDs, suppress duplicates, and exchange ACK/NACK/confirmation records across crashes and reconnects. |
 | [`transport_mesh`](transport_mesh.md) | Own a bounded peer set, apply typed discovery snapshots, propagate subscriptions, route PubSub publications, suppress loops, and resynchronize reconnecting peers. |
@@ -126,9 +127,9 @@ that a local socket write proves remote application handling; use
 `DurableDelivery` when application acknowledgement and crash replay are
 required.
 
-Deployment remains responsible for certificate issuance and secure delivery,
-revocation-list publication, service/method authorization, domain payload
-schemas and versions, idempotency of mutating RPC handlers, metrics/alert
-export, and environment-specific capacity, latency, and fault-injection gates.
-Those policies depend on the deployment trust model and workload and therefore
-remain explicit integration inputs rather than transport defaults.
+Secure node enrollment supplies the default local-network certificate authority,
+issuance, and machine-key ownership boundary. Deployment remains responsible
+for enrollment-token delivery, revocation-list publication, service/method
+authorization, domain payload schemas and versions, idempotency of mutating RPC
+handlers, metrics/alert export, and environment-specific capacity, latency, and
+fault-injection gates.

@@ -19,6 +19,10 @@ authentication mechanism. The membership table rejects sessions from another
 cluster and sessions claiming the local node ID. The included HMAC datagram
 transport constructs this value only after validating a configured peer key.
 
+See [Secure node enrollment](secure_node_enrollment.md) for the closed-by-default
+CA/token bootstrap that authenticates a discovered candidate through
+`TcpTransport` before this value may be constructed.
+
 ## Discovery
 
 The discovery API lives in `manyfold.architecture.discovery`; its primary
