@@ -47,9 +47,6 @@ _NODE_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 _COMMAND_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:/-]*\Z")
 _RAFT_JOURNAL_HEADER_BYTES = 40
 _RAFT_JOURNAL_MAGIC = b"PYSYNCOBJ"
-_CONTROL_LOG_WRITE = "control_log_append"
-
-
 @final
 @dataclass(frozen=True)
 class MemberConfig:
@@ -318,10 +315,10 @@ class CorruptCoordinatorStateError(RuntimeError):
 class DurableWriteBoundary(Protocol):
     """Observe durable transaction stages for controlled fault injection."""
 
-    def before_write(self, path: Path, operation: str) -> None:
+    def before_write(self, path: Path) -> None:
         """Run immediately before a durable write starts."""
 
-    def before_commit(self, path: Path, operation: str) -> None:
+    def before_commit(self, path: Path) -> None:
         """Run after mutation but before the durable transaction commits."""
 
 
@@ -700,7 +697,7 @@ def _insert_command(
     boundary: DurableWriteBoundary,
 ) -> None:
     with _connect_database(path) as connection:
-        boundary.before_write(path, _CONTROL_LOG_WRITE)
+        boundary.before_write(path)
         connection.execute(
             """
             INSERT INTO committed_commands (
@@ -717,7 +714,7 @@ def _insert_command(
                 payload_json,
             ),
         )
-        boundary.before_commit(path, _CONTROL_LOG_WRITE)
+        boundary.before_commit(path)
 
 
 def _read_command_by_id(path: Path, command_id: str) -> _StoredCommand | None:
@@ -801,6 +798,8 @@ class _ControlPlaneLog(SyncObjConsumer):
         database_path: Path,
         durable_write_boundary: DurableWriteBoundary,
     ) -> None:
+        # SyncObjConsumer excludes fields present before its initializer from
+        # snapshots. Runtime paths and injected dependencies must stay here.
         self._database_path = database_path
         self._durable_write_boundary = durable_write_boundary
         super().__init__()
@@ -847,11 +846,11 @@ class _StoredCommand:
 
 @final
 class _DirectDurableWrite:
-    def before_write(self, path: Path, operation: str) -> None:
-        del path, operation
+    def before_write(self, path: Path) -> None:
+        del path
 
-    def before_commit(self, path: Path, operation: str) -> None:
-        del path, operation
+    def before_commit(self, path: Path) -> None:
+        del path
 
 
 _DIRECT_DURABLE_WRITE = _DirectDurableWrite()
