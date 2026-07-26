@@ -2,13 +2,17 @@ from __future__ import annotations
 
 import os
 import shutil
+import socket
 import ssl
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
+from time import monotonic
 
 from manyfold.architecture.transport import (
     FrameKind,
+    LinkState,
     NodeIdentity,
     TcpTransport,
     TransportConfig,
@@ -22,7 +26,11 @@ from manyfold.architecture.transport_pki import (
     TlsSecurityReloader,
 )
 
-from tests.test_architecture_transport import _run_openssl, _signed_certificate
+from tests.test_architecture_transport import (
+    _run_openssl,
+    _signed_certificate,
+    _wait_for,
+)
 
 
 @unittest.skipUnless(
@@ -96,6 +104,39 @@ class ArchitectureTransportPkiTests(unittest.TestCase):
         self.assertTrue(client.flush(timeout=1.0))
         self.assertEqual(replacement.receive(timeout=1.0).payload, b"rotated")
         self.assertGreaterEqual(client.health().connections_established, 2)
+
+    def test_close_interrupts_pending_mutual_tls_handshake(self) -> None:
+        server_reloader = TlsSecurityReloader.for_server(self._server_files)
+        server = self._track(
+            TcpTransport.listen(
+                NodeIdentity("cluster", "server", "server-stalled-handshake"),
+                config=replace(
+                    _transport_config(server_reloader.security),
+                    handshake_timeout=30.0,
+                ),
+                expected_peer_node_id="client",
+            )
+        )
+        stalled_peer = socket.create_connection(
+            (server.address.host, server.address.port),
+            timeout=1.0,
+        )
+        try:
+            self.assertTrue(
+                _wait_for(
+                    lambda: server.health().state is LinkState.HANDSHAKING,
+                    timeout=1.0,
+                )
+            )
+
+            started_at = monotonic()
+            server.close()
+
+            self.assertLess(monotonic() - started_at, 1.0)
+            self.assertFalse(server._supervisor.is_alive())
+            self.assertFalse(server._writer.is_alive())
+        finally:
+            stalled_peer.close()
 
     def test_reloader_replaces_changed_context_and_retains_good_on_error(
         self,
