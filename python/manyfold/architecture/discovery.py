@@ -254,6 +254,7 @@ class DnsDiscovery:
         *,
         resolver: AddressResolver | None = None,
         max_candidates: int = DEFAULT_DISCOVERY_LIMIT,
+        max_failures: int = DEFAULT_DISCOVERY_LIMIT,
         max_seeds: int = DEFAULT_DISCOVERY_SOURCE_LIMIT,
     ) -> None:
         self._seeds = _bounded_sequence(
@@ -266,6 +267,7 @@ class DnsDiscovery:
             max_candidates,
             "max_candidates",
         )
+        self._max_failures = _require_positive_int(max_failures, "max_failures")
 
     @property
     def source_name(self) -> str:
@@ -287,6 +289,8 @@ class DnsDiscovery:
                         message=f"{type(error).__name__}: {error}",
                     )
                 )
+                if len(failures) == self._max_failures:
+                    return DiscoveryReport(tuple(candidates), tuple(failures))
                 continue
             for address in addresses:
                 try:
@@ -301,6 +305,8 @@ class DnsDiscovery:
                             ),
                         )
                     )
+                    if len(failures) == self._max_failures:
+                        return DiscoveryReport(tuple(candidates), tuple(failures))
                     continue
                 if endpoint in seen:
                     continue
@@ -382,6 +388,7 @@ class MdnsDiscovery:
         resolver: DnsSdResolver | None = None,
         timeout_seconds: float = DEFAULT_MDNS_TIMEOUT_SECONDS,
         max_candidates: int = DEFAULT_DISCOVERY_LIMIT,
+        max_failures: int = DEFAULT_DISCOVERY_LIMIT,
     ) -> None:
         self._service_type = _canonical_dns_name(service_type)
         self._resolver = resolver or SystemMdnsResolver()
@@ -393,6 +400,7 @@ class MdnsDiscovery:
             max_candidates,
             "max_candidates",
         )
+        self._max_failures = _require_positive_int(max_failures, "max_failures")
 
     @property
     def source_name(self) -> str:
@@ -435,6 +443,8 @@ class MdnsDiscovery:
                             ),
                         )
                     )
+                    if len(failures) == self._max_failures:
+                        return DiscoveryReport(tuple(candidates), tuple(failures))
                     continue
                 if endpoint in seen:
                     continue
