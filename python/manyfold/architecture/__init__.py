@@ -126,18 +126,28 @@ from .transport import (
 )
 from .transport_delivery import (
     DEFAULT_DELIVERY_ITEM_LIMIT as DEFAULT_DELIVERY_ITEM_LIMIT,
+    DEFAULT_DELIVERY_MAX_ATTEMPTS as DEFAULT_DELIVERY_MAX_ATTEMPTS,
+    DEFAULT_DELIVERY_SOFT_LIMIT_RATIO as DEFAULT_DELIVERY_SOFT_LIMIT_RATIO,
     DEFAULT_DELIVERY_STORAGE_BYTES as DEFAULT_DELIVERY_STORAGE_BYTES,
+    DEFAULT_RENDERED_FRAME_TTL_SECONDS as DEFAULT_RENDERED_FRAME_TTL_SECONDS,
     DELIVERY_CHANNEL as DELIVERY_CHANNEL,
     DELIVERY_PROTOCOL_VERSION as DELIVERY_PROTOCOL_VERSION,
+    MAX_FRAME_TICK_TTL_SECONDS as MAX_FRAME_TICK_TTL_SECONDS,
+    DeliveryCapacity as DeliveryCapacity,
     DeliveryClosed as DeliveryClosed,
     DeliveryConfig as DeliveryConfig,
     DeliveryConflict as DeliveryConflict,
     DeliveryError as DeliveryError,
+    DeliveryEvent as DeliveryEvent,
+    DeliveryEventKind as DeliveryEventKind,
     DeliveryHealth as DeliveryHealth,
+    DeliveryObserver as DeliveryObserver,
     DeliveryProtocolError as DeliveryProtocolError,
+    DeliverySemantics as DeliverySemantics,
     DeliveryStorageFull as DeliveryStorageFull,
     DurableDelivery as DurableDelivery,
     ReceivedDelivery as ReceivedDelivery,
+    TopicDeliveryPolicy as TopicDeliveryPolicy,
 )
 from .transport_mesh import (
     DEFAULT_DUPLICATE_WINDOW as DEFAULT_DUPLICATE_WINDOW,
