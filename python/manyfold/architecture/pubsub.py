@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import struct
+from _thread import LockType
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, is_dataclass
 from inspect import Parameter, signature
@@ -101,6 +102,7 @@ class PubSub:
         worker_name: str | None = None,
         service_discovery: bool = True,
         _runtime: PubSubRuntime | None = None,
+        _runtime_lock: LockType | None = None,
         _schedule: "PubSubSchedule | None" = None,
     ) -> None:
         resolved_topic = _resolve_topic(topic)
@@ -124,11 +126,13 @@ class PubSub:
             name=resolved_topic,
             retained_messages=retained_messages,
         )
+        self._runtime_lock = _runtime_lock or ThreadLock()
         if self._stream_schema is not None:
-            self._runtime.register_flatbuffer_pad(
-                resolved_topic,
-                self._stream_schema.table,
-            )
+            with self._runtime_lock:
+                self._runtime.register_flatbuffer_pad(
+                    resolved_topic,
+                    self._stream_schema.table,
+                )
         self._callbacks: dict[int, Callable[[StreamRow], object]] = {}
         self._next_callback_id = 1
 
@@ -147,11 +151,13 @@ class PubSub:
 
     def observability_metrics(self) -> tuple[object, ...]:
         """Return Rust-recorded observability metrics emitted by this PubSub."""
-        return tuple(self._runtime.observability_metrics())
+        with self._runtime_lock:
+            return tuple(self._runtime.observability_metrics())
 
     def observability_logs(self) -> tuple[object, ...]:
         """Return Rust-recorded observability logs emitted by this PubSub."""
-        return tuple(self._runtime.observability_logs())
+        with self._runtime_lock:
+            return tuple(self._runtime.observability_logs())
 
     def publish(
         self,
@@ -183,13 +189,14 @@ class PubSub:
         else:
             payload_bytes = _payload_bytes(payload)
 
-        self._runtime.publish(
-            self.topic,
-            payload_bytes,
-            pad_name=self.topic,
-            event_time=event_time,
-            key=key,
-        )
+        with self._runtime_lock:
+            self._runtime.publish(
+                self.topic,
+                payload_bytes,
+                pad_name=self.topic,
+                event_time=event_time,
+                key=key,
+            )
         self._publish_to_callbacks()
 
     def subscribe(
@@ -507,10 +514,11 @@ class PubSub:
             raise ValueError("query parameter '__manyfold_stream_topic' is reserved")
         query_parameters["__manyfold_stream_topic"] = self.topic
         scoped_sql = _scope_stream_query(sql)
-        rows = self._runtime.query(
-            scoped_sql,
-            query_parameters,
-        )
+        with self._runtime_lock:
+            rows = self._runtime.query(
+                scoped_sql,
+                query_parameters,
+            )
         return [StreamRow(row) for row in rows]
 
     def query_one(
@@ -553,10 +561,11 @@ class PubSub:
         self._stream_schema = _coerce_stream_schema(self.topic, model)
         if self._stream_schema is None:
             raise ValueError("could not infer stream schema")
-        self._runtime.register_flatbuffer_pad(
-            self.topic,
-            self._stream_schema.table,
-        )
+        with self._runtime_lock:
+            self._runtime.register_flatbuffer_pad(
+                self.topic,
+                self._stream_schema.table,
+            )
 
     def _publish_to_callbacks(self) -> None:
         if not self._callbacks:
@@ -1092,6 +1101,7 @@ class PubSubFabric:
             name=self.namespace,
             retained_messages=retained_messages,
         )
+        self._runtime_lock = ThreadLock()
         self._topics: dict[str, PubSub] = {}
 
     @property
@@ -1112,6 +1122,7 @@ class PubSubFabric:
             schema=schema,
             schedule=True,
             _runtime=self._runtime,
+            _runtime_lock=self._runtime_lock,
             _schedule=self.schedule,
         )
         self._topics[resolved_topic] = created

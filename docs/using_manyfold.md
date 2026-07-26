@@ -92,6 +92,10 @@ Manyfold-native architecture elements remain available from
 stream API is the primary application surface. Behavior-heavy substrates such
 as PubSub stay backed by the runtime implementation.
 
+For reducer-owned application state, [PubSub state
+machines](state_machines.md) provide named typed command, state, transition,
+and audit topics without introducing another observable abstraction.
+
 ## Observability
 
 Metrics and logs use the same architecture shape as application data. The
