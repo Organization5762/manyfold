@@ -5,13 +5,29 @@ from __future__ import annotations
 from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass
+from hashlib import sha256
+from pathlib import Path
 from queue import Empty, Full, Queue
-from threading import RLock, Thread, current_thread
+from tempfile import TemporaryDirectory
+from threading import RLock, Thread, current_thread, local
 from time import time
 from typing import final
 from uuid import uuid4
 
 from . import _transport_mesh_protocol as _protocol
+from ._transport_mesh_delivery import (
+    MeshDeliveryConfig,
+    MeshTopicBinding,
+    MeshTopicPolicy,
+)
+from ._transport_mesh_lifecycle import (
+    MeshLifecycleEvent,
+    MeshLifecycleHealth,
+    MeshLifecycleKind,
+    MeshLifecycleReason,
+    _MeshLifecycleLog,
+)
+from .pubsub import PubSub, PubSubCallbackSubscription, StreamRow
 from .transport import (
     FrameKind,
     LinkHealth,
@@ -19,16 +35,23 @@ from .transport import (
     NodeIdentity,
     TcpAddress,
     TcpTransport,
-    TransportClosed,
     TransportConfig,
     TransportMessage,
-    TransportQueueFull,
+)
+from .transport_delivery import (
+    DeliveryClosed,
+    DeliveryError,
+    DeliveryHealth,
+    DeliveryStorageFull,
+    DurableDelivery,
+    ReceivedDelivery,
 )
 
 DEFAULT_MAX_PEERS = 32
 DEFAULT_MAX_SUBSCRIPTIONS = 4096
 DEFAULT_DUPLICATE_WINDOW = 8192
 DEFAULT_PUBLICATION_QUEUE_LIMIT = 1024
+DEFAULT_LIFECYCLE_EVENT_LIMIT = 4096
 
 _CLOSED_SENTINEL = object()
 
@@ -80,6 +103,7 @@ class MeshConfig:
     max_subscriptions: int = DEFAULT_MAX_SUBSCRIPTIONS
     duplicate_window: int = DEFAULT_DUPLICATE_WINDOW
     publication_queue_limit: int = DEFAULT_PUBLICATION_QUEUE_LIMIT
+    lifecycle_event_limit: int = DEFAULT_LIFECYCLE_EVENT_LIMIT
 
     def __post_init__(self) -> None:
         _protocol.require_positive_integer(self.max_peers, "max_peers")
@@ -88,6 +112,10 @@ class MeshConfig:
         _protocol.require_positive_integer(
             self.publication_queue_limit,
             "publication_queue_limit",
+        )
+        _protocol.require_positive_integer(
+            self.lifecycle_event_limit,
+            "lifecycle_event_limit",
         )
 
 
@@ -146,6 +174,7 @@ class MeshPeerHealth:
     source: str
     address: TcpAddress
     link: LinkHealth
+    delivery: DeliveryHealth
     interested_topics: tuple[str, ...]
     last_routing_error: str | None
 
@@ -234,6 +263,7 @@ class TransportMesh:
         connector_config: TransportConfig,
         listener_config: TransportConfig | None = None,
         config: MeshConfig | None = None,
+        delivery: MeshDeliveryConfig | None = None,
     ) -> None:
         if not isinstance(identity, NodeIdentity):
             raise ValueError("identity must be a NodeIdentity")
@@ -246,16 +276,37 @@ class TransportMesh:
             raise ValueError("listener_config must be a TransportConfig or None")
         if config is not None and not isinstance(config, MeshConfig):
             raise ValueError("config must be a MeshConfig or None")
+        if delivery is not None and not isinstance(delivery, MeshDeliveryConfig):
+            raise ValueError("delivery must be a MeshDeliveryConfig or None")
         self.identity = identity
         self.connector_config = connector_config
         self.listener_config = listener_config or connector_config
         self.config = config or MeshConfig()
+        self.delivery = delivery or MeshDeliveryConfig()
+        self._temporary_state = (
+            TemporaryDirectory(prefix="manyfold-mesh-")
+            if self.delivery.state_directory is None
+            else None
+        )
+        self._state_directory = (
+            Path(self._temporary_state.name)
+            if self._temporary_state is not None
+            else self.delivery.state_directory
+        )
+        if self._state_directory is None:
+            raise RuntimeError("mesh delivery state directory was not resolved")
+        self._state_directory.mkdir(parents=True, exist_ok=True)
         self._lock = RLock()
+        self._lifecycle = _MeshLifecycleLog(
+            identity.node_id,
+            self.config.lifecycle_event_limit,
+        )
         self._closed = False
         self._peers: dict[str, _PeerLink] = {}
         self._peer_reservations: set[str] = set()
         self._local_subscriptions: dict[str, str] = {}
         self._remote_subscriptions: dict[str, _RemoteSubscription] = {}
+        self._topic_bindings: dict[str, _TopicBindingState] = {}
         self._seen_order: deque[str] = deque()
         self._seen_ids: set[str] = set()
         self._publications: Queue[MeshPublication | object] = Queue(
@@ -263,12 +314,95 @@ class TransportMesh:
         )
         self._duplicate_publications = 0
         self._last_routing_error: str | None = None
+        self._emit(
+            MeshLifecycleKind.RUNTIME_STARTING,
+            MeshLifecycleReason.STARTUP,
+        )
+        self._emit(
+            MeshLifecycleKind.RUNTIME_READY,
+            MeshLifecycleReason.STARTUP,
+        )
 
     def __enter__(self) -> "TransportMesh":
         return self
 
     def __exit__(self, *error: object) -> None:
         self.close()
+
+    def lifecycle_events(
+        self,
+        *,
+        after_sequence: int = 0,
+    ) -> tuple[MeshLifecycleEvent, ...]:
+        """Read ordered, bounded, non-durable local lifecycle events."""
+        return self._lifecycle.read(after_sequence=after_sequence)
+
+    def lifecycle_health(self) -> MeshLifecycleHealth:
+        """Return retention health for the local lifecycle event stream."""
+        return self._lifecycle.health()
+
+    def bind_topic(
+        self,
+        topic: PubSub,
+        *,
+        policy: MeshTopicPolicy = MeshTopicPolicy.APPEND,
+    ) -> MeshTopicBinding:
+        """Bind one named ``PubSubTopic`` to durable mesh delivery once."""
+        if not isinstance(topic, PubSub):
+            raise TypeError("topic must be a PubSub topic")
+        if not isinstance(policy, MeshTopicPolicy):
+            raise ValueError("policy must be a MeshTopicPolicy")
+        resolved_topic = _protocol.require_topic(topic.topic)
+        with self._lock:
+            self._require_open_locked()
+            if self._peers or self._peer_reservations:
+                raise MeshRouteError(
+                    "durable topics must be bound before mesh peers start"
+                )
+            if resolved_topic in self._topic_bindings:
+                raise MeshRouteError(
+                    f"mesh topic {resolved_topic!r} is already bound"
+                )
+        subscription = self._subscribe(
+            resolved_topic,
+            subscription_id=self._binding_subscription_id(resolved_topic),
+        )
+        inbound_context = local()
+
+        def publish(row: StreamRow) -> None:
+            if getattr(inbound_context, "active", False):
+                return
+            payload = row["payload"]
+            if not isinstance(payload, bytes | bytearray | memoryview):
+                raise MeshRouteError(
+                    f"PubSub topic {resolved_topic!r} produced a non-bytes payload"
+                )
+            self._publish_bound(
+                resolved_topic,
+                bytes(payload),
+                policy=policy,
+            )
+
+        callback = topic.subscribe(publish)
+
+        def dispose() -> bool:
+            callback_disposed = callback.dispose()
+            subscription_disposed = subscription.dispose()
+            with self._lock:
+                self._topic_bindings.pop(resolved_topic, None)
+            return callback_disposed or subscription_disposed
+
+        binding = MeshTopicBinding(topic, policy, dispose)
+        with self._lock:
+            self._topic_bindings[resolved_topic] = _TopicBindingState(
+                topic=topic,
+                policy=policy,
+                subscription=subscription,
+                callback=callback,
+                inbound_context=inbound_context,
+                binding=binding,
+            )
+        return binding
 
     def listen(
         self,
@@ -286,6 +420,11 @@ class TransportMesh:
         if not isinstance(config, TransportConfig):
             raise ValueError("transport_config must be a TransportConfig")
         self._reserve_peer(peer_node_id)
+        self._emit(
+            MeshLifecycleKind.PEER_CONNECTING,
+            MeshLifecycleReason.LISTENER,
+            peer_node_id=peer_node_id,
+        )
         try:
             transport = TcpTransport.listen(
                 self.identity,
@@ -310,6 +449,11 @@ class TransportMesh:
             if entry.node_id in desired:
                 raise ValueError(f"duplicate discovery peer {entry.node_id!r}")
             desired[entry.node_id] = entry
+            self._emit(
+                MeshLifecycleKind.PEER_DISCOVERED,
+                MeshLifecycleReason.DISCOVERY,
+                peer_node_id=entry.node_id,
+            )
         with self._lock:
             self._require_open_locked()
             listener_peers = {
@@ -343,6 +487,11 @@ class TransportMesh:
             if existing is not None:
                 continue
             self._reserve_peer(peer_id)
+            self._emit(
+                MeshLifecycleKind.PEER_CONNECTING,
+                MeshLifecycleReason.DISCOVERY,
+                peer_node_id=peer_id,
+            )
             try:
                 transport = TcpTransport.connect(
                     self.identity,
@@ -362,6 +511,10 @@ class TransportMesh:
             peer = self._peers.pop(peer_node_id, None)
             if peer is None:
                 return False
+        peer.delivery.close()
+        if peer.reader is not current_thread():
+            peer.reader.join(timeout=2.0)
+        with self._lock:
             removed = tuple(
                 (subscription_id, subscription.topic)
                 for subscription_id, subscription in self._remote_subscriptions.items()
@@ -369,9 +522,11 @@ class TransportMesh:
             )
             for subscription_id, _ in removed:
                 del self._remote_subscriptions[subscription_id]
-        peer.transport.close()
-        if peer.reader is not current_thread():
-            peer.reader.join(timeout=2.0)
+        self._emit(
+            MeshLifecycleKind.PEER_DISCONNECTED,
+            MeshLifecycleReason.DISCOVERY,
+            peer_node_id=peer_node_id,
+        )
         for subscription_id, topic in removed:
             self._fanout_control(
                 _protocol.CONTROL_UNSUBSCRIBE,
@@ -384,7 +539,14 @@ class TransportMesh:
     def subscribe(self, topic: str) -> MeshSubscription:
         """Register and propagate one bounded local topic subscription."""
         topic = _protocol.require_topic(topic)
-        subscription_id = uuid4().hex
+        return self._subscribe(topic, subscription_id=uuid4().hex)
+
+    def _subscribe(
+        self,
+        topic: str,
+        *,
+        subscription_id: str,
+    ) -> MeshSubscription:
         with self._lock:
             self._require_open_locked()
             self._require_subscription_capacity_locked()
@@ -479,6 +641,32 @@ class TransportMesh:
             forwarded_peers=forwarded,
         )
 
+    def _publish_bound(
+        self,
+        topic: str,
+        payload: bytes,
+        *,
+        policy: MeshTopicPolicy,
+    ) -> MeshPublishResult:
+        message_id = uuid4().hex
+        with self._lock:
+            self._require_open_locked()
+            peer_ids = self._interested_peers_locked(topic)
+            self._remember_message_locked(message_id)
+        forwarded = self._fanout_publication(
+            topic,
+            payload,
+            message_id,
+            source_node_id=self.identity.node_id,
+            peer_ids=peer_ids,
+            policy=policy,
+        )
+        return MeshPublishResult(
+            message_id=message_id,
+            delivered_locally=True,
+            forwarded_peers=forwarded,
+        )
+
     def receive(self, *, timeout: float | None = None) -> MeshPublication:
         """Receive one locally subscribed publication."""
         _protocol.require_timeout(timeout)
@@ -521,6 +709,7 @@ class TransportMesh:
                 source=peer.source,
                 address=peer.transport.address,
                 link=peer.transport.health(),
+                delivery=peer.delivery.health(),
                 interested_topics=topics,
                 last_routing_error=peer.last_error,
             )
@@ -553,16 +742,26 @@ class TransportMesh:
         with self._lock:
             if self._closed:
                 return
+            self._emit(
+                MeshLifecycleKind.RUNTIME_STOPPING,
+                MeshLifecycleReason.SHUTDOWN,
+            )
             self._closed = True
             peers = tuple(self._peers.values())
+            bindings = tuple(self._topic_bindings.values())
             self._peers.clear()
             self._peer_reservations.clear()
+            self._topic_bindings.clear()
             self._local_subscriptions.clear()
             self._remote_subscriptions.clear()
             self._seen_order.clear()
             self._seen_ids.clear()
+        for binding in bindings:
+            binding.binding.dispose()
         for peer in peers:
-            peer.transport.close()
+            peer.delivery.close(
+                graceful_timeout=self.delivery.graceful_shutdown_seconds
+            )
         for peer in peers:
             if peer.reader is not current_thread():
                 peer.reader.join(timeout=2.0)
@@ -576,6 +775,12 @@ class TransportMesh:
             self._publications.put_nowait(_CLOSED_SENTINEL)
         except Full:
             pass
+        if self._temporary_state is not None:
+            self._temporary_state.cleanup()
+        self._emit(
+            MeshLifecycleKind.RUNTIME_STOPPED,
+            MeshLifecycleReason.SHUTDOWN,
+        )
 
     def _reserve_peer(self, peer_node_id: str) -> None:
         with self._lock:
@@ -602,28 +807,59 @@ class TransportMesh:
         *,
         source: str,
     ) -> None:
+        journal_key = sha256(
+            (
+                f"{self.identity.cluster_id}\0{self.identity.node_id}\0"
+                f"{peer_node_id}"
+            ).encode()
+        ).hexdigest()
+        delivery = DurableDelivery(
+            transport,
+            self.delivery._for_journal(
+                self._state_directory / f"peer-{journal_key}.sqlite3",
+                transport_max_payload_bytes=transport.config.max_payload_bytes,
+            ),
+            owns_transport=True,
+        )
         reader = Thread(
             target=self._read_peer,
-            args=(peer_node_id, transport),
+            args=(peer_node_id, delivery),
             name=f"manyfold-mesh-{self.identity.node_id}-{peer_node_id}",
             daemon=True,
         )
         peer = _PeerLink(
             transport=transport,
+            delivery=delivery,
             source=source,
             reader=reader,
+            last_link_state=LinkState.STARTING,
+            last_delivery_health=delivery.health(),
+            watermark_crossed=False,
         )
         with self._lock:
             if peer_node_id not in self._peer_reservations:
-                transport.close()
+                delivery.close()
                 raise MeshRouteError(
                     f"mesh peer reservation for {peer_node_id!r} was lost"
                 )
             self._peer_reservations.remove(peer_node_id)
             self._peers[peer_node_id] = peer
+        if peer.last_delivery_health.outbox_items:
+            self._emit(
+                MeshLifecycleKind.DURABLE_REPLAYED,
+                MeshLifecycleReason.RECOVERY,
+                peer_node_id=peer_node_id,
+                item_count=peer.last_delivery_health.outbox_items,
+                byte_count=peer.last_delivery_health.logical_storage_bytes,
+            )
         reader.start()
 
-    def _read_peer(self, peer_node_id: str, transport: TcpTransport) -> None:
+    def _read_peer(
+        self,
+        peer_node_id: str,
+        delivery: DurableDelivery,
+    ) -> None:
+        transport = delivery.transport
         synchronized_connections = 0
         while True:
             with self._lock:
@@ -635,11 +871,13 @@ class TransportMesh:
                 transport,
                 synchronized_connections,
             )
+            self._publish_link_transition(peer_node_id, transport.health().state)
+            self._publish_delivery_health(peer_node_id, delivery)
             try:
-                message = transport.receive(timeout=0.1)
+                received = delivery.receive(timeout=0.1)
             except TimeoutError:
                 continue
-            except TransportClosed:
+            except DeliveryClosed:
                 return
             synchronized_connections = self._synchronize_connection(
                 peer_node_id,
@@ -647,19 +885,43 @@ class TransportMesh:
                 synchronized_connections,
             )
             try:
-                self._process_peer_message(peer_node_id, message)
+                self._process_peer_message(peer_node_id, received)
             except MeshCapacityError as error:
                 self._record_peer_error(peer_node_id, error)
-                transport.close()
+                delivery.nack(received.message_id, reason=str(error))
+                delivery.close()
                 return
             except MeshError as error:
                 self._record_peer_error(peer_node_id, error)
+                delivery.nack(received.message_id, reason=str(error))
+            else:
+                try:
+                    delivery.ack(received.message_id)
+                except DeliveryClosed:
+                    return
+                self._emit(
+                    MeshLifecycleKind.DURABLE_ACKED,
+                    MeshLifecycleReason.ACKNOWLEDGEMENT,
+                    topic=(
+                        None
+                        if received.message.channel.startswith(
+                            _protocol.RESERVED_PREFIX
+                        )
+                        else received.message.channel
+                    ),
+                    peer_node_id=peer_node_id,
+                    message_id=received.message_id,
+                    correlation_id=received.message.correlation_id,
+                    attempt=received.delivery_attempt,
+                    byte_count=len(received.message.payload),
+                )
 
     def _process_peer_message(
         self,
         peer_node_id: str,
-        message: TransportMessage,
+        received: ReceivedDelivery,
     ) -> None:
+        message = received.message
         if message.kind is not FrameKind.PUBSUB:
             raise MeshRouteError(
                 f"mesh peer {peer_node_id!r} sent non-PubSub frame {message.kind!r}"
@@ -675,24 +937,19 @@ class TransportMesh:
         if message.channel == _protocol.CONTROL_SYNC:
             self._synchronize_peer(peer_node_id)
             return
-        if not message.channel.startswith(_protocol.PUBLICATION_PREFIX):
+        if message.channel.startswith(_protocol.RESERVED_PREFIX):
             raise MeshRouteError(
                 f"mesh peer {peer_node_id!r} sent unknown channel {message.channel!r}"
             )
         if message.correlation_id is None:
-            raise MeshRouteError("mesh publication is missing message_id")
-        try:
-            source_node_id, topic = _protocol.decode_publication_channel(
-                message.channel
-            )
-        except ValueError as error:
-            raise MeshRouteError(f"publication channel is invalid: {error}") from error
+            raise MeshRouteError("mesh publication is missing source_node_id")
+        topic = _protocol.require_topic(message.channel)
         self._accept_publication(
             peer_node_id,
-            source_node_id,
+            message.correlation_id,
             topic,
             message.payload,
-            message.correlation_id,
+            received.message_id,
         )
 
     def _decode_subscription(self, payload: bytes) -> tuple[str, str]:
@@ -710,6 +967,8 @@ class TransportMesh:
         topic: str,
     ) -> None:
         with self._lock:
+            if peer_node_id not in self._peers:
+                return
             if subscription_id in self._local_subscriptions:
                 return
             existing = self._remote_subscriptions.get(subscription_id)
@@ -761,9 +1020,44 @@ class TransportMesh:
                 self._duplicate_publications += 1
                 return
             self._remember_message_locked(message_id)
-            deliver_locally = topic in self._local_subscriptions.values()
+            binding = self._topic_bindings.get(topic)
+            binding_subscription_id = (
+                None
+                if binding is None
+                else binding.subscription.subscription_id
+            )
+            queue_locally = any(
+                subscription_topic == topic
+                and subscription_id != binding_subscription_id
+                for subscription_id, subscription_topic in (
+                    self._local_subscriptions.items()
+                )
+            )
             peer_ids = self._interested_peers_locked(topic, exclude={peer_node_id})
-        if deliver_locally:
+        try:
+            self._fanout_publication(
+                topic,
+                payload,
+                message_id,
+                source_node_id=source_node_id,
+                peer_ids=peer_ids,
+                policy=(
+                    MeshTopicPolicy.APPEND
+                    if binding is None
+                    else binding.policy
+                ),
+            )
+        except MeshError:
+            with self._lock:
+                self._forget_message_locked(message_id)
+            raise
+        if binding is not None:
+            binding.inbound_context.active = True
+            try:
+                binding.topic.publish(payload)
+            finally:
+                binding.inbound_context.active = False
+        if queue_locally:
             publication = MeshPublication(
                 topic=topic,
                 payload=payload,
@@ -780,13 +1074,6 @@ class TransportMesh:
                     break
                 except Full:
                     continue
-        self._fanout_publication(
-            topic,
-            payload,
-            message_id,
-            source_node_id=source_node_id,
-            peer_ids=peer_ids,
-        )
 
     def _fanout_publication(
         self,
@@ -796,14 +1083,21 @@ class TransportMesh:
         *,
         source_node_id: str,
         peer_ids: Sequence[str],
+        policy: MeshTopicPolicy = MeshTopicPolicy.APPEND,
     ) -> tuple[str, ...]:
         message = TransportMessage(
             kind=FrameKind.PUBSUB,
-            channel=_protocol.encode_publication_channel(source_node_id, topic),
+            channel=topic,
             payload=payload,
-            correlation_id=message_id,
+            correlation_id=source_node_id,
         )
-        accepted, rejected = self._send_to_peers(peer_ids, message)
+        accepted, rejected = self._send_to_peers(
+            peer_ids,
+            message,
+            message_id=message_id,
+            topic=topic,
+            policy=policy,
+        )
         if rejected:
             raise MeshBackpressureError(
                 message_id,
@@ -832,8 +1126,8 @@ class TransportMesh:
                 FrameKind.PUBSUB,
                 channel,
                 payload,
-                correlation_id=message_id,
             ),
+            message_id=message_id,
         )
         if rejected:
             raise MeshBackpressureError(
@@ -847,6 +1141,10 @@ class TransportMesh:
         self,
         peer_ids: Sequence[str],
         message: TransportMessage,
+        *,
+        message_id: str,
+        topic: str | None = None,
+        policy: MeshTopicPolicy = MeshTopicPolicy.APPEND,
     ) -> tuple[tuple[str, ...], tuple[str, ...]]:
         accepted: list[str] = []
         rejected: list[str] = []
@@ -857,11 +1155,22 @@ class TransportMesh:
                 rejected.append(peer_id)
                 continue
             try:
-                peer.transport.send(message)
-            except (TransportClosed, TransportQueueFull):
+                peer.delivery.send(message, message_id=message_id)
+            except (DeliveryClosed, DeliveryError, DeliveryStorageFull):
                 rejected.append(peer_id)
             else:
                 accepted.append(peer_id)
+                self._emit(
+                    MeshLifecycleKind.DURABLE_ENQUEUED,
+                    MeshLifecycleReason.LOCAL_PUBLICATION,
+                    topic=topic,
+                    peer_node_id=peer_id,
+                    message_id=message_id,
+                    correlation_id=message.correlation_id,
+                    item_count=peer.delivery.health().outbox_items,
+                    byte_count=len(message.payload),
+                    detail=policy.value,
+                )
         return tuple(accepted), tuple(rejected)
 
     def _synchronize_peer(self, peer_node_id: str) -> None:
@@ -886,7 +1195,11 @@ class TransportMesh:
                 _protocol.encode_subscription(subscription_id, topic),
                 correlation_id=uuid4().hex,
             )
-            sent, failed = self._send_to_peers((peer_node_id,), message)
+            sent, failed = self._send_to_peers(
+                (peer_node_id,),
+                message,
+                message_id=message.correlation_id or uuid4().hex,
+            )
             accepted.extend(sent)
             rejected.extend(failed)
         if rejected:
@@ -972,6 +1285,155 @@ class TransportMesh:
             )
         )
 
+    def _publish_link_transition(
+        self,
+        peer_node_id: str,
+        state: LinkState,
+    ) -> None:
+        with self._lock:
+            peer = self._peers.get(peer_node_id)
+            if peer is None or peer.last_link_state is state:
+                return
+            previous = peer.last_link_state
+            peer.last_link_state = state
+        if previous is LinkState.CONNECTED and state is not LinkState.CONNECTED:
+            self._emit(
+                MeshLifecycleKind.PEER_DISCONNECTED,
+                MeshLifecycleReason.LINK_STATE_CHANGED,
+                peer_node_id=peer_node_id,
+                detail=state.value,
+            )
+        if state is LinkState.CONNECTED:
+            self._emit(
+                MeshLifecycleKind.PEER_CONNECTED,
+                MeshLifecycleReason.RECONNECT
+                if peer.transport.health().connections_established > 1
+                else MeshLifecycleReason.LINK_STATE_CHANGED,
+                peer_node_id=peer_node_id,
+            )
+        elif state is LinkState.RECONNECTING:
+            self._emit(
+                MeshLifecycleKind.PEER_RECONNECTING,
+                MeshLifecycleReason.RECONNECT,
+                peer_node_id=peer_node_id,
+            )
+
+    def _publish_delivery_health(
+        self,
+        peer_node_id: str,
+        delivery: DurableDelivery,
+    ) -> None:
+        health = delivery.health()
+        with self._lock:
+            peer = self._peers.get(peer_node_id)
+            if peer is None:
+                return
+            previous = peer.last_delivery_health
+            peer.last_delivery_health = health
+            crossed = (
+                health.outbox_items * 5 >= delivery.config.max_outbox_items * 4
+            )
+            watermark_changed = crossed != peer.watermark_crossed
+            peer.watermark_crossed = crossed
+        self._emit_health_delta(
+            MeshLifecycleKind.DURABLE_SENT,
+            MeshLifecycleReason.LOCAL_PUBLICATION,
+            peer_node_id,
+            health.frames_sent - previous.frames_sent,
+            item_count=health.outbox_items,
+        )
+        self._emit_health_delta(
+            MeshLifecycleKind.DURABLE_RETRY,
+            MeshLifecycleReason.RETRY,
+            peer_node_id,
+            health.retries - previous.retries,
+            attempt=health.retries,
+            item_count=health.outbox_items,
+        )
+        self._emit_health_delta(
+            MeshLifecycleKind.DURABLE_EXPIRED,
+            MeshLifecycleReason.EXPIRY,
+            peer_node_id,
+            (health.expired_outbox + health.expired_inbox)
+            - (previous.expired_outbox + previous.expired_inbox),
+            item_count=health.outbox_items + health.pending_inbox_items,
+        )
+        self._emit_optional_health_delta(
+            MeshLifecycleKind.DURABLE_COALESCED,
+            MeshLifecycleReason.CAPACITY,
+            peer_node_id,
+            health,
+            previous,
+            "coalesced",
+        )
+        self._emit_optional_health_delta(
+            MeshLifecycleKind.DURABLE_DROPPED,
+            MeshLifecycleReason.CAPACITY,
+            peer_node_id,
+            health,
+            previous,
+            "storage_rejections",
+        )
+        if health.last_error is not None and health.last_error != previous.last_error:
+            self._emit(
+                MeshLifecycleKind.DELIVERY_FAILED,
+                MeshLifecycleReason.ERROR,
+                peer_node_id=peer_node_id,
+                item_count=health.outbox_items,
+                byte_count=health.logical_storage_bytes,
+                detail=health.last_error,
+            )
+        if watermark_changed:
+            self._emit(
+                (
+                    MeshLifecycleKind.WATERMARK_CROSSED
+                    if crossed
+                    else MeshLifecycleKind.WATERMARK_RECOVERED
+                ),
+                MeshLifecycleReason.CAPACITY,
+                peer_node_id=peer_node_id,
+                item_count=health.outbox_items,
+                byte_count=health.logical_storage_bytes,
+            )
+
+    def _emit_health_delta(
+        self,
+        kind: MeshLifecycleKind,
+        reason: MeshLifecycleReason,
+        peer_node_id: str,
+        delta: int,
+        *,
+        attempt: int | None = None,
+        item_count: int | None = None,
+    ) -> None:
+        if delta <= 0:
+            return
+        self._emit(
+            kind,
+            reason,
+            peer_node_id=peer_node_id,
+            attempt=attempt,
+            item_count=item_count if item_count is not None else delta,
+        )
+
+    def _emit_optional_health_delta(
+        self,
+        kind: MeshLifecycleKind,
+        reason: MeshLifecycleReason,
+        peer_node_id: str,
+        health: DeliveryHealth,
+        previous: DeliveryHealth,
+        field: str,
+    ) -> None:
+        delta = int(getattr(health, field, 0)) - int(getattr(previous, field, 0))
+        self._emit_health_delta(
+            kind,
+            reason,
+            peer_node_id,
+            delta,
+            item_count=health.outbox_items,
+        )
+
     def _require_subscription_capacity_locked(self) -> None:
         retained = len(self._local_subscriptions) + len(self._remote_subscriptions)
         if retained >= self.config.max_subscriptions:
@@ -985,6 +1447,19 @@ class TransportMesh:
             self._seen_ids.remove(expired)
         self._seen_order.append(message_id)
         self._seen_ids.add(message_id)
+
+    def _forget_message_locked(self, message_id: str) -> None:
+        if message_id not in self._seen_ids:
+            return
+        self._seen_ids.remove(message_id)
+        self._seen_order.remove(message_id)
+
+    def _binding_subscription_id(self, topic: str) -> str:
+        return sha256(
+            (
+                f"{self.identity.cluster_id}\0{self.identity.node_id}\0{topic}"
+            ).encode()
+        ).hexdigest()
 
     def _require_open_locked(self) -> None:
         if self._closed:
@@ -1001,12 +1476,24 @@ class TransportMesh:
         with self._lock:
             self._last_routing_error = f"{type(error).__name__}: {error}"
 
+    def _emit(
+        self,
+        kind: MeshLifecycleKind,
+        reason: MeshLifecycleReason,
+        **fields: object,
+    ) -> MeshLifecycleEvent:
+        return self._lifecycle.publish(kind, reason, **fields)
+
 
 @dataclass(slots=True)
 class _PeerLink:
     transport: TcpTransport
+    delivery: DurableDelivery
     source: str
     reader: Thread
+    last_link_state: LinkState
+    last_delivery_health: DeliveryHealth
+    watermark_crossed: bool
     last_error: str | None = None
 
 
@@ -1016,8 +1503,19 @@ class _RemoteSubscription:
     next_hop: str
 
 
+@dataclass(slots=True)
+class _TopicBindingState:
+    topic: PubSub
+    policy: MeshTopicPolicy
+    subscription: MeshSubscription
+    callback: PubSubCallbackSubscription
+    inbound_context: object
+    binding: MeshTopicBinding
+
+
 __all__ = [
     "DEFAULT_DUPLICATE_WINDOW",
+    "DEFAULT_LIFECYCLE_EVENT_LIMIT",
     "DEFAULT_MAX_PEERS",
     "DEFAULT_MAX_SUBSCRIPTIONS",
     "DEFAULT_PUBLICATION_QUEUE_LIMIT",
@@ -1025,14 +1523,21 @@ __all__ = [
     "MeshCapacityError",
     "MeshClosed",
     "MeshConfig",
+    "MeshDeliveryConfig",
     "MeshError",
     "MeshHealth",
+    "MeshLifecycleEvent",
+    "MeshLifecycleHealth",
+    "MeshLifecycleKind",
+    "MeshLifecycleReason",
     "MeshPeerHealth",
     "MeshPublication",
     "MeshPublishResult",
     "MeshRouteError",
     "MeshSubscription",
     "MeshSubscriptionBackpressureError",
+    "MeshTopicBinding",
+    "MeshTopicPolicy",
     "PeerDiscovery",
     "TransportMesh",
 ]

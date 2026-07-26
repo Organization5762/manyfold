@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import json
-from urllib.parse import quote, unquote
 
 CONTROL_SUBSCRIBE = "_manyfold.mesh.subscribe"
 CONTROL_UNSUBSCRIBE = "_manyfold.mesh.unsubscribe"
 CONTROL_SYNC = "_manyfold.mesh.sync"
-PUBLICATION_PREFIX = "_manyfold.mesh.publish/"
 RESERVED_PREFIX = "_manyfold.mesh."
 
 
@@ -75,25 +73,3 @@ def decode_subscription(payload: bytes) -> tuple[str, str]:
     if not isinstance(subscription_id, str) or not subscription_id.strip():
         raise ValueError("subscription_id must be a non-empty string")
     return subscription_id.strip(), require_topic(topic)
-
-
-def encode_publication_channel(source_node_id: str, topic: str) -> str:
-    return (
-        f"{PUBLICATION_PREFIX}{quote(source_node_id, safe='')}/"
-        f"{quote(topic, safe='')}"
-    )
-
-
-def decode_publication_channel(channel: str) -> tuple[str, str]:
-    encoded = channel.removeprefix(PUBLICATION_PREFIX)
-    try:
-        encoded_source, encoded_topic = encoded.split("/", 1)
-        source_node_id = unquote(encoded_source, errors="strict")
-        topic = unquote(encoded_topic, errors="strict")
-    except ValueError as error:
-        raise ValueError("publication channel is missing source or topic") from error
-    except UnicodeDecodeError as error:
-        raise ValueError("publication source or topic is not valid UTF-8") from error
-    if not source_node_id.strip():
-        raise ValueError("publication source_node_id must be a non-empty string")
-    return source_node_id.strip(), require_topic(topic)
