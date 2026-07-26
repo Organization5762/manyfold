@@ -6,6 +6,7 @@ from .consensus import (
     CommittedCommand as CommittedCommand,
     ControlCommand as ControlCommand,
     CoordinatorStatus as CoordinatorStatus,
+    DurableWriteBoundary as DurableWriteBoundary,
     MemberConfig as MemberConfig,
     PersistentRaftCoordinator as PersistentRaftCoordinator,
 )
@@ -41,6 +42,7 @@ __all__ = [
     "CredentialExpiredError",
     "DevelopmentCluster",
     "DiagnosticSeverity",
+    "DurableWriteBoundary",
     "HttpResponse",
     "LocalDevelopmentTransportSecurityProvider",
     "MAX_COMMAND_BYTES",
