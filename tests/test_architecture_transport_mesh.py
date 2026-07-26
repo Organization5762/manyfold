@@ -41,11 +41,11 @@ class ArchitectureTransportMeshTests(unittest.TestCase):
 
     def test_bound_topic_survives_three_peer_disconnect_and_restart(self) -> None:
         topic_a = PubSubTopic(
-            "navigation",
+            "machine.commands",
             namespace="durable-mesh-a",
         )
         topic_c = PubSubTopic(
-            "navigation",
+            "machine.commands",
             namespace="durable-mesh-c",
         )
         node_a = self._mesh("a", durable_state=True)
@@ -84,7 +84,7 @@ class ArchitectureTransportMeshTests(unittest.TestCase):
                 timeout=1.0,
             )
         )
-        topic_a.publish(b"queued-while-offline")
+        topic_a.publish(b"queued-while-offline", key="command-7")
         self.assertTrue(
             _wait_for(
                 lambda: node_b.peer_health()[1].delivery.outbox_items >= 1,
@@ -107,6 +107,7 @@ class ArchitectureTransportMeshTests(unittest.TestCase):
                 lambda: (
                     topic_c.latest() is not None
                     and topic_c.latest().payload == b"queued-while-offline"
+                    and topic_c.latest().message_key == "command-7"
                 ),
                 timeout=3.0,
             ),
@@ -122,6 +123,17 @@ class ArchitectureTransportMeshTests(unittest.TestCase):
         self.assertTrue(
             _wait_for(
                 lambda: restarted_b.peer_health()[1].delivery.outbox_items == 0,
+                timeout=2.0,
+            )
+        )
+        topic_a.publish(b"fallback-command")
+        self.assertTrue(
+            _wait_for(
+                lambda: (
+                    topic_c.latest() is not None
+                    and topic_c.latest().payload == b"fallback-command"
+                    and topic_c.latest().message_key == "machine:1"
+                ),
                 timeout=2.0,
             )
         )

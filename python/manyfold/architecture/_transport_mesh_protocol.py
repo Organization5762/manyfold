@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import struct
 
 CONTROL_SUBSCRIBE = "_manyfold.mesh.subscribe"
 CONTROL_UNSUBSCRIBE = "_manyfold.mesh.unsubscribe"
 CONTROL_SYNC = "_manyfold.mesh.sync"
 RESERVED_PREFIX = "_manyfold.mesh."
+_PUBLICATION_HEADER = struct.Struct("!I")
 
 
 def require_text(value: str, field_name: str) -> str:
@@ -73,3 +75,23 @@ def decode_subscription(payload: bytes) -> tuple[str, str]:
     if not isinstance(subscription_id, str) or not subscription_id.strip():
         raise ValueError("subscription_id must be a non-empty string")
     return subscription_id.strip(), require_topic(topic)
+
+
+def encode_publication(source_node_id: str, payload: bytes) -> bytes:
+    source = require_text(source_node_id, "publication source_node_id").encode()
+    return _PUBLICATION_HEADER.pack(len(source)) + source + payload
+
+
+def decode_publication(payload: bytes) -> tuple[str, bytes]:
+    if len(payload) < _PUBLICATION_HEADER.size:
+        raise ValueError("publication payload is missing its source header")
+    source_size = _PUBLICATION_HEADER.unpack_from(payload)[0]
+    source_start = _PUBLICATION_HEADER.size
+    source_end = source_start + source_size
+    if source_size == 0 or source_end > len(payload):
+        raise ValueError("publication payload has an invalid source header")
+    try:
+        source_node_id = payload[source_start:source_end].decode()
+    except UnicodeDecodeError as error:
+        raise ValueError("publication source_node_id is not valid UTF-8") from error
+    return require_text(source_node_id, "publication source_node_id"), payload[source_end:]

@@ -151,6 +151,7 @@ class MeshPublication:
     topic: str
     payload: bytes
     message_id: str
+    correlation_id: str | None
     source_node_id: str
     received_at: float
 
@@ -377,10 +378,20 @@ class TransportMesh:
                 raise MeshRouteError(
                     f"PubSub topic {resolved_topic!r} produced a non-bytes payload"
                 )
+            correlation_id = self._topic_correlation_id(resolved_topic, row)
             self._publish_bound(
                 resolved_topic,
                 bytes(payload),
                 policy=policy,
+                message_id=(
+                    None
+                    if correlation_id is None
+                    else self._correlated_message_id(
+                        resolved_topic,
+                        correlation_id,
+                    )
+                ),
+                correlation_id=correlation_id,
             )
 
         callback = topic.subscribe(publish)
@@ -592,6 +603,7 @@ class TransportMesh:
         payload: bytes | bytearray | memoryview,
         *,
         message_id: str | None = None,
+        correlation_id: str | None = None,
     ) -> MeshPublishResult:
         """Publish once to local consumers and interested next-hop peers."""
         topic = _protocol.require_topic(topic)
@@ -600,6 +612,11 @@ class TransportMesh:
             uuid4().hex
             if message_id is None
             else _protocol.require_text(message_id, "message_id")
+        )
+        resolved_correlation_id = (
+            None
+            if correlation_id is None
+            else _protocol.require_text(correlation_id, "correlation_id")
         )
         with self._lock:
             self._require_open_locked()
@@ -616,6 +633,7 @@ class TransportMesh:
                     topic=topic,
                     payload=payload_bytes,
                     message_id=resolved_message_id,
+                    correlation_id=resolved_correlation_id,
                     source_node_id=self.identity.node_id,
                     received_at=time(),
                 )
@@ -634,6 +652,7 @@ class TransportMesh:
             resolved_message_id,
             source_node_id=self.identity.node_id,
             peer_ids=peer_ids,
+            correlation_id=resolved_correlation_id,
         )
         return MeshPublishResult(
             message_id=resolved_message_id,
@@ -647,22 +666,25 @@ class TransportMesh:
         payload: bytes,
         *,
         policy: MeshTopicPolicy,
+        message_id: str | None = None,
+        correlation_id: str | None = None,
     ) -> MeshPublishResult:
-        message_id = uuid4().hex
+        resolved_message_id = uuid4().hex if message_id is None else message_id
         with self._lock:
             self._require_open_locked()
             peer_ids = self._interested_peers_locked(topic)
-            self._remember_message_locked(message_id)
+            self._remember_message_locked(resolved_message_id)
         forwarded = self._fanout_publication(
             topic,
             payload,
-            message_id,
+            resolved_message_id,
             source_node_id=self.identity.node_id,
             peer_ids=peer_ids,
             policy=policy,
+            correlation_id=correlation_id,
         )
         return MeshPublishResult(
-            message_id=message_id,
+            message_id=resolved_message_id,
             delivered_locally=True,
             forwarded_peers=forwarded,
         )
@@ -941,15 +963,18 @@ class TransportMesh:
             raise MeshRouteError(
                 f"mesh peer {peer_node_id!r} sent unknown channel {message.channel!r}"
             )
-        if message.correlation_id is None:
-            raise MeshRouteError("mesh publication is missing source_node_id")
         topic = _protocol.require_topic(message.channel)
+        try:
+            source_node_id, payload = _protocol.decode_publication(message.payload)
+        except ValueError as error:
+            raise MeshRouteError(f"publication payload is invalid: {error}") from error
         self._accept_publication(
             peer_node_id,
-            message.correlation_id,
+            source_node_id,
             topic,
-            message.payload,
+            payload,
             received.message_id,
+            correlation_id=message.correlation_id,
         )
 
     def _decode_subscription(self, payload: bytes) -> tuple[str, str]:
@@ -1014,6 +1039,8 @@ class TransportMesh:
         topic: str,
         payload: bytes,
         message_id: str,
+        *,
+        correlation_id: str | None,
     ) -> None:
         with self._lock:
             if message_id in self._seen_ids:
@@ -1046,6 +1073,7 @@ class TransportMesh:
                     if binding is None
                     else binding.policy
                 ),
+                correlation_id=correlation_id,
             )
         except MeshError:
             with self._lock:
@@ -1054,7 +1082,7 @@ class TransportMesh:
         if binding is not None:
             binding.inbound_context.active = True
             try:
-                binding.topic.publish(payload)
+                binding.topic.publish(payload, key=correlation_id)
             finally:
                 binding.inbound_context.active = False
         if queue_locally:
@@ -1062,6 +1090,7 @@ class TransportMesh:
                 topic=topic,
                 payload=payload,
                 message_id=message_id,
+                correlation_id=correlation_id,
                 source_node_id=source_node_id,
                 received_at=time(),
             )
@@ -1084,12 +1113,13 @@ class TransportMesh:
         source_node_id: str,
         peer_ids: Sequence[str],
         policy: MeshTopicPolicy = MeshTopicPolicy.APPEND,
+        correlation_id: str | None = None,
     ) -> tuple[str, ...]:
         message = TransportMessage(
             kind=FrameKind.PUBSUB,
             channel=topic,
-            payload=payload,
-            correlation_id=source_node_id,
+            payload=_protocol.encode_publication(source_node_id, payload),
+            correlation_id=correlation_id,
         )
         accepted, rejected = self._send_to_peers(
             peer_ids,
@@ -1458,6 +1488,32 @@ class TransportMesh:
         return sha256(
             (
                 f"{self.identity.cluster_id}\0{self.identity.node_id}\0{topic}"
+            ).encode()
+        ).hexdigest()
+
+    def _topic_correlation_id(
+        self,
+        topic: str,
+        row: StreamRow,
+    ) -> str | None:
+        message_key = row.get("message_key")
+        if message_key is not None:
+            return _protocol.require_text(message_key, "PubSub message key")
+        if not topic.endswith(".commands"):
+            return None
+        offset = row.get("offset")
+        if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
+            raise MeshRouteError(
+                f"command topic {topic!r} did not expose a valid topic offset"
+            )
+        machine_name = topic.removesuffix(".commands")
+        return f"{machine_name}:{offset}"
+
+    def _correlated_message_id(self, topic: str, correlation_id: str) -> str:
+        return sha256(
+            (
+                f"{self.identity.cluster_id}\0{self.identity.node_id}\0"
+                f"{topic}\0{correlation_id}"
             ).encode()
         ).hexdigest()
 
