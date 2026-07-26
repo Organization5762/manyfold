@@ -224,6 +224,7 @@ class TcpTransport:
         self._connection_ready = Event()
         self._condition = Condition(Lock())
         self._connection: socket.socket | None = None
+        self._handshake_connection: socket.socket | None = None
         self._state = (
             LinkState.LISTENING
             if mode is _Mode.LISTENER
@@ -468,10 +469,14 @@ class TcpTransport:
             self._connection_ready.set()
             connection = self._connection
             self._connection = None
+            handshake_connection = self._handshake_connection
+            self._handshake_connection = None
             listener = self._listener
             self._listener = None
             self._condition.notify_all()
         _wire.close_socket(connection)
+        if handshake_connection is not connection:
+            _wire.close_socket(handshake_connection)
         _wire.close_socket(listener)
         self._drain_queues()
         try:
@@ -492,6 +497,7 @@ class TcpTransport:
                     (self.address.host, self.address.port),
                     timeout=self.config.connect_timeout,
                 )
+                self._set_handshake_connection(connection)
                 connection.settimeout(self.config.handshake_timeout)
                 self._set_state(LinkState.HANDSHAKING)
                 connection = self._secure_connection(
@@ -526,6 +532,7 @@ class TcpTransport:
             connection: socket.socket | None = None
             try:
                 connection, _ = listener.accept()
+                self._set_handshake_connection(connection)
                 connection.settimeout(self.config.handshake_timeout)
                 self._set_state(LinkState.HANDSHAKING)
                 connection = self._secure_connection(
@@ -537,7 +544,9 @@ class TcpTransport:
                 self._install_connection(connection, remote_identity)
                 connection = None
                 self._read_connection()
-            except socket.timeout:
+            except socket.timeout as error:
+                if connection is not None:
+                    self._drop_connection(connection, error)
                 continue
             except (
                 OSError,
@@ -704,6 +713,9 @@ class TcpTransport:
         with self._condition:
             if self._state is LinkState.CLOSED:
                 raise TransportClosed("transport closed during handshake")
+            if self._handshake_connection is not connection:
+                raise TransportError("transport handshake socket ownership changed")
+            self._handshake_connection = None
             previous = self._connection
             self._connection = connection
             self._remote_identity = remote_identity
@@ -736,7 +748,7 @@ class TcpTransport:
             raise TransportError(
                 f"mutual TLS SSLContext is unavailable: {error}"
             ) from error
-        return context.wrap_socket(
+        secured_connection = context.wrap_socket(
             connection,
             server_side=server_side,
             server_hostname=(
@@ -744,7 +756,47 @@ class TcpTransport:
                 if server_side
                 else security.server_hostname or self.address.host
             ),
+            do_handshake_on_connect=False,
         )
+        self._replace_handshake_connection(connection, secured_connection)
+        try:
+            secured_connection.do_handshake()
+        except OSError:
+            self._clear_handshake_connection(secured_connection)
+            _wire.close_socket(secured_connection)
+            raise
+        return secured_connection
+
+    def _set_handshake_connection(self, connection: socket.socket) -> None:
+        with self._condition:
+            if self._state is not LinkState.CLOSED:
+                if self._handshake_connection is not None:
+                    raise TransportError("transport already owns a handshake socket")
+                self._handshake_connection = connection
+                return
+        _wire.close_socket(connection)
+        raise TransportClosed("transport closed before handshake")
+
+    def _replace_handshake_connection(
+        self,
+        previous: socket.socket,
+        connection: socket.socket,
+    ) -> None:
+        with self._condition:
+            if self._state is LinkState.CLOSED:
+                error = TransportClosed("transport closed during TLS setup")
+            elif self._handshake_connection is not previous:
+                error = TransportError("transport handshake socket ownership changed")
+            else:
+                self._handshake_connection = connection
+                return
+        _wire.close_socket(connection)
+        raise error
+
+    def _clear_handshake_connection(self, connection: socket.socket) -> None:
+        with self._condition:
+            if self._handshake_connection is connection:
+                self._handshake_connection = None
 
     def _drop_connection(
         self,
@@ -752,6 +804,8 @@ class TcpTransport:
         error: BaseException,
     ) -> None:
         with self._condition:
+            if self._handshake_connection is connection:
+                self._handshake_connection = None
             active = self._connection
             if active is not None and connection is not None and active is not connection:
                 # A writer can observe an error from the previous socket after the
