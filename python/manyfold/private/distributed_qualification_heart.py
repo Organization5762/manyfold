@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+from importlib.metadata import version as distribution_version
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
@@ -30,6 +31,20 @@ _HOT_DATA = {
     "sensor_sample",
 }
 _HASH_CHUNK_BYTES = 1024 * 1024
+_MESH_COUNT_KEYS = {
+    "node_a_first",
+    "node_a_reconnected",
+    "node_b_first",
+    "node_b_reconnected",
+}
+_MESH_STORY_KEYS = {
+    "discovery_candidate_untrusted_before_authentication",
+    "shutdown_clean",
+    "status_reported_loss_and_reconnect",
+    "subscriptions_restored",
+    "swim_loss_detected",
+    "transport_reconnected",
+}
 
 
 def run_heart_scenarios(
@@ -166,10 +181,10 @@ def _verify_mesh(value: dict[str, object]) -> dict[str, object]:
         value.get("authentication")
         == "machine_signer_enrollment_mutual_tls_identity_uri"
         and value.get("process_count") == 2
-        and navigation
-        and sensor
+        and set(navigation) == _MESH_COUNT_KEYS
+        and set(sensor) == _MESH_COUNT_KEYS
         and all(int(count) >= 1 for count in (*navigation.values(), *sensor.values()))
-        and story
+        and set(story) == _MESH_STORY_KEYS
         and all(flag is True for flag in story.values())
         and local == _HOT_TOPICS
         and not _list(value, "durable_delivery_topics")
@@ -278,7 +293,7 @@ def _verify_coordination(value: dict[str, object]) -> dict[str, object]:
     valid = (
         value.get("schema_version") == 1
         and installation.get("install_kind") == "wheel"
-        and installation.get("distribution_version") == "0.1.42"
+        and installation.get("distribution_version") == distribution_version("manyfold")
         and raft.get("node_count") == 3
         and raft.get("leader_changed") is True
         and raft.get("restarted_process_changed") is True

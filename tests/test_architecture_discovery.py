@@ -60,6 +60,16 @@ class ArchitectureDiscoveryTests(unittest.TestCase):
         self.assertEqual(len(report.failures), 1)
         self.assertIn("invalid resolved address", report.failures[0].message)
 
+    def test_dns_bounds_malformed_resolver_failures(self) -> None:
+        report = DnsDiscovery(
+            (DnsSeed("node-a.example", 7443),),
+            resolver=_ResolvedAddresses(tuple(f"invalid-{index}" for index in range(20))),
+            max_failures=3,
+        ).discover()
+
+        self.assertFalse(report.candidates)
+        self.assertEqual(len(report.failures), 3)
+
     def test_composite_discovery_deduplicates_and_bounds_candidates(self) -> None:
         first = PeerEndpoint("10.0.0.1", 7443)
         second = PeerEndpoint("10.0.0.2", 7443)
@@ -127,6 +137,24 @@ class ArchitectureDiscoveryTests(unittest.TestCase):
         )
         self.assertEqual(len(report.failures), 1)
         self.assertIn("invalid resolved address", report.failures[0].message)
+
+    def test_mdns_bounds_malformed_service_failures(self) -> None:
+        report = MdnsDiscovery(
+            resolver=_ResolvedDnsSd(
+                (
+                    DnsSdService(
+                        instance="node-a._manyfold._tcp.local.",
+                        target="node-a.local.",
+                        port=7443,
+                        addresses=tuple(f"invalid-{index}" for index in range(20)),
+                    ),
+                )
+            ),
+            max_failures=3,
+        ).discover()
+
+        self.assertFalse(report.candidates)
+        self.assertEqual(len(report.failures), 3)
 
     def test_composite_reports_one_source_failure_and_continues(self) -> None:
         endpoint = PeerEndpoint("10.0.0.1", 7443)

@@ -5,12 +5,20 @@ from __future__ import annotations
 import errno
 import json
 import os
+import platform
+import shutil
 import socket
 import subprocess
 import time
 from pathlib import Path
 
-from manyfold.architecture.discovery import DnsDiscovery, DnsSeed, PeerEndpoint
+from manyfold.architecture.discovery import (
+    DnsDiscovery,
+    DnsSdService,
+    DnsSeed,
+    MdnsDiscovery,
+    PeerEndpoint,
+)
 from manyfold.architecture.membership import (
     AuthenticatedPeerSession,
     MembershipConfig,
@@ -186,14 +194,15 @@ def _cluster_scenarios(
             },
             timeout_seconds,
         )
+        first_status = cluster.status(node_ids[0])
         results["first_node_boot"] = result(
             "first_node_boot",
-            first_ready,
+            first_ready and first_status.get("has_quorum") is False,
             "One production coordinator boots with identity-bound durable state "
             "without claiming a false three-node quorum.",
             evidence={
                 "process_id": first_pid,
-                "has_quorum": cluster.status(node_ids[0]).get("has_quorum"),
+                "has_quorum": first_status.get("has_quorum"),
             },
         )
 
@@ -249,14 +258,28 @@ def _cluster_scenarios(
             lambda: cluster.status(follower).get("has_quorum") is False,
             timeout_seconds,
         )
+        cluster.commit(
+            "qualification.partition",
+            {"phase": "during-loss"},
+            command_id="during-partition",
+            timeout_seconds=timeout_seconds,
+        )
         cluster.reconnect_node(follower)
-        cluster.wait_for_log_length(follower, 1, timeout_seconds=timeout_seconds)
+        healed_log = cluster.wait_for_log_length(
+            follower,
+            2,
+            timeout_seconds=timeout_seconds,
+        )
+        caught_up = [item["command_id"] for item in healed_log] == [
+            "before-loss",
+            "during-partition",
+        ]
         results["partition_and_asymmetric_loss"] = result(
             "partition_and_asymmetric_loss",
-            disconnected,
+            disconnected and caught_up,
             "A one-node asymmetric Raft disconnect loses quorum locally and catches "
             "up without process restart after healing.",
-            evidence={"partitioned_node": follower, "caught_up": True},
+            evidence={"partitioned_node": follower, "caught_up": caught_up},
         )
 
         leader_pid = cluster.process_id(leader)
@@ -273,7 +296,7 @@ def _cluster_scenarios(
         )
         results["leader_kill"] = result(
             "leader_kill",
-            replacement != leader and recovered["sequence"] == 2,
+            replacement != leader and recovered["sequence"] == 3,
             "A surviving quorum elects a different leader and commits after abrupt "
             "leader loss.",
             evidence={"killed": leader, "replacement": replacement},
@@ -281,14 +304,14 @@ def _cluster_scenarios(
         restarted_pid = cluster.start_node(leader)
         log = cluster.wait_for_log_length(
             leader,
-            2,
+            3,
             timeout_seconds=timeout_seconds,
         )
         results["process_restart"] = result(
             "process_restart",
             restarted_pid != leader_pid
             and [item["command_id"] for item in log]
-            == ["before-loss", "after-leader-kill"],
+            == ["before-loss", "during-partition", "after-leader-kill"],
             "A killed coordinator restarts with the same identity and catches up its "
             "durable committed log.",
             evidence={"old_pid": leader_pid, "new_pid": restarted_pid},
@@ -364,11 +387,11 @@ def _state_damage(
             len(
                 cluster.wait_for_log_length(
                     node,
-                    2,
+                    3,
                     timeout_seconds=timeout_seconds,
                 )
             )
-            >= 2
+            >= 3
             for node in node_ids
         )
         cluster.stop()
@@ -402,9 +425,13 @@ def _state_damage(
 
 def _discovery_scenario() -> ScenarioResult:
     try:
-        report = DnsDiscovery(
+        dns = DnsDiscovery(
             (DnsSeed("stale.example", 7443), DnsSeed("mixed.example", 7443)),
             resolver=_AddressResolver(),
+            max_candidates=4,
+        ).discover()
+        mdns = MdnsDiscovery(
+            resolver=_MdnsResolver(),
             max_candidates=4,
         ).discover()
         membership = MembershipTable(
@@ -429,9 +456,12 @@ def _discovery_scenario() -> ScenarioResult:
         )
         membership.close()
         passed = (
-            [candidate.endpoint.host for candidate in report.candidates]
+            [candidate.endpoint.host for candidate in dns.candidates]
             == ["192.0.2.10"]
-            and len(report.failures) == 2
+            and len(dns.failures) == 2
+            and [candidate.endpoint.host for candidate in mdns.candidates]
+            == ["192.0.2.11"]
+            and len(mdns.failures) == 1
             and stale.incarnation == 2
             and stale.endpoint.host == "127.0.0.2"
         )
@@ -442,9 +472,13 @@ def _discovery_scenario() -> ScenarioResult:
             "sources, and membership ignores stale incarnations.",
             evidence={
                 "candidates": [
-                    candidate.endpoint.host for candidate in report.candidates
+                    candidate.endpoint.host for candidate in dns.candidates
                 ],
-                "failures": [failure.message for failure in report.failures],
+                "failures": [failure.message for failure in dns.failures],
+                "mdns_candidates": [
+                    candidate.endpoint.host for candidate in mdns.candidates
+                ],
+                "mdns_failures": [failure.message for failure in mdns.failures],
                 "stale_incarnation_observed": stale.incarnation,
             },
         )
@@ -631,28 +665,38 @@ def _required_process_id(cluster: DevelopmentCluster, node_id: str) -> int:
 
 
 def _process_resources(process_id: int) -> dict[str, int | None]:
+    thread_column = "thcount" if platform.system() == "Darwin" else "nlwp"
     completed = subprocess.run(
-        ("ps", "-o", "rss=,thcount=", "-p", str(process_id)),
+        ("ps", "-o", f"rss=,{thread_column}=", "-p", str(process_id)),
         check=True,
         capture_output=True,
         text=True,
     )
     values = completed.stdout.split()
-    lsof = subprocess.run(
-        ("lsof", "-a", "-p", str(process_id), "-F", "f"),
+    file_descriptor_count = _file_descriptor_count(process_id)
+    return {
+        "rss_kib": int(values[0]) if values else None,
+        "thread_count": int(values[1]) if len(values) > 1 else None,
+        "file_descriptor_count": file_descriptor_count,
+    }
+
+
+def _file_descriptor_count(process_id: int) -> int | None:
+    proc_descriptors = Path("/proc") / str(process_id) / "fd"
+    if proc_descriptors.is_dir():
+        return sum(1 for _entry in proc_descriptors.iterdir())
+    lsof = shutil.which("lsof")
+    if lsof is None:
+        return None
+    completed = subprocess.run(
+        (lsof, "-a", "-p", str(process_id), "-F", "f"),
         check=False,
         capture_output=True,
         text=True,
     )
-    return {
-        "rss_kib": int(values[0]) if values else None,
-        "thread_count": int(values[1]) if len(values) > 1 else None,
-        "file_descriptor_count": (
-            sum(line.startswith("f") for line in lsof.stdout.splitlines())
-            if lsof.returncode == 0
-            else None
-        ),
-    }
+    if completed.returncode != 0:
+        return None
+    return sum(line.startswith("f") for line in completed.stdout.splitlines())
 
 
 def _soak_metrics(samples: list[dict[str, object]]) -> dict[str, object]:
@@ -695,23 +739,42 @@ class _AddressResolver:
         return ("not-an-ip", "192.0.2.10")
 
 
+class _MdnsResolver:
+    def resolve(
+        self,
+        service_type: str,
+        *,
+        timeout_seconds: float,
+    ) -> tuple[DnsSdService, ...]:
+        if service_type != "_manyfold._tcp.local." or timeout_seconds <= 0:
+            raise ValueError("invalid mDNS request")
+        return (
+            DnsSdService(
+                "node-b._manyfold._tcp.local.",
+                "node-b.local.",
+                7443,
+                ("not-an-ip", "192.0.2.11"),
+            ),
+        )
+
+
 class _OneShotDurableWriteFault(DurableWriteBoundary):
     def __init__(self, stage: str, error_number: int) -> None:
         self.stage = stage
         self.error_number = error_number
         self.calls: list[str] = []
 
-    def before_write(self, path: Path, operation: str) -> None:
-        self._raise_once("before_write", path, operation)
+    def before_write(self, path: Path) -> None:
+        self._raise_once("before_write", path)
 
-    def before_commit(self, path: Path, operation: str) -> None:
-        self._raise_once("before_commit", path, operation)
+    def before_commit(self, path: Path) -> None:
+        self._raise_once("before_commit", path)
 
-    def _raise_once(self, stage: str, path: Path, operation: str) -> None:
+    def _raise_once(self, stage: str, path: Path) -> None:
         if stage != self.stage or self.calls:
             return
         self.calls.append(stage)
         raise OSError(
             self.error_number,
-            f"injected {stage} failure for {operation} at {path}",
+            f"injected {stage} failure at {path}",
         )
