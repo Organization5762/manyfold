@@ -4,11 +4,26 @@ from __future__ import annotations
 
 import os
 import sqlite3
-from dataclasses import dataclass
-from enum import Enum
 from pathlib import Path
 from threading import Lock
 from typing import final
+from uuid import uuid4
+
+from ._transport_delivery_records import (
+    _CompactionResult,
+    _InboxDisposition,
+    _InboxRecord,
+    _InboxTransition,
+    _JournalStats,
+    _OutboxDisposition,
+    _OutboxInsertResult,
+    _OutboxRecord,
+    _OutboxReplayRecord,
+    _OutboxTransition,
+    _OutboxUsage,
+    _RecoveredTopicPolicy,
+    _TopicStats,
+)
 
 if os.name == "nt":
     import msvcrt
@@ -16,11 +31,16 @@ else:
     import fcntl
 
 _JOURNAL_APPLICATION_ID = 0x4D46444C
-_JOURNAL_SCHEMA_VERSION = 1
+_JOURNAL_SCHEMA_VERSION = 2
+_LEGACY_MAX_ATTEMPTS = 2_147_483_647
+_MESSAGE_ID_SEQUENCE_BLOCK = 1024
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS outbox (
     message_id TEXT PRIMARY KEY,
+    topic TEXT NOT NULL,
+    semantics TEXT NOT NULL CHECK(semantics IN ('append', 'latest')),
+    source_key TEXT,
     frame_kind INTEGER NOT NULL,
     channel TEXT NOT NULL,
     correlation_id TEXT,
@@ -28,12 +48,17 @@ CREATE TABLE IF NOT EXISTS outbox (
     created_at REAL NOT NULL,
     expires_at REAL NOT NULL,
     attempts INTEGER NOT NULL,
+    max_attempts INTEGER NOT NULL,
     next_attempt_at REAL NOT NULL,
     last_error TEXT,
     size_bytes INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS outbox_due
 ON outbox(next_attempt_at, created_at);
+CREATE INDEX IF NOT EXISTS outbox_topic
+ON outbox(topic, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS outbox_latest_slot
+ON outbox(topic, source_key) WHERE semantics = 'latest';
 CREATE TABLE IF NOT EXISTS inbox (
     message_id TEXT PRIMARY KEY,
     frame_kind INTEGER NOT NULL,
@@ -49,67 +74,34 @@ CREATE TABLE IF NOT EXISTS inbox (
     ack_confirmed INTEGER NOT NULL CHECK(ack_confirmed IN (0, 1)),
     size_bytes INTEGER NOT NULL
 );
-CREATE INDEX IF NOT EXISTS inbox_pending
+CREATE INDEX IF NOT EXISTS inbox_status
 ON inbox(status, created_at);
 CREATE INDEX IF NOT EXISTS inbox_ack_due
 ON inbox(status, ack_confirmed, next_ack_at);
+CREATE TABLE IF NOT EXISTS journal_metadata (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
 
 
 def _record_size(
     message_id: str,
+    topic: str,
+    source_key: str | None,
     channel: str,
     correlation_id: str | None,
     payload: bytes,
 ) -> int:
     return (
         len(message_id.encode("utf-8"))
+        + len(topic.encode("utf-8"))
+        + (0 if source_key is None else len(source_key.encode("utf-8")))
         + len(channel.encode("utf-8"))
         + (0 if correlation_id is None else len(correlation_id.encode("utf-8")))
         + len(payload)
-        + 128
+        + 160
     )
-
-
-class _InboxDisposition(str, Enum):
-    NEW = "new"
-    PENDING_DUPLICATE = "pending_duplicate"
-    ACKED_DUPLICATE = "acked_duplicate"
-
-
-@dataclass(frozen=True, slots=True)
-class _OutboxRecord:
-    message_id: str
-    frame_kind: int
-    channel: str
-    correlation_id: str | None
-    payload: bytes
-    attempts: int
-
-
-@dataclass(frozen=True, slots=True)
-class _InboxRecord:
-    message_id: str
-    frame_kind: int
-    channel: str
-    correlation_id: str | None
-    payload: bytes
-    delivery_attempt: int
-    ack_attempts: int = 0
-
-
-@dataclass(frozen=True, slots=True)
-class _JournalStats:
-    outbox_items: int
-    pending_inbox_items: int
-    acked_inbox_items: int
-    logical_bytes: int
-
-
-@dataclass(frozen=True, slots=True)
-class _CompactionResult:
-    expired_outbox_ids: tuple[str, ...]
-    expired_inbox_ids: tuple[str, ...]
 
 
 class _JournalError(RuntimeError):
@@ -117,7 +109,14 @@ class _JournalError(RuntimeError):
 
 
 class _JournalFull(_JournalError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        capacity: _OutboxUsage | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.capacity = capacity
 
 
 class _JournalConflict(_JournalError):
@@ -164,11 +163,21 @@ class _DeliveryJournal:
                 raise _JournalError(
                     f"{path} is not a ManyFold delivery journal"
                 )
-            if schema_version not in (0, _JOURNAL_SCHEMA_VERSION):
+            if schema_version not in (0, 1, _JOURNAL_SCHEMA_VERSION):
                 raise _JournalError(
                     "delivery journal schema version "
                     f"{schema_version} is incompatible with "
                     f"{_JOURNAL_SCHEMA_VERSION}"
+                )
+            integrity = tuple(
+                str(row[0])
+                for row in self._connection.execute(
+                    "PRAGMA quick_check(1)"
+                ).fetchall()
+            )
+            if integrity != ("ok",):
+                raise _JournalError(
+                    f"delivery journal integrity check failed: {integrity!r}"
                 )
             page_size = int(
                 self._connection.execute("PRAGMA page_size").fetchone()[0]
@@ -179,7 +188,33 @@ class _DeliveryJournal:
                     "max_storage_bytes is too small for the SQLite journal"
                 )
             self._connection.execute(f"PRAGMA max_page_count={max_pages}")
-            self._connection.executescript(_SCHEMA)
+            if schema_version == 1:
+                self._migrate_v1()
+            else:
+                self._connection.executescript(_SCHEMA)
+            self._connection.execute(
+                """
+                INSERT OR IGNORE INTO journal_metadata (key, value)
+                VALUES ('journal_id', ?)
+                """,
+                (uuid4().hex,),
+            )
+            self._connection.execute(
+                """
+                INSERT OR IGNORE INTO journal_metadata (key, value)
+                VALUES ('message_sequence', '0')
+                """
+            )
+            self._journal_id = str(
+                self._connection.execute(
+                    """
+                    SELECT value FROM journal_metadata
+                    WHERE key = 'journal_id'
+                    """
+                ).fetchone()[0]
+            )
+            self._next_message_sequence = 1
+            self._message_sequence_limit = 0
             self._connection.execute(
                 f"PRAGMA application_id={_JOURNAL_APPLICATION_ID}"
             )
@@ -210,6 +245,16 @@ class _DeliveryJournal:
                 self._owner_lock.close()
             raise
 
+    def next_message_id(self) -> str:
+        """Reserve one crash-stable, journal-scoped outbound message ID."""
+        with self._lock:
+            self._require_open()
+            if self._next_message_sequence > self._message_sequence_limit:
+                self._reserve_message_sequences()
+            sequence = self._next_message_sequence
+            self._next_message_sequence += 1
+        return f"{self._journal_id}-{sequence:016x}"
+
     def close(self) -> None:
         with self._lock:
             if self._closed:
@@ -227,9 +272,14 @@ class _DeliveryJournal:
         *,
         created_at: float,
         expires_at: float,
-    ) -> bool:
+        topic_item_limit: int,
+        topic_byte_limit: int,
+        soft_limit_ratio: float,
+    ) -> _OutboxInsertResult:
         size_bytes = _record_size(
             record.message_id,
+            record.topic,
+            record.source_key,
             record.channel,
             record.correlation_id,
             record.payload,
@@ -237,13 +287,17 @@ class _DeliveryJournal:
         with self._transaction() as connection:
             existing = connection.execute(
                 """
-                SELECT frame_kind, channel, correlation_id, payload
+                SELECT topic, semantics, source_key, frame_kind, channel,
+                       correlation_id, payload
                 FROM outbox WHERE message_id = ?
                 """,
                 (record.message_id,),
             ).fetchone()
             if existing is not None:
                 if existing != (
+                    record.topic,
+                    record.semantics,
+                    record.source_key,
                     record.frame_kind,
                     record.channel,
                     record.correlation_id,
@@ -252,45 +306,95 @@ class _DeliveryJournal:
                     raise _JournalConflict(
                         f"outbox message_id {record.message_id!r} has different content"
                     )
-                return False
-            self._require_capacity(
-                connection,
-                table="outbox",
-                item_limit=self._max_outbox_items,
-                added_bytes=size_bytes,
+                return _OutboxInsertResult(_OutboxDisposition.DEDUPLICATED)
+            replaced_message_id: str | None = None
+            if record.semantics == "latest":
+                existing_slot = connection.execute(
+                    """
+                    SELECT message_id FROM outbox
+                    WHERE topic = ? AND source_key = ? AND semantics = 'latest'
+                    """,
+                    (record.topic, record.source_key),
+                ).fetchone()
+                if existing_slot is not None:
+                    replaced_message_id = str(existing_slot[0])
+                    self._execute_write(
+                        connection,
+                        "DELETE FROM outbox WHERE message_id = ?",
+                        (replaced_message_id,),
+                    )
+            usage = self._projected_usage(
+                self._outbox_usage(connection, record.topic),
+                size_bytes,
+            )
+            should_compact = self._crosses_soft_limit(
+                usage,
+                topic_item_limit=topic_item_limit,
+                topic_byte_limit=topic_byte_limit,
+                soft_limit_ratio=soft_limit_ratio,
+            )
+            expired: tuple[_OutboxTransition, ...] = ()
+            if should_compact:
+                expired = self._delete_expired_outbox(connection, created_at)
+                if expired:
+                    usage = self._projected_usage(
+                        self._outbox_usage(connection, record.topic),
+                        size_bytes,
+                    )
+            self._require_outbox_capacity(
+                usage,
+                topic=record.topic,
+                topic_item_limit=topic_item_limit,
+                topic_byte_limit=topic_byte_limit,
             )
             self._execute_write(
                 connection,
                 """
                 INSERT INTO outbox (
-                    message_id, frame_kind, channel, correlation_id, payload,
-                    created_at, expires_at, attempts, next_attempt_at,
-                    last_error, size_bytes
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, NULL, ?)
+                    message_id, topic, semantics, source_key, frame_kind,
+                    channel, correlation_id, payload, created_at, expires_at,
+                    attempts, max_attempts, next_attempt_at, last_error,
+                    size_bytes
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, NULL, ?)
                 """,
                 (
                     record.message_id,
+                    record.topic,
+                    record.semantics,
+                    record.source_key,
                     record.frame_kind,
                     record.channel,
                     record.correlation_id,
                     record.payload,
                     created_at,
                     expires_at,
+                    record.max_attempts,
                     created_at,
                     size_bytes,
                 ),
             )
-            return True
+            return _OutboxInsertResult(
+                (
+                    _OutboxDisposition.REPLACED
+                    if replaced_message_id is not None
+                    else _OutboxDisposition.INSERTED
+                ),
+                replaced_message_id=replaced_message_id,
+                expired_outbox=expired,
+                soft_compaction=should_compact,
+                capacity=usage,
+            )
 
     def due_outbox(self, now: float, *, limit: int) -> tuple[_OutboxRecord, ...]:
         with self._lock:
             self._require_open()
             rows = self._connection.execute(
                 """
-                SELECT message_id, frame_kind, channel, correlation_id,
-                       payload, attempts
+                SELECT message_id, topic, semantics, source_key, frame_kind,
+                       channel, correlation_id, payload, attempts, max_attempts
                 FROM outbox
-                WHERE expires_at > ? AND next_attempt_at <= ?
+                WHERE expires_at > ? AND attempts < max_attempts
+                  AND next_attempt_at <= ?
                 ORDER BY created_at
                 LIMIT ?
                 """,
@@ -305,10 +409,10 @@ class _DeliveryJournal:
         next_attempt_at: float,
         error: str | None,
         increment_attempts: bool,
-    ) -> None:
+    ) -> bool:
         attempts = "attempts + 1" if increment_attempts else "attempts"
         with self._transaction() as connection:
-            self._execute_write(
+            cursor = self._execute_write(
                 connection,
                 f"""
                 UPDATE outbox
@@ -317,15 +421,37 @@ class _DeliveryJournal:
                 """,
                 (next_attempt_at, error, message_id),
             )
+            return cursor.rowcount > 0
 
-    def delete_outbox(self, message_id: str) -> bool:
+    def outbox_replay_records(self) -> tuple[_OutboxReplayRecord, ...]:
+        with self._lock:
+            self._require_open()
+            rows = self._connection.execute(
+                """
+                SELECT message_id, topic, source_key, correlation_id, attempts
+                FROM outbox ORDER BY created_at
+                """
+            ).fetchall()
+        return tuple(_OutboxReplayRecord(*row) for row in rows)
+
+    def delete_outbox(self, message_id: str) -> _OutboxRecord | None:
         with self._transaction() as connection:
-            cursor = self._execute_write(
+            row = connection.execute(
+                """
+                SELECT message_id, topic, semantics, source_key, frame_kind,
+                       channel, correlation_id, payload, attempts, max_attempts
+                FROM outbox WHERE message_id = ?
+                """,
+                (message_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            self._execute_write(
                 connection,
                 "DELETE FROM outbox WHERE message_id = ?",
                 (message_id,),
             )
-            return cursor.rowcount > 0
+            return _OutboxRecord(*row)
 
     def record_inbox(
         self,
@@ -333,9 +459,13 @@ class _DeliveryJournal:
         *,
         created_at: float,
         expires_at: float,
+        topic_item_limit: int,
+        topic_byte_limit: int,
     ) -> _InboxDisposition:
         size_bytes = _record_size(
             record.message_id,
+            record.channel,
+            None,
             record.channel,
             record.correlation_id,
             record.payload,
@@ -373,11 +503,16 @@ class _DeliveryJournal:
                     if existing[4] == "acked"
                     else _InboxDisposition.PENDING_DUPLICATE
                 )
-            self._require_capacity(
-                connection,
-                table="inbox",
-                item_limit=self._max_inbox_items,
-                added_bytes=size_bytes,
+            usage = self._projected_usage(
+                self._inbox_usage(connection, record.channel),
+                size_bytes,
+            )
+            self._require_inbox_capacity(usage)
+            self._require_inbox_topic_capacity(
+                usage,
+                topic=record.channel,
+                item_limit=topic_item_limit,
+                byte_limit=topic_byte_limit,
             )
             self._execute_write(
                 connection,
@@ -402,6 +537,11 @@ class _DeliveryJournal:
                 ),
             )
             return _InboxDisposition.NEW
+
+    def inbox_usage(self, topic: str) -> _OutboxUsage:
+        with self._lock:
+            self._require_open()
+            return self._inbox_usage(self._connection, topic)
 
     def pending_inbox(
         self,
@@ -522,23 +662,35 @@ class _DeliveryJournal:
 
     def compact(self, now: float) -> _CompactionResult:
         with self._transaction() as connection:
-            expired_outbox_ids = tuple(
-                str(row[0])
+            expired_outbox = self._delete_expired_outbox(connection, now)
+            exhausted_outbox = tuple(
+                _OutboxTransition(*row)
                 for row in connection.execute(
-                    "SELECT message_id FROM outbox WHERE expires_at <= ?",
+                    """
+                    SELECT message_id, topic, source_key, correlation_id,
+                           attempts
+                    FROM outbox
+                    WHERE expires_at > ? AND attempts >= max_attempts
+                    """,
                     (now,),
                 ).fetchall()
             )
-            expired_inbox_ids = tuple(
-                str(row[0])
+            expired_inbox = tuple(
+                _InboxTransition(*row)
                 for row in connection.execute(
-                    "SELECT message_id FROM inbox WHERE expires_at <= ?",
+                    """
+                    SELECT message_id, channel, correlation_id, delivery_attempt
+                    FROM inbox WHERE expires_at <= ?
+                    """,
                     (now,),
                 ).fetchall()
             )
             self._execute_write(
                 connection,
-                "DELETE FROM outbox WHERE expires_at <= ?",
+                """
+                DELETE FROM outbox
+                WHERE expires_at > ? AND attempts >= max_attempts
+                """,
                 (now,),
             )
             self._execute_write(
@@ -547,24 +699,241 @@ class _DeliveryJournal:
                 (now,),
             )
             connection.execute("PRAGMA incremental_vacuum(16)")
-            return _CompactionResult(expired_outbox_ids, expired_inbox_ids)
+            return _CompactionResult(
+                expired_outbox,
+                exhausted_outbox,
+                expired_inbox,
+            )
 
     def stats(self) -> _JournalStats:
         with self._lock:
             self._require_open()
-            outbox_items = self._count(self._connection, "outbox")
-            pending = int(
-                self._connection.execute(
-                    "SELECT COUNT(*) FROM inbox WHERE status = 'pending'"
+            return self._stats(self._connection)
+
+    def topic_stats(self, topic: str) -> _TopicStats:
+        with self._lock:
+            self._require_open()
+            outbox = self._connection.execute(
+                """
+                SELECT
+                    COUNT(*),
+                    COALESCE(
+                        SUM(CASE WHEN semantics = 'append' THEN 1 ELSE 0 END),
+                        0
+                    ),
+                    COALESCE(SUM(size_bytes), 0)
+                FROM outbox WHERE topic = ?
+                """,
+                (topic,),
+            ).fetchone()
+            inbox = self._connection.execute(
+                """
+                SELECT COUNT(*), COALESCE(SUM(size_bytes), 0)
+                FROM inbox WHERE channel = ?
+                """,
+                (topic,),
+            ).fetchone()
+        outbox_items = int(outbox[0])
+        append_outbox_items = int(outbox[1])
+        inbox_items = int(inbox[0])
+        return _TopicStats(
+            outbox_items,
+            append_outbox_items,
+            outbox_items - append_outbox_items,
+            inbox_items,
+            int(outbox[2]) + int(inbox[1]),
+        )
+
+    def validate_recovered_limits(
+        self,
+        *,
+        topic_policies: dict[str, _RecoveredTopicPolicy],
+        default_topic_policy: _RecoveredTopicPolicy,
+    ) -> None:
+        """Fail closed when a recovered journal exceeds current retention policy."""
+        with self._lock:
+            self._require_open()
+            stats = self._stats(self._connection)
+            if stats.outbox_items > self._max_outbox_items:
+                raise _JournalFull(
+                    f"recovered outbox has {stats.outbox_items} items; "
+                    f"current limit is {self._max_outbox_items}"
+                )
+            inbox_items = stats.pending_inbox_items + stats.acked_inbox_items
+            if inbox_items > self._max_inbox_items:
+                raise _JournalFull(
+                    f"recovered inbox has {inbox_items} items; "
+                    f"current limit is {self._max_inbox_items}"
+                )
+            if stats.logical_bytes > self._max_storage_bytes:
+                raise _JournalFull(
+                    "recovered delivery journal has "
+                    f"{stats.logical_bytes} logical bytes; current limit is "
+                    f"{self._max_storage_bytes}"
+                )
+            for topic, semantics, item_count, byte_count in self._connection.execute(
+                """
+                SELECT topic, semantics, COUNT(*), COALESCE(SUM(size_bytes), 0)
+                FROM outbox
+                GROUP BY topic, semantics
+                """
+            ):
+                topic_name = str(topic)
+                policy = topic_policies.get(
+                    topic_name,
+                    default_topic_policy,
+                )
+                if str(semantics) != policy.semantics:
+                    raise _JournalFull(
+                        f"recovered outbox topic {topic_name!r} has "
+                        f"{str(semantics)!r} rows; current policy requires "
+                        f"{policy.semantics!r}"
+                    )
+                item_limit, byte_limit = (
+                    policy.max_items,
+                    policy.max_bytes,
+                )
+                if int(item_count) > item_limit:
+                    raise _JournalFull(
+                        f"recovered outbox topic {topic_name!r} has "
+                        f"{int(item_count)} items; current limit is {item_limit}"
+                    )
+                if int(byte_count) > byte_limit:
+                    raise _JournalFull(
+                        f"recovered outbox topic {topic_name!r} has "
+                        f"{int(byte_count)} logical bytes; current limit is "
+                        f"{byte_limit}"
+                    )
+            for topic, source_key, item_count in self._connection.execute(
+                """
+                SELECT topic, source_key, COUNT(*)
+                FROM outbox
+                WHERE semantics = 'latest'
+                GROUP BY topic, source_key
+                """
+            ):
+                topic_name = str(topic)
+                policy = topic_policies.get(
+                    topic_name,
+                    default_topic_policy,
+                )
+                if not policy.latest_per_source and source_key not in (None, ""):
+                    raise _JournalFull(
+                        f"recovered latest topic {topic_name!r} has source "
+                        "keys but current policy has one shared latest slot"
+                    )
+                if policy.latest_per_source and not source_key:
+                    raise _JournalFull(
+                        f"recovered latest topic {topic_name!r} has no "
+                        "source key but current policy requires source slots"
+                    )
+                if int(item_count) > 1:
+                    source_detail = "" if source_key is None else f" {source_key!r}"
+                    raise _JournalFull(
+                        f"recovered latest topic {topic_name!r} source"
+                        f"{source_detail} has {int(item_count)} retained rows; "
+                        "current policy allows one"
+                    )
+            for topic, source_count in self._connection.execute(
+                """
+                SELECT topic, COUNT(DISTINCT source_key)
+                FROM outbox
+                WHERE semantics = 'latest'
+                GROUP BY topic
+                """
+            ):
+                topic_name = str(topic)
+                policy = topic_policies.get(
+                    str(topic),
+                    default_topic_policy,
+                )
+                if policy.latest_per_source and int(source_count) > policy.max_items:
+                    raise _JournalFull(
+                        f"recovered latest topic {topic_name!r} has "
+                        f"{int(source_count)} source slots; current limit is "
+                        f"{policy.max_items}"
+                    )
+            for topic, item_count, byte_count in self._connection.execute(
+                """
+                SELECT channel, COUNT(*), COALESCE(SUM(size_bytes), 0)
+                FROM inbox
+                GROUP BY channel
+                """
+            ):
+                topic_name = str(topic)
+                policy = topic_policies.get(
+                    topic_name,
+                    default_topic_policy,
+                )
+                if int(item_count) > policy.max_inbox_items:
+                    raise _JournalFull(
+                        f"recovered inbox topic {topic_name!r} has "
+                        f"{int(item_count)} items; current limit is "
+                        f"{policy.max_inbox_items}"
+                    )
+                if int(byte_count) > policy.max_inbox_bytes:
+                    raise _JournalFull(
+                        f"recovered inbox topic {topic_name!r} has "
+                        f"{int(byte_count)} logical bytes; current limit is "
+                        f"{policy.max_inbox_bytes}"
+                    )
+
+    def _migrate_v1(self) -> None:
+        self._connection.executescript(
+            f"""
+            BEGIN IMMEDIATE;
+            ALTER TABLE outbox ADD COLUMN topic TEXT;
+            ALTER TABLE outbox ADD COLUMN semantics TEXT NOT NULL DEFAULT 'append';
+            ALTER TABLE outbox ADD COLUMN source_key TEXT;
+            ALTER TABLE outbox ADD COLUMN max_attempts INTEGER NOT NULL
+                DEFAULT {_LEGACY_MAX_ATTEMPTS};
+            UPDATE outbox SET topic = channel WHERE topic IS NULL;
+            CREATE INDEX IF NOT EXISTS outbox_due
+                ON outbox(next_attempt_at, created_at);
+            CREATE INDEX IF NOT EXISTS outbox_topic
+                ON outbox(topic, created_at);
+            CREATE UNIQUE INDEX IF NOT EXISTS outbox_latest_slot
+                ON outbox(topic, source_key) WHERE semantics = 'latest';
+            CREATE INDEX IF NOT EXISTS inbox_status
+                ON inbox(status, created_at);
+            CREATE INDEX IF NOT EXISTS inbox_ack_due
+                ON inbox(status, ack_confirmed, next_ack_at);
+            CREATE TABLE IF NOT EXISTS journal_metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            PRAGMA user_version={_JOURNAL_SCHEMA_VERSION};
+            COMMIT;
+            """
+        )
+
+    def _reserve_message_sequences(self) -> None:
+        connection = self._connection
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            previous_limit = int(
+                connection.execute(
+                    """
+                    SELECT value FROM journal_metadata
+                    WHERE key = 'message_sequence'
+                    """
                 ).fetchone()[0]
             )
-            acked = int(
-                self._connection.execute(
-                    "SELECT COUNT(*) FROM inbox WHERE status = 'acked'"
-                ).fetchone()[0]
+            next_limit = previous_limit + _MESSAGE_ID_SEQUENCE_BLOCK
+            self._execute_write(
+                connection,
+                """
+                UPDATE journal_metadata SET value = ?
+                WHERE key = 'message_sequence'
+                """,
+                (str(next_limit),),
             )
-            logical_bytes = self._logical_bytes(self._connection)
-        return _JournalStats(outbox_items, pending, acked, logical_bytes)
+            connection.execute("COMMIT")
+        except BaseException:
+            connection.execute("ROLLBACK")
+            raise
+        self._next_message_sequence = previous_limit + 1
+        self._message_sequence_limit = next_limit
 
     def _require_capacity(
         self,
@@ -582,6 +951,210 @@ class _DeliveryJournal:
                 "delivery journal logical byte limit "
                 f"{self._max_storage_bytes} would be exceeded"
             )
+
+    def _require_outbox_capacity(
+        self,
+        usage: _OutboxUsage,
+        *,
+        topic: str,
+        topic_item_limit: int,
+        topic_byte_limit: int,
+    ) -> None:
+        if usage.items > self._max_outbox_items:
+            raise _JournalFull(
+                f"outbox item limit {self._max_outbox_items} is full",
+                capacity=usage,
+            )
+        if usage.logical_bytes > self._max_storage_bytes:
+            raise _JournalFull(
+                "delivery journal logical byte limit "
+                f"{self._max_storage_bytes} would be exceeded",
+                capacity=usage,
+            )
+        if usage.topic_items > topic_item_limit:
+            raise _JournalFull(
+                f"outbox topic {topic!r} item limit {topic_item_limit} is full",
+                capacity=usage,
+            )
+        if usage.topic_bytes > topic_byte_limit:
+            raise _JournalFull(
+                f"outbox topic {topic!r} byte limit {topic_byte_limit} "
+                "would be exceeded",
+                capacity=usage,
+            )
+
+    def _crosses_soft_limit(
+        self,
+        usage: _OutboxUsage,
+        *,
+        topic_item_limit: int,
+        topic_byte_limit: int,
+        soft_limit_ratio: float,
+    ) -> bool:
+        return any(
+            (
+                usage.items / self._max_outbox_items >= soft_limit_ratio,
+                usage.logical_bytes / self._max_storage_bytes >= soft_limit_ratio,
+                usage.topic_items / topic_item_limit >= soft_limit_ratio,
+                usage.topic_bytes / topic_byte_limit >= soft_limit_ratio,
+            )
+        )
+
+    def _delete_expired_outbox(
+        self,
+        connection: sqlite3.Connection,
+        now: float,
+    ) -> tuple[_OutboxTransition, ...]:
+        expired = tuple(
+            _OutboxTransition(*row)
+            for row in connection.execute(
+                """
+                SELECT message_id, topic, source_key, correlation_id, attempts
+                FROM outbox WHERE expires_at <= ?
+                """,
+                (now,),
+            ).fetchall()
+        )
+        if expired:
+            self._execute_write(
+                connection,
+                "DELETE FROM outbox WHERE expires_at <= ?",
+                (now,),
+            )
+        return expired
+
+    def _outbox_usage(
+        self,
+        connection: sqlite3.Connection,
+        topic: str,
+    ) -> _OutboxUsage:
+        row = connection.execute(
+            """
+            SELECT
+                COUNT(*),
+                COALESCE(SUM(size_bytes), 0),
+                COALESCE(SUM(CASE WHEN topic = ? THEN 1 ELSE 0 END), 0),
+                COALESCE(
+                    SUM(CASE WHEN topic = ? THEN size_bytes ELSE 0 END),
+                    0
+                )
+            FROM outbox
+            """,
+            (topic, topic),
+        ).fetchone()
+        inbox_bytes = int(
+            connection.execute(
+                "SELECT COALESCE(SUM(size_bytes), 0) FROM inbox"
+            ).fetchone()[0]
+        )
+        return _OutboxUsage(
+            items=int(row[0]),
+            logical_bytes=int(row[1]) + inbox_bytes,
+            topic_items=int(row[2]),
+            topic_bytes=int(row[3]),
+        )
+
+    def _projected_usage(
+        self,
+        usage: _OutboxUsage,
+        added_bytes: int,
+    ) -> _OutboxUsage:
+        return _OutboxUsage(
+            items=usage.items + 1,
+            logical_bytes=usage.logical_bytes + added_bytes,
+            topic_items=usage.topic_items + 1,
+            topic_bytes=usage.topic_bytes + added_bytes,
+        )
+
+    def _require_inbox_topic_capacity(
+        self,
+        usage: _OutboxUsage,
+        *,
+        topic: str,
+        item_limit: int,
+        byte_limit: int,
+    ) -> None:
+        if usage.topic_items > item_limit:
+            raise _JournalFull(
+                f"inbox topic {topic!r} item limit {item_limit} is full",
+                capacity=usage,
+            )
+        if usage.topic_bytes > byte_limit:
+            raise _JournalFull(
+                f"inbox topic {topic!r} byte limit {byte_limit} "
+                "would be exceeded",
+                capacity=usage,
+            )
+
+    def _require_inbox_capacity(self, usage: _OutboxUsage) -> None:
+        if usage.items > self._max_inbox_items:
+            raise _JournalFull(
+                f"inbox item limit {self._max_inbox_items} is full",
+                capacity=usage,
+            )
+        if usage.logical_bytes > self._max_storage_bytes:
+            raise _JournalFull(
+                "delivery journal logical byte limit "
+                f"{self._max_storage_bytes} would be exceeded",
+                capacity=usage,
+            )
+
+    def _inbox_usage(
+        self,
+        connection: sqlite3.Connection,
+        topic: str,
+    ) -> _OutboxUsage:
+        row = connection.execute(
+            """
+            SELECT COUNT(*), COALESCE(SUM(size_bytes), 0)
+            FROM inbox
+            """
+        ).fetchone()
+        topic_row = connection.execute(
+            """
+            SELECT COUNT(*), COALESCE(SUM(size_bytes), 0)
+            FROM inbox WHERE channel = ?
+            """,
+            (topic,),
+        ).fetchone()
+        outbox_bytes = int(
+            connection.execute(
+                "SELECT COALESCE(SUM(size_bytes), 0) FROM outbox"
+            ).fetchone()[0]
+        )
+        return _OutboxUsage(
+            items=int(row[0]),
+            logical_bytes=int(row[1]) + outbox_bytes,
+            topic_items=int(topic_row[0]),
+            topic_bytes=int(topic_row[1]),
+        )
+
+    def _stats(self, connection: sqlite3.Connection) -> _JournalStats:
+        outbox_items = self._count(connection, "outbox")
+        append_outbox_items = int(
+            connection.execute(
+                "SELECT COUNT(*) FROM outbox WHERE semantics = 'append'"
+            ).fetchone()[0]
+        )
+        latest_outbox_items = outbox_items - append_outbox_items
+        pending = int(
+            connection.execute(
+                "SELECT COUNT(*) FROM inbox WHERE status = 'pending'"
+            ).fetchone()[0]
+        )
+        acked = int(
+            connection.execute(
+                "SELECT COUNT(*) FROM inbox WHERE status = 'acked'"
+            ).fetchone()[0]
+        )
+        return _JournalStats(
+            outbox_items,
+            append_outbox_items,
+            latest_outbox_items,
+            pending,
+            acked,
+            self._logical_bytes(connection),
+        )
 
     def _logical_bytes(self, connection: sqlite3.Connection) -> int:
         outbox_bytes = int(
