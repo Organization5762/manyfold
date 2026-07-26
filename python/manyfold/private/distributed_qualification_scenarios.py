@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
+import socket
 import subprocess
 import time
 from pathlib import Path
@@ -15,14 +17,22 @@ from manyfold.architecture.membership import (
     MembershipTable,
 )
 from manyfold.architecture.transport import NodeIdentity
-from manyfold.cluster import ClusterConfig, DevelopmentCluster, MemberConfig
+from manyfold.cluster import (
+    ClusterConfig,
+    ControlCommand,
+    DevelopmentCluster,
+    DurableWriteBoundary,
+    MemberConfig,
+    PersistentRaftCoordinator,
+)
+from manyfold.cluster.consensus import CoordinatorUnavailableError
 from manyfold.cluster.network import (
     DISCONNECT_FAULT_LAYER,
     NetworkProtocolConfig,
 )
 
 from .distributed_qualification_heart import run_heart_scenarios
-from .distributed_qualification_types import ScenarioResult, blocked, failed, result
+from .distributed_qualification_types import ScenarioResult, failed, result
 
 MAX_RESOURCE_RSS_GROWTH_KIB = 64 * 1024
 MAX_RESOURCE_THREADS = 8
@@ -62,16 +72,9 @@ def run_release_scenarios(
     }
     discovery = _discovery_scenario()
     results[discovery.name] = discovery
-    results["disk_full_and_write_failure"] = blocked(
-        "disk_full_and_write_failure",
-        "PersistentRaftCoordinator has no explicit injectable durable-write "
-        "boundary for deterministic ENOSPC or partial-write qualification.",
-        durable_files=[
-            "committed.sqlite3",
-            "raft.journal",
-            "raft.snapshot",
-        ],
-        safe_injection_hook=None,
+    results["disk_full_and_write_failure"] = _storage_failure_scenario(
+        output_dir / "storage-faults",
+        timeout_seconds=timeout_seconds,
     )
     ordered = tuple(results[name] for name in _CORE_ORDER)
     return ordered + run_heart_scenarios(
@@ -453,6 +456,138 @@ def _discovery_scenario() -> ScenarioResult:
         )
 
 
+def _storage_failure_scenario(
+    root: Path,
+    *,
+    timeout_seconds: float,
+) -> ScenarioResult:
+    try:
+        evidence = {
+            stage: _run_storage_fault(
+                root / stage,
+                stage=stage,
+                error_number=error_number,
+                timeout_seconds=timeout_seconds,
+            )
+            for stage, error_number in (
+                ("before_write", errno.ENOSPC),
+                ("before_commit", errno.EIO),
+            )
+        }
+        passed = all(
+            item["unknown_outcome"]
+            and item["fault_calls"] == [item["stage"]]
+            and item["command_ids_after_retry"] == ["faulted-command"]
+            and item["command_ids_after_restart"] == ["faulted-command"]
+            and item["next_sequence"] == 2
+            for item in evidence.values()
+        )
+        return result(
+            "disk_full_and_write_failure",
+            passed,
+            "The real persistent Raft control log recovers exactly once from "
+            "ENOSPC before write and interruption after mutation before commit.",
+            evidence=evidence,
+        )
+    except Exception as error:
+        return failed(
+            "disk_full_and_write_failure",
+            "Persistent storage fault recovery failed",
+            error,
+        )
+
+
+def _run_storage_fault(
+    root: Path,
+    *,
+    stage: str,
+    error_number: int,
+    timeout_seconds: float,
+) -> dict[str, object]:
+    raft_port, api_port = _reserve_ports(2)
+    config = ClusterConfig(
+        (MemberConfig("node-1", "127.0.0.1", raft_port, api_port),)
+    )
+    fault = _OneShotDurableWriteFault(stage, error_number)
+    coordinator = PersistentRaftCoordinator(
+        config,
+        "node-1",
+        root,
+        durable_write_boundary=fault,
+    )
+    unknown_outcome = False
+    try:
+        if not _wait_for(
+            lambda: coordinator.status().role == "leader",
+            timeout_seconds,
+        ):
+            raise TimeoutError("storage-fault coordinator did not become leader")
+        try:
+            coordinator.commit(
+                ControlCommand(
+                    "faulted-command",
+                    "qualification.storage",
+                    {"stage": stage},
+                ),
+                timeout_seconds=min(2.0, timeout_seconds),
+            )
+        except CoordinatorUnavailableError as error:
+            unknown_outcome = "outcome may be unknown" in str(error)
+        if not _wait_for(
+            lambda: len(coordinator.read_log()) == 1,
+            timeout_seconds,
+        ):
+            raise TimeoutError("faulted command was not retried")
+        command_ids_after_retry = [
+            command.command_id for command in coordinator.read_log()
+        ]
+    finally:
+        coordinator.close()
+
+    reopened = PersistentRaftCoordinator(config, "node-1", root)
+    try:
+        if not _wait_for(
+            lambda: reopened.status().role == "leader",
+            timeout_seconds,
+        ):
+            raise TimeoutError("reopened coordinator did not become leader")
+        command_ids_after_restart = [
+            command.command_id for command in reopened.read_log()
+        ]
+        next_sequence = reopened.commit(
+            ControlCommand(
+                "after-recovery",
+                "qualification.storage",
+                {"recovered": True},
+            ),
+            timeout_seconds=timeout_seconds,
+        ).sequence
+    finally:
+        reopened.close()
+    return {
+        "stage": stage,
+        "errno": error_number,
+        "fault_calls": fault.calls,
+        "unknown_outcome": unknown_outcome,
+        "command_ids_after_retry": command_ids_after_retry,
+        "command_ids_after_restart": command_ids_after_restart,
+        "next_sequence": next_sequence,
+    }
+
+
+def _reserve_ports(count: int) -> tuple[int, ...]:
+    sockets: list[socket.socket] = []
+    try:
+        for _ in range(count):
+            stream = socket.socket()
+            stream.bind(("127.0.0.1", 0))
+            sockets.append(stream)
+        return tuple(int(stream.getsockname()[1]) for stream in sockets)
+    finally:
+        for stream in sockets:
+            stream.close()
+
+
 def _duplicate_config_rejected(config: ClusterConfig) -> bool:
     first, second, third = config.members
     try:
@@ -558,3 +693,25 @@ class _AddressResolver:
         if hostname == "stale.example":
             raise OSError("stale DNS seed")
         return ("not-an-ip", "192.0.2.10")
+
+
+class _OneShotDurableWriteFault(DurableWriteBoundary):
+    def __init__(self, stage: str, error_number: int) -> None:
+        self.stage = stage
+        self.error_number = error_number
+        self.calls: list[str] = []
+
+    def before_write(self, path: Path, operation: str) -> None:
+        self._raise_once("before_write", path, operation)
+
+    def before_commit(self, path: Path, operation: str) -> None:
+        self._raise_once("before_commit", path, operation)
+
+    def _raise_once(self, stage: str, path: Path, operation: str) -> None:
+        if stage != self.stage or self.calls:
+            return
+        self.calls.append(stage)
+        raise OSError(
+            self.error_number,
+            f"injected {stage} failure for {operation} at {path}",
+        )
