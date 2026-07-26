@@ -13,7 +13,7 @@ from manyfold.distributed_qualification import (
 
 
 class DistributedQualificationTests(unittest.TestCase):
-    def test_release_profile_runs_real_cluster_and_reports_missing_boundaries(
+    def test_release_profile_runs_real_cluster_and_reports_missing_heart_artifacts(
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -34,8 +34,7 @@ class DistributedQualificationTests(unittest.TestCase):
                     if item["status"] == "fail"
                 }
             )
-            self.assertEqual(scenarios["disk_full_and_write_failure"]["status"], "blocked")
-            for name in REQUIRED_SCENARIOS[:10] + ("deterministic_shutdown",):
+            for name in REQUIRED_SCENARIOS[:12]:
                 with self.subTest(name=name):
                     self.assertEqual(scenarios[name]["status"], "pass")
             verified = verify_qualification_artifact(output / "summary.json")
