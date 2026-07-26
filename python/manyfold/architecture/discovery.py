@@ -254,6 +254,7 @@ class DnsDiscovery:
         *,
         resolver: AddressResolver | None = None,
         max_candidates: int = DEFAULT_DISCOVERY_LIMIT,
+        max_failures: int = DEFAULT_DISCOVERY_LIMIT,
         max_seeds: int = DEFAULT_DISCOVERY_SOURCE_LIMIT,
     ) -> None:
         self._seeds = _bounded_sequence(
@@ -266,6 +267,7 @@ class DnsDiscovery:
             max_candidates,
             "max_candidates",
         )
+        self._max_failures = _require_positive_int(max_failures, "max_failures")
 
     @property
     def source_name(self) -> str:
@@ -287,9 +289,25 @@ class DnsDiscovery:
                         message=f"{type(error).__name__}: {error}",
                     )
                 )
+                if len(failures) == self._max_failures:
+                    return DiscoveryReport(tuple(candidates), tuple(failures))
                 continue
             for address in addresses:
-                endpoint = PeerEndpoint(_canonical_ip(address), seed.port)
+                try:
+                    endpoint = PeerEndpoint(_canonical_ip(address), seed.port)
+                except (TypeError, ValueError) as error:
+                    failures.append(
+                        DiscoveryFailure(
+                            source=f"dns:{seed.hostname}",
+                            message=(
+                                f"invalid resolved address {address!r}: "
+                                f"{type(error).__name__}: {error}"
+                            ),
+                        )
+                    )
+                    if len(failures) == self._max_failures:
+                        return DiscoveryReport(tuple(candidates), tuple(failures))
+                    continue
                 if endpoint in seen:
                     continue
                 seen.add(endpoint)
@@ -370,6 +388,7 @@ class MdnsDiscovery:
         resolver: DnsSdResolver | None = None,
         timeout_seconds: float = DEFAULT_MDNS_TIMEOUT_SECONDS,
         max_candidates: int = DEFAULT_DISCOVERY_LIMIT,
+        max_failures: int = DEFAULT_DISCOVERY_LIMIT,
     ) -> None:
         self._service_type = _canonical_dns_name(service_type)
         self._resolver = resolver or SystemMdnsResolver()
@@ -381,6 +400,7 @@ class MdnsDiscovery:
             max_candidates,
             "max_candidates",
         )
+        self._max_failures = _require_positive_int(max_failures, "max_failures")
 
     @property
     def source_name(self) -> str:
@@ -405,11 +425,27 @@ class MdnsDiscovery:
             )
 
         candidates: list[PeerCandidate] = []
+        failures: list[DiscoveryFailure] = []
         seen: set[PeerEndpoint] = set()
         for service in services:
             hosts = service.addresses or (service.target,)
             for host in hosts:
-                endpoint = PeerEndpoint(host, service.port)
+                try:
+                    endpoint_host = _canonical_ip(host) if service.addresses else host
+                    endpoint = PeerEndpoint(endpoint_host, service.port)
+                except (TypeError, ValueError) as error:
+                    failures.append(
+                        DiscoveryFailure(
+                            source=f"mdns:{service.instance}",
+                            message=(
+                                f"invalid resolved address {host!r}: "
+                                f"{type(error).__name__}: {error}"
+                            ),
+                        )
+                    )
+                    if len(failures) == self._max_failures:
+                        return DiscoveryReport(tuple(candidates), tuple(failures))
+                    continue
                 if endpoint in seen:
                     continue
                 seen.add(endpoint)
@@ -421,8 +457,8 @@ class MdnsDiscovery:
                     )
                 )
                 if len(candidates) == self._max_candidates:
-                    return DiscoveryReport(tuple(candidates))
-        return DiscoveryReport(tuple(candidates))
+                    return DiscoveryReport(tuple(candidates), tuple(failures))
+        return DiscoveryReport(tuple(candidates), tuple(failures))
 
 
 def _canonical_dns_name(name: str) -> str:
