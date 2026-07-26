@@ -135,6 +135,15 @@ uv run manyfold-heart-monitor-verify heart-lib_2026-monitor.json --min-samples 3
   confusion, update this file in the same change. Keep it short, concrete, and
   startup-oriented.
 
+## Release notes
+
+- Put the release notes in both the release PR and the created release
+  artifacts, including the GitHub Release body and packaged release-note file.
+- Link every catalogued claim of completed work to its merged PR or commit. Do
+  not describe work as shipped without traceable source provenance.
+- Limit “Why use this release” to one or two sentences. Spend the rest of the
+  notes cataloguing changes, fixes, boundaries, compatibility, and validation.
+
 ## Memory Lifecycle
 
 - Treat memory leaks as release blockers. Manyfold is a long-running runtime;
