@@ -69,9 +69,7 @@ def _decode_delivery_frame(
     max_message_bytes: int,
 ) -> "_DeliveryFrame":
     if message.kind is not FrameKind.PUBSUB or message.channel != DELIVERY_CHANNEL:
-        raise DeliveryProtocolError(
-            "durable delivery exclusively owns the transport receive stream"
-        )
+        raise DeliveryProtocolError("message is not a durable-delivery frame")
     if len(message.payload) < _DELIVERY_HEADER.size:
         raise DeliveryProtocolError("delivery frame is shorter than its header")
     (
@@ -135,9 +133,7 @@ def _decode_delivery_frame(
             ) from error
         _require_text(channel, "delivery channel")
         if delivery_attempt < 1:
-            raise DeliveryProtocolError(
-                "delivery DATA frame attempt must be positive"
-            )
+            raise DeliveryProtocolError("delivery DATA frame attempt must be positive")
     elif (
         frame_kind != 0
         or delivery_attempt != 0
@@ -145,17 +141,18 @@ def _decode_delivery_frame(
         or correlation_id is not None
     ):
         raise DeliveryProtocolError("delivery control frame contains message metadata")
-    if resolved_operation in (
-        _DeliveryOperation.ACK,
-        _DeliveryOperation.CONFIRM,
-    ) and payload_size:
+    if (
+        resolved_operation
+        in (
+            _DeliveryOperation.ACK,
+            _DeliveryOperation.CONFIRM,
+        )
+        and payload_size
+    ):
         raise DeliveryProtocolError(
             f"delivery {resolved_operation.name} frame contains a payload"
         )
-    if (
-        resolved_operation is _DeliveryOperation.NACK
-        and payload_size > _MAX_TEXT_BYTES
-    ):
+    if resolved_operation is _DeliveryOperation.NACK and payload_size > _MAX_TEXT_BYTES:
         raise DeliveryProtocolError("delivery NACK reason exceeds the protocol limit")
     return _DeliveryFrame(
         operation=resolved_operation,

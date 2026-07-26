@@ -156,6 +156,7 @@ from .transport_mesh import (
     MeshRouteError as MeshRouteError,
     MeshSubscription as MeshSubscription,
     MeshSubscriptionBackpressureError as MeshSubscriptionBackpressureError,
+    MeshTopicBinding as MeshTopicBinding,
     PeerDiscovery as PeerDiscovery,
     TransportMesh as TransportMesh,
 )
@@ -190,6 +191,14 @@ from .transport_rpc import (
     RpcShutdownTimeout as RpcShutdownTimeout,
     RpcTimeout as RpcTimeout,
 )
+from .transport_topics import (
+    DEFAULT_DURABLE_PEER_BYTES as DEFAULT_DURABLE_PEER_BYTES,
+    DEFAULT_DURABLE_PEER_ITEMS as DEFAULT_DURABLE_PEER_ITEMS,
+    DurableTopicDiagnostics as DurableTopicDiagnostics,
+    DurableTopicMode as DurableTopicMode,
+    DurableTopicPolicy as DurableTopicPolicy,
+    MeshDurabilityConfig as MeshDurabilityConfig,
+)
 from .values import (
     HistoricalValue as HistoricalValue,
     ImmutableValue as ImmutableValue,
@@ -218,6 +227,8 @@ __all__ = [
     "DEFAULT_DELIVERY_ITEM_LIMIT",
     "DEFAULT_DELIVERY_STORAGE_BYTES",
     "DEFAULT_DUPLICATE_WINDOW",
+    "DEFAULT_DURABLE_PEER_BYTES",
+    "DEFAULT_DURABLE_PEER_ITEMS",
     "DEFAULT_LOG_BACKUP_COUNT",
     "DEFAULT_LOG_FILE",
     "DEFAULT_LOG_MAX_BYTES",
@@ -245,6 +256,9 @@ __all__ = [
     "DnsSdService",
     "DnsSeed",
     "DurableDelivery",
+    "DurableTopicDiagnostics",
+    "DurableTopicMode",
+    "DurableTopicPolicy",
     "EnrollmentBundle",
     "EnrollmentPolicy",
     "EnrollmentRequest",
@@ -278,6 +292,7 @@ __all__ = [
     "MeshCapacityError",
     "MeshClosed",
     "MeshConfig",
+    "MeshDurabilityConfig",
     "MeshError",
     "MeshHealth",
     "MeshPeerHealth",
@@ -286,6 +301,7 @@ __all__ = [
     "MeshRouteError",
     "MeshSubscription",
     "MeshSubscriptionBackpressureError",
+    "MeshTopicBinding",
     "MetricHistogramRecord",
     "MetricsDestination",
     "MonotonicLogicalClock",

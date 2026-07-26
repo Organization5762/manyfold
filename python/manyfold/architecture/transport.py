@@ -181,8 +181,7 @@ class TcpTransport:
         if not isinstance(config, TransportConfig):
             raise ValueError("config must be a TransportConfig")
         if (
-            config.security.mode
-            is TransportSecurityMode.INSECURE_LOCAL_DEVELOPMENT
+            config.security.mode is TransportSecurityMode.INSECURE_LOCAL_DEVELOPMENT
             and not _is_loopback_host(address.host)
         ):
             raise ValueError(
@@ -200,9 +199,7 @@ class TcpTransport:
                         "listener mutual TLS SSLContext cannot check hostnames"
                     )
                 if config.security.server_hostname is not None:
-                    raise ValueError(
-                        "listener mutual TLS does not use server_hostname"
-                    )
+                    raise ValueError("listener mutual TLS does not use server_hostname")
         self.identity = identity
         self.address = address
         self.config = config
@@ -213,7 +210,7 @@ class TcpTransport:
             else _require_text(expected_peer_node_id, "expected_peer_node_id")
         )
         self._listener = listener
-        self._outbound: Queue[TransportMessage] = Queue(
+        self._outbound: Queue[_OutboundItem] = Queue(
             maxsize=config.outbound_queue_limit
         )
         self._inbound: Queue[TransportMessage | object] = Queue(
@@ -226,9 +223,7 @@ class TcpTransport:
         self._connection: socket.socket | None = None
         self._handshake_connection: socket.socket | None = None
         self._state = (
-            LinkState.LISTENING
-            if mode is _Mode.LISTENER
-            else LinkState.RECONNECTING
+            LinkState.LISTENING if mode is _Mode.LISTENER else LinkState.RECONNECTING
         )
         self._remote_identity: NodeIdentity | None = None
         self._generation = 0
@@ -243,14 +238,14 @@ class TcpTransport:
         self._bytes_sent = 0
         self._bytes_received = 0
         self._outbound_pending = 0
+        self._outbound_serial = 0
+        self._discarded_outbound_serials: dict[str, int] = {}
         self._last_error: str | None = None
         self._last_remote_sequence = 0
         self._remote_instance_id: str | None = None
         self._supervisor = Thread(
             target=(
-                self._run_listener
-                if mode is _Mode.LISTENER
-                else self._run_connector
+                self._run_listener if mode is _Mode.LISTENER else self._run_connector
             ),
             name=f"manyfold-transport-{identity.node_id}-supervisor",
             daemon=True,
@@ -324,9 +319,7 @@ class TcpTransport:
     @property
     def link_capabilities(self) -> LinkCapabilities:
         """Return graph Link semantics for the active TCP session."""
-        is_mutual_tls = (
-            self.config.security.mode is TransportSecurityMode.MUTUAL_TLS
-        )
+        is_mutual_tls = self.config.security.mode is TransportSecurityMode.MUTUAL_TLS
         return LinkCapabilities(
             ordered=True,
             reliable=True,
@@ -374,10 +367,13 @@ class TcpTransport:
         """Wait for a validated peer connection, returning false on timeout."""
         _require_optional_timeout(timeout)
         with self._condition:
-            return self._condition.wait_for(
-                lambda: self._state in (LinkState.CONNECTED, LinkState.CLOSED),
-                timeout=timeout,
-            ) and self._state is LinkState.CONNECTED
+            return (
+                self._condition.wait_for(
+                    lambda: self._state in (LinkState.CONNECTED, LinkState.CLOSED),
+                    timeout=timeout,
+                )
+                and self._state is LinkState.CONNECTED
+            )
 
     def send(self, message: TransportMessage, *, timeout: float = 0.0) -> None:
         """Queue one frame, applying bounded backpressure at the caller."""
@@ -415,11 +411,13 @@ class TcpTransport:
                 self._outbound_slots.release()
                 raise TransportClosed("transport is closed")
             self._outbound_pending += 1
+            self._outbound_serial += 1
+            outbound = _OutboundItem(message, self._outbound_serial)
             self._generation += 1
             self._changed_at = time()
             self._condition.notify_all()
             try:
-                self._outbound.put_nowait(message)
+                self._outbound.put_nowait(outbound)
             except Full as error:
                 self._outbound_pending -= 1
                 self._outbound_slots.release()
@@ -431,11 +429,15 @@ class TcpTransport:
         """Wait until every accepted outbound frame has reached the socket."""
         _require_optional_timeout(timeout)
         with self._condition:
-            return self._condition.wait_for(
-                lambda: self._outbound_pending == 0
-                or self._state is LinkState.CLOSED,
-                timeout=timeout,
-            ) and self._outbound_pending == 0
+            return (
+                self._condition.wait_for(
+                    lambda: (
+                        self._outbound_pending == 0 or self._state is LinkState.CLOSED
+                    ),
+                    timeout=timeout,
+                )
+                and self._outbound_pending == 0
+            )
 
     def receive(self, *, timeout: float | None = None) -> TransportMessage:
         """Receive one application frame or raise ``TimeoutError``."""
@@ -560,7 +562,7 @@ class TcpTransport:
                 self._drop_connection(connection, error)
 
     def _run_writer(self) -> None:
-        pending: TransportMessage | None = None
+        pending: _OutboundItem | None = None
         encoded: bytes | None = None
         sequence = 0
         last_write = monotonic()
@@ -575,11 +577,16 @@ class TcpTransport:
                 if connection is None:
                     self._connection_ready.clear()
                     continue
+                if pending is not None and self._is_outbound_discarded(pending):
+                    self._outbound.task_done()
+                    self._complete_outbound()
+                    pending = None
+                    encoded = None
+                    continue
                 if encoded is None:
                     if pending is None:
                         wait = max(
-                            self.config.heartbeat_interval
-                            - (monotonic() - last_write),
+                            self.config.heartbeat_interval - (monotonic() - last_write),
                             0.0,
                         )
                         try:
@@ -590,7 +597,7 @@ class TcpTransport:
                     if pending is not None:
                         sequence += 1
                         encoded = _encode_message(
-                            pending,
+                            pending.message,
                             sequence=sequence,
                             max_payload_bytes=self.config.max_payload_bytes,
                         )
@@ -662,7 +669,9 @@ class TcpTransport:
             stop=self._stop,
         )
         if frame.kind != _wire.HELLO_KIND or frame.sequence != 0:
-            raise TransportProtocolError("peer did not begin with an identity handshake")
+            raise TransportProtocolError(
+                "peer did not begin with an identity handshake"
+            )
         if frame.channel or frame.correlation_id:
             raise TransportProtocolError("identity handshake contains frame metadata")
         identity = _decode_identity(frame.payload)
@@ -752,9 +761,7 @@ class TcpTransport:
             connection,
             server_side=server_side,
             server_hostname=(
-                None
-                if server_side
-                else security.server_hostname or self.address.host
+                None if server_side else security.server_hostname or self.address.host
             ),
             do_handshake_on_connect=False,
         )
@@ -807,7 +814,11 @@ class TcpTransport:
             if self._handshake_connection is connection:
                 self._handshake_connection = None
             active = self._connection
-            if active is not None and connection is not None and active is not connection:
+            if (
+                active is not None
+                and connection is not None
+                and active is not connection
+            ):
                 # A writer can observe an error from the previous socket after the
                 # supervisor has already installed its replacement.
                 stale_connection = True
@@ -892,6 +903,22 @@ class TcpTransport:
             self._generation += 1
             self._changed_at = time()
             self._condition.notify_all()
+
+    def _discard_outbound(self, channel: str) -> None:
+        """Invalidate queued frames on one channel without discarding other work."""
+        channel = _require_text(channel, "channel")
+        with self._condition:
+            self._discarded_outbound_serials[channel] = self._outbound_serial
+            self._generation += 1
+            self._changed_at = time()
+            self._condition.notify_all()
+
+    def _is_outbound_discarded(self, item: _OutboundItem) -> bool:
+        with self._condition:
+            return item.serial <= self._discarded_outbound_serials.get(
+                item.message.channel,
+                0,
+            )
 
     def _notify_queue_depth_changed(self) -> None:
         with self._condition:
@@ -1012,9 +1039,7 @@ def _decode_message(frame: "_wire._WireFrame") -> TransportMessage:
     try:
         channel = frame.channel.decode("utf-8")
         correlation_id = (
-            None
-            if not frame.correlation_id
-            else frame.correlation_id.decode("utf-8")
+            None if not frame.correlation_id else frame.correlation_id.decode("utf-8")
         )
     except UnicodeDecodeError as error:
         raise TransportProtocolError("frame metadata is not valid UTF-8") from error
@@ -1027,7 +1052,16 @@ def _decode_message(frame: "_wire._WireFrame") -> TransportMessage:
             sequence=frame.sequence,
         )
     except (TypeError, ValueError) as error:
-        raise TransportProtocolError(f"peer frame metadata is invalid: {error}") from error
+        raise TransportProtocolError(
+            f"peer frame metadata is invalid: {error}"
+        ) from error
+
+
+@dataclass(frozen=True, slots=True)
+class _OutboundItem:
+    message: TransportMessage
+    serial: int
+
 
 class _Mode(Enum):
     LISTENER = "listener"

@@ -81,6 +81,68 @@ through authenticated mesh peers, not signed end to end.
 for peers with different TLS hostname or trust settings. Listener configuration
 is similarly explicit per `listen(...)` call.
 
+## Durable topic bindings
+
+Applications that need brief disconnect and restart recovery can bind a named,
+schema-validated `PubSub` directly to the mesh. The mesh remains the sole
+transport/session owner and its existing reader dispatches data, ACKs, retries,
+and subscription control.
+
+```python
+from dataclasses import dataclass
+from pathlib import Path
+
+from manyfold.architecture.pubsub import PubSub
+from manyfold.architecture.transport_topics import (
+    DurableTopicPolicy,
+    MeshDurabilityConfig,
+)
+
+@dataclass(frozen=True)
+class Navigation:
+    command: str
+    source: str
+
+navigation = PubSub(topic="navigation", schema=Navigation, schedule=False)
+mesh = TransportMesh(
+    identity,
+    connector_config=transport_config,
+    durability=MeshDurabilityConfig(Path("manyfold-delivery")),
+)
+mesh.bind(navigation, policy=DurableTopicPolicy.append())
+```
+
+Bindings follow the mesh lifecycle: create them before peers join and call
+`mesh.close()` once. `DurableTopicPolicy.append()` retains distinct,
+deduplicated commands in order. `DurableTopicPolicy.latest()` keeps one pending
+value for the topic, or one per bounded `key_field`, from enqueue time—not only
+after capacity pressure. Both policies expire stale rows and have strict item,
+byte, payload, and per-peer caps.
+
+Recommended initial policies deliberately favor freshness over replay:
+
+| Stream | Policy | Default operational TTL |
+| --- | --- | --- |
+| Navigation commands | append | 10 s |
+| Frame ticks | latest, one slot | one cadence, never above 50 ms |
+| Rendered frames | latest, one slot | measured 100–250 ms |
+| Microphone samples | latest per source | 500 ms |
+| Debug/input taps | latest per source | 500 ms |
+| Sensor snapshots | latest per source | 5 s |
+
+A frame tick is a clock impulse, not a historical sample: a newer tick replaces
+the pending tick immediately and an expired tick is never replayed. Latest
+topics similarly bound outage storage by active source count, at the cost of
+discarding intermediate samples. Append topics preserve commands until ACK or
+TTL, but reject new commands with `MeshBackpressureError` at a hard cap rather
+than silently losing retained work.
+
+`durable_topic_diagnostics()` reports retained rows and bytes plus replaced,
+expired, retried, acknowledged, hard-cap-rejected, and recovery-loaded counts
+per peer and topic. SQLite uses full-synchronous commits; each accepted publish
+therefore pays one durable transaction per interested peer. Expiry and
+incremental compaction run while connected or disconnected.
+
 ## Routing and bounds
 
 Every local subscription receives a unique ID. A node retains the first next hop
@@ -111,13 +173,11 @@ orphans state and the caller can retry `synchronize()` or disposal.
 
 ## Operational boundary
 
-This mesh owns its `TcpTransport` instances exclusively and consumes only
-PubSub frames. Coordinator RPC should use a separate transport owner or a future
-common frame dispatcher; sharing one link between independent readers would
-race.
+This mesh owns each `TcpTransport` and has exactly one receive loop per peer.
+Durable bindings share that dispatcher; applications must not attach
+`DurableDelivery` or another reader to a mesh-owned transport.
 
 The mesh deliberately accepts typed static discovery snapshots rather than
 embedding DNS, Consul, Kubernetes, or another control plane. The deployment
 owner must feed authoritative updates and provision one listener per expected
-inbound peer. Durable acknowledgement/replay remains the responsibility of the
-transport delivery layer rather than this routing index.
+inbound peer.

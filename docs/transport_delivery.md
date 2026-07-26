@@ -115,10 +115,14 @@ observation without retaining an event history.
 ## Operational boundary
 
 One `DurableDelivery` instance exclusively owns its transport receive stream
-and the journal lock enforces one live process per SQLite journal. Multi-peer
-routing, PubSub
-subscription propagation, coordinator RPC request state, authorization policy,
-and certificate operations remain separate layers.
+and the journal lock enforces one live process per SQLite journal. Existing
+point-to-point users can keep this API. New multi-peer applications should use
+`TransportMesh.bind(...)` with `DurableTopicPolicy`; the mesh reuses the durable
+journal/protocol contract while retaining sole ownership of every peer receive
+loop. Do not attach `DurableDelivery` to a mesh-owned transport.
+
+Coordinator RPC request state, authorization policy, certificate operations,
+and Raft-replicated world/device state remain separate layers.
 
 Operators must size TTL and dedupe retention from the longest supported outage,
 provision storage above the bounded worst case, alert on journal saturation and
