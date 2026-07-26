@@ -1,4 +1,4 @@
-"""Bounded durable topic policies for :class:`TransportMesh`."""
+"""Explicit journaled and live-latest policies for :class:`TransportMesh`."""
 
 from __future__ import annotations
 
@@ -7,130 +7,153 @@ from enum import Enum
 from pathlib import Path
 from typing import final
 
+from .transport_delivery import TopicDeliveryPolicy
+
 DEFAULT_DURABLE_PEER_ITEMS = 1024
 DEFAULT_DURABLE_PEER_BYTES = 64 * 1024 * 1024
 
 
 @final
-class DurableTopicMode(str, Enum):
-    """The two supported outage-retention semantics."""
+class TopicDeliveryClass(str, Enum):
+    """A binding's transport and retention contract."""
 
-    APPEND = "append"
-    LATEST = "latest"
+    DURABLE_APPEND = "durable_append"
+    DURABLE_LATEST = "durable_latest"
+    LIVE_LATEST = "live_latest"
 
 
 @final
 @dataclass(frozen=True, slots=True)
-class DurableTopicPolicy:
-    """Per-topic retention, pressure, and expiry limits."""
+class MeshTopicPolicy:
+    """One named topic's journaled or process-local latest delivery policy."""
 
-    mode: DurableTopicMode
-    ttl_seconds: float
-    soft_pending_items: int
-    hard_pending_items: int
-    soft_pending_bytes: int
-    hard_pending_bytes: int
+    topic: str
+    delivery_class: TopicDeliveryClass
     max_message_bytes: int
+    max_sources: int
     key_field: str | None = None
+    journal_policy: TopicDeliveryPolicy | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.mode, DurableTopicMode):
-            raise ValueError("mode must be a DurableTopicMode")
-        _positive_number(self.ttl_seconds, "ttl_seconds")
-        _positive_integer(self.soft_pending_items, "soft_pending_items")
-        _positive_integer(self.hard_pending_items, "hard_pending_items")
-        _positive_integer(self.soft_pending_bytes, "soft_pending_bytes")
-        _positive_integer(self.hard_pending_bytes, "hard_pending_bytes")
+        object.__setattr__(self, "topic", _text(self.topic, "topic"))
+        if not isinstance(self.delivery_class, TopicDeliveryClass):
+            raise ValueError("delivery_class must be a TopicDeliveryClass")
         _positive_integer(self.max_message_bytes, "max_message_bytes")
-        if self.soft_pending_items > self.hard_pending_items:
-            raise ValueError("soft_pending_items must not exceed hard_pending_items")
-        if self.soft_pending_bytes > self.hard_pending_bytes:
-            raise ValueError("soft_pending_bytes must not exceed hard_pending_bytes")
-        if self.max_message_bytes > self.hard_pending_bytes:
-            raise ValueError("max_message_bytes must not exceed hard_pending_bytes")
+        _positive_integer(self.max_sources, "max_sources")
         if self.key_field is not None:
             object.__setattr__(
                 self,
                 "key_field",
                 _text(self.key_field, "key_field"),
             )
-        if self.mode is DurableTopicMode.APPEND and self.key_field is not None:
-            raise ValueError("append topics do not accept key_field")
+        if self.retains_journal_rows:
+            if not isinstance(self.journal_policy, TopicDeliveryPolicy):
+                raise ValueError("durable mesh topics require journal_policy")
+            if self.journal_policy.topic != self.topic:
+                raise ValueError("journal_policy topic must match mesh topic")
+        elif self.journal_policy is not None:
+            raise ValueError("live latest topics cannot configure a journal policy")
 
     @classmethod
-    def append(
+    def commands(
         cls,
+        topic: str,
         *,
-        ttl_seconds: float = 10.0,
-        soft_pending_items: int = 192,
-        hard_pending_items: int = 256,
-        soft_pending_bytes: int = 768 * 1024,
-        hard_pending_bytes: int = 1024 * 1024,
+        max_items: int = 256,
+        max_bytes: int = 1024 * 1024,
         max_message_bytes: int = 16 * 1024,
-    ) -> "DurableTopicPolicy":
-        """Retain distinct commands in order until ACK, expiry, or a hard cap."""
+        ttl_seconds: float = 10.0,
+        max_attempts: int = 64,
+        soft_limit_ratio: float = 0.7,
+    ) -> "MeshTopicPolicy":
+        """Build bounded durable append with stable-key deduplication."""
         return cls(
-            DurableTopicMode.APPEND,
-            ttl_seconds,
-            soft_pending_items,
-            hard_pending_items,
-            soft_pending_bytes,
-            hard_pending_bytes,
+            topic,
+            TopicDeliveryClass.DURABLE_APPEND,
             max_message_bytes,
+            max_items,
+            journal_policy=TopicDeliveryPolicy.commands(
+                topic,
+                max_items=max_items,
+                max_bytes=max_bytes,
+                ttl_seconds=ttl_seconds,
+                max_attempts=max_attempts,
+                soft_limit_ratio=soft_limit_ratio,
+            ),
         )
 
     @classmethod
     def latest(
         cls,
+        topic: str,
         *,
+        max_sources: int,
+        max_bytes: int,
+        max_message_bytes: int = 512 * 1024,
         ttl_seconds: float,
-        max_keys: int = 1,
-        soft_pending_bytes: int = 512 * 1024,
-        hard_pending_bytes: int = 1024 * 1024,
+        max_attempts: int = 4,
+        soft_limit_ratio: float = 0.5,
+        key_field: str | None = None,
+    ) -> "MeshTopicPolicy":
+        """Build bounded durable latest-per-source delivery."""
+        return cls(
+            topic,
+            TopicDeliveryClass.DURABLE_LATEST,
+            max_message_bytes,
+            max_sources,
+            key_field,
+            TopicDeliveryPolicy.latest(
+                topic,
+                max_sources=max_sources,
+                max_bytes=max_bytes,
+                ttl_seconds=ttl_seconds,
+                max_attempts=max_attempts,
+                soft_limit_ratio=soft_limit_ratio,
+            ),
+        )
+
+    @classmethod
+    def live_latest(
+        cls,
+        topic: str,
+        *,
+        max_sources: int = 1,
         max_message_bytes: int = 512 * 1024,
         key_field: str | None = None,
-    ) -> "DurableTopicPolicy":
-        """Keep one pending value for the topic or for each bounded key."""
-        _positive_integer(max_keys, "max_keys")
+    ) -> "MeshTopicPolicy":
+        """Build non-journaled one-slot-per-source reconnect resynchronization."""
         return cls(
-            DurableTopicMode.LATEST,
-            ttl_seconds,
-            max_keys,
-            max_keys,
-            soft_pending_bytes,
-            hard_pending_bytes,
+            topic,
+            TopicDeliveryClass.LIVE_LATEST,
             max_message_bytes,
+            max_sources,
             key_field,
         )
+
+    @property
+    def retains_journal_rows(self) -> bool:
+        """Return whether this policy may persist delivery rows."""
+        return self.delivery_class is not TopicDeliveryClass.LIVE_LATEST
 
 
 @final
 @dataclass(frozen=True, slots=True)
 class MeshDurabilityConfig:
-    """Per-peer journal, retry, dedupe, and compaction bounds."""
+    """Per-peer durable journal and retry bounds."""
 
     journal_directory: Path
-    soft_peer_items: int = 768
     hard_peer_items: int = DEFAULT_DURABLE_PEER_ITEMS
-    soft_peer_bytes: int = 48 * 1024 * 1024
     hard_peer_bytes: int = DEFAULT_DURABLE_PEER_BYTES
     dedupe_retention_seconds: float = 10.0
     retry_initial_seconds: float = 0.02
     retry_multiplier: float = 1.5
     retry_max_seconds: float = 0.25
-    compaction_interval_seconds: float = 0.1
 
     def __post_init__(self) -> None:
         if not isinstance(self.journal_directory, Path):
             raise ValueError("journal_directory must be a pathlib.Path")
-        _positive_integer(self.soft_peer_items, "soft_peer_items")
         _positive_integer(self.hard_peer_items, "hard_peer_items")
-        _positive_integer(self.soft_peer_bytes, "soft_peer_bytes")
         _positive_integer(self.hard_peer_bytes, "hard_peer_bytes")
-        if self.soft_peer_items > self.hard_peer_items:
-            raise ValueError("soft_peer_items must not exceed hard_peer_items")
-        if self.soft_peer_bytes > self.hard_peer_bytes:
-            raise ValueError("soft_peer_bytes must not exceed hard_peer_bytes")
         _positive_number(
             self.dedupe_retention_seconds,
             "dedupe_retention_seconds",
@@ -138,10 +161,6 @@ class MeshDurabilityConfig:
         _positive_number(self.retry_initial_seconds, "retry_initial_seconds")
         _positive_number(self.retry_multiplier, "retry_multiplier")
         _positive_number(self.retry_max_seconds, "retry_max_seconds")
-        _positive_number(
-            self.compaction_interval_seconds,
-            "compaction_interval_seconds",
-        )
         if self.retry_multiplier < 1:
             raise ValueError("retry_multiplier must be at least 1")
         if self.retry_max_seconds < self.retry_initial_seconds:
@@ -151,19 +170,17 @@ class MeshDurabilityConfig:
 @final
 @dataclass(frozen=True, slots=True)
 class DurableTopicDiagnostics:
-    """Bounded durable-topic counters and retained rows."""
+    """Per-topic durable transition counters across current peers."""
 
     topic: str
-    mode: DurableTopicMode
+    delivery_class: TopicDeliveryClass
+    retains_journal_rows: bool
     outbox_items: int
-    pending_inbox_items: int
-    acked_inbox_items: int
-    logical_bytes: int
-    replaced: int
+    coalesced: int
     expired: int
     retried: int
     acknowledged: int
-    hard_cap_rejected: int
+    storage_rejections: int
     recovery_loaded_rows: int
 
 
@@ -187,7 +204,7 @@ __all__ = [
     "DEFAULT_DURABLE_PEER_BYTES",
     "DEFAULT_DURABLE_PEER_ITEMS",
     "DurableTopicDiagnostics",
-    "DurableTopicMode",
-    "DurableTopicPolicy",
     "MeshDurabilityConfig",
+    "MeshTopicPolicy",
+    "TopicDeliveryClass",
 ]

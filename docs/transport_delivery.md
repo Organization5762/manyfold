@@ -126,6 +126,12 @@ latency makes older frames useless. Generic `latest()` policies require an
 explicit `source`, making microphone, debug, input, and sensor coalescing
 independent per producer.
 
+These point-to-point journal profiles remain available for existing
+`DurableDelivery` callers. Mesh and Heart bindings must use
+`MeshTopicPolicy.live_latest()` for frame ticks, rendered frames, audio, and
+debug streams so those high-rate topics never create journal rows or restart
+backlogs.
+
 Replacement deletes the previous latest row inside the same `BEGIN IMMEDIATE`
 transaction before checking topic and peer capacity. A replacement can
 therefore succeed at a one-item hard cap. If the new row is too large or SQLite
@@ -195,19 +201,21 @@ Pass an optional `observer` to `DurableDelivery` when a caller such as the mesh
 must publish message-level lifecycle telemetry. The callback receives immutable
 `DeliveryEvent` values with a process-monotonic sequence, timestamp, kind,
 message ID, raw topic, source, correlation ID, attempt, optional related ID,
-detail, and typed `DeliveryCapacity` evidence when applicable.
+detail, terminal-outcome marker, and typed `DeliveryCapacity` evidence when
+applicable.
 `DeliveryEventKind` distinguishes `ENQUEUED`, `COALESCED`, `DEDUPLICATED`,
 `DROPPED`, `DUPLICATE_SUPPRESSED`, `EXPIRED`, `RETRY_SCHEDULED`, `SENT`,
-`SOFT_WATERMARK`, `ACKNOWLEDGED`, and `REPLAYED`. A coalescing event relates the
-new ID to the replaced ID; duplicate suppression identifies the exact inbound
-ID/topic/correlation outcome; replay events identify rows recovered when the
-journal opens. Soft-watermark and capacity-rejection events carry projected
-peer/topic item and byte use beside the corresponding soft ratio and hard caps.
+`SOFT_WATERMARK`, `SOFT_WATERMARK_RECOVERED`, `ACKNOWLEDGED`, and `REPLAYED`.
+A coalescing event relates the new ID to the replaced ID; duplicate suppression
+identifies the exact inbound ID/topic/correlation outcome; replay events
+identify rows recovered when the journal opens. Soft-watermark and
+capacity-rejection events carry projected peer/topic item and byte use beside
+the corresponding soft ratio and hard caps.
 
 Events are synchronous observations and are not retained by the delivery layer.
-Worker and caller threads can invoke the observer concurrently, so observers
-must use the event sequence for ordering and return quickly. Observer failures
-do not roll back or alter delivery; `last_error` records the failure. This keeps
+Worker and caller threads can originate events; delivery serializes observer
+calls in sequence order. Observers must return quickly. Observer failures do
+not roll back or alter delivery; `last_error` records the failure. This keeps
 typed mesh lifecycle publication separate from journal correctness and avoids
 inferring message transitions from aggregate health counters.
 
@@ -224,16 +232,16 @@ It reports append and latest-slot throughput, p50/p95 commit latency, logical
 bytes, retained rows, expected retained rows, and main database file size. It
 fails if latest retention exceeds one row per source. Results are environment
 specific; use the target filesystem and payload distribution for capacity
-decisions. Set `--latest-sources 1` to model the single shared frame-tick slot
-at Heart's 1,000-ticks/s ceiling; increase it to validate debug/input source
-cardinality.
+decisions. This measures the journal primitive only; it is not a recommended
+Heart frame path. Validate Heart's 1,000-ticks/s and 500-rendered-frames/s
+workload through non-journaled mesh live-latest bindings.
 
 ## Operational boundary
 
 One `DurableDelivery` instance exclusively owns its transport receive stream
 and the journal lock enforces one live process per SQLite journal. Existing
 point-to-point users can keep this API. New multi-peer applications should use
-`TransportMesh.bind(...)` with `DurableTopicPolicy`; the mesh reuses the durable
+`TransportMesh.bind(...)` with `MeshTopicPolicy`; the mesh reuses the durable
 journal/protocol contract while retaining sole ownership of every peer receive
 loop. Do not attach `DurableDelivery` to a mesh-owned transport.
 

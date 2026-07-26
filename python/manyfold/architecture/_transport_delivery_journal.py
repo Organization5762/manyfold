@@ -798,6 +798,30 @@ class _DeliveryJournal:
             logical_bytes,
         )
 
+    def outbox_usage(self, topic: str) -> _OutboxUsage:
+        """Return current peer and topic outbox use under the journal lock."""
+        with self._lock:
+            self._require_open()
+            return self._outbox_usage(self._connection, topic)
+
+    def topic_row_count(self, topic: str) -> int:
+        """Return current outbox and inbox rows for one application topic."""
+        with self._lock:
+            self._require_open()
+            outbox = int(
+                self._connection.execute(
+                    "SELECT COUNT(*) FROM outbox WHERE topic = ?",
+                    (topic,),
+                ).fetchone()[0]
+            )
+            inbox = int(
+                self._connection.execute(
+                    "SELECT COUNT(*) FROM inbox WHERE channel = ?",
+                    (topic,),
+                ).fetchone()[0]
+            )
+            return outbox + inbox
+
     def _migrate_v1(self) -> None:
         self._connection.executescript(
             f"""

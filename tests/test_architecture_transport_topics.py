@@ -11,6 +11,7 @@ from threading import enumerate as enumerate_threads
 
 from manyfold.architecture.pubsub import PubSub
 from manyfold.architecture.transport import (
+    LinkState,
     NodeIdentity,
     ReconnectPolicy,
     TcpAddress,
@@ -19,14 +20,15 @@ from manyfold.architecture.transport import (
 )
 from manyfold.architecture.transport_mesh import (
     MeshBackpressureError,
+    MeshLifecycleKind,
     MeshRouteError,
     PeerDiscovery,
     TransportMesh,
 )
 from manyfold.architecture.transport_topics import (
-    DurableTopicMode,
-    DurableTopicPolicy,
     MeshDurabilityConfig,
+    MeshTopicPolicy,
+    TopicDeliveryClass,
 )
 
 
@@ -51,22 +53,27 @@ class DurableTransportTopicTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "explicit schema"):
             mesh.bind(
                 PubSub(topic="untyped", schedule=False),
-                policy=DurableTopicPolicy.append(),
+                policy=MeshTopicPolicy.commands("untyped"),
             )
         typed = PubSub(topic="sensor", schema=_Event, schedule=False)
         with self.assertRaisesRegex(ValueError, "not declared"):
             mesh.bind(
                 typed,
-                policy=DurableTopicPolicy.latest(
+                policy=MeshTopicPolicy.latest(
+                    "sensor",
                     ttl_seconds=5.0,
+                    max_sources=8,
+                    max_bytes=1024,
                     key_field="missing",
                 ),
             )
         mesh.bind(
             typed,
-            policy=DurableTopicPolicy.latest(
+            policy=MeshTopicPolicy.latest(
+                "sensor",
                 ttl_seconds=5.0,
-                max_keys=8,
+                max_sources=8,
+                max_bytes=1024,
                 key_field="source",
             ),
         )
@@ -75,18 +82,23 @@ class DurableTransportTopicTests(unittest.TestCase):
         with self.assertRaisesRegex(MeshRouteError, "already bound"):
             mesh.bind(
                 typed,
-                policy=DurableTopicPolicy.latest(ttl_seconds=5.0),
+                policy=MeshTopicPolicy.latest(
+                    "sensor",
+                    ttl_seconds=5.0,
+                    max_sources=1,
+                    max_bytes=1024,
+                ),
             )
 
-    def test_frame_tick_policy_is_one_slot_with_a_fifty_millisecond_ceiling(
+    def test_frame_tick_policy_is_one_non_journaled_slot(
         self,
     ) -> None:
-        policy = DurableTopicPolicy.latest(ttl_seconds=0.05)
-        self.assertEqual(policy.soft_pending_items, 1)
-        self.assertEqual(policy.hard_pending_items, 1)
-        self.assertEqual(policy.ttl_seconds, 0.05)
+        policy = MeshTopicPolicy.live_latest("heart.frame_ticks")
+        self.assertEqual(policy.max_sources, 1)
+        self.assertFalse(policy.retains_journal_rows)
+        self.assertEqual(policy.delivery_class, TopicDeliveryClass.LIVE_LATEST)
         with self.assertRaisesRegex(ValueError, "positive"):
-            DurableTopicPolicy.latest(ttl_seconds=0.0)
+            MeshTopicPolicy.live_latest("heart.frame_ticks", max_sources=0)
 
     def test_three_peer_append_latest_partition_recovery_and_shutdown(self) -> None:
         mesh_a, topics_a, addresses = self._hub("a", ("b", "c"))
@@ -118,9 +130,9 @@ class DurableTransportTopicTests(unittest.TestCase):
         self.assertTrue(
             _wait_for(
                 lambda: (
-                    mesh_a.health().remote_subscriptions == 6
-                    and mesh_b.health().remote_subscriptions == 6
-                    and mesh_c.health().remote_subscriptions == 6
+                    mesh_a.health().remote_subscriptions == 8
+                    and mesh_b.health().remote_subscriptions == 8
+                    and mesh_c.health().remote_subscriptions == 8
                 ),
                 timeout=3.0,
             )
@@ -157,30 +169,61 @@ class DurableTransportTopicTests(unittest.TestCase):
                 peer for peer in mesh_a.peer_health() if peer.node_id == "c"
             ).interested_topics,
         )
-        for value in range(100):
+        self.assertTrue(
+            _wait_for(
+                lambda: next(
+                    peer for peer in mesh_a.peer_health() if peer.node_id == "c"
+                ).link.state
+                is not LinkState.CONNECTED,
+                timeout=3.0,
+            )
+        )
+        for value in range(500):
             topics_a["rendered"].publish(_Event(value, "display"))
+        for value in range(1000):
+            topics_a["tick"].publish(_Event(value, "clock"))
         frame_diagnostics = _diagnostic(mesh_a, "rendered")
-        self.assertLessEqual(frame_diagnostics.outbox_items, 2)
-        self.assertGreaterEqual(frame_diagnostics.replaced, 99)
+        self.assertEqual(frame_diagnostics.outbox_items, 0)
+        self.assertFalse(frame_diagnostics.retains_journal_rows)
+        self.assertFalse(_diagnostic(mesh_a, "tick").retains_journal_rows)
 
         mesh_c.apply_discovery((PeerDiscovery("a", addresses["c"]),))
         self.assertTrue(
             _wait_for(
-                lambda: observed_c.count(("rendered", 99)) == 1,
+                lambda: (
+                    observed_c.count(("rendered", 499)) == 1
+                    and observed_c.count(("tick", 999)) == 1
+                ),
                 timeout=3.0,
-            )
+            ),
+            (
+                observed_c,
+                mesh_a.peer_health(),
+                mesh_c.peer_health(),
+                mesh_a.lifecycle_events(),
+                mesh_c.lifecycle_events(),
+            ),
         )
         self.assertFalse(
-            any(kind == "rendered" and value < 99 for kind, value in observed_c),
+            any(
+                kind == "rendered" and value < 499
+                for kind, value in observed_c
+            ),
+            observed_c,
+        )
+        self.assertFalse(
+            any(kind == "tick" and value < 999 for kind, value in observed_c),
             observed_c,
         )
 
         mesh_c.remove_peer("a")
-        topics_a["tick"].publish(_Event(100, "clock"))
+        topics_a["tick"].publish(_Event(1000, "clock"))
         time.sleep(0.12)
         mesh_c.apply_discovery((PeerDiscovery("a", addresses["c"]),))
-        time.sleep(0.2)
-        self.assertNotIn(("tick", 100), observed_c)
+        self.assertTrue(
+            _wait_for(lambda: ("tick", 1000) in observed_c, timeout=3.0),
+            (observed_c, mesh_a.peer_health(), mesh_c.peer_health()),
+        )
 
         mesh_a.close()
         mesh_b.close()
@@ -198,12 +241,183 @@ class DurableTransportTopicTests(unittest.TestCase):
             )
         )
 
+    def test_lifecycle_orders_disconnect_retry_reconnect_and_sender_ack(
+        self,
+    ) -> None:
+        mesh_a, topics_a, addresses = self._hub("a", ("b",))
+        lifecycle = mesh_a.subscribe_lifecycle()
+        self.addCleanup(lifecycle.dispose)
+        mesh_b, topics_b = self._spoke("b", "a", addresses["b"])
+        observed_navigation: list[int] = []
+        observed_sensor: list[int] = []
+        subscriptions = (
+            topics_b["navigation"].subscribe(
+                lambda row: observed_navigation.append(int(row.value))
+            ),
+            topics_b["sensor"].subscribe(
+                lambda row: observed_sensor.append(int(row.value))
+            ),
+        )
+        self.addCleanup(
+            lambda: [subscription.dispose() for subscription in subscriptions]
+        )
+        self.assertTrue(
+            _wait_for(
+                lambda: mesh_a.health().remote_subscriptions == 4,
+                timeout=3.0,
+            )
+        )
+
+        self.assertTrue(mesh_b.remove_peer("a"))
+        self.assertTrue(
+            _wait_for(
+                lambda: _has_lifecycle(
+                    mesh_a,
+                    MeshLifecycleKind.PEER_RECONNECTING,
+                    peer_node_id="b",
+                ),
+                timeout=3.0,
+            )
+        )
+        for value in range(3):
+            topics_a["navigation"].publish(
+                _Event(value, "controller"),
+                key=f"navigation-offline-{value}",
+            )
+        topics_a["sensor"].publish(
+            _Event(1, "imu"),
+            key="sensor-reading-1",
+        )
+        topics_a["sensor"].publish(
+            _Event(2, "imu"),
+            key="sensor-reading-2",
+        )
+        self.assertEqual(_diagnostic(mesh_a, "navigation").outbox_items, 3)
+        self.assertEqual(_diagnostic(mesh_a, "sensor").outbox_items, 1)
+        self.assertEqual(_diagnostic(mesh_a, "sensor").coalesced, 1)
+
+        mesh_b.apply_discovery((PeerDiscovery("a", addresses["b"]),))
+        self.assertTrue(
+            _wait_for(
+                lambda: (
+                    observed_navigation == [0, 1, 2]
+                    and observed_sensor == [2]
+                    and _diagnostic(mesh_a, "navigation").outbox_items == 0
+                    and _diagnostic(mesh_a, "sensor").outbox_items == 0
+                ),
+                timeout=4.0,
+            ),
+            (
+                observed_navigation,
+                observed_sensor,
+                mesh_a.lifecycle_events(),
+            ),
+        )
+
+        events = mesh_a.lifecycle_events()
+        self.assertFalse(
+            _diagnostic(mesh_a, "navigation").retains_journal_rows
+        )
+        self.assertTrue(
+            _diagnostic(mesh_b, "navigation").retains_journal_rows
+        )
+        self.assertEqual(
+            tuple(event.sequence for event in events),
+            tuple(range(1, len(events) + 1)),
+        )
+        correlation = "navigation-offline-0"
+        correlated = tuple(
+            event
+            for event in events
+            if event.correlation_id == correlation
+            and event.peer_node_id == "b"
+        )
+        self.assertTrue(
+            _ordered_kinds(
+                correlated,
+                (
+                    MeshLifecycleKind.DURABLE_ENQUEUED,
+                    MeshLifecycleKind.DURABLE_SENT,
+                    MeshLifecycleKind.DURABLE_RETRY,
+                    MeshLifecycleKind.DURABLE_ACKED,
+                ),
+            )
+        )
+        self.assertEqual(
+            len({event.message_id for event in correlated}),
+            1,
+        )
+        self.assertTrue(
+            _ordered_kinds(
+                events,
+                (
+                    MeshLifecycleKind.PEER_DISCOVERED,
+                    MeshLifecycleKind.PEER_CONNECTING,
+                    MeshLifecycleKind.PEER_CONNECTED,
+                    MeshLifecycleKind.PEER_DISCONNECTED,
+                    MeshLifecycleKind.PEER_RECONNECTING,
+                    MeshLifecycleKind.PEER_CONNECTED,
+                ),
+                peer_node_id="b",
+            )
+        )
+        self.assertTrue(
+            _ordered_kinds(
+                events,
+                (
+                    MeshLifecycleKind.WATERMARK_CROSSED,
+                    MeshLifecycleKind.WATERMARK_RECOVERED,
+                ),
+            )
+        )
+        watermark = next(
+            event
+            for event in events
+            if event.kind is MeshLifecycleKind.WATERMARK_CROSSED
+        )
+        self.assertGreaterEqual(watermark.item_count or 0, 1)
+        self.assertGreater(watermark.byte_count or 0, 0)
+        self.assertTrue(
+            _has_lifecycle(
+                mesh_a,
+                MeshLifecycleKind.DURABLE_COALESCED,
+                topic="sensor",
+                correlation_id="sensor-reading-2",
+            )
+        )
+        subscribed_events = lifecycle.drain()
+        self.assertEqual(
+            tuple(event.sequence for event in subscribed_events),
+            tuple(
+                range(
+                    subscribed_events[0].sequence,
+                    subscribed_events[-1].sequence + 1,
+                )
+            ),
+        )
+
+        mesh_a.close()
+        final_events = mesh_a.lifecycle_events()
+        self.assertTrue(
+            _ordered_kinds(
+                final_events,
+                (
+                MeshLifecycleKind.RUNTIME_STOPPING,
+                MeshLifecycleKind.RUNTIME_STOPPED,
+                ),
+            ),
+        )
+        self.assertIs(
+            final_events[-1].kind,
+            MeshLifecycleKind.RUNTIME_STOPPED,
+        )
+
     def test_append_hard_cap_rejects_without_exceeding_bound(self) -> None:
         mesh_a, topics_a, addresses = self._hub("a", ("b",))
         mesh_b, _ = self._spoke("b", "a", addresses["b"])
         self.assertTrue(
             _wait_for(
-                lambda: mesh_a.health().remote_subscriptions == 3,
+                lambda: mesh_a.health().remote_subscriptions == 4,
                 timeout=3.0,
             )
         )
@@ -222,8 +436,11 @@ class DurableTransportTopicTests(unittest.TestCase):
 
         diagnostics = _diagnostic(mesh_a, "navigation")
         self.assertEqual(diagnostics.outbox_items, 4)
-        self.assertEqual(diagnostics.hard_cap_rejected, 1)
-        self.assertEqual(diagnostics.mode, DurableTopicMode.APPEND)
+        self.assertEqual(diagnostics.storage_rejections, 1)
+        self.assertEqual(
+            diagnostics.delivery_class,
+            TopicDeliveryClass.DURABLE_APPEND,
+        )
 
     def test_process_partition_and_restart_loads_append_and_latest_rows(
         self,
@@ -268,9 +485,9 @@ class DurableTransportTopicTests(unittest.TestCase):
         sender_commands.put(("tick", 50))
         time.sleep(0.12)
         sender_commands.put(("topic-diagnostics", "process.tick"))
-        self.assertGreaterEqual(
+        self.assertEqual(
             _next_kind(output, "topic-diagnostics", timeout=5.0)[1],
-            1,
+            0,
         )
         sender_commands.put(("navigation", 2))
         sender_commands.put(("rendered", 77))
@@ -350,15 +567,12 @@ class DurableTransportTopicTests(unittest.TestCase):
             connector_config=_transport_config(),
             durability=MeshDurabilityConfig(
                 self._root / "journals",
-                soft_peer_items=6,
                 hard_peer_items=8,
-                soft_peer_bytes=48 * 1024,
                 hard_peer_bytes=64 * 1024,
                 dedupe_retention_seconds=2.0,
                 retry_initial_seconds=0.02,
                 retry_multiplier=1.5,
                 retry_max_seconds=0.05,
-                compaction_interval_seconds=0.02,
             ),
         )
         self._meshes.append(mesh)
@@ -369,36 +583,43 @@ class DurableTransportTopicTests(unittest.TestCase):
                 schedule=False,
             ),
             "rendered": PubSub(topic="rendered", schema=_Event, schedule=False),
+            "sensor": PubSub(topic="sensor", schema=_Event, schedule=False),
             "tick": PubSub(topic="tick", schema=_Event, schedule=False),
         }
         mesh.bind(
             topics["navigation"],
-            policy=DurableTopicPolicy.append(
+            policy=MeshTopicPolicy.commands(
+                "navigation",
                 ttl_seconds=2.0,
-                soft_pending_items=3,
-                hard_pending_items=4,
-                soft_pending_bytes=24 * 1024,
-                hard_pending_bytes=32 * 1024,
+                max_items=4,
+                max_bytes=32 * 1024,
                 max_message_bytes=4096,
             ),
         )
         mesh.bind(
             topics["rendered"],
-            policy=DurableTopicPolicy.latest(
-                ttl_seconds=0.2,
-                max_keys=1,
-                soft_pending_bytes=24 * 1024,
-                hard_pending_bytes=32 * 1024,
+            policy=MeshTopicPolicy.live_latest(
+                "rendered",
+                max_sources=1,
                 max_message_bytes=4096,
             ),
         )
         mesh.bind(
+            topics["sensor"],
+            policy=MeshTopicPolicy.latest(
+                "sensor",
+                ttl_seconds=2.0,
+                max_sources=2,
+                max_bytes=32 * 1024,
+                max_message_bytes=4096,
+                key_field="source",
+            ),
+        )
+        mesh.bind(
             topics["tick"],
-            policy=DurableTopicPolicy.latest(
-                ttl_seconds=0.05,
-                max_keys=1,
-                soft_pending_bytes=24 * 1024,
-                hard_pending_bytes=32 * 1024,
+            policy=MeshTopicPolicy.live_latest(
+                "tick",
+                max_sources=1,
                 max_message_bytes=4096,
             ),
         )
@@ -411,6 +632,41 @@ def _diagnostic(mesh: TransportMesh, topic: str):
         for diagnostic in mesh.durable_topic_diagnostics()
         if diagnostic.topic == topic
     )
+
+
+def _has_lifecycle(
+    mesh: TransportMesh,
+    kind: MeshLifecycleKind,
+    *,
+    topic: str | None = None,
+    peer_node_id: str | None = None,
+    correlation_id: str | None = None,
+) -> bool:
+    return any(
+        event.kind is kind
+        and (topic is None or event.topic == topic)
+        and (peer_node_id is None or event.peer_node_id == peer_node_id)
+        and (correlation_id is None or event.correlation_id == correlation_id)
+        for event in mesh.lifecycle_events()
+    )
+
+
+def _ordered_kinds(
+    events,
+    kinds: tuple[MeshLifecycleKind, ...],
+    *,
+    peer_node_id: str | None = None,
+) -> bool:
+    remaining = iter(kinds)
+    expected = next(remaining, None)
+    for event in events:
+        if peer_node_id is not None and event.peer_node_id != peer_node_id:
+            continue
+        if event.kind is expected:
+            expected = next(remaining, None)
+            if expected is None:
+                return True
+    return False
 
 
 def _receiver_process(
@@ -513,15 +769,12 @@ def _process_mesh(root: Path, node_id: str) -> tuple[TransportMesh, dict[str, Pu
         connector_config=_transport_config(),
         durability=MeshDurabilityConfig(
             root / "process-journals",
-            soft_peer_items=16,
             hard_peer_items=32,
-            soft_peer_bytes=256 * 1024,
             hard_peer_bytes=512 * 1024,
             dedupe_retention_seconds=10.0,
             retry_initial_seconds=0.02,
             retry_multiplier=1.5,
             retry_max_seconds=0.05,
-            compaction_interval_seconds=0.02,
         ),
     )
     topics = {
@@ -548,41 +801,36 @@ def _process_mesh(root: Path, node_id: str) -> tuple[TransportMesh, dict[str, Pu
     }
     mesh.bind(
         topics["navigation"],
-        policy=DurableTopicPolicy.append(
+        policy=MeshTopicPolicy.commands(
+            "process.navigation",
             ttl_seconds=10.0,
-            soft_pending_items=8,
-            hard_pending_items=16,
-            soft_pending_bytes=128 * 1024,
-            hard_pending_bytes=256 * 1024,
+            max_items=16,
+            max_bytes=256 * 1024,
             max_message_bytes=4096,
         ),
     )
     mesh.bind(
         topics["rendered"],
-        policy=DurableTopicPolicy.latest(
-            ttl_seconds=0.25,
-            soft_pending_bytes=128 * 1024,
-            hard_pending_bytes=256 * 1024,
+        policy=MeshTopicPolicy.live_latest(
+            "process.rendered",
             max_message_bytes=4096,
         ),
     )
     mesh.bind(
         topics["tick"],
-        policy=DurableTopicPolicy.latest(
-            ttl_seconds=0.05,
-            soft_pending_bytes=128 * 1024,
-            hard_pending_bytes=256 * 1024,
+        policy=MeshTopicPolicy.live_latest(
+            "process.tick",
             max_message_bytes=4096,
         ),
     )
     mesh.bind(
         topics["sensor"],
-        policy=DurableTopicPolicy.latest(
+        policy=MeshTopicPolicy.latest(
+            "process.sensor",
             ttl_seconds=5.0,
-            max_keys=8,
+            max_sources=8,
+            max_bytes=256 * 1024,
             key_field="source",
-            soft_pending_bytes=128 * 1024,
-            hard_pending_bytes=256 * 1024,
             max_message_bytes=4096,
         ),
     )

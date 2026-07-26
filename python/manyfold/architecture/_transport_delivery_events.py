@@ -37,6 +37,7 @@ class DeliveryEventKind(str, Enum):
     RETRY_SCHEDULED = "retry_scheduled"
     SENT = "sent"
     SOFT_WATERMARK = "soft_watermark"
+    SOFT_WATERMARK_RECOVERED = "soft_watermark_recovered"
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +70,7 @@ class DeliveryEvent:
     related_message_id: str | None = None
     detail: str | None = None
     capacity: DeliveryCapacity | None = None
+    terminal: bool = False
 
 
 DeliveryObserver: TypeAlias = Callable[[DeliveryEvent], None]

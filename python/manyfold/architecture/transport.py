@@ -728,9 +728,8 @@ class TcpTransport:
             previous = self._connection
             self._connection = connection
             self._remote_identity = remote_identity
-            if self._remote_instance_id != remote_identity.instance_id:
-                self._last_remote_sequence = 0
-                self._remote_instance_id = remote_identity.instance_id
+            self._last_remote_sequence = 0
+            self._remote_instance_id = remote_identity.instance_id
             self._state = LinkState.CONNECTED
             self._connections_established += 1
             self._connected_at = time()

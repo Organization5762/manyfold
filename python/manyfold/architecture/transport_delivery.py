@@ -75,7 +75,7 @@ _CLOSED_SENTINEL = object()
 
 @final
 class DurableDelivery:
-    """SQLite-backed at-least-once delivery over one owned receive stream."""
+    """SQLite-backed at-least-once delivery over one transport."""
 
     def __init__(
         self,
@@ -83,6 +83,7 @@ class DurableDelivery:
         config: DeliveryConfig,
         *,
         owns_transport: bool = False,
+        owns_receive_loop: bool = True,
         observer: DeliveryObserver | None = None,
     ) -> None:
         if not isinstance(transport, TcpTransport):
@@ -91,6 +92,8 @@ class DurableDelivery:
             raise ValueError("config must be a DeliveryConfig")
         if not isinstance(owns_transport, bool):
             raise ValueError("owns_transport must be a boolean")
+        if not isinstance(owns_receive_loop, bool):
+            raise ValueError("owns_receive_loop must be a boolean")
         if observer is not None and not callable(observer):
             raise TypeError("observer must be callable")
         if config.max_message_bytes + _DELIVERY_HEADER_SIZE + 256 > (
@@ -106,7 +109,9 @@ class DurableDelivery:
             policy.topic: policy for policy in config.topic_policies
         }
         self._owns_transport = owns_transport
+        self._owns_receive_loop = owns_receive_loop
         self._observer = observer
+        self._observer_lock = Lock()
         self._event_sequence = 0
         try:
             self._journal = _DeliveryJournal(
@@ -140,6 +145,7 @@ class DurableDelivery:
         self._coalesced = 0
         self._soft_compactions = 0
         self._soft_watermark_crossings = 0
+        self._soft_watermark_topics: set[str] = set()
         self._storage_rejections = 0
         self._retry_exhausted = 0
         self._expired_outbox = 0
@@ -149,10 +155,14 @@ class DurableDelivery:
         self._last_stats = self._journal.stats()
         self._recovered_outbox = len(recovered_records)
         self._fill_receive_queue()
-        self._receiver = Thread(
-            target=self._run_receiver,
-            name=f"manyfold-delivery-{transport.identity.node_id}-receiver",
-            daemon=True,
+        self._receiver = (
+            Thread(
+                target=self._run_receiver,
+                name=f"manyfold-delivery-{transport.identity.node_id}-receiver",
+                daemon=True,
+            )
+            if owns_receive_loop
+            else None
         )
         self._sender = Thread(
             target=self._run_sender,
@@ -168,7 +178,8 @@ class DurableDelivery:
                 correlation_id=record.correlation_id,
                 attempt=record.attempts,
             )
-        self._receiver.start()
+        if self._receiver is not None:
+            self._receiver.start()
         self._sender.start()
 
     def __enter__(self) -> "DurableDelivery":
@@ -263,6 +274,7 @@ class DurableDelivery:
                 correlation_id=message.correlation_id,
                 detail=str(error),
                 capacity=self._delivery_capacity(policy, error.capacity),
+                terminal=True,
             )
             raise DeliveryStorageFull(str(error)) from error
         except _JournalConflict as error:
@@ -273,6 +285,7 @@ class DurableDelivery:
                 source_key,
                 correlation_id=message.correlation_id,
                 detail=str(error),
+                terminal=True,
             )
             raise DeliveryConflict(str(error)) from error
         except _JournalError as error:
@@ -287,6 +300,10 @@ class DurableDelivery:
                 correlation_id=message.correlation_id,
             )
         else:
+            crossed_soft_watermark = (
+                result.soft_compaction
+                and policy.topic not in self._soft_watermark_topics
+            )
             self._change(
                 accepted=1,
                 coalesced=(
@@ -296,6 +313,9 @@ class DurableDelivery:
                 ),
                 expired_outbox=len(result.expired_outbox),
                 soft_compactions=1 if result.soft_compaction else 0,
+                soft_watermark_crossings=(
+                    1 if crossed_soft_watermark else 0
+                ),
             )
             self._emit(
                 (
@@ -309,7 +329,8 @@ class DurableDelivery:
                 correlation_id=message.correlation_id,
                 related_message_id=result.replaced_message_id,
             )
-            if result.soft_compaction:
+            if crossed_soft_watermark:
+                self._soft_watermark_topics.add(policy.topic)
                 self._emit(
                     DeliveryEventKind.SOFT_WATERMARK,
                     resolved_message_id,
@@ -327,6 +348,7 @@ class DurableDelivery:
                     correlation_id=expired.correlation_id,
                     attempt=expired.attempts,
                     detail="soft watermark expiry sweep",
+                    terminal=True,
                 )
         self._wake_sender.set()
         return resolved_message_id
@@ -380,6 +402,26 @@ class DurableDelivery:
                 continue
             self._fill_receive_queue()
             return item
+
+    def handle_transport_message(self, message: TransportMessage) -> None:
+        """Process one delivery frame supplied by an external receive-loop owner."""
+        self._require_open()
+        if self._owns_receive_loop:
+            raise DeliveryConflict(
+                "handle_transport_message requires owns_receive_loop=False"
+            )
+        try:
+            frame = _decode_delivery_frame(
+                message,
+                max_message_bytes=self.config.max_message_bytes,
+            )
+            self._handle_frame(frame)
+        except DeliveryError:
+            raise
+        except Exception as error:
+            raise DeliveryProtocolError(
+                f"could not process externally received delivery frame: {error}"
+            ) from error
 
     def ack(self, message_id: str) -> None:
         """Persist successful application processing and schedule an ACK."""
@@ -521,13 +563,24 @@ class DurableDelivery:
             self._condition.notify_all()
         self._stop.set()
         self._wake_sender.set()
-        self._receiver.join()
+        if self._receiver is not None:
+            self._receiver.join()
         self._sender.join()
         self._drain_receive_queue()
         self._last_stats = self._journal_stats()
         self._journal.close()
         if self._owns_transport:
             self.transport.close()
+
+    def _retained_topic_rows(self, topic: str) -> int:
+        """Return current durable rows for an internal composed owner."""
+        return self._journal.topic_row_count(_require_text(topic, "topic"))
+
+    def _retained_topic_outbox_items(self, topic: str) -> int:
+        """Return current outbound rows for an internal composed owner."""
+        return self._journal.outbox_usage(
+            _require_text(topic, "topic")
+        ).topic_items
 
     def _run_receiver(self) -> None:
         while not self._stop.is_set():
@@ -657,6 +710,7 @@ class DurableDelivery:
                     correlation_id=deleted.correlation_id,
                     attempt=deleted.attempts,
                 )
+                self._refresh_soft_watermark(deleted.topic)
         elif frame.operation is _DeliveryOperation.NACK:
             reason = frame.payload.decode("utf-8", errors="replace")
             self._journal.mark_outbox_attempt(
@@ -824,7 +878,9 @@ class DurableDelivery:
                 expired.source_key,
                 correlation_id=expired.correlation_id,
                 attempt=expired.attempts,
+                terminal=True,
             )
+            self._refresh_soft_watermark(expired.topic)
         for exhausted in result.exhausted_outbox:
             self._emit(
                 DeliveryEventKind.DROPPED,
@@ -834,7 +890,9 @@ class DurableDelivery:
                 correlation_id=exhausted.correlation_id,
                 attempt=exhausted.attempts,
                 detail="retry budget exhausted",
+                terminal=True,
             )
+            self._refresh_soft_watermark(exhausted.topic)
         for expired in result.expired_inbox:
             self._emit(
                 DeliveryEventKind.EXPIRED,
@@ -883,35 +941,38 @@ class DurableDelivery:
         related_message_id: str | None = None,
         detail: str | None = None,
         capacity: DeliveryCapacity | None = None,
+        terminal: bool = False,
     ) -> None:
         observer = self._observer
         if observer is None:
             return
-        with self._condition:
-            self._event_sequence += 1
-            event = DeliveryEvent(
-                sequence=self._event_sequence,
-                occurred_at=time(),
-                kind=kind,
-                message_id=message_id,
-                topic=topic,
-                source=source or None,
-                correlation_id=correlation_id,
-                attempt=attempt,
-                related_message_id=related_message_id,
-                detail=detail,
-                capacity=capacity,
-            )
-        try:
-            observer(event)
-        except Exception as error:
+        with self._observer_lock:
             with self._condition:
-                self._last_error = (
-                    f"delivery observer failed for event {event.sequence}: "
-                    f"{type(error).__name__}: {error}"
+                self._event_sequence += 1
+                event = DeliveryEvent(
+                    sequence=self._event_sequence,
+                    occurred_at=time(),
+                    kind=kind,
+                    message_id=message_id,
+                    topic=topic,
+                    source=source or None,
+                    correlation_id=correlation_id,
+                    attempt=attempt,
+                    related_message_id=related_message_id,
+                    detail=detail,
+                    capacity=capacity,
+                    terminal=terminal,
                 )
-                self._generation += 1
-                self._condition.notify_all()
+            try:
+                observer(event)
+            except Exception as error:
+                with self._condition:
+                    self._last_error = (
+                        f"delivery observer failed for event {event.sequence}: "
+                        f"{type(error).__name__}: {error}"
+                    )
+                    self._generation += 1
+                    self._condition.notify_all()
 
     def _delivery_capacity(
         self,
@@ -930,6 +991,35 @@ class DurableDelivery:
             topic_bytes=usage.topic_bytes,
             topic_byte_limit=policy.max_bytes,
             soft_limit_ratio=policy.soft_limit_ratio,
+        )
+
+    def _refresh_soft_watermark(self, topic: str) -> None:
+        if topic not in self._soft_watermark_topics:
+            return
+        policy = self._policy_for(topic)
+        try:
+            usage = self._journal.outbox_usage(topic)
+        except _JournalError:
+            return
+        is_crossed = any(
+            (
+                usage.items / self.config.max_outbox_items
+                >= policy.soft_limit_ratio,
+                usage.logical_bytes / self.config.max_storage_bytes
+                >= policy.soft_limit_ratio,
+                usage.topic_items / policy.max_items >= policy.soft_limit_ratio,
+                usage.topic_bytes / policy.max_bytes >= policy.soft_limit_ratio,
+            )
+        )
+        if is_crossed:
+            return
+        self._soft_watermark_topics.remove(topic)
+        self._emit(
+            DeliveryEventKind.SOFT_WATERMARK_RECOVERED,
+            f"watermark:{topic}",
+            topic,
+            None,
+            capacity=self._delivery_capacity(policy, usage),
         )
 
     def _policy_for(self, topic: str) -> TopicDeliveryPolicy:
@@ -1012,6 +1102,7 @@ class DurableDelivery:
         outbox_deduplicated: int = 0,
         coalesced: int = 0,
         soft_compactions: int = 0,
+        soft_watermark_crossings: int = 0,
         storage_rejections: int = 0,
         retry_exhausted: int = 0,
         expired_outbox: int = 0,
@@ -1029,7 +1120,7 @@ class DurableDelivery:
             self._outbox_deduplicated += outbox_deduplicated
             self._coalesced += coalesced
             self._soft_compactions += soft_compactions
-            self._soft_watermark_crossings += soft_compactions
+            self._soft_watermark_crossings += soft_watermark_crossings
             self._storage_rejections += storage_rejections
             self._retry_exhausted += retry_exhausted
             self._expired_outbox += expired_outbox

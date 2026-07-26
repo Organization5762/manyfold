@@ -612,10 +612,7 @@ os._exit(0)
         self.assertEqual(health.outbox_items, 1)
         self.assertEqual(health.expired_outbox, 1)
         self.assertGreaterEqual(health.soft_compactions, 1)
-        self.assertEqual(
-            health.soft_watermark_crossings,
-            health.soft_compactions,
-        )
+        self.assertEqual(health.soft_watermark_crossings, 1)
 
     def test_retry_budget_compacts_unacknowledged_message(self) -> None:
         sender_transport, receiver_transport = self._transport_pair()

@@ -148,18 +148,17 @@ class TransportDeliveryEventTests(unittest.TestCase):
         watermark = _event(
             events,
             DeliveryEventKind.SOFT_WATERMARK,
-            second_sensor_id,
+            first_sensor_id,
         )
         self.assertEqual(watermark.capacity.topic_items, 1)
         self.assertEqual(watermark.capacity.topic_item_limit, 1)
-        self.assertEqual(
-            _event(
-                events,
-                DeliveryEventKind.EXPIRED,
-                "debug-old",
-            ).topic,
-            short.topic,
+        expired = _event(
+            events,
+            DeliveryEventKind.EXPIRED,
+            "debug-old",
         )
+        self.assertEqual(expired.topic, short.topic)
+        self.assertTrue(expired.terminal)
         self.assertEqual(
             tuple(event.sequence for event in events),
             tuple(range(1, len(events) + 1)),

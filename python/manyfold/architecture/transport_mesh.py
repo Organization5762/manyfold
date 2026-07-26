@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass
+from hashlib import sha256
 from queue import Empty, Full, Queue
 from threading import RLock, Thread, current_thread
 from time import time
@@ -12,9 +13,16 @@ from typing import final, get_type_hints
 from uuid import uuid4
 
 from . import _transport_mesh_protocol as _protocol
-from ._transport_delivery_journal import _JournalError, _JournalFull
-from ._transport_delivery_protocol import DELIVERY_CHANNEL, _DeliveryFrame
-from ._transport_mesh_delivery import _MeshDurablePeer
+from ._transport_delivery_protocol import DELIVERY_CHANNEL
+from ._transport_mesh_delivery import _MeshDeliveryPeer
+from ._transport_mesh_lifecycle import (
+    MeshLifecycleEvent,
+    MeshLifecycleHealth,
+    MeshLifecycleKind,
+    MeshLifecycleReason,
+    MeshLifecycleSubscription,
+    _MeshLifecycleLog,
+)
 from .pubsub import PubSub, PubSubCallbackSubscription, StreamRow
 from .transport import (
     FrameKind,
@@ -28,17 +36,24 @@ from .transport import (
     TransportMessage,
     TransportQueueFull,
 )
+from .transport_delivery import (
+    DeliveryError,
+    DeliveryHealth,
+    DeliveryStorageFull,
+    ReceivedDelivery,
+)
 from .transport_topics import (
     DurableTopicDiagnostics,
-    DurableTopicMode,
-    DurableTopicPolicy,
     MeshDurabilityConfig,
+    MeshTopicPolicy,
+    TopicDeliveryClass,
 )
 
 DEFAULT_MAX_PEERS = 32
 DEFAULT_MAX_SUBSCRIPTIONS = 4096
 DEFAULT_DUPLICATE_WINDOW = 8192
 DEFAULT_PUBLICATION_QUEUE_LIMIT = 1024
+DEFAULT_LIFECYCLE_EVENT_LIMIT = 4096
 
 _CLOSED_SENTINEL = object()
 
@@ -90,6 +105,7 @@ class MeshConfig:
     max_subscriptions: int = DEFAULT_MAX_SUBSCRIPTIONS
     duplicate_window: int = DEFAULT_DUPLICATE_WINDOW
     publication_queue_limit: int = DEFAULT_PUBLICATION_QUEUE_LIMIT
+    lifecycle_event_limit: int = DEFAULT_LIFECYCLE_EVENT_LIMIT
 
     def __post_init__(self) -> None:
         _protocol.require_positive_integer(self.max_peers, "max_peers")
@@ -98,6 +114,10 @@ class MeshConfig:
         _protocol.require_positive_integer(
             self.publication_queue_limit,
             "publication_queue_limit",
+        )
+        _protocol.require_positive_integer(
+            self.lifecycle_event_limit,
+            "lifecycle_event_limit",
         )
 
 
@@ -133,6 +153,7 @@ class MeshPublication:
     topic: str
     payload: bytes
     message_id: str
+    correlation_id: str | None
     source_node_id: str
     received_at: float
 
@@ -156,6 +177,7 @@ class MeshPeerHealth:
     source: str
     address: TcpAddress
     link: LinkHealth
+    delivery: DeliveryHealth | None
     interested_topics: tuple[str, ...]
     last_routing_error: str | None
 
@@ -222,7 +244,7 @@ class MeshTopicBinding:
         self,
         mesh: "TransportMesh",
         topic: PubSub,
-        policy: DurableTopicPolicy,
+        policy: MeshTopicPolicy,
         mesh_subscription: MeshSubscription,
     ) -> None:
         self.topic = topic
@@ -232,12 +254,18 @@ class MeshTopicBinding:
         self._local_subscription: PubSubCallbackSubscription | None = None
         self._is_disposed = False
         self._publishing_remote = False
+        self._latest_rows: dict[str, tuple[bytes, str, str, str]] = {}
         self._lock = RLock()
 
     @property
     def is_disposed(self) -> bool:
         with self._lock:
             return self._is_disposed
+
+    @property
+    def retains_journal_rows(self) -> bool:
+        """Return whether this binding may retain per-peer journal rows."""
+        return self.policy.retains_journal_rows
 
     def __enter__(self) -> "MeshTopicBinding":
         return self
@@ -268,13 +296,13 @@ class MeshTopicBinding:
                 return
         self._mesh._publish_bound(self, row)
 
-    def _publish_remote(self, payload: bytes) -> None:
+    def _publish_remote(self, payload: bytes, correlation_id: str) -> None:
         with self._lock:
             if self._is_disposed:
                 return
             self._publishing_remote = True
             try:
-                self.topic.publish_encoded(payload)
+                self.topic.publish_encoded(payload, key=correlation_id)
             finally:
                 self._publishing_remote = False
 
@@ -333,6 +361,10 @@ class TransportMesh:
         self.config = config or MeshConfig()
         self.durability = durability
         self._lock = RLock()
+        self._lifecycle = _MeshLifecycleLog(
+            identity.node_id,
+            self.config.lifecycle_event_limit,
+        )
         self._closed = False
         self._peers: dict[str, _PeerLink] = {}
         self._peer_reservations: set[str] = set()
@@ -346,12 +378,44 @@ class TransportMesh:
         self._duplicate_publications = 0
         self._last_routing_error: str | None = None
         self._bindings: dict[str, MeshTopicBinding] = {}
+        self._emit(
+            MeshLifecycleKind.RUNTIME_STARTING,
+            MeshLifecycleReason.STARTUP,
+        )
+        self._emit(
+            MeshLifecycleKind.RUNTIME_READY,
+            MeshLifecycleReason.STARTUP,
+        )
 
     def __enter__(self) -> "TransportMesh":
         return self
 
     def __exit__(self, *error: object) -> None:
         self.close()
+
+    def lifecycle_events(
+        self,
+        *,
+        after_sequence: int = 0,
+    ) -> tuple[MeshLifecycleEvent, ...]:
+        """Read ordered, bounded, process-local lifecycle events."""
+        return self._lifecycle.read(after_sequence=after_sequence)
+
+    def subscribe_lifecycle(
+        self,
+        *,
+        after_sequence: int = 0,
+        queue_limit: int = 1024,
+    ) -> MeshLifecycleSubscription:
+        """Create a bounded pull subscription to local lifecycle events."""
+        return self._lifecycle.subscribe(
+            after_sequence=after_sequence,
+            queue_limit=queue_limit,
+        )
+
+    def lifecycle_health(self) -> MeshLifecycleHealth:
+        """Return bounded local lifecycle retention and subscriber health."""
+        return self._lifecycle.health()
 
     def listen(
         self,
@@ -368,6 +432,16 @@ class TransportMesh:
         config = transport_config or self.listener_config
         if not isinstance(config, TransportConfig):
             raise ValueError("transport_config must be a TransportConfig")
+        self._emit(
+            MeshLifecycleKind.PEER_DISCOVERED,
+            MeshLifecycleReason.LISTENER,
+            peer_node_id=peer_node_id,
+        )
+        self._emit(
+            MeshLifecycleKind.PEER_CONNECTING,
+            MeshLifecycleReason.LISTENER,
+            peer_node_id=peer_node_id,
+        )
         self._reserve_peer(peer_node_id)
         try:
             transport = TcpTransport.listen(
@@ -425,6 +499,16 @@ class TransportMesh:
                 existing = self._peers.get(peer_id)
             if existing is not None:
                 continue
+            self._emit(
+                MeshLifecycleKind.PEER_DISCOVERED,
+                MeshLifecycleReason.DISCOVERY,
+                peer_node_id=peer_id,
+            )
+            self._emit(
+                MeshLifecycleKind.PEER_CONNECTING,
+                MeshLifecycleReason.DISCOVERY,
+                peer_node_id=peer_id,
+            )
             self._reserve_peer(peer_id)
             try:
                 transport = TcpTransport.connect(
@@ -457,6 +541,11 @@ class TransportMesh:
             peer.reader.join(timeout=2.0)
         if peer.durable is not None:
             peer.durable.close()
+        self._emit(
+            MeshLifecycleKind.PEER_DISCONNECTED,
+            MeshLifecycleReason.PEER_REMOVED,
+            peer_node_id=peer_node_id,
+        )
         for subscription_id, topic in removed:
             self._fanout_control(
                 _protocol.CONTROL_UNSUBSCRIBE,
@@ -492,15 +581,15 @@ class TransportMesh:
         self,
         topic: PubSub,
         *,
-        policy: DurableTopicPolicy,
+        policy: MeshTopicPolicy,
     ) -> MeshTopicBinding:
-        """Bind one named, schema-validated PubSub topic to durable mesh delivery."""
+        """Bind one named, schema-validated PubSub to an explicit mesh policy."""
         if not isinstance(topic, PubSub):
             raise TypeError("topic must be a PubSub")
         if topic.schema is None:
             raise ValueError("durable mesh topics require an explicit schema")
-        if not isinstance(policy, DurableTopicPolicy):
-            raise TypeError("policy must be a DurableTopicPolicy")
+        if not isinstance(policy, MeshTopicPolicy):
+            raise TypeError("policy must be a MeshTopicPolicy")
         if policy.key_field is not None and policy.key_field not in get_type_hints(
             topic.schema
         ):
@@ -508,16 +597,26 @@ class TransportMesh:
                 f"latest key_field {policy.key_field!r} is not declared by "
                 f"topic {topic.topic!r} schema"
             )
-        if self.durability is None:
+        if policy.retains_journal_rows and self.durability is None:
             raise ValueError("durable topic binding requires MeshDurabilityConfig")
-        if policy.max_message_bytes > self.durability.hard_peer_bytes:
+        if (
+            policy.retains_journal_rows
+            and self.durability is not None
+            and policy.max_message_bytes > self.durability.hard_peer_bytes
+        ):
             raise ValueError(
                 "topic max_message_bytes exceeds the per-peer journal byte cap"
             )
         with self._lock:
             self._require_open_locked()
+            if self._peers or self._peer_reservations:
+                raise MeshRouteError(
+                    "mesh topics must be bound before peers are registered"
+                )
             if topic.topic in self._bindings:
                 raise MeshRouteError(f"durable topic {topic.topic!r} is already bound")
+            if policy.topic != topic.topic:
+                raise ValueError("policy topic must match the bound PubSub topic")
         mesh_subscription = self.subscribe(topic.topic)
         binding = MeshTopicBinding(self, topic, policy, mesh_subscription)
         with self._lock:
@@ -543,18 +642,22 @@ class TransportMesh:
             ]
             diagnostics.append(
                 DurableTopicDiagnostics(
-                    topic,
-                    binding.policy.mode,
-                    sum(row.outbox_items for row in rows),
-                    sum(row.pending_inbox_items for row in rows),
-                    sum(row.acked_inbox_items for row in rows),
-                    sum(row.logical_bytes for row in rows),
-                    sum(row.replaced for row in rows),
-                    sum(row.expired for row in rows),
-                    sum(row.retried for row in rows),
-                    sum(row.acknowledged for row in rows),
-                    sum(row.hard_cap_rejected for row in rows),
-                    sum(row.recovery_loaded_rows for row in rows),
+                    topic=topic,
+                    delivery_class=binding.policy.delivery_class,
+                    retains_journal_rows=any(
+                        row.retains_journal_rows for row in rows
+                    ),
+                    outbox_items=sum(row.outbox_items for row in rows),
+                    coalesced=sum(row.coalesced for row in rows),
+                    expired=sum(row.expired for row in rows),
+                    retried=sum(row.retried for row in rows),
+                    acknowledged=sum(row.acknowledged for row in rows),
+                    storage_rejections=sum(
+                        row.storage_rejections for row in rows
+                    ),
+                    recovery_loaded_rows=sum(
+                        row.recovery_loaded_rows for row in rows
+                    ),
                 )
             )
         return tuple(diagnostics)
@@ -586,6 +689,7 @@ class TransportMesh:
         payload: bytes | bytearray | memoryview,
         *,
         message_id: str | None = None,
+        correlation_id: str | None = None,
     ) -> MeshPublishResult:
         """Publish once to local consumers and interested next-hop peers."""
         topic = _protocol.require_topic(topic)
@@ -594,6 +698,11 @@ class TransportMesh:
             uuid4().hex
             if message_id is None
             else _protocol.require_text(message_id, "message_id")
+        )
+        resolved_correlation_id = (
+            None
+            if correlation_id is None
+            else _protocol.require_text(correlation_id, "correlation_id")
         )
         with self._lock:
             self._require_open_locked()
@@ -610,6 +719,7 @@ class TransportMesh:
                     topic=topic,
                     payload=payload_bytes,
                     message_id=resolved_message_id,
+                    correlation_id=resolved_correlation_id,
                     source_node_id=self.identity.node_id,
                     received_at=time(),
                 )
@@ -626,6 +736,7 @@ class TransportMesh:
             topic,
             payload_bytes,
             resolved_message_id,
+            correlation_id=resolved_correlation_id,
             source_node_id=self.identity.node_id,
             peer_ids=peer_ids,
         )
@@ -677,6 +788,9 @@ class TransportMesh:
                 source=peer.source,
                 address=peer.transport.address,
                 link=peer.transport.health(),
+                delivery=(
+                    None if peer.durable is None else peer.durable.health()
+                ),
                 interested_topics=topics,
                 last_routing_error=peer.last_error,
             )
@@ -707,6 +821,10 @@ class TransportMesh:
         with self._lock:
             if self._closed:
                 return
+            self._emit(
+                MeshLifecycleKind.RUNTIME_STOPPING,
+                MeshLifecycleReason.SHUTDOWN,
+            )
             self._closed = True
             peers = tuple(self._peers.values())
             bindings = tuple(self._bindings.values())
@@ -736,6 +854,10 @@ class TransportMesh:
             self._publications.put_nowait(_CLOSED_SENTINEL)
         except Full:
             pass
+        self._emit(
+            MeshLifecycleKind.RUNTIME_STOPPED,
+            MeshLifecycleReason.SHUTDOWN,
+        )
 
     def _reserve_peer(self, peer_node_id: str) -> None:
         with self._lock:
@@ -768,10 +890,17 @@ class TransportMesh:
         durable = (
             None
             if self.durability is None
-            else _MeshDurablePeer(
+            else _MeshDeliveryPeer(
                 self.identity.node_id,
                 peer_node_id,
+                transport,
                 self.durability,
+                tuple(
+                    binding.policy
+                    for binding in self._bindings.values()
+                    if binding.policy.retains_journal_rows
+                ),
+                self._emit,
             )
         )
         peer = _PeerLink(
@@ -804,20 +933,22 @@ class TransportMesh:
                 transport,
                 synchronized_connections,
             )
+            self._observe_peer_state(peer_node_id, peer)
+            self._resync_live_connection(peer_node_id, peer)
             if peer.durable is not None:
-                if transport.health().state is LinkState.CONNECTED:
-                    peer.durable.tick(transport)
-                else:
-                    peer.durable.maintain()
-                    transport._discard_outbound(DELIVERY_CHANNEL)
-                for frame in peer.durable.recover_pending():
-                    if self._has_binding_for_frame(frame):
-                        self._accept_durable_frame(peer_node_id, peer, frame)
+                for delivery in peer.durable.recover_pending():
+                    if self._has_binding_for_delivery(delivery):
+                        self._accept_durable_delivery(
+                            peer_node_id,
+                            peer,
+                            delivery,
+                        )
             try:
                 message = transport.receive(timeout=0.1)
             except TimeoutError:
                 continue
             except TransportClosed:
+                self._observe_peer_state(peer_node_id, peer)
                 return
             synchronized_connections = self._synchronize_connection(
                 peer_node_id,
@@ -841,29 +972,21 @@ class TransportMesh:
         if message.channel == DELIVERY_CHANNEL:
             with self._lock:
                 peer = self._peers.get(peer_node_id)
-                bindings = tuple(self._bindings.values())
             if peer is None or peer.durable is None:
                 raise MeshRouteError(
                     f"mesh peer {peer_node_id!r} sent durable data "
                     "without configured durability"
                 )
-            max_message_bytes = max(
-                (binding.policy.max_message_bytes for binding in bindings),
-                default=1,
-            )
             try:
-                frame = peer.durable.handle(
-                    peer.transport,
+                deliveries = peer.durable.handle_transport_message(
                     message,
-                    max_message_bytes=max_message_bytes,
-                    dedupe_ttl_seconds=self.durability.dedupe_retention_seconds,
                 )
-            except (_JournalError, ValueError) as error:
+            except (DeliveryError, ValueError) as error:
                 raise MeshRouteError(
                     f"durable frame from {peer_node_id!r} is invalid: {error}"
                 ) from error
-            if frame is not None:
-                self._accept_durable_frame(peer_node_id, peer, frame)
+            for delivery in deliveries:
+                self._accept_durable_delivery(peer_node_id, peer, delivery)
             return
         if message.kind is not FrameKind.PUBSUB:
             raise MeshRouteError(
@@ -890,13 +1013,20 @@ class TransportMesh:
             source_node_id, topic = _protocol.decode_publication_channel(
                 message.channel
             )
+            (
+                correlation_id,
+                replacement_key,
+                payload,
+            ) = _protocol.decode_publication_payload(message.payload)
         except ValueError as error:
             raise MeshRouteError(f"publication channel is invalid: {error}") from error
         self._accept_publication(
             peer_node_id,
             source_node_id,
             topic,
-            message.payload,
+            correlation_id,
+            replacement_key,
+            payload,
             message.correlation_id,
         )
 
@@ -930,6 +1060,7 @@ class TransportMesh:
             _protocol.encode_subscription(subscription_id, topic),
             exclude={peer_node_id},
         )
+        self._resync_live_latest(peer_node_id, topic)
 
     def _accept_remote_unsubscribe(
         self,
@@ -958,21 +1089,59 @@ class TransportMesh:
         peer_node_id: str,
         source_node_id: str,
         topic: str,
+        correlation_id: str | None,
+        replacement_key: str | None,
         payload: bytes,
         message_id: str,
     ) -> None:
         with self._lock:
+            if source_node_id == self.identity.node_id:
+                self._duplicate_publications += 1
+                if message_id not in self._seen_ids:
+                    self._remember_message_locked(message_id)
+                return
             if message_id in self._seen_ids:
                 self._duplicate_publications += 1
                 return
             self._remember_message_locked(message_id)
-            deliver_locally = topic in self._local_subscriptions.values()
+            binding = self._bindings.get(topic)
+            is_live_binding = (
+                binding is not None
+                and binding.policy.delivery_class
+                is TopicDeliveryClass.LIVE_LATEST
+            )
+            deliver_locally = (
+                topic in self._local_subscriptions.values() and not is_live_binding
+            )
             peer_ids = self._interested_peers_locked(topic, exclude={peer_node_id})
+        if is_live_binding and binding is not None:
+            if correlation_id is None:
+                raise MeshRouteError(
+                    f"live latest topic {topic!r} is missing correlation_id"
+                )
+            replacement_key = replacement_key or f"{topic}\x1f{correlation_id}"
+            with binding._lock:
+                if (
+                    replacement_key not in binding._latest_rows
+                    and len(binding._latest_rows)
+                    >= binding.policy.max_sources
+                ):
+                    raise MeshCapacityError(
+                        f"live latest topic {topic!r} reached its key bound"
+                    )
+                binding._latest_rows[replacement_key] = (
+                    payload,
+                    correlation_id,
+                    message_id,
+                    source_node_id,
+                )
+            binding._publish_remote(payload, correlation_id)
         if deliver_locally:
             publication = MeshPublication(
                 topic=topic,
                 payload=payload,
                 message_id=message_id,
+                correlation_id=correlation_id,
                 source_node_id=source_node_id,
                 received_at=time(),
             )
@@ -985,13 +1154,25 @@ class TransportMesh:
                     break
                 except Full:
                     continue
-        self._fanout_publication(
-            topic,
-            payload,
-            message_id,
-            source_node_id=source_node_id,
-            peer_ids=peer_ids,
-        )
+        if is_live_binding:
+            self._fanout_live_latest(
+                topic,
+                payload,
+                message_id,
+                correlation_id=correlation_id,
+                replacement_key=replacement_key,
+                source_node_id=source_node_id,
+                peer_ids=peer_ids,
+            )
+        else:
+            self._fanout_publication(
+                topic,
+                payload,
+                message_id,
+                correlation_id=correlation_id,
+                source_node_id=source_node_id,
+                peer_ids=peer_ids,
+            )
 
     def _fanout_publication(
         self,
@@ -999,13 +1180,19 @@ class TransportMesh:
         payload: bytes,
         message_id: str,
         *,
+        correlation_id: str | None,
+        replacement_key: str | None = None,
         source_node_id: str,
         peer_ids: Sequence[str],
     ) -> tuple[str, ...]:
         message = TransportMessage(
             kind=FrameKind.PUBSUB,
             channel=_protocol.encode_publication_channel(source_node_id, topic),
-            payload=payload,
+            payload=_protocol.encode_publication_payload(
+                payload,
+                correlation_id,
+                replacement_key,
+            ),
             correlation_id=message_id,
         )
         accepted, rejected = self._send_to_peers(peer_ids, message)
@@ -1017,32 +1204,124 @@ class TransportMesh:
             )
         return accepted
 
+    def _fanout_live_latest(
+        self,
+        topic: str,
+        payload: bytes,
+        message_id: str,
+        *,
+        correlation_id: str,
+        replacement_key: str,
+        source_node_id: str,
+        peer_ids: Sequence[str],
+    ) -> tuple[str, ...]:
+        channel = _protocol.encode_publication_channel(source_node_id, topic)
+        message = TransportMessage(
+            kind=FrameKind.PUBSUB,
+            channel=channel,
+            payload=_protocol.encode_publication_payload(
+                payload,
+                correlation_id,
+                replacement_key,
+            ),
+            correlation_id=message_id,
+        )
+        accepted: list[str] = []
+        rejected: list[str] = []
+        for peer_id in peer_ids:
+            with self._lock:
+                peer = self._peers.get(peer_id)
+            if (
+                peer is None
+                or peer.transport.health().state is not LinkState.CONNECTED
+            ):
+                rejected.append(peer_id)
+                continue
+            peer.transport._discard_outbound(channel)
+            try:
+                peer.transport.send(message, timeout=0.0)
+            except (TransportClosed, TransportQueueFull):
+                rejected.append(peer_id)
+            else:
+                accepted.append(peer_id)
+        del rejected
+        return tuple(accepted)
+
     def _publish_bound(self, binding: MeshTopicBinding, row: StreamRow) -> None:
         topic = binding.topic.topic
         payload = binding.topic.encode_row(row)
         policy = binding.policy
+        pubsub_key = _pubsub_key(row)
+        correlation_id = _pubsub_correlation_id(topic, row)
+        if policy.key_field is not None and pubsub_key is None:
+            correlation_id = _protocol.require_text(
+                str(row[policy.key_field]),
+                f"{topic} correlation",
+            )
         replacement_key: str | None = None
-        if policy.mode is DurableTopicMode.LATEST:
+        if policy.delivery_class is not TopicDeliveryClass.DURABLE_APPEND:
             key = (
-                topic
-                if policy.key_field is None
-                else _protocol.require_text(
-                    str(row[policy.key_field]),
-                    f"{topic} latest key",
+                correlation_id
+                if policy.key_field is None and pubsub_key is not None
+                else (
+                    topic
+                    if policy.key_field is None
+                    else _protocol.require_text(
+                        str(row[policy.key_field]),
+                        f"{topic} latest key",
+                    )
                 )
             )
             replacement_key = f"{topic}\x1f{key}"
-        message_id = uuid4().hex
+        message_id = _bound_message_id(
+            self.identity.node_id,
+            topic,
+            correlation_id
+            if policy.delivery_class is TopicDeliveryClass.DURABLE_APPEND
+            else _pubsub_offset(row),
+        )
         with self._lock:
             self._require_open_locked()
             peer_ids = self._interested_peers_locked(topic)
+        if policy.delivery_class is TopicDeliveryClass.LIVE_LATEST:
+            if replacement_key is None:
+                raise MeshRouteError("live latest topic requires a replacement key")
+            with binding._lock:
+                if (
+                    replacement_key not in binding._latest_rows
+                    and len(binding._latest_rows) >= policy.max_sources
+                ):
+                    raise MeshBackpressureError(
+                        message_id,
+                        accepted_peers=(),
+                        rejected_peers=(self.identity.node_id,),
+                    )
+                binding._latest_rows[replacement_key] = (
+                    payload,
+                    correlation_id,
+                    message_id,
+                    self.identity.node_id,
+                )
+            with self._lock:
+                self._remember_message_locked(message_id)
+            self._fanout_live_latest(
+                topic,
+                payload,
+                message_id,
+                correlation_id=correlation_id,
+                replacement_key=replacement_key,
+                source_node_id=self.identity.node_id,
+                peer_ids=peer_ids,
+            )
+            return
         message = TransportMessage(
             FrameKind.PUBSUB,
             topic,
             payload,
-            correlation_id=_encode_durable_correlation(
+            correlation_id=_protocol.encode_durable_correlation(
                 self.identity.node_id,
                 replacement_key,
+                correlation_id,
             ),
         )
         accepted: list[str] = []
@@ -1054,13 +1333,12 @@ class TransportMesh:
                 rejected.append(peer_id)
                 continue
             try:
-                peer.durable.enqueue(
+                peer.durable.send(
                     message,
                     message_id=message_id,
-                    replacement_key=replacement_key,
-                    policy=policy,
+                    source=replacement_key,
                 )
-            except _JournalFull:
+            except DeliveryStorageFull:
                 rejected.append(peer_id)
             else:
                 accepted.append(peer_id)
@@ -1071,17 +1349,18 @@ class TransportMesh:
                 rejected_peers=rejected,
             )
 
-    def _accept_durable_frame(
+    def _accept_durable_delivery(
         self,
         peer_node_id: str,
         peer: "_PeerLink",
-        frame: _DeliveryFrame,
+        delivery: ReceivedDelivery,
     ) -> None:
+        message = delivery.message
         try:
-            source_node_id, replacement_key = _decode_durable_correlation(
-                frame.correlation_id
+            metadata = _protocol.decode_durable_correlation(
+                message.correlation_id
             )
-            topic = frame.channel
+            topic = message.channel
             with self._lock:
                 binding = self._bindings.get(topic)
                 downstream = self._interested_peers_locked(
@@ -1090,18 +1369,15 @@ class TransportMesh:
                 )
             if binding is None:
                 raise MeshRouteError(f"durable topic {topic!r} is not bound")
-            if source_node_id == self.identity.node_id:
-                peer.durable.ack(peer.transport, frame)
+            if metadata.source_node_id == self.identity.node_id:
+                peer.durable.ack(delivery.message_id)
                 return
-            binding._publish_remote(frame.payload)
-            if binding.policy.mode is DurableTopicMode.APPEND:
+            replacement_key = metadata.replacement_key
+            if (
+                binding.policy.delivery_class
+                is TopicDeliveryClass.DURABLE_APPEND
+            ):
                 replacement_key = None
-            message = TransportMessage(
-                FrameKind(frame.frame_kind),
-                frame.channel,
-                frame.payload,
-                correlation_id=frame.correlation_id,
-            )
             for downstream_id in downstream:
                 with self._lock:
                     downstream_peer = self._peers.get(downstream_id)
@@ -1109,25 +1385,101 @@ class TransportMesh:
                     raise MeshRouteError(
                         f"durable downstream peer {downstream_id!r} is unavailable"
                     )
-                downstream_peer.durable.enqueue(
+                downstream_peer.durable.send(
                     message,
-                    message_id=frame.message_id,
-                    replacement_key=replacement_key,
-                    policy=binding.policy,
+                    message_id=delivery.message_id,
+                    source=replacement_key,
                 )
-            peer.durable.ack(peer.transport, frame)
+            binding._publish_remote(message.payload, metadata.correlation_id)
+            peer.durable.ack(delivery.message_id)
         except Exception as error:
-            peer.durable.nack(peer.transport, frame, str(error))
+            peer.durable.nack(delivery.message_id, str(error))
             if isinstance(error, MeshError):
                 raise
             raise MeshRouteError(
-                f"durable topic {frame.channel!r} from peer "
+                f"durable topic {message.channel!r} from peer "
                 f"{peer_node_id!r} could not be accepted: {error}"
             ) from error
 
-    def _has_binding_for_frame(self, frame: _DeliveryFrame) -> bool:
+    def _has_binding_for_delivery(self, delivery: ReceivedDelivery) -> bool:
         with self._lock:
-            return frame.channel in self._bindings
+            return delivery.message.channel in self._bindings
+
+    def _resync_live_latest(self, peer_node_id: str, topic: str) -> None:
+        with self._lock:
+            binding = self._bindings.get(topic)
+        if (
+            binding is None
+            or binding.policy.delivery_class
+            is not TopicDeliveryClass.LIVE_LATEST
+        ):
+            return
+        with binding._lock:
+            latest_rows = tuple(binding._latest_rows.items())
+        for replacement_key, (
+            payload,
+            correlation_id,
+            message_id,
+            source_node_id,
+        ) in latest_rows:
+            self._fanout_live_latest(
+                topic,
+                payload,
+                message_id,
+                correlation_id=correlation_id,
+                replacement_key=replacement_key,
+                source_node_id=source_node_id,
+                peer_ids=(peer_node_id,),
+            )
+
+    def _resync_live_connection(
+        self,
+        peer_node_id: str,
+        peer: "_PeerLink",
+    ) -> None:
+        health = peer.transport.health()
+        if (
+            health.state is not LinkState.CONNECTED
+            or health.connections_established <= peer.live_resynced_connections
+        ):
+            return
+        with self._lock:
+            topics = tuple(
+                sorted(
+                    {
+                        subscription.topic
+                        for subscription in self._remote_subscriptions.values()
+                        if subscription.next_hop == peer_node_id
+                        and (
+                            binding := self._bindings.get(subscription.topic)
+                        )
+                        is not None
+                        and binding.policy.delivery_class
+                        is TopicDeliveryClass.LIVE_LATEST
+                    }
+                )
+            )
+        for topic in topics:
+            self._resync_live_latest(peer_node_id, topic)
+        now = time()
+        if (
+            peer.live_sync_request_attempts < 1
+            and health.connected_at is not None
+            and now - health.connected_at >= 0.1
+            and now - peer.live_sync_requested_at >= 0.1
+        ):
+            try:
+                self._synchronize_peer(peer_node_id)
+            except MeshError as error:
+                self._record_peer_error(peer_node_id, error)
+            peer.live_sync_request_attempts += 1
+            peer.live_sync_requested_at = now
+            return
+        if (
+            peer.live_sync_request_attempts >= 1
+            and now - peer.live_sync_requested_at >= 0.1
+        ):
+            peer.live_resynced_connections = health.connections_established
 
     def _remove_binding(
         self,
@@ -1237,9 +1589,65 @@ class TransportMesh:
         self._reset_peer_routes(peer_node_id)
         try:
             self._synchronize_peer(peer_node_id)
+            self._send_to_peers(
+                (peer_node_id,),
+                TransportMessage(
+                    FrameKind.PUBSUB,
+                    _protocol.CONTROL_SYNC,
+                    b"",
+                    correlation_id=uuid4().hex,
+                ),
+            )
         except MeshError as error:
             self._record_peer_error(peer_node_id, error)
         return health.connections_established
+
+    def _observe_peer_state(self, peer_node_id: str, peer: "_PeerLink") -> None:
+        health = peer.transport.health()
+        previous = peer.observed_state
+        if health.state is previous:
+            return
+        peer.observed_state = health.state
+        if health.state is LinkState.CONNECTED:
+            peer.live_sync_request_attempts = 0
+            peer.live_sync_requested_at = 0.0
+            self._emit(
+                MeshLifecycleKind.PEER_CONNECTED,
+                MeshLifecycleReason.RECONNECT
+                if health.connections_established > 1
+                else MeshLifecycleReason.LINK_STATE_CHANGED,
+                peer_node_id=peer_node_id,
+                attempt=health.connection_attempts,
+            )
+            return
+        if health.state in {LinkState.LISTENING, LinkState.RECONNECTING}:
+            if previous is LinkState.CONNECTED:
+                self._emit(
+                    MeshLifecycleKind.PEER_DISCONNECTED,
+                    MeshLifecycleReason.LINK_STATE_CHANGED,
+                    peer_node_id=peer_node_id,
+                    attempt=health.connection_attempts,
+                    detail=health.last_error,
+                )
+            if previous is LinkState.CONNECTED or health.connection_attempts > 1:
+                self._emit(
+                    MeshLifecycleKind.PEER_RECONNECTING,
+                    MeshLifecycleReason.RECONNECT,
+                    peer_node_id=peer_node_id,
+                    attempt=health.connection_attempts,
+                    detail=health.last_error,
+                )
+            return
+        if health.state is LinkState.CLOSED and previous is not None:
+            self._emit(
+                MeshLifecycleKind.PEER_DISCONNECTED,
+                MeshLifecycleReason.SHUTDOWN
+                if self._closed
+                else MeshLifecycleReason.LINK_STATE_CHANGED,
+                peer_node_id=peer_node_id,
+                attempt=health.connection_attempts,
+                detail=health.last_error,
+            )
 
     def _reset_peer_routes(self, peer_node_id: str) -> None:
         with self._lock:
@@ -1324,30 +1732,49 @@ class TransportMesh:
         with self._lock:
             self._last_routing_error = f"{type(error).__name__}: {error}"
 
+    def _emit(
+        self,
+        kind: MeshLifecycleKind,
+        reason: MeshLifecycleReason,
+        **fields: object,
+    ) -> MeshLifecycleEvent:
+        return self._lifecycle.publish(kind, reason, **fields)
 
-def _encode_durable_correlation(
+
+def _pubsub_key(row: StreamRow) -> str | None:
+    value = row.as_dict().get("message_key")
+    if value is None:
+        return None
+    return _protocol.require_text(str(value), "PubSub key")
+
+
+def _pubsub_offset(row: StreamRow) -> str:
+    value = row.as_dict().get("offset")
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise MeshRouteError("bound PubSub row is missing a valid offset")
+    return str(value)
+
+
+def _pubsub_correlation_id(topic: str, row: StreamRow) -> str:
+    key = _pubsub_key(row)
+    if key is not None:
+        return key
+    offset = _pubsub_offset(row)
+    if topic.endswith(".commands"):
+        return f"{topic.removesuffix('.commands')}:{offset}"
+    return f"{topic}:{offset}"
+
+
+def _bound_message_id(
     source_node_id: str,
-    replacement_key: str | None,
+    topic: str,
+    stable_value: str,
 ) -> str:
-    return f"{len(source_node_id)}:{source_node_id}{replacement_key or ''}"
-
-
-def _decode_durable_correlation(value: str | None) -> tuple[str, str | None]:
-    if value is None or ":" not in value:
-        raise MeshRouteError("durable topic correlation metadata is missing")
-    encoded_size, remainder = value.split(":", 1)
-    try:
-        source_size = int(encoded_size)
-    except ValueError as error:
-        raise MeshRouteError("durable source node_id size is invalid") from error
-    if source_size < 1 or source_size > len(remainder):
-        raise MeshRouteError("durable source node_id size is out of bounds")
-    source_node_id = remainder[:source_size]
-    replacement_key = remainder[source_size:]
-    return (
-        _protocol.require_text(source_node_id, "durable source node_id"),
-        replacement_key or None,
-    )
+    digest = sha256()
+    for value in (source_node_id, topic, stable_value):
+        digest.update(value.encode("utf-8"))
+        digest.update(b"\0")
+    return digest.hexdigest()
 
 
 @dataclass(slots=True)
@@ -1355,8 +1782,12 @@ class _PeerLink:
     transport: TcpTransport
     source: str
     reader: Thread
-    durable: _MeshDurablePeer | None
+    durable: _MeshDeliveryPeer | None
     last_error: str | None = None
+    observed_state: LinkState | None = None
+    live_resynced_connections: int = 0
+    live_sync_request_attempts: int = 0
+    live_sync_requested_at: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -1367,6 +1798,7 @@ class _RemoteSubscription:
 
 __all__ = [
     "DEFAULT_DUPLICATE_WINDOW",
+    "DEFAULT_LIFECYCLE_EVENT_LIMIT",
     "DEFAULT_MAX_PEERS",
     "DEFAULT_MAX_SUBSCRIPTIONS",
     "DEFAULT_PUBLICATION_QUEUE_LIMIT",
@@ -1376,6 +1808,11 @@ __all__ = [
     "MeshConfig",
     "MeshError",
     "MeshHealth",
+    "MeshLifecycleEvent",
+    "MeshLifecycleHealth",
+    "MeshLifecycleKind",
+    "MeshLifecycleReason",
+    "MeshLifecycleSubscription",
     "MeshPeerHealth",
     "MeshPublication",
     "MeshPublishResult",

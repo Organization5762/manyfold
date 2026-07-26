@@ -205,13 +205,14 @@ class PubSub:
             }
         )
 
-    def publish_encoded(self, payload: bytes) -> None:
+    def publish_encoded(self, payload: bytes, *, key: str | None = None) -> None:
         """Publish already encoded bytes after native schema validation."""
         payload_bytes = _payload_bytes(payload)
         self._runtime.publish(
             self.topic,
             payload_bytes,
             pad_name=self.topic,
+            key=key,
         )
         self._publish_to_callbacks()
 

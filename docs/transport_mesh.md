@@ -73,6 +73,11 @@ through authenticated mesh peers, not signed end to end.
 | `synchronize()` | Explicitly retry subscription state after caller-observed backpressure. Reconnected links synchronize automatically. |
 | `publish(topic, payload)` | Deliver locally and fan out to unique interested next hops; no subscriber is an explicit routing error. |
 | `receive(...)` | Remove one publication from the bounded local queue. |
+| `bind(pubsub, policy=...)` | Bind one named typed `PubSub` handle once, before peers join. |
+| `lifecycle_events(after_sequence=...)` | Read the retained suffix of ordered, typed local lifecycle events. |
+| `subscribe_lifecycle(...)` | Pull lifecycle events from a bounded, non-durable local queue. |
+| `lifecycle_health()` | Report lifecycle retention and subscriber-drop counts. |
+| `durable_topic_diagnostics()` | Report each binding's delivery class, current journal retention, and transition counters. |
 | `peer_health()` | Report each underlying link, discovery source, interested topics, and latest routing error. |
 | `health()` | Report bounded peer/subscription/queue counts and duplicate suppression. |
 | `close()` | Dispose links and readers, clear every routing index and payload reference, and unblock receivers. |
@@ -83,19 +88,18 @@ is similarly explicit per `listen(...)` call.
 
 ## Durable topic bindings
 
-Applications that need brief disconnect and restart recovery can bind a named,
-schema-validated `PubSub` directly to the mesh. The mesh remains the sole
-transport/session owner and its existing reader dispatches data, ACKs, retries,
-and subscription control.
+Bind named, schema-validated `PubSub` handles directly at startup. The mesh
+remains the sole transport and receive-loop owner; the durable classes compose
+the existing `DurableDelivery` journal behind that dispatcher.
 
 ```python
 from dataclasses import dataclass
 from pathlib import Path
 
-from manyfold.architecture.pubsub import PubSub
+from manyfold.architecture.pubsub import PubSubTopic
 from manyfold.architecture.transport_topics import (
-    DurableTopicPolicy,
     MeshDurabilityConfig,
+    MeshTopicPolicy,
 )
 
 @dataclass(frozen=True)
@@ -103,45 +107,101 @@ class Navigation:
     command: str
     source: str
 
-navigation = PubSub(topic="navigation", schema=Navigation, schedule=False)
+navigation = PubSubTopic("navigation.commands", schema=Navigation)
+sensor_state = PubSubTopic("navigation.states", schema=Navigation)
+frame_ticks = PubSubTopic("heart.frame_ticks", schema=Navigation)
 mesh = TransportMesh(
     identity,
     connector_config=transport_config,
     durability=MeshDurabilityConfig(Path("manyfold-delivery")),
 )
-mesh.bind(navigation, policy=DurableTopicPolicy.append())
+mesh.bind(
+    navigation,
+    policy=MeshTopicPolicy.commands("navigation.commands"),
+)
+mesh.bind(
+    sensor_state,
+    policy=MeshTopicPolicy.latest(
+        "navigation.states",
+        max_sources=32,
+        max_bytes=1024 * 1024,
+        ttl_seconds=5.0,
+        key_field="source",
+    ),
+)
+mesh.bind(
+    frame_ticks,
+    policy=MeshTopicPolicy.live_latest(
+        "heart.frame_ticks",
+        max_sources=1,
+    ),
+)
+
+navigation.publish(
+    Navigation("open-settings", "controller-1"),
+    key="navigation:request-42",
+)
 ```
 
-Bindings follow the mesh lifecycle: create them before peers join and call
-`mesh.close()` once. `DurableTopicPolicy.append()` retains distinct,
-deduplicated commands in order. `DurableTopicPolicy.latest()` keeps one pending
-value for the topic, or one per bounded `key_field`, from enqueue time—not only
-after capacity pressure. Both policies expire stale rows and have strict item,
-byte, payload, and per-peer caps.
+`MeshTopicPolicy.commands()` is bounded durable append. A PubSub `key=` becomes
+the stable correlation and deduplication identity; without a key, a
+`<machine>.commands` topic uses `<machine>:<fabric-offset>`. A repeated ID with
+different content is a conflict rather than silent replacement.
 
-Recommended initial policies deliberately favor freshness over replay:
+`MeshTopicPolicy.latest()` is bounded durable latest-per-source. It atomically
+replaces the pending journal row for each `key_field`, expires stale rows by
+TTL, and applies both item and byte soft watermarks and hard caps.
 
-| Stream | Policy | Default operational TTL |
-| --- | --- | --- |
-| Navigation commands | append | 10 s |
-| Frame ticks | latest, one slot | one cadence, never above 50 ms |
-| Rendered frames | latest, one slot | measured 100–250 ms |
-| Microphone samples | latest per source | 500 ms |
-| Debug/input taps | latest per source | 500 ms |
-| Sensor snapshots | latest per source | 5 s |
+`MeshTopicPolicy.live_latest()` is process-local, non-journaled latest-per-source.
+It retains at most `max_sources` current values in memory, discards older
+outbound frames on the same source/topic slot, and resends only current state
+after subscription recovery. It never creates outage or restart replay rows.
+Use it for frame ticks, rendered frames, audio, and bounded debug streams. Use
+durable append for navigation/input commands, durable latest with TTL for
+low-rate sensor state, and the separate Raft path for coordinated world/device
+state.
 
-A frame tick is a clock impulse, not a historical sample: a newer tick replaces
-the pending tick immediately and an expired tick is never replayed. Latest
-topics similarly bound outage storage by active source count, at the cost of
-discarding intermediate samples. Append topics preserve commands until ACK or
-TTL, but reject new commands with `MeshBackpressureError` at a hard cap rather
-than silently losing retained work.
+`MeshTopicBinding.retains_journal_rows` describes whether the configured class
+may journal. `durable_topic_diagnostics()` reports whether rows actually exist
+now, plus outbox items and coalesced, expired, retried, sender-acknowledged,
+storage-rejected, and recovery-loaded counts. SQLite uses full-synchronous
+commits, so durable fanout pays one transaction per interested peer. Live-latest
+fanout never touches SQLite.
 
-`durable_topic_diagnostics()` reports retained rows and bytes plus replaced,
-expired, retried, acknowledged, hard-cap-rejected, and recovery-loaded counts
-per peer and topic. SQLite uses full-synchronous commits; each accepted publish
-therefore pays one durable transaction per interested peer. Expiry and
-incremental compaction run while connected or disconnected.
+State machines can bind their four actual handles without an adapter:
+`<name>.commands` as commands, `<name>.states` as durable latest,
+`<name>.transitions` as commands when replay is desired, and `<name>.events`
+left local by default. Transport replay does not make command consumption,
+state revision, transition publication, and audit publication atomic; that
+consumer/state boundary remains separate work.
+
+## Typed lifecycle events
+
+`MeshLifecycleEvent` is the public transport telemetry record. Its
+`MeshLifecycleKind` covers runtime start/ready/stopping/stopped, peer
+discovery/connect/disconnect/reconnect, durable enqueue/coalesce/drop/expire,
+retry/send/sender-ACK/replay, watermark crossing/recovery, and terminal delivery
+failure. `MeshLifecycleReason` gives the stable cause.
+
+Every record has a node-local monotonic `sequence` and transition timestamp.
+Applicable records carry exact topic, peer, message, correlation and related
+message IDs, attempt, item count, byte count, and detail. The sequence is
+assigned synchronously at the transition boundary, so consumers use it—not
+wall-clock timestamps—for ordering.
+
+```python
+with mesh.subscribe_lifecycle(after_sequence=0, queue_limit=1024) as events:
+    event = events.receive(timeout=1.0)
+    print(event.sequence, event.kind, event.correlation_id)
+```
+
+Lifecycle telemetry is local and non-durable by policy. Publication only
+appends to bounded in-memory storage and bounded pull queues with non-blocking
+`put_nowait`; it never calls application callbacks, enters topic delivery, or
+waits for a telemetry consumer. A full subscriber queue drops its oldest event,
+and `lifecycle_health()` exposes both retention and subscriber drops. Heart and
+qualification consumers should read this surface instead of polling private
+transport state or republishing lifecycle records through a durable binding.
 
 ## Routing and bounds
 
