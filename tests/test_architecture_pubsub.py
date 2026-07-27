@@ -5,7 +5,7 @@ import sys
 import unittest
 from dataclasses import dataclass
 from os import getpid
-from queue import Queue
+from queue import Empty, Queue
 from threading import Event, Thread, get_ident
 from uuid import UUID
 
@@ -394,6 +394,74 @@ class PubSubStreamTests(unittest.TestCase):
         self.assertTrue(subscription.is_disposed)
         with self.assertRaisesRegex(RuntimeError, "closed"):
             stream.publish(Temperature(degrees=72.5, unit="F"))
+
+    def test_pubsub_close_cancels_pending_main_thread_callback_delivery(
+        self,
+    ) -> None:
+        stream = PubSub(topic="context.main-thread-cancel", schema=Temperature)
+        observed: list[float] = []
+        drain_main_thread_callbacks()
+
+        stream.subscribe(
+            lambda row: observed.append(row.degrees),
+            callback_placement=CallbackPlacement.main_thread(),
+        )
+        stream.publish(Temperature(degrees=72.0, unit="F"))
+        stream.close()
+
+        self.assertEqual(observed, [])
+        self.assertEqual(drain_main_thread_callbacks(), 1)
+        self.assertEqual(observed, [])
+
+    def test_pubsub_subscription_dispose_cancels_pending_main_thread_callback(
+        self,
+    ) -> None:
+        stream = PubSub(
+            topic="context.main-thread-subscription-cancel",
+            schema=Temperature,
+        )
+        observed: list[float] = []
+        drain_main_thread_callbacks()
+
+        subscription = stream.subscribe(
+            lambda row: observed.append(row.degrees),
+            callback_placement=CallbackPlacement.main_thread(),
+        )
+        stream.publish(Temperature(degrees=72.0, unit="F"))
+        self.assertTrue(subscription.dispose())
+
+        self.assertEqual(drain_main_thread_callbacks(), 1)
+        self.assertEqual(observed, [])
+
+    def test_pubsub_close_cancels_pending_spawned_thread_callback_delivery(
+        self,
+    ) -> None:
+        stream = PubSub(topic="context.spawned-thread-cancel", schema=Temperature)
+        first_started = Queue()
+        release_first = Event()
+        observed: Queue[float] = Queue()
+
+        def observe(row: StreamRow) -> None:
+            observed.put(row.degrees)
+            if row.degrees == 72.0:
+                first_started.put(True)
+                release_first.wait(timeout=2.0)
+
+        stream.subscribe(
+            observe,
+            callback_placement=CallbackPlacement.spawned_thread(
+                "context-spawned-cancel",
+            ),
+        )
+        stream.publish(Temperature(degrees=72.0, unit="F"))
+        self.assertTrue(first_started.get(timeout=1.0))
+        stream.publish(Temperature(degrees=73.0, unit="F"))
+        stream.close()
+        release_first.set()
+
+        self.assertEqual(observed.get(timeout=1.0), 72.0)
+        with self.assertRaises(Empty):
+            observed.get(timeout=0.2)
 
     def test_pubsub_topic_context_closes_borrowed_handle_not_named_fabric(
         self,
