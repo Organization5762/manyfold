@@ -6,7 +6,7 @@ import unittest
 from dataclasses import dataclass
 from os import getpid
 from queue import Empty, Queue
-from threading import Event, Thread, get_ident
+from threading import Barrier, Event, Thread, get_ident
 from uuid import UUID
 
 from manyfold.architecture import (
@@ -482,54 +482,115 @@ class PubSubStreamTests(unittest.TestCase):
         self.assertEqual(drain_main_thread_callbacks(), 0)
         self.assertEqual(observed, [])
 
-    def test_pubsub_dispose_ignores_fanout_snapshot_after_unsubscribe(
+    def test_pubsub_publish_racing_dispose_does_not_deliver_after_dispose(
         self,
     ) -> None:
-        stream = PubSub(topic="context.dispose-fanout-snapshot", schema=Temperature)
-        observed: list[float] = []
-        stream.publish(Temperature(degrees=72.0, unit="F"))
-        row = stream.latest()
-        self.assertIsNotNone(row)
+        delivered_after_dispose = Queue()
+        publish_errors: Queue[Exception] = Queue()
 
-        subscription = stream.subscribe(lambda value: observed.append(value.degrees))
-        deliver = next(iter(stream._callbacks.values()))
-        self.assertTrue(subscription.dispose())
+        for attempt in range(200):
+            stream = PubSub(
+                topic=f"context.dispose-publish-race.{attempt}",
+                schema=Temperature,
+                retained_messages=4096,
+            )
+            for seed in range(256):
+                stream.publish(Temperature(degrees=float(seed), unit="F"))
 
-        deliver(row)
+            dispose_returned = Event()
 
-        self.assertEqual(observed, [])
+            def observe(_row: StreamRow) -> None:
+                if dispose_returned.is_set():
+                    delivered_after_dispose.put(attempt)
 
-    def test_pubsub_close_ignores_fanout_snapshot_after_close(self) -> None:
-        stream = PubSub(topic="context.close-fanout-snapshot", schema=Temperature)
-        observed: list[float] = []
-        stream.publish(Temperature(degrees=72.0, unit="F"))
-        row = stream.latest()
-        self.assertIsNotNone(row)
+            subscription = stream.subscribe(observe)
+            start = Barrier(3)
 
-        stream.subscribe(lambda value: observed.append(value.degrees))
-        deliver = next(iter(stream._callbacks.values()))
-        stream.close()
+            def publish() -> None:
+                try:
+                    start.wait(timeout=1.0)
+                    stream.publish(Temperature(degrees=1000.0 + attempt, unit="F"))
+                except Exception as error:
+                    publish_errors.put(error)
 
-        deliver(row)
+            def dispose() -> None:
+                try:
+                    start.wait(timeout=1.0)
+                    subscription.dispose()
+                    dispose_returned.set()
+                except Exception as error:
+                    publish_errors.put(error)
 
-        self.assertEqual(observed, [])
-
-    def test_pubsub_publish_ignores_close_race_after_runtime_write(self) -> None:
-        stream = PubSub(topic="context.close-during-fanout", schema=Temperature)
-        observed: list[float] = []
-        stream.subscribe(lambda value: observed.append(value.degrees))
-        original_latest = stream.latest
-
-        def close_then_read_latest() -> StreamRow | None:
+            publisher = Thread(target=publish)
+            disposer = Thread(target=dispose)
+            publisher.start()
+            disposer.start()
+            start.wait(timeout=1.0)
+            publisher.join(timeout=2.0)
+            disposer.join(timeout=2.0)
+            self.assertFalse(publisher.is_alive())
+            self.assertFalse(disposer.is_alive())
             stream.close()
-            return original_latest()
 
-        stream.latest = close_then_read_latest  # type: ignore[method-assign]
+        with self.assertRaises(Empty):
+            delivered_after_dispose.get(timeout=0.1)
+        with self.assertRaises(Empty):
+            publish_errors.get(timeout=0.1)
 
-        stream.publish(Temperature(degrees=72.0, unit="F"))
+    def test_pubsub_publish_racing_close_does_not_deliver_after_close(self) -> None:
+        delivered_after_close = Queue()
+        publish_errors: Queue[Exception] = Queue()
 
-        self.assertTrue(stream.is_closed)
-        self.assertEqual(observed, [])
+        for attempt in range(200):
+            stream = PubSub(
+                topic=f"context.close-publish-race.{attempt}",
+                schema=Temperature,
+                retained_messages=4096,
+            )
+            for seed in range(256):
+                stream.publish(Temperature(degrees=float(seed), unit="F"))
+
+            close_returned = Event()
+
+            def observe(_row: StreamRow) -> None:
+                if close_returned.is_set():
+                    delivered_after_close.put(attempt)
+
+            stream.subscribe(observe)
+            start = Barrier(3)
+
+            def publish() -> None:
+                try:
+                    start.wait(timeout=1.0)
+                    stream.publish(Temperature(degrees=1000.0 + attempt, unit="F"))
+                except RuntimeError as error:
+                    if not stream.is_closed:
+                        publish_errors.put(error)
+                except Exception as error:
+                    publish_errors.put(error)
+
+            def close() -> None:
+                try:
+                    start.wait(timeout=1.0)
+                    stream.close()
+                    close_returned.set()
+                except Exception as error:
+                    publish_errors.put(error)
+
+            publisher = Thread(target=publish)
+            closer = Thread(target=close)
+            publisher.start()
+            closer.start()
+            start.wait(timeout=1.0)
+            publisher.join(timeout=2.0)
+            closer.join(timeout=2.0)
+            self.assertFalse(publisher.is_alive())
+            self.assertFalse(closer.is_alive())
+
+        with self.assertRaises(Empty):
+            delivered_after_close.get(timeout=0.1)
+        with self.assertRaises(Empty):
+            publish_errors.get(timeout=0.1)
 
     def test_pubsub_close_releases_pending_main_thread_callback_queue_capacity(
         self,
