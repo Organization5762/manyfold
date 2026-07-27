@@ -293,6 +293,31 @@ peek, or a private subscribe factory. Heart-shaped tests must prove:
 The stable namespace containing this adapter must survive top-level export
 narrowing.
 
+## Node runtime gates for M14
+
+- `manyfold.node.NodeConfig.from_env_json(value)` parses a passed JSON value
+  without reading global environment state and returns `NodeConfig | None`;
+  missing, empty, or explicitly disabled configuration means no runtime rather
+  than a disabled runtime object.
+- The application container directly owns `NodeRuntime(config)`. Construction
+  has no side effects; `start()` atomically owns signer, core node, then
+  `TransportMesh`, and failed/closed-during-start attempts roll back mesh, core
+  node, then signer without leaked workers, subscriptions, or registry names.
+- `runtime.mesh` is available only while running for a separately owned Heart
+  topic bridge. `stop() -> bool` is restartable/idempotent and closes mesh,
+  core node, then signer. `close() -> bool` is terminal/idempotent and
+  coordinates with concurrent start/stop; start after close raises.
+- `NodeSnapshot` contains bounded node diagnostics and bounded mesh health.
+  Diagnostic retention is capped by `NodeConfig.diagnostic_limit`; mesh peers,
+  subscriptions, duplicate IDs, and publication queue are capped by
+  `MeshConfig`.
+- Each topic interest has an independently disposable
+  `MeshSubscription.dispose() -> bool`; mesh/runtime shutdown also clears all
+  local/remote subscriptions, queued publications, and reader threads.
+- Production-faithful tests cover startup rollback at every acquisition step,
+  concurrent start/stop/close, duplicate lifecycle calls, cleanup order,
+  snapshot bounds, topic disposal, and restart versus terminal-close behavior.
+
 ## Heart compatibility
 
 - Historical pinned evidence: Heart depends on Manyfold
