@@ -5,7 +5,6 @@ from __future__ import annotations
 import base64
 import contextlib
 import datetime as dt
-import fcntl
 import hashlib
 import ipaddress
 import json
@@ -22,6 +21,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from types import ModuleType
 from typing import Any, Final, final
 
 from cryptography import x509
@@ -43,6 +43,12 @@ from .enrollment import (
     _read_secure,
 )
 from .transport import NodeIdentity, TransportSecurity
+
+_fcntl: ModuleType | None
+if os.name == "posix":
+    import fcntl as _fcntl
+else:
+    _fcntl = None
 
 _PROCESS_CREDENTIAL_TTL_SECONDS: Final = 5 * 60
 _MIN_PROCESS_CREDENTIAL_TTL_SECONDS: Final = 2
@@ -109,10 +115,7 @@ class MachineSignerService:
         max_audit_entries: int = 256,
         credential_ttl_seconds: int = _PROCESS_CREDENTIAL_TTL_SECONDS,
     ) -> None:
-        if os.name != "posix":
-            raise NotImplementedError(
-                "MachineSignerService requires a Windows named-pipe/ACL host"
-            )
+        _require_posix_signer()
         if max_clients < 1 or max_audit_entries < 1:
             raise ValueError("signer limits must be positive")
         if not (
@@ -153,7 +156,7 @@ class MachineSignerService:
             lock_fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
             os.chmod(lock_path, 0o600)
             try:
-                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                _lock_instance(lock_fd)
             except OSError:
                 os.close(lock_fd)
                 raise RuntimeError(
@@ -185,7 +188,7 @@ class MachineSignerService:
                     listener.close()
                 with contextlib.suppress(FileNotFoundError):
                     self._socket_path.unlink()
-                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                _unlock_instance(lock_fd)
                 os.close(lock_fd)
                 raise
 
@@ -216,7 +219,7 @@ class MachineSignerService:
         with contextlib.suppress(FileNotFoundError):
             self._socket_path.unlink()
         if lock_fd is not None:
-            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            _unlock_instance(lock_fd)
             os.close(lock_fd)
 
     def health(self) -> MachineSignerHealth:
@@ -450,6 +453,7 @@ class MachineSignerClient:
         *,
         clock: Callable[[], dt.datetime] | None = None,
     ) -> None:
+        _require_posix_signer()
         self._socket_path = Path(socket_path)
         self._identity = identity
         self._clock = _utc_now if clock is None else clock
@@ -800,6 +804,28 @@ def _text(value: object, name: str) -> str:
     if not isinstance(value, str) or not value:
         raise ValueError(f"{name} must be non-empty text")
     return value
+
+
+def _require_posix_signer() -> ModuleType:
+    if _fcntl is None:
+        raise NotImplementedError(
+            "machine signer requires POSIX Unix sockets and advisory file "
+            "locking; Windows named-pipe/ACL support is not implemented"
+        )
+    return _fcntl
+
+
+def _lock_instance(file_descriptor: int) -> None:
+    file_locks = _require_posix_signer()
+    file_locks.flock(
+        file_descriptor,
+        file_locks.LOCK_EX | file_locks.LOCK_NB,
+    )
+
+
+def _unlock_instance(file_descriptor: int) -> None:
+    file_locks = _require_posix_signer()
+    file_locks.flock(file_descriptor, file_locks.LOCK_UN)
 
 
 def _require_private_directory(path: Path) -> None:
