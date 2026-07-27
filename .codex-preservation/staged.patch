@@ -1,0 +1,90 @@
+* Unmerged path python/manyfold/architecture/__init__.py
+* Unmerged path tests/test_architecture_pubsub.py
+diff --git c/README.md i/README.md
+index e4c9e0b86394664c57ba9b75632f86ecf25dc750..dab57f2c571376ed5e9d1b6bd48346c15d804227 100644
+--- c/README.md
++++ i/README.md
+@@ -94,6 +94,29 @@ Manyfold-native architecture elements remain available from
+ `PubSub` is the primary application stream surface. Behavior-heavy substrates
+ stay backed by the runtime implementation.
+ 
++### Outside Interfaces
++
++Use architecture interfaces when external sources have lifecycle or schema
++state that needs to compose with streams:
++
++```python
++from manyfold.architecture import BluetoothControllerInterface, SerialBusInterface
++
++controllers = BluetoothControllerInterface("controllers")
++controllers.connect_controller("joy-0", name="8BitDo Lite 2")
++controllers.publish_controller_state("joy-0", {"dpad_x": 1, "south": True})
++controllers.disconnect_controller("joy-0", reason="link lost")
++
++serial = SerialBusInterface("serial")
++serial.discover_bus("/dev/ttyUSB0")
++serial.publish_bus_schema("/dev/ttyUSB0", {"rotation": "int", "pressed": "bool"})
++serial.publish_frame("/dev/ttyUSB0", {"rotation": 3, "pressed": True})
++```
++
++Both adapters publish normalized lifecycle, schema, data, and error events to a
++`PubSub` stream, so Bluetooth reconnect churn and serial bus discovery remain
++queryable beside the payloads they produce.
++
+ ### Stats: Compute Values
+ 
+ ```python
+diff --git c/docs/using_manyfold.md i/docs/using_manyfold.md
+index abae736c9616fe3601097d77e11f6eef2bd6fce1..4f73feb2c66cee6060c5d211cd1e1fbb994d4d81 100644
+--- c/docs/using_manyfold.md
++++ i/docs/using_manyfold.md
+@@ -254,6 +254,49 @@ Use `stream.query(...)` for SQL scoped to one PubSub stream and
+ assigns a default `event_time` when callers do not provide one; distributed
+ queue implementations own that ordering contract.
+ 
++## Interfaces
++
++Use `Interface` adapters when an outside source has connection state or schema
++state that should be visible beside its data. The adapter publishes normalized
++events into a `PubSub` stream, so application code can query lifecycle, schema,
++and payload history through the same SQL surface as ordinary streams.
++
++```python
++from manyfold.architecture import BluetoothControllerInterface, SerialBusInterface
++
++
++controllers = BluetoothControllerInterface("controllers")
++controllers.connect_controller("joy-0", name="8BitDo Lite 2")
++controllers.publish_controller_state(
++    "joy-0",
++    {"dpad_x": 1, "south": True},
++    schema={"dpad_x": "int", "south": "bool"},
++)
++controllers.disconnect_controller("joy-0", reason="link lost")
++
++serial = SerialBusInterface("serial")
++serial.discover_bus("/dev/ttyUSB0")
++serial.publish_bus_schema("/dev/ttyUSB0", {"rotation": "int", "pressed": "bool"})
++serial.publish_frame("/dev/ttyUSB0", {"rotation": 3, "pressed": True})
++
++latest = serial.latest()
++if latest is not None:
++    print(f"{latest.source_id}: {latest.event_type} {latest.schema}")
++```
++
++Output:
++
++```text
++/dev/ttyUSB0: serial.frame {"pressed":"bool","rotation":"int"}
++```
++
++`BluetoothControllerInterface` is for lossy controller connection cycles:
++connect, publish sampled state, disconnect, then reconnect under the same stable
++controller id. `SerialBusInterface` is for buses that appear, disappear, and
++need schema discovery before downstream consumers can interpret frames. Both
++keep active-source state bounded to currently connected sources and retain only
++the event history configured on their underlying `PubSub`.
++
+ ## Inspect
+ 
+ Manyfold is useful when the runtime can answer operational questions:

@@ -1,0 +1,1749 @@
+ec45932 refs/remotes/origin/HEAD@{2026-07-26 10:58:59 -0700}: fetch origin main: fast-forward
+ec45932 refs/remotes/origin/main@{2026-07-26 10:58:59 -0700}: fetch origin main: fast-forward
+89c1c8b worktrees/manyfold-89c1c8b-wheel.BhscVz/HEAD@{2026-07-25 15:46:45 -0700}: 
+89c1c8b refs/remotes/origin/HEAD@{2026-07-25 15:46:39 -0700}: fetch origin main: fast-forward
+89c1c8b refs/remotes/origin/main@{2026-07-25 15:46:39 -0700}: fetch origin main: fast-forward
+726f64d worktrees/manyfold-726f64d-wheel.Q2CKno/HEAD@{2026-07-25 15:12:28 -0700}: 
+726f64d worktrees/manyfold-canonical/HEAD@{2026-07-25 14:44:02 -0700}: 
+726f64d refs/remotes/origin/HEAD@{2026-07-25 14:43:49 -0700}: fetch origin main: fast-forward
+726f64d refs/remotes/origin/main@{2026-07-25 14:43:49 -0700}: fetch origin main: fast-forward
+616769f refs/remotes/origin/codex/swim-mesh-restart-fixes@{2026-07-25 14:22:08 -0700}: update by push
+616769f refs/heads/codex/swim-mesh-restart-fixes@{2026-07-25 14:22:06 -0700}: commit (amend): Preserve peer identity across SWIM and mesh restarts
+616769f worktrees/manyfold-node/HEAD@{2026-07-25 14:22:06 -0700}: commit (amend): Preserve peer identity across SWIM and mesh restarts
+8e68869 refs/remotes/origin/codex/swim-mesh-restart-fixes@{2026-07-25 14:18:24 -0700}: update by push
+8e68869 refs/heads/codex/swim-mesh-restart-fixes@{2026-07-25 14:18:01 -0700}: commit: Preserve peer identity across SWIM and mesh restarts
+8e68869 worktrees/manyfold-node/HEAD@{2026-07-25 14:18:01 -0700}: commit: Preserve peer identity across SWIM and mesh restarts
+7f1b8f8 refs/heads/codex/swim-mesh-restart-fixes@{2026-07-25 14:12:58 -0700}: branch: Created from 7f1b8f8b3013175b39fa2753f6eb24f21cc49ea9
+60820d1 refs/stash@{2026-07-25 14:12:58 -0700}: On codex/node-runtime-bootstrap: discarded competing node runtime bootstrap
+7f1b8f8 worktrees/manyfold-node/HEAD@{2026-07-25 14:12:58 -0700}: checkout: moving from codex/node-runtime-bootstrap to codex/swim-mesh-restart-fixes
+fa4c8e2 worktrees/manyfold-node/HEAD@{2026-07-25 14:12:58 -0700}: reset: moving to HEAD
+7f1b8f8 refs/remotes/origin/HEAD@{2026-07-25 14:12:53 -0700}: fetch origin main codex/node-bootstrap: fast-forward
+7339181 refs/remotes/origin/codex/node-bootstrap@{2026-07-25 14:12:53 -0700}: fetch origin main codex/node-bootstrap: storing head
+7f1b8f8 refs/remotes/origin/main@{2026-07-25 14:12:53 -0700}: fetch origin main codex/node-bootstrap: fast-forward
+fa4c8e2 refs/heads/codex/node-runtime-bootstrap@{2026-07-25 14:02:16 -0700}: rebase (finish): refs/heads/codex/node-runtime-bootstrap onto 364e6b0002b24be960535ab1cc7180d8f9b767db
+fa4c8e2 worktrees/manyfold-node/HEAD@{2026-07-25 14:02:16 -0700}: rebase (finish): returning to refs/heads/codex/node-runtime-bootstrap
+fa4c8e2 worktrees/manyfold-node/HEAD@{2026-07-25 14:02:16 -0700}: rebase (pick): Add authenticated node runtime bootstrap
+364e6b0 worktrees/manyfold-node/HEAD@{2026-07-25 14:02:16 -0700}: rebase (start): checkout 364e6b0002b24be960535ab1cc7180d8f9b767db
+b9c8193 refs/heads/codex/node-runtime-bootstrap@{2026-07-25 14:02:13 -0700}: rebase (finish): refs/heads/codex/node-runtime-bootstrap onto 364e6b0002b24be960535ab1cc7180d8f9b767db
+b9c8193 worktrees/manyfold-node/HEAD@{2026-07-25 14:02:13 -0700}: rebase (finish): returning to refs/heads/codex/node-runtime-bootstrap
+b9c8193 worktrees/manyfold-node/HEAD@{2026-07-25 14:02:13 -0700}: rebase (continue): Add authenticated node runtime bootstrap
+ef4157f worktrees/manyfold-node/HEAD@{2026-07-25 14:00:13 -0700}: rebase (pick): Add bounded authenticated SWIM membership backend
+f778a43 worktrees/manyfold-node/HEAD@{2026-07-25 14:00:13 -0700}: rebase (pick): Bound discovery inputs and failures
+364e6b0 worktrees/manyfold-node/HEAD@{2026-07-25 14:00:13 -0700}: rebase (start): checkout 364e6b0002b24be960535ab1cc7180d8f9b767db
+123eedc refs/heads/codex/node-runtime-bootstrap@{2026-07-25 14:00:09 -0700}: commit: Add authenticated node runtime bootstrap
+123eedc worktrees/manyfold-node/HEAD@{2026-07-25 14:00:09 -0700}: commit: Add authenticated node runtime bootstrap
+364e6b0 refs/remotes/origin/HEAD@{2026-07-25 13:59:40 -0700}: fetch origin --prune: fast-forward
+ee02222 refs/remotes/origin/codex/wasm-client-initialization@{2026-07-25 13:59:40 -0700}: fetch origin --prune: storing head
+364e6b0 refs/remotes/origin/main@{2026-07-25 13:59:40 -0700}: fetch origin --prune: fast-forward
+2245d7c refs/remotes/origin/codex/heart-coordination-contract@{2026-07-25 13:50:19 -0700}: update by push
+8734e76 refs/heads/codex/node-runtime-bootstrap@{2026-07-25 13:50:01 -0700}: cherry-pick: Add bounded multi-peer PubSub transport mesh
+8734e76 worktrees/manyfold-node/HEAD@{2026-07-25 13:50:01 -0700}: cherry-pick: Add bounded multi-peer PubSub transport mesh
+c14f36e worktrees/manyfold-node/HEAD@{2026-07-25 13:49:58 -0700}: reset: moving to c14f36ede7985a446239185eacec1134651ce0c8
+c14f36e refs/heads/codex/node-runtime-bootstrap@{2026-07-25 13:49:49 -0700}: reset: moving to codex/peer-discovery-membership
+c14f36e worktrees/manyfold-node/HEAD@{2026-07-25 13:49:49 -0700}: reset: moving to codex/peer-discovery-membership
+61b1b7c worktrees/manyfold-node/HEAD@{2026-07-25 13:49:47 -0700}: rebase (abort): returning to refs/heads/codex/node-runtime-bootstrap
+c14f36e worktrees/manyfold-node/HEAD@{2026-07-25 13:49:39 -0700}: rebase (start): checkout codex/peer-discovery-membership
+b1c79a6 refs/heads/codex/cross-process-transport-foundation@{2026-07-25 13:48:32 -0700}: commit: Integrate production transport layers
+b1c79a6 worktrees/manyfold5/HEAD@{2026-07-25 13:48:32 -0700}: commit: Integrate production transport layers
+c14f36e refs/heads/codex/peer-discovery-membership@{2026-07-25 13:47:21 -0700}: rebase (finish): refs/heads/codex/peer-discovery-membership onto 2dc38cc7893d37e47e430db45921d8ff4ff4b834
+c14f36e worktrees/manyfold6/HEAD@{2026-07-25 13:47:21 -0700}: rebase (finish): returning to refs/heads/codex/peer-discovery-membership
+c14f36e worktrees/manyfold6/HEAD@{2026-07-25 13:47:20 -0700}: rebase (continue): Add bounded authenticated SWIM membership backend
+2245d7c worktrees/manyfold-heart-coordination.lYscbb/HEAD@{2026-07-25 13:46:31 -0700}: reset: moving to 2245d7c354052e2b8468321b0e58edb3659eeaa5
+61b1b7c refs/heads/codex/node-runtime-bootstrap@{2026-07-25 13:46:17 -0700}: cherry-pick: Add bounded multi-peer PubSub transport mesh
+61b1b7c worktrees/manyfold-node/HEAD@{2026-07-25 13:46:17 -0700}: cherry-pick: Add bounded multi-peer PubSub transport mesh
+2245d7c refs/heads/codex/heart-coordination-contract@{2026-07-25 13:46:15 -0700}: branch: Created from codex/cross-process-transport-foundation
+2245d7c worktrees/manyfold-heart-coordination.lYscbb/HEAD@{2026-07-25 13:46:15 -0700}: reset: moving to HEAD
+2245d7c worktrees/manyfold-heart-coordination.lYscbb/HEAD@{2026-07-25 13:46:15 -0700}: 
+3321940 refs/heads/codex/node-runtime-bootstrap@{2026-07-25 13:46:14 -0700}: cherry-pick: Add bounded authenticated cross-process transport
+3321940 worktrees/manyfold-node/HEAD@{2026-07-25 13:46:14 -0700}: cherry-pick: Add bounded authenticated cross-process transport
+fd77218 refs/heads/codex/node-runtime-bootstrap@{2026-07-25 13:46:06 -0700}: branch: Created from codex/peer-discovery-membership
+fd77218 worktrees/manyfold-node/HEAD@{2026-07-25 13:46:06 -0700}: reset: moving to HEAD
+fd77218 worktrees/manyfold-node/HEAD@{2026-07-25 13:46:06 -0700}: 
+2245d7c refs/heads/codex/cross-process-transport-foundation@{2026-07-25 13:45:30 -0700}: rebase (finish): refs/heads/codex/cross-process-transport-foundation onto 2dc38cc7893d37e47e430db45921d8ff4ff4b834
+2245d7c worktrees/manyfold5/HEAD@{2026-07-25 13:45:30 -0700}: rebase (finish): returning to refs/heads/codex/cross-process-transport-foundation
+2245d7c worktrees/manyfold5/HEAD@{2026-07-25 13:45:30 -0700}: rebase (pick): Add bounded coordinator RPC transport
+c6917ac worktrees/manyfold5/HEAD@{2026-07-25 13:45:30 -0700}: rebase (pick): Add bounded multi-peer PubSub transport mesh
+871a720 worktrees/manyfold5/HEAD@{2026-07-25 13:45:30 -0700}: rebase (pick): Add durable transport delivery journal
+eb99e21 worktrees/manyfold5/HEAD@{2026-07-25 13:45:30 -0700}: rebase (pick): Add reloadable mutual TLS transport security
+9f738cc worktrees/manyfold6/HEAD@{2026-07-25 13:45:22 -0700}: rebase (pick): Bound discovery inputs and failures
+2dc38cc worktrees/manyfold6/HEAD@{2026-07-25 13:45:22 -0700}: rebase (start): checkout origin/main
+2dc38cc worktrees/manyfold5/HEAD@{2026-07-25 13:45:13 -0700}: rebase (start): checkout origin/main
+2dc38cc refs/remotes/origin/HEAD@{2026-07-25 13:44:35 -0700}: fetch origin main: fast-forward
+2dc38cc refs/remotes/origin/main@{2026-07-25 13:44:35 -0700}: fetch origin main: fast-forward
+6b92c91 refs/heads/codex/cross-process-transport-foundation@{2026-07-25 13:43:07 -0700}: cherry-pick: Add bounded coordinator RPC transport
+6b92c91 worktrees/manyfold5/HEAD@{2026-07-25 13:43:07 -0700}: cherry-pick: Add bounded coordinator RPC transport
+6fd53e0 refs/heads/codex/coordinator-rpc-transport@{2026-07-25 13:42:43 -0700}: commit: Add bounded coordinator RPC transport
+6fd53e0 worktrees/manyfold10/HEAD@{2026-07-25 13:42:43 -0700}: commit: Add bounded coordinator RPC transport
+4d81f34 refs/heads/codex/coordinator-rpc-transport@{2026-07-25 13:42:04 -0700}: branch: Created from HEAD
+4d81f34 worktrees/manyfold10/HEAD@{2026-07-25 13:42:04 -0700}: checkout: moving from 4d81f34deaaf6f75da0650024428593091d5c2f0 to codex/coordinator-rpc-transport
+fd77218 refs/heads/codex/peer-discovery-membership@{2026-07-25 13:41:38 -0700}: cherry-pick: Add bounded authenticated SWIM membership backend
+fd77218 worktrees/manyfold6/HEAD@{2026-07-25 13:41:38 -0700}: cherry-pick: Add bounded authenticated SWIM membership backend
+cca3dac refs/heads/codex/peer-discovery-membership@{2026-07-25 13:41:29 -0700}: commit: Bound discovery inputs and failures
+cca3dac worktrees/manyfold6/HEAD@{2026-07-25 13:41:29 -0700}: commit: Bound discovery inputs and failures
+77d9da3 refs/heads/codex/cross-process-transport-foundation@{2026-07-25 13:41:28 -0700}: cherry-pick: Add bounded multi-peer PubSub transport mesh
+77d9da3 worktrees/manyfold5/HEAD@{2026-07-25 13:41:28 -0700}: cherry-pick: Add bounded multi-peer PubSub transport mesh
+34d4a32 refs/heads/codex/cross-process-transport-foundation@{2026-07-25 13:41:27 -0700}: cherry-pick: Add durable transport delivery journal
+34d4a32 worktrees/manyfold5/HEAD@{2026-07-25 13:41:27 -0700}: cherry-pick: Add durable transport delivery journal
+90be9ce refs/heads/codex/cross-process-transport-foundation@{2026-07-25 13:41:21 -0700}: commit: Add reloadable mutual TLS transport security
+90be9ce worktrees/manyfold5/HEAD@{2026-07-25 13:41:21 -0700}: commit: Add reloadable mutual TLS transport security
+3d6b53e refs/heads/codex/durable-transport-delivery@{2026-07-25 13:34:18 -0700}: commit: Add durable transport delivery journal
+3d6b53e worktrees/manyfold8/HEAD@{2026-07-25 13:34:18 -0700}: commit: Add durable transport delivery journal
+4d81f34 refs/heads/codex/durable-transport-delivery@{2026-07-25 13:33:59 -0700}: branch: Created from HEAD
+4d81f34 worktrees/manyfold8/HEAD@{2026-07-25 13:33:59 -0700}: checkout: moving from 4d81f34deaaf6f75da0650024428593091d5c2f0 to codex/durable-transport-delivery
+85aaca0 refs/heads/codex/configurable-raft-faults@{2026-07-25 13:28:23 -0700}: commit (amend): Generalize Raft membership and fault testing
+85aaca0 worktrees/manyfold7/HEAD@{2026-07-25 13:28:23 -0700}: commit (amend): Generalize Raft membership and fault testing
+7c5181c refs/heads/codex/transport-mesh-pubsub@{2026-07-25 13:27:08 -0700}: commit: Add bounded multi-peer PubSub transport mesh
+7c5181c worktrees/manyfold9/HEAD@{2026-07-25 13:27:08 -0700}: commit: Add bounded multi-peer PubSub transport mesh
+4d81f34 refs/heads/codex/transport-mesh-pubsub@{2026-07-25 13:26:06 -0700}: branch: Created from HEAD
+4d81f34 worktrees/manyfold9/HEAD@{2026-07-25 13:26:06 -0700}: checkout: moving from 4d81f34deaaf6f75da0650024428593091d5c2f0 to codex/transport-mesh-pubsub
+d8df8b2 refs/heads/codex/configurable-raft-faults@{2026-07-25 13:23:36 -0700}: commit (cherry-pick): Generalize Raft membership and fault testing
+d8df8b2 worktrees/manyfold7/HEAD@{2026-07-25 13:23:36 -0700}: commit (cherry-pick): Generalize Raft membership and fault testing
+ed656a7 refs/heads/codex/configurable-raft-faults@{2026-07-25 13:23:06 -0700}: branch: Created from origin/main
+ed656a7 worktrees/manyfold7/HEAD@{2026-07-25 13:23:06 -0700}: checkout: moving from codex/persistent-raft-dev-cluster to codex/configurable-raft-faults
+af63df8 worktrees/manyfold7/HEAD@{2026-07-25 13:23:02 -0700}: rebase (abort): returning to refs/heads/codex/persistent-raft-dev-cluster
+ed656a7 worktrees/manyfold7/HEAD@{2026-07-25 13:22:53 -0700}: rebase (start): checkout origin/main
+af63df8 refs/heads/codex/persistent-raft-dev-cluster@{2026-07-25 13:22:48 -0700}: commit: Generalize Raft membership and fault testing
+af63df8 worktrees/manyfold7/HEAD@{2026-07-25 13:22:48 -0700}: commit: Generalize Raft membership and fault testing
+ed656a7 refs/remotes/origin/HEAD@{2026-07-25 13:22:01 -0700}: fetch origin main: fast-forward
+ed656a7 refs/remotes/origin/main@{2026-07-25 13:22:01 -0700}: fetch origin main: fast-forward
+0e3858c worktrees/manyfold13/HEAD@{2026-07-25 13:13:00 -0700}: 
+0e3858c worktrees/manyfold14/HEAD@{2026-07-25 13:13:00 -0700}: 
+0e3858c worktrees/manyfold11/HEAD@{2026-07-25 13:12:59 -0700}: 
+0e3858c worktrees/manyfold12/HEAD@{2026-07-25 13:12:59 -0700}: 
+4d81f34 worktrees/manyfold10/HEAD@{2026-07-25 13:10:27 -0700}: 
+4d81f34 worktrees/manyfold9/HEAD@{2026-07-25 13:10:23 -0700}: 
+4d81f34 worktrees/manyfold8/HEAD@{2026-07-25 13:10:18 -0700}: 
+7ca2bcf refs/heads/codex/architecture-values@{2026-07-25 12:06:42 -0700}: rebase (finish): refs/heads/codex/architecture-values onto 0e3858ca56b051b2c7933831d961155730a1d591
+7ca2bcf worktrees/manyfold/HEAD@{2026-07-25 12:06:42 -0700}: rebase (finish): returning to refs/heads/codex/architecture-values
+7ca2bcf worktrees/manyfold/HEAD@{2026-07-25 12:06:42 -0700}: rebase (pick): Prepare ManyFold 0.1.42 distributed runtime release
+6eb7577 worktrees/manyfold/HEAD@{2026-07-25 12:06:42 -0700}: rebase (pick): Add bounded authenticated cross-process transport
+2744f7a worktrees/manyfold/HEAD@{2026-07-25 12:06:42 -0700}: rebase (pick): Add persistent Raft development cluster
+42cb730 worktrees/manyfold/HEAD@{2026-07-25 12:06:42 -0700}: rebase (pick): Add authenticated peer discovery and membership
+1f15fc5 worktrees/manyfold/HEAD@{2026-07-25 12:06:42 -0700}: rebase (pick): Remove public event stream compatibility types
+0e3858c worktrees/manyfold/HEAD@{2026-07-25 12:06:42 -0700}: rebase (start): checkout origin/main
+b15e64a refs/heads/codex/architecture-values@{2026-07-25 12:04:05 -0700}: commit: Prepare ManyFold 0.1.42 distributed runtime release
+b15e64a worktrees/manyfold/HEAD@{2026-07-25 12:04:05 -0700}: commit: Prepare ManyFold 0.1.42 distributed runtime release
+6f47677 refs/heads/codex/architecture-values@{2026-07-25 11:51:55 -0700}: cherry-pick: Add bounded authenticated cross-process transport
+6f47677 worktrees/manyfold/HEAD@{2026-07-25 11:51:55 -0700}: cherry-pick: Add bounded authenticated cross-process transport
+1582ca3 refs/heads/codex/architecture-values@{2026-07-25 11:50:26 -0700}: commit (cherry-pick): Add persistent Raft development cluster
+1582ca3 worktrees/manyfold/HEAD@{2026-07-25 11:50:26 -0700}: commit (cherry-pick): Add persistent Raft development cluster
+4d81f34 refs/heads/codex/cross-process-transport-foundation@{2026-07-25 11:49:26 -0700}: commit: Add bounded authenticated cross-process transport
+4d81f34 worktrees/manyfold5/HEAD@{2026-07-25 11:49:26 -0700}: commit: Add bounded authenticated cross-process transport
+c63d650 refs/heads/codex/persistent-raft-dev-cluster@{2026-07-25 11:48:59 -0700}: commit: Add persistent Raft development cluster
+c63d650 worktrees/manyfold7/HEAD@{2026-07-25 11:48:59 -0700}: commit: Add persistent Raft development cluster
+61f58bd refs/heads/codex/cross-process-transport-foundation@{2026-07-25 11:48:32 -0700}: branch: Created from HEAD
+61f58bd worktrees/manyfold5/HEAD@{2026-07-25 11:48:32 -0700}: checkout: moving from 61f58bd6ea5f6d4d5251c7f5ce45d35dccb4f83e to codex/cross-process-transport-foundation
+61f58bd refs/heads/codex/persistent-raft-dev-cluster@{2026-07-25 11:47:03 -0700}: branch: Created from HEAD
+61f58bd worktrees/manyfold7/HEAD@{2026-07-25 11:47:03 -0700}: checkout: moving from 61f58bd6ea5f6d4d5251c7f5ce45d35dccb4f83e to codex/persistent-raft-dev-cluster
+1c91475 refs/heads/codex/architecture-values@{2026-07-25 11:45:17 -0700}: cherry-pick: Add authenticated peer discovery and membership
+1c91475 worktrees/manyfold/HEAD@{2026-07-25 11:45:17 -0700}: cherry-pick: Add authenticated peer discovery and membership
+e6eb920 refs/heads/codex/architecture-values@{2026-07-25 11:45:09 -0700}: commit: Remove public event stream compatibility types
+e6eb920 worktrees/manyfold/HEAD@{2026-07-25 11:45:09 -0700}: commit: Remove public event stream compatibility types
+5191fa0 refs/heads/codex/peer-discovery-membership@{2026-07-25 11:43:15 -0700}: commit: Add authenticated peer discovery and membership
+5191fa0 worktrees/manyfold6/HEAD@{2026-07-25 11:43:15 -0700}: commit: Add authenticated peer discovery and membership
+61f58bd refs/heads/codex/peer-discovery-membership@{2026-07-25 11:42:13 -0700}: branch: Created from HEAD
+61f58bd worktrees/manyfold6/HEAD@{2026-07-25 11:42:13 -0700}: checkout: moving from 61f58bd6ea5f6d4d5251c7f5ce45d35dccb4f83e to codex/peer-discovery-membership
+61f58bd worktrees/manyfold7/HEAD@{2026-07-25 11:29:44 -0700}: 
+61f58bd worktrees/manyfold6/HEAD@{2026-07-25 11:29:35 -0700}: 
+61f58bd worktrees/manyfold5/HEAD@{2026-07-25 11:29:27 -0700}: 
+0e3858c refs/remotes/origin/HEAD@{2026-07-02 14:34:22 -0700}: fetch origin main --tags: fast-forward
+0e3858c refs/remotes/origin/main@{2026-07-02 14:34:22 -0700}: fetch origin main --tags: fast-forward
+61f58bd refs/heads/codex/architecture-values@{2026-07-02 14:23:42 -0700}: commit: Add observability destinations for 0.1.41
+61f58bd worktrees/manyfold/HEAD@{2026-07-02 14:23:42 -0700}: commit: Add observability destinations for 0.1.41
+a6ab94c refs/heads/codex/architecture-values@{2026-07-02 12:39:10 -0700}: commit: Simplify datastream delivery helpers
+a6ab94c worktrees/manyfold/HEAD@{2026-07-02 12:39:10 -0700}: commit: Simplify datastream delivery helpers
+7cd3fc3 refs/heads/codex/architecture-values@{2026-07-02 11:45:32 -0700}: commit: Rename stream threads as datastream delivery
+7cd3fc3 worktrees/manyfold/HEAD@{2026-07-02 11:45:32 -0700}: commit: Rename stream threads as datastream delivery
+f953208 refs/heads/codex/architecture-values@{2026-07-02 11:09:35 -0700}: commit: Purge Rx stream facade
+f953208 worktrees/manyfold/HEAD@{2026-07-02 11:09:35 -0700}: commit: Purge Rx stream facade
+b9cd24b refs/heads/codex/architecture-values@{2026-07-02 10:57:25 -0700}: commit: Remove PubSubObservable share operator
+b9cd24b worktrees/manyfold/HEAD@{2026-07-02 10:57:25 -0700}: commit: Remove PubSubObservable share operator
+2abfa66 refs/heads/codex/architecture-values@{2026-07-02 10:34:07 -0700}: commit: Package wasm npm targets from script assets
+2abfa66 worktrees/manyfold/HEAD@{2026-07-02 10:34:07 -0700}: commit: Package wasm npm targets from script assets
+f9bea5e refs/heads/codex/architecture-values@{2026-07-02 10:34:01 -0700}: commit: Add PubSubObservable sharing and value operators
+f9bea5e worktrees/manyfold/HEAD@{2026-07-02 10:34:01 -0700}: commit: Add PubSubObservable sharing and value operators
+49b5cac refs/heads/codex/architecture-values@{2026-07-02 10:12:24 -0700}: commit: Add PubSub value and callback architecture
+49b5cac worktrees/manyfold/HEAD@{2026-07-02 10:12:24 -0700}: commit: Add PubSub value and callback architecture
+612169f refs/heads/codex/architecture-values@{2026-07-01 15:38:57 -0700}: branch: Created from origin/main
+612169f worktrees/manyfold/HEAD@{2026-07-01 15:38:57 -0700}: checkout: moving from codex/release-0.1.40 to codex/architecture-values
+612169f refs/heads/main@{2026-07-01 15:30:11 -0700}: pull: Fast-forward
+612169f HEAD@{2026-07-01 15:30:11 -0700}: pull: Fast-forward
+439ce9a HEAD@{2026-07-01 15:30:08 -0700}: checkout: moving from main to main
+1f6cf99 refs/stash@{2026-07-01 15:30:03 -0700}: WIP on main: 439ce9a Add PubSub stream runtime (#259)
+439ce9a HEAD@{2026-07-01 15:30:03 -0700}: reset: moving to HEAD
+439ce9a HEAD@{2026-07-01 15:29:58 -0700}: checkout: moving from main to main
+612169f refs/remotes/origin/HEAD@{2026-06-30 15:10:28 -0700}: fetch origin main --tags: fast-forward
+612169f refs/remotes/origin/main@{2026-06-30 15:10:28 -0700}: fetch origin main --tags: fast-forward
+e8c5202 refs/remotes/origin/codex/release-0.1.40@{2026-06-30 15:00:22 -0700}: update by push
+e8c5202 refs/heads/codex/release-0.1.40@{2026-06-30 15:00:20 -0700}: commit: Prepare manyfold 0.1.40 release
+e8c5202 worktrees/manyfold/HEAD@{2026-06-30 15:00:20 -0700}: commit: Prepare manyfold 0.1.40 release
+c93faa6 refs/heads/codex/release-0.1.40@{2026-06-30 14:56:16 -0700}: branch: Created from origin/main
+c93faa6 worktrees/manyfold/HEAD@{2026-06-30 14:56:16 -0700}: checkout: moving from codex/pubsub-worker-locks to codex/release-0.1.40
+c93faa6 refs/remotes/origin/HEAD@{2026-06-30 14:56:07 -0700}: fetch origin main --tags: fast-forward
+c93faa6 refs/remotes/origin/main@{2026-06-30 14:56:07 -0700}: fetch origin main --tags: fast-forward
+0b839c4 refs/heads/codex/pubsub-worker-locks@{2026-06-30 14:21:29 -0700}: commit (amend): Add PubSub namespaces and native runtime locks
+0b839c4 worktrees/manyfold/HEAD@{2026-06-30 14:21:29 -0700}: commit (amend): Add PubSub namespaces and native runtime locks
+206f45f refs/heads/codex/pubsub-worker-locks@{2026-06-30 14:19:55 -0700}: commit (amend): Add PubSub namespaces and native runtime locks
+206f45f worktrees/manyfold/HEAD@{2026-06-30 14:19:55 -0700}: commit (amend): Add PubSub namespaces and native runtime locks
+e05a4b1 refs/heads/codex/pubsub-worker-locks@{2026-06-30 13:57:54 -0700}: commit (amend): Add PubSub namespaces and native runtime locks
+e05a4b1 worktrees/manyfold/HEAD@{2026-06-30 13:57:54 -0700}: commit (amend): Add PubSub namespaces and native runtime locks
+5b71796 refs/heads/codex/pubsub-worker-locks@{2026-06-30 13:55:43 -0700}: commit (amend): Add PubSub namespaces and native runtime locks
+5b71796 worktrees/manyfold/HEAD@{2026-06-30 13:55:43 -0700}: commit (amend): Add PubSub namespaces and native runtime locks
+23dc5d8 refs/heads/codex/pubsub-worker-locks@{2026-06-30 13:50:37 -0700}: commit (amend): Add PubSub namespaces and native runtime locks
+23dc5d8 worktrees/manyfold/HEAD@{2026-06-30 13:50:37 -0700}: commit (amend): Add PubSub namespaces and native runtime locks
+bb5749e refs/heads/codex/pubsub-worker-locks@{2026-06-30 13:46:03 -0700}: commit (amend): Add PubSub namespaces and native runtime locks
+bb5749e worktrees/manyfold/HEAD@{2026-06-30 13:46:03 -0700}: commit (amend): Add PubSub namespaces and native runtime locks
+c399ce8 refs/heads/codex/pubsub-worker-locks@{2026-06-30 13:43:55 -0700}: commit (amend): Add PubSub namespaces and native runtime locks
+c399ce8 worktrees/manyfold/HEAD@{2026-06-30 13:43:55 -0700}: commit (amend): Add PubSub namespaces and native runtime locks
+8c3817d refs/heads/codex/pubsub-worker-locks@{2026-06-30 13:41:32 -0700}: commit: Add PubSub namespaces and native runtime locks
+8c3817d worktrees/manyfold/HEAD@{2026-06-30 13:41:32 -0700}: commit: Add PubSub namespaces and native runtime locks
+439ce9a refs/heads/codex/pubsub-worker-locks@{2026-06-30 13:41:27 -0700}: branch: Created from HEAD
+439ce9a worktrees/manyfold/HEAD@{2026-06-30 13:41:27 -0700}: checkout: moving from 439ce9ac6a1a39e369025cb7c315181c813e7c46 to codex/pubsub-worker-locks
+439ce9a worktrees/manyfold/HEAD@{2026-06-30 12:20:59 -0700}: 
+439ce9a HEAD@{2026-06-30 12:14:40 -0700}: checkout: moving from main to main
+439ce9a refs/heads/main@{2026-06-30 12:13:16 -0700}: pull --ff-only: Fast-forward
+439ce9a refs/remotes/origin/HEAD@{2026-06-30 12:13:16 -0700}: pull --ff-only: fast-forward
+439ce9a refs/remotes/origin/main@{2026-06-30 12:13:16 -0700}: pull --ff-only: fast-forward
+439ce9a HEAD@{2026-06-30 12:13:16 -0700}: pull --ff-only: Fast-forward
+b55e2c2 HEAD@{2026-06-30 12:12:07 -0700}: checkout: moving from codex/pubsub-stream-runtime to main
+a140c04 HEAD@{2026-06-30 12:05:02 -0700}: commit (amend): Add PubSub stream runtime
+642250e HEAD@{2026-06-30 12:00:31 -0700}: commit: All the changes
+b55e2c2 HEAD@{2026-06-30 11:48:02 -0700}: checkout: moving from main to codex/pubsub-stream-runtime
+b55e2c2 refs/heads/main@{2026-06-30 08:35:04 -0700}: pull: Fast-forward
+b55e2c2 refs/remotes/origin/HEAD@{2026-06-30 08:35:04 -0700}: pull: fast-forward
+b55e2c2 refs/remotes/origin/main@{2026-06-30 08:35:04 -0700}: pull: fast-forward
+b55e2c2 HEAD@{2026-06-30 08:35:04 -0700}: pull: Fast-forward
+a9c69da HEAD@{2026-06-30 08:34:59 -0700}: checkout: moving from codex/manyfold-controller-runtime-substrate to main
+f888d7b refs/heads/codex/manyfold-controller-runtime-substrate@{2026-06-30 08:33:20 -0700}: commit: Address automated PR review feedback
+f888d7b HEAD@{2026-06-30 08:33:20 -0700}: commit: Address automated PR review feedback
+f844f2a refs/heads/codex/manyfold-controller-runtime-substrate@{2026-06-30 08:23:25 -0700}: commit: Gate Rust benchmarks on checked-in baselines
+f844f2a HEAD@{2026-06-30 08:23:25 -0700}: commit: Gate Rust benchmarks on checked-in baselines
+65a8934 refs/heads/codex/manyfold-controller-runtime-substrate@{2026-06-30 08:21:14 -0700}: commit: Use plural benchmark baselines directory
+65a8934 HEAD@{2026-06-30 08:21:14 -0700}: commit: Use plural benchmark baselines directory
+d66a6c1 refs/heads/codex/manyfold-controller-runtime-substrate@{2026-06-30 08:20:13 -0700}: commit: Add pubsub benchmark baseline comparison
+d66a6c1 HEAD@{2026-06-30 08:20:13 -0700}: commit: Add pubsub benchmark baseline comparison
+94fb2e2 refs/heads/codex/manyfold-controller-runtime-substrate@{2026-06-30 06:59:25 -0700}: commit: Add architecture pubsub benchmark
+94fb2e2 HEAD@{2026-06-30 06:59:25 -0700}: commit: Add architecture pubsub benchmark
+60e786e refs/heads/codex/manyfold-controller-runtime-substrate@{2026-06-30 06:56:44 -0700}: commit: Move runtime pubsub substrate into Rust
+60e786e HEAD@{2026-06-30 06:56:44 -0700}: commit: Move runtime pubsub substrate into Rust
+215e460 refs/heads/codex/manyfold-controller-runtime-substrate@{2026-06-30 06:49:27 -0700}: rebase (finish): refs/heads/codex/manyfold-controller-runtime-substrate onto cb3f93ca37d1cae0c60462e635edb1210effe02e
+215e460 HEAD@{2026-06-30 06:49:27 -0700}: rebase (finish): returning to refs/heads/codex/manyfold-controller-runtime-substrate
+215e460 HEAD@{2026-06-30 06:49:27 -0700}: rebase (pick): Move dormant runtime benchmark into benchmark sources
+cb3f93c HEAD@{2026-06-30 06:49:27 -0700}: rebase (start): checkout origin/codex/manyfold-controller-runtime-substrate
+b32d7cc refs/heads/codex/manyfold-controller-runtime-substrate@{2026-06-30 06:49:05 -0700}: commit: Move dormant runtime benchmark into benchmark sources
+b32d7cc HEAD@{2026-06-30 06:49:05 -0700}: commit: Move dormant runtime benchmark into benchmark sources
+8372a67 refs/heads/codex/manyfold-controller-runtime-substrate@{2026-06-29 17:34:50 -0700}: commit: Add Manyfold controller runtime substrate
+8372a67 HEAD@{2026-06-29 17:34:50 -0700}: commit: Add Manyfold controller runtime substrate
+a9c69da refs/heads/codex/manyfold-controller-runtime-substrate@{2026-06-29 17:34:14 -0700}: branch: Created from HEAD
+a9c69da HEAD@{2026-06-29 17:34:14 -0700}: checkout: moving from main to codex/manyfold-controller-runtime-substrate
+a9c69da refs/heads/main@{2026-06-27 08:41:25 -0700}: pull: Fast-forward
+a9c69da refs/remotes/origin/HEAD@{2026-06-27 08:41:25 -0700}: pull: fast-forward
+a9c69da refs/remotes/origin/main@{2026-06-27 08:41:25 -0700}: pull: fast-forward
+a9c69da HEAD@{2026-06-27 08:41:25 -0700}: pull: Fast-forward
+3b94ef6 HEAD@{2026-06-27 08:41:22 -0700}: checkout: moving from codex/typed-contract-compatibility to main
+8efa9e5 refs/stash@{2026-06-27 08:41:20 -0700}: WIP on codex/typed-contract-compatibility: 5c12f1d Add pull request CI workflow
+5c12f1d HEAD@{2026-06-27 08:41:20 -0700}: reset: moving to HEAD
+5c12f1d refs/heads/codex/typed-contract-compatibility@{2026-06-27 08:35:22 -0700}: commit: Add pull request CI workflow
+5c12f1d HEAD@{2026-06-27 08:35:22 -0700}: commit: Add pull request CI workflow
+e2de165 refs/heads/codex/manyfold-v1-memory-readiness@{2026-06-27 08:34:45 -0700}: commit: Fix sparse lineage CI verifier expectations
+b2f738d refs/heads/codex/manyfold-v1-memory-readiness@{2026-06-21 18:04:10 -0700}: commit: Remove lineage compatibility surface
+5bfb65f refs/heads/codex/manyfold-v1-memory-readiness@{2026-06-21 16:07:23 -0700}: commit: Cut retained lineage hooks from sparse runtime
+3fbae75 refs/heads/codex/manyfold-v1-memory-readiness@{2026-06-21 15:38:16 -0700}: commit: Remove native lineage retention store
+956e490 refs/heads/codex/manyfold-v1-memory-readiness@{2026-06-21 15:07:31 -0700}: commit: Make native lineage store lazy
+d827f5d refs/heads/codex/manyfold-v1-memory-readiness@{2026-06-21 14:58:45 -0700}: commit: Add native zero net allocation guard
+0ca0e16 refs/heads/codex/manyfold-v1-memory-readiness@{2026-06-21 13:58:12 -0700}: commit: Harden benchmark artifact tail checks
+9c35bb0 refs/heads/codex/manyfold-v1-memory-readiness@{2026-06-21 13:48:37 -0700}: commit: Address memory readiness PR feedback
+bfaedfa refs/heads/codex/manyfold-v1-memory-readiness@{2026-06-21 13:44:51 -0700}: commit: Add strict Heart monitor verifier
+eda9b0c refs/heads/codex/manyfold-v1-memory-readiness@{2026-06-21 13:35:23 -0700}: commit: Guard hot paths against frame introspection
+084d391 refs/heads/codex/manyfold-v1-memory-readiness@{2026-06-21 13:25:49 -0700}: commit: Extend subscription churn plateau sampling
+3b6b07b refs/heads/codex/manyfold-v1-memory-readiness@{2026-06-21 13:18:35 -0700}: commit: Require monotonic benchmark progress
+1135f2c refs/heads/codex/manyfold-v1-memory-readiness@{2026-06-21 13:16:17 -0700}: commit: Strengthen Heart monitor gate verification
+5a681cb refs/heads/codex/manyfold-v1-memory-readiness@{2026-06-21 13:10:58 -0700}: commit: Relax jemalloc wrapper runtime budget
+77ac2ea refs/heads/codex/manyfold-v1-memory-readiness@{2026-06-21 13:06:28 -0700}: commit: Bound jemalloc CI baseline
+aaba715 refs/heads/codex/manyfold-v1-memory-readiness@{2026-06-21 13:02:49 -0700}: commit: Fix memory readiness CI gates
+0642a2d refs/heads/codex/manyfold-v1-memory-readiness@{2026-06-21 12:58:12 -0700}: commit: Prepare manyfold memory readiness gates
+3b94ef6 refs/heads/codex/manyfold-v1-memory-readiness@{2026-06-21 12:21:14 -0700}: branch: Created from HEAD
+f46a541 refs/heads/codex/typed-contract-compatibility@{2026-06-21 12:19:16 -0700}: commit: Hide contract migration internals
+f46a541 HEAD@{2026-06-21 12:19:16 -0700}: commit: Hide contract migration internals
+e7e366c refs/heads/codex/typed-contract-compatibility@{2026-06-21 12:12:34 -0700}: commit: Add typed contract compatibility API
+e7e366c HEAD@{2026-06-21 12:12:34 -0700}: commit: Add typed contract compatibility API
+3b94ef6 refs/heads/codex/typed-contract-compatibility@{2026-06-21 12:04:25 -0700}: branch: Created from HEAD
+3b94ef6 HEAD@{2026-06-21 12:04:25 -0700}: checkout: moving from main to codex/typed-contract-compatibility
+3b94ef6 refs/remotes/origin/HEAD@{2026-05-19 19:23:46 -0700}: update by push
+3b94ef6 refs/remotes/origin/main@{2026-05-19 19:23:46 -0700}: update by push
+3b94ef6 refs/heads/main@{2026-05-19 19:23:44 -0700}: commit: Release manyfold 0.1.38
+3b94ef6 HEAD@{2026-05-19 19:23:44 -0700}: commit: Release manyfold 0.1.38
+484d3e9 refs/remotes/origin/HEAD@{2026-05-19 19:16:56 -0700}: update by push
+484d3e9 refs/remotes/origin/main@{2026-05-19 19:16:56 -0700}: update by push
+484d3e9 refs/heads/main@{2026-05-19 19:16:54 -0700}: commit: Release manyfold 0.1.37
+484d3e9 HEAD@{2026-05-19 19:16:54 -0700}: commit: Release manyfold 0.1.37
+647b290 refs/remotes/origin/HEAD@{2026-05-19 19:11:14 -0700}: update by push
+647b290 refs/remotes/origin/main@{2026-05-19 19:11:14 -0700}: update by push
+647b290 refs/heads/main@{2026-05-19 19:11:11 -0700}: commit: Release manyfold 0.1.36
+647b290 HEAD@{2026-05-19 19:11:11 -0700}: commit: Release manyfold 0.1.36
+07602f1 refs/remotes/origin/HEAD@{2026-05-19 18:53:28 -0700}: update by push
+07602f1 refs/remotes/origin/main@{2026-05-19 18:53:28 -0700}: update by push
+07602f1 refs/heads/main@{2026-05-19 18:53:21 -0700}: commit: Release manyfold 0.1.35
+07602f1 HEAD@{2026-05-19 18:53:21 -0700}: commit: Release manyfold 0.1.35
+96d0c73 refs/remotes/origin/HEAD@{2026-05-18 11:30:29 -0700}: update by push
+96d0c73 refs/remotes/origin/main@{2026-05-18 11:30:29 -0700}: update by push
+96d0c73 refs/heads/main@{2026-05-18 11:30:22 -0700}: commit: Bound manyfold runtime retention on main
+96d0c73 HEAD@{2026-05-18 11:30:22 -0700}: commit: Bound manyfold runtime retention on main
+193f728 HEAD@{2026-05-18 11:18:55 -0700}: reset: moving to 193f7286227acf515910979e964306e516b39696
+193f728 HEAD@{2026-05-18 11:18:30 -0700}: checkout: moving from codex/heart-memory-retention to main
+f126844 HEAD@{2026-05-18 11:18:26 -0700}: reset: moving to HEAD
+1e2fa26 refs/remotes/origin/codex/heart-memory-retention@{2026-05-18 11:17:58 -0700}: fetch origin --tags: storing head
+f126844 refs/heads/codex/heart-memory-retention@{2026-05-18 08:08:02 -0700}: branch: Created from v0.1.33
+f126844 HEAD@{2026-05-18 08:08:02 -0700}: checkout: moving from main to codex/heart-memory-retention
+193f728 refs/heads/main@{2026-05-18 08:07:10 -0700}: pull --ff-only: Fast-forward
+193f728 refs/remotes/origin/HEAD@{2026-05-18 08:07:10 -0700}: pull --ff-only: fast-forward
+a025f0c refs/remotes/origin/codex/delimited-buffer-drain-split@{2026-05-18 08:07:10 -0700}: pull --ff-only: storing head
+05d72f0 refs/remotes/origin/codex/garden-example-catalog-cleanup@{2026-05-18 08:07:10 -0700}: pull --ff-only: storing head
+be7007a refs/remotes/origin/codex/garden-local-spool-normalization@{2026-05-18 08:07:10 -0700}: pull --ff-only: storing head
+80d2b6f refs/remotes/origin/codex/garden-project-metadata-import-visitor@{2026-05-18 08:07:10 -0700}: pull --ff-only: storing head
+78f039c refs/remotes/origin/codex/garden-reference-text-normalization@{2026-05-18 08:07:10 -0700}: pull --ff-only: storing head
+6ecd2e3 refs/remotes/origin/codex/garden-sys-path-fast-path@{2026-05-18 08:07:10 -0700}: pull --ff-only: storing head
+1dbd2b6 refs/remotes/origin/codex/zero-backoff-constant-time@{2026-05-18 08:07:10 -0700}: pull --ff-only: storing head
+824f2e9 refs/remotes/origin/garden-backoff-zero-delay@{2026-05-18 08:07:10 -0700}: pull --ff-only: storing head
+ccaeb0a refs/remotes/origin/garden-doc-verification-commands@{2026-05-18 08:07:10 -0700}: pull --ff-only: storing head
+e538fa8 refs/remotes/origin/garden-double-buffer-active-state@{2026-05-18 08:07:10 -0700}: pull --ff-only: storing head
+ab7bae9 refs/remotes/origin/garden-example-int-schema-byteslike@{2026-05-18 08:07:10 -0700}: pull --ff-only: storing head
+c8ea280 refs/remotes/origin/garden-mailbox-descriptor-trim-20260516@{2026-05-18 08:07:10 -0700}: pull --ff-only: storing head
+11134d4 refs/remotes/origin/garden-onboarding-verification-20260515@{2026-05-18 08:07:10 -0700}: pull --ff-only: storing head
+b122c0c refs/remotes/origin/garden-reference-example-text-trim@{2026-05-18 08:07:10 -0700}: pull --ff-only: storing head
+76277d7 refs/remotes/origin/garden-reference-example-trim-20260515@{2026-05-18 08:07:10 -0700}: pull --ff-only: storing head
+fa82802 refs/remotes/origin/garden-remove-production-asserts-20260515@{2026-05-18 08:07:10 -0700}: pull --ff-only: storing head
+b08e3f2 refs/remotes/origin/garden-sensor-event-metadata-order-20260516@{2026-05-18 08:07:10 -0700}: pull --ff-only: storing head
+193b08b refs/remotes/origin/garden/bounded-ring-buffer-push-validation@{2026-05-18 08:07:10 -0700}: pull --ff-only: storing head
+0e1901d refs/remotes/origin/garden/catalog-lookup-module-validation-20260515@{2026-05-18 08:07:10 -0700}: pull --ff-only: storing head
+8a26980 refs/remotes/origin/garden/consensus-byteslike-decode-20260515@{2026-05-18 08:07:10 -0700}: pull --ff-only: storing head
+2549874 refs/remotes/origin/garden/embedded-validation-cleanup-20260516@{2026-05-18 08:07:10 -0700}: pull --ff-only: storing head
+a229097 refs/remotes/origin/garden/example-int-schema-bytes-like@{2026-05-18 08:07:10 -0700}: pull --ff-only: storing head
+631e33c refs/remotes/origin/garden/example-required-latest@{2026-05-18 08:07:10 -0700}: pull --ff-only: storing head
+1040c00 refs/remotes/origin/garden/native-visibility-default-cleanup-20260515@{2026-05-18 08:07:10 -0700}: pull --ff-only: storing head
+c2fa4d4 refs/remotes/origin/garden/onboarding-catalog-checks@{2026-05-18 08:07:10 -0700}: pull --ff-only: storing head
+f665d06 refs/remotes/origin/garden/retry-policy-order@{2026-05-18 08:07:10 -0700}: pull --ff-only: storing head
+d453367 refs/remotes/origin/garden/sensor-retry-policy-order@{2026-05-18 08:07:10 -0700}: pull --ff-only: storing head
+372aefe refs/remotes/origin/garden/sensor-tag-metadata-order@{2026-05-18 08:07:10 -0700}: pull --ff-only: storing head
+83c03b0 refs/remotes/origin/garden/stats-single-value-average@{2026-05-18 08:07:10 -0700}: pull --ff-only: storing head
+695b14b refs/remotes/origin/garden/top-level-stub-export-check@{2026-05-18 08:07:10 -0700}: pull --ff-only: storing head
+193f728 refs/remotes/origin/main@{2026-05-18 08:07:10 -0700}: pull --ff-only: fast-forward
+193f728 HEAD@{2026-05-18 08:07:10 -0700}: pull --ff-only: Fast-forward
+38ca0e8 refs/heads/codex/private-main-functions@{2026-05-16 21:33:12 -0700}: commit: Use private script entrypoints
+637e209 refs/heads/codex/private-main-functions@{2026-05-16 21:27:56 -0700}: branch: Created from origin/main
+637e209 refs/remotes/origin/HEAD@{2026-05-16 21:27:45 -0700}: fetch origin main: fast-forward
+637e209 refs/remotes/origin/main@{2026-05-16 21:27:45 -0700}: fetch origin main: fast-forward
+2c12836 refs/heads/codex/declaration-order-refactor@{2026-05-16 21:24:02 -0700}: commit: Enforce Python declaration ordering
+1bb43de refs/heads/codex/declaration-order-refactor@{2026-05-16 21:23:53 -0700}: branch: Created from HEAD
+f126844 refs/remotes/origin/codex/coalesce-latest-node@{2026-05-16 19:50:57 -0700}: fetch origin codex/coalesce-latest-node --tags: fast-forward
+98ba40f refs/heads/codex/lazy-route-pipelines-heart@{2026-05-16 19:39:11 -0700}: branch: Created from origin/codex/coalesce-latest-node
+98ba40f worktrees/manyfold-heart/HEAD@{2026-05-16 19:39:11 -0700}: reset: moving to HEAD
+98ba40f worktrees/manyfold-heart/HEAD@{2026-05-16 19:39:11 -0700}: 
+1bb43de refs/remotes/origin/HEAD@{2026-05-15 21:04:46 -0700}: update by push
+1bb43de refs/remotes/origin/main@{2026-05-15 21:04:46 -0700}: update by push
+1bb43de refs/heads/main@{2026-05-15 21:04:41 -0700}: commit: Validate reactive thread observables
+1bb43de HEAD@{2026-05-15 21:04:41 -0700}: commit: Validate reactive thread observables
+2173c71 worktrees/manyfold4/HEAD@{2026-05-15 21:02:58 -0700}: 
+2173c71 refs/heads/codex/garden-sys-path-fast-path@{2026-05-15 21:02:46 -0700}: branch: Created from HEAD
+2173c71 worktrees/manyfold3/HEAD@{2026-05-15 21:01:58 -0700}: 
+2173c71 refs/remotes/origin/HEAD@{2026-05-15 20:05:16 -0700}: update by push
+2173c71 refs/remotes/origin/main@{2026-05-15 20:05:16 -0700}: update by push
+2173c71 refs/heads/main@{2026-05-15 20:05:06 -0700}: commit: Harden sensor JSON schema decoding
+2173c71 HEAD@{2026-05-15 20:05:06 -0700}: commit: Harden sensor JSON schema decoding
+d6afc16 refs/heads/codex/garden-example-catalog-cleanup@{2026-05-15 20:03:29 -0700}: branch: Created from HEAD
+20656ef refs/heads/main@{2026-05-15 20:02:30 -0700}: merge origin/main: Fast-forward
+20656ef HEAD@{2026-05-15 20:02:30 -0700}: merge origin/main: Fast-forward
+20656ef refs/remotes/origin/HEAD@{2026-05-15 20:02:26 -0700}: fetch origin main --tags: fast-forward
+20656ef refs/remotes/origin/main@{2026-05-15 20:02:26 -0700}: fetch origin main --tags: fast-forward
+d6afc16 refs/remotes/origin/HEAD@{2026-05-15 19:15:49 -0700}: update by push
+d6afc16 refs/remotes/origin/main@{2026-05-15 19:15:49 -0700}: update by push
+d6afc16 HEAD@{2026-05-15 19:14:47 -0700}: rebase (finish): returning to refs/heads/main
+d6afc16 HEAD@{2026-05-15 19:14:47 -0700}: rebase (pick): Reject non-finite sensor event JSON values
+9ce97e4 refs/remotes/origin/HEAD@{2026-05-15 19:14:44 -0700}: fetch origin main: fast-forward
+9ce97e4 refs/remotes/origin/main@{2026-05-15 19:14:44 -0700}: fetch origin main: fast-forward
+dc10854 refs/remotes/origin/HEAD@{2026-05-15 19:12:25 -0700}: fetch origin main: fast-forward
+dc10854 refs/remotes/origin/main@{2026-05-15 19:12:25 -0700}: fetch origin main: fast-forward
+187853e refs/heads/garden-mailbox-descriptor-trim-20260516@{2026-05-15 19:08:07 -0700}: branch: Created from HEAD
+67ec789 refs/heads/garden-reference-example-text-trim@{2026-05-15 19:07:40 -0700}: branch: Created from HEAD
+95de849 refs/remotes/origin/garden-embedded-route-shape-20260515b@{2026-05-15 19:07:17 -0700}: update by push
+95de849 refs/heads/garden-embedded-route-shape-20260515b@{2026-05-15 19:07:10 -0700}: commit: Refactor embedded route shape validation
+089c240 refs/heads/garden-embedded-route-shape-20260515b@{2026-05-15 19:07:10 -0700}: branch: Created from HEAD
+95de849 worktrees/manyfold-embedded-route-shape-20260515/HEAD@{2026-05-15 19:07:10 -0700}: commit: Refactor embedded route shape validation
+089c240 worktrees/manyfold-embedded-route-shape-20260515/HEAD@{2026-05-15 19:07:10 -0700}: checkout: moving from 089c2407479db108c54b4f4cbbacdc76fdb92d2b to garden-embedded-route-shape-20260515b
+187853e refs/heads/garden-sensor-event-metadata-order-20260516@{2026-05-15 19:06:26 -0700}: branch: Created from HEAD
+67ec789 refs/heads/garden-reference-example-trim-20260515@{2026-05-15 19:06:06 -0700}: branch: Created from HEAD
+187853e refs/remotes/origin/HEAD@{2026-05-15 19:05:54 -0700}: update by push
+187853e refs/remotes/origin/main@{2026-05-15 19:05:54 -0700}: update by push
+1e223ab refs/heads/garden/sensor-retry-policy-order@{2026-05-15 19:04:51 -0700}: branch: Created from HEAD
+187853e refs/heads/garden-example-int-schema-20260516@{2026-05-15 19:03:47 -0700}: branch: Created from HEAD
+67ec789 refs/heads/garden-sensor-tag-metadata-order@{2026-05-15 18:42:07 -0700}: branch: Created from HEAD
+089c240 worktrees/manyfold-embedded-route-shape-20260515/HEAD@{2026-05-15 18:42:05 -0700}: 
+67ec789 refs/heads/garden-embedded-route-shape-20260515@{2026-05-15 18:41:15 -0700}: branch: Created from HEAD
+187853e HEAD@{2026-05-15 16:25:48 -0700}: rebase (finish): returning to refs/heads/main
+187853e HEAD@{2026-05-15 16:25:48 -0700}: rebase (pick): Validate scheduler and sensor sequence state
+084e1a4 HEAD@{2026-05-15 16:25:47 -0700}: rebase (pick): Validate delivery latency stats
+089c240 HEAD@{2026-05-15 16:25:47 -0700}: rebase (start): checkout origin/main
+1e223ab HEAD@{2026-05-15 14:12:43 -0700}: rebase (finish): returning to refs/heads/main
+1e223ab HEAD@{2026-05-15 14:12:42 -0700}: rebase (continue): Validate scheduler and sensor sequence state
+089c240 refs/remotes/origin/HEAD@{2026-05-15 08:38:54 -0700}: fetch origin main: fast-forward
+089c240 refs/remotes/origin/main@{2026-05-15 08:38:54 -0700}: fetch origin main: fast-forward
+96c5b74 HEAD@{2026-05-15 07:53:05 -0700}: rebase (pick): Validate delivery latency stats
+4aa1d05 HEAD@{2026-05-15 07:53:05 -0700}: rebase (start): checkout origin/main
+4aa1d05 refs/remotes/origin/HEAD@{2026-05-15 07:52:55 -0700}: fetch origin main: fast-forward
+4aa1d05 refs/remotes/origin/main@{2026-05-15 07:52:55 -0700}: fetch origin main: fast-forward
+384b186 refs/heads/garden-scheduled-write-retry-invariant-20260513@{2026-05-14 16:34:19 -0700}: branch: Created from HEAD
+9bc67b8 refs/remotes/origin/HEAD@{2026-05-14 16:34:06 -0700}: pull --rebase origin main: fast-forward
+9bc67b8 refs/remotes/origin/main@{2026-05-14 16:34:06 -0700}: pull --rebase origin main: fast-forward
+67ec789 HEAD@{2026-05-14 16:34:06 -0700}: pull --rebase origin main (finish): returning to refs/heads/main
+67ec789 HEAD@{2026-05-14 16:34:06 -0700}: pull --rebase origin main (pick): Validate scheduler and sensor sequence state
+8edb07b HEAD@{2026-05-14 16:34:06 -0700}: pull --rebase origin main (pick): Validate delivery latency stats
+cc37971 HEAD@{2026-05-14 16:33:20 -0700}: rebase (start): checkout origin/main
+bfeff28 refs/heads/garden-sensor-tag-metadata-order-20260514@{2026-05-14 16:33:18 -0700}: branch: Created from HEAD
+cc37971 refs/remotes/origin/HEAD@{2026-05-14 16:33:16 -0700}: fetch origin main: fast-forward
+cc37971 refs/remotes/origin/main@{2026-05-14 16:33:16 -0700}: fetch origin main: fast-forward
+11c4c1c HEAD@{2026-05-14 16:32:57 -0700}: rebase (finish): returning to refs/heads/garden/any-schema-bytes-like-20260514
+11c4c1c HEAD@{2026-05-14 16:32:57 -0700}: rebase (pick): Handle bytes-like any schema tokens
+2d08031 refs/remotes/origin/HEAD@{2026-05-14 16:32:33 -0700}: fetch origin: fast-forward
+2d08031 refs/remotes/origin/main@{2026-05-14 16:32:33 -0700}: fetch origin: fast-forward
+c42ffc5 HEAD@{2026-05-14 16:32:33 -0700}: Branch: renamed refs/heads/garden/rx-facade-repr-20260514 to refs/heads/garden/any-schema-bytes-like-20260514
+bfeff28 refs/heads/garden-test-support-loader-20260513@{2026-05-14 16:32:13 -0700}: branch: Created from HEAD
+384b186 refs/heads/garden-validategraph-mailbox-order-20260513@{2026-05-14 16:31:55 -0700}: branch: Created from HEAD
+c42ffc5 HEAD@{2026-05-14 16:31:18 -0700}: checkout: moving from main to garden/rx-facade-repr-20260514
+f98e091 HEAD@{2026-05-14 16:30:56 -0700}: reset: moving to HEAD
+be7678f refs/stash@{2026-05-14 16:30:55 -0700}: On main: always-be-shipping-preserve-unrelated-before-final-verify
+1267269 refs/remotes/origin/garden/test-support-none-sentinel@{2026-05-14 16:29:34 -0700}: fetch origin: storing head
+f98e091 HEAD@{2026-05-13 16:34:53 -0700}: pull --rebase origin main (finish): returning to refs/heads/main
+f98e091 HEAD@{2026-05-13 16:34:53 -0700}: pull --rebase origin main (pick): Validate delivery latency stats
+c42ffc5 HEAD@{2026-05-13 16:34:53 -0700}: pull --rebase origin main (start): checkout c42ffc51925e59b56536de2bd98a9d13fdaf7ac1
+384b186 refs/heads/garden-reset-shutdown-subject-20260513@{2026-05-13 16:14:08 -0700}: branch: Created from HEAD
+c42ffc5 refs/remotes/origin/HEAD@{2026-05-13 14:42:46 -0700}: fetch origin main: fast-forward
+c42ffc5 refs/remotes/origin/main@{2026-05-13 14:42:46 -0700}: fetch origin main: fast-forward
+dcb4a74 HEAD@{2026-05-13 13:30:53 -0700}: reset: moving to HEAD
+dcb4a74 HEAD@{2026-05-13 13:30:30 -0700}: commit: Validate delivery latency stats
+bfeff28 refs/remotes/origin/HEAD@{2026-05-13 09:23:38 -0700}: update by push
+bfeff28 refs/remotes/origin/main@{2026-05-13 09:23:38 -0700}: update by push
+bfeff28 refs/heads/main@{2026-05-13 09:23:27 -0700}: commit: Validate graph access capabilities
+bfeff28 HEAD@{2026-05-13 09:23:27 -0700}: commit: Validate graph access capabilities
+384b186 refs/heads/garden-lego-lookup-trim-20260513@{2026-05-13 09:23:20 -0700}: branch: Created from HEAD
+f088d99 refs/remotes/origin/garden/reactive-thread-scheduler-none@{2026-05-12 22:04:34 -0700}: pull --ff-only: storing head
+384b186 refs/remotes/origin/HEAD@{2026-05-12 21:04:05 -0700}: update by push
+384b186 refs/remotes/origin/main@{2026-05-12 21:04:05 -0700}: update by push
+384b186 refs/heads/main@{2026-05-12 21:04:01 -0700}: commit: Keep sensor sequences atomic on publish failure
+384b186 HEAD@{2026-05-12 21:04:01 -0700}: commit: Keep sensor sequences atomic on publish failure
+1f2335b refs/heads/main@{2026-05-12 21:01:46 -0700}: pull --ff-only: Fast-forward
+1f2335b refs/remotes/origin/HEAD@{2026-05-12 21:01:46 -0700}: pull --ff-only: fast-forward
+1f2335b refs/remotes/origin/main@{2026-05-12 21:01:46 -0700}: pull --ff-only: fast-forward
+1f2335b HEAD@{2026-05-12 21:01:46 -0700}: pull --ff-only: Fast-forward
+e864849 refs/remotes/origin/HEAD@{2026-05-12 20:05:01 -0700}: update by push
+e864849 refs/remotes/origin/main@{2026-05-12 20:05:01 -0700}: update by push
+e864849 refs/heads/main@{2026-05-12 20:04:54 -0700}: commit: Keep sensor publisher sequences atomic
+e864849 HEAD@{2026-05-12 20:04:54 -0700}: commit: Keep sensor publisher sequences atomic
+a330f5e refs/heads/main@{2026-05-12 19:05:17 -0700}: merge origin/main: Fast-forward
+a330f5e HEAD@{2026-05-12 19:05:17 -0700}: merge origin/main: Fast-forward
+a330f5e refs/remotes/origin/HEAD@{2026-05-12 19:05:14 -0700}: fetch origin main --tags: fast-forward
+a330f5e refs/remotes/origin/main@{2026-05-12 19:05:14 -0700}: fetch origin main --tags: fast-forward
+2ad504c refs/remotes/origin/HEAD@{2026-05-12 19:05:09 -0700}: update by push
+2ad504c refs/remotes/origin/main@{2026-05-12 19:05:09 -0700}: update by push
+2ad504c refs/heads/main@{2026-05-12 19:04:56 -0700}: commit: Validate graph interval bounds
+2ad504c HEAD@{2026-05-12 19:04:56 -0700}: commit: Validate graph interval bounds
+1142538 refs/heads/garden/reference-test-import-scope-cleanup-20260513@{2026-05-12 19:03:47 -0700}: branch: Created from HEAD
+1142538 refs/remotes/origin/HEAD@{2026-05-12 18:06:10 -0700}: update by push
+1142538 refs/remotes/origin/main@{2026-05-12 18:06:10 -0700}: update by push
+1142538 HEAD@{2026-05-12 18:05:06 -0700}: rebase (finish): returning to refs/heads/main
+1142538 HEAD@{2026-05-12 18:05:06 -0700}: rebase (pick): Keep JSON decoder sequence atomic
+01f5115 refs/remotes/origin/HEAD@{2026-05-12 18:05:00 -0700}: fetch origin main --tags: fast-forward
+01f5115 refs/remotes/origin/main@{2026-05-12 18:05:00 -0700}: fetch origin main --tags: fast-forward
+b4f9a90 refs/heads/garden-module-load-rollback-20260513@{2026-05-12 18:03:11 -0700}: branch: Created from HEAD
+0b12521 refs/heads/main@{2026-05-12 18:02:51 -0700}: pull --ff-only origin main: Fast-forward
+0b12521 HEAD@{2026-05-12 18:02:51 -0700}: pull --ff-only origin main: Fast-forward
+0b12521 refs/remotes/origin/HEAD@{2026-05-12 18:02:37 -0700}: fetch origin main --tags: fast-forward
+0b12521 refs/remotes/origin/main@{2026-05-12 18:02:37 -0700}: fetch origin main --tags: fast-forward
+31a19d9 refs/heads/garden-rfc-check-diagnostic-20260513@{2026-05-12 17:04:19 -0700}: branch: Created from HEAD
+b4f9a90 refs/remotes/origin/HEAD@{2026-05-12 17:03:36 -0700}: update by push
+b4f9a90 refs/remotes/origin/main@{2026-05-12 17:03:36 -0700}: update by push
+b4f9a90 refs/heads/main@{2026-05-12 17:03:21 -0700}: commit: Validate frame assembler selector keys
+b4f9a90 HEAD@{2026-05-12 17:03:21 -0700}: commit: Validate frame assembler selector keys
+31a19d9 refs/remotes/origin/HEAD@{2026-05-12 16:06:10 -0700}: update by push
+31a19d9 refs/remotes/origin/main@{2026-05-12 16:06:10 -0700}: update by push
+31a19d9 refs/heads/main@{2026-05-12 16:06:02 -0700}: commit: Validate graph snapshot records
+31a19d9 HEAD@{2026-05-12 16:06:02 -0700}: commit: Validate graph snapshot records
+75476b2 refs/heads/main@{2026-05-12 16:04:55 -0700}: pull --rebase --autostash: Fast-forward
+75476b2 refs/remotes/origin/HEAD@{2026-05-12 16:04:55 -0700}: pull --rebase --autostash: fast-forward
+75476b2 refs/remotes/origin/main@{2026-05-12 16:04:55 -0700}: pull --rebase --autostash: fast-forward
+75476b2 HEAD@{2026-05-12 16:04:55 -0700}: pull --rebase --autostash: Fast-forward
+58097e9 refs/heads/main@{2026-05-12 16:01:50 -0700}: pull --ff-only: Fast-forward
+58097e9 refs/remotes/origin/HEAD@{2026-05-12 16:01:50 -0700}: pull --ff-only: fast-forward
+58097e9 refs/remotes/origin/main@{2026-05-12 16:01:50 -0700}: pull --ff-only: fast-forward
+58097e9 HEAD@{2026-05-12 16:01:50 -0700}: pull --ff-only: Fast-forward
+37e91bf refs/remotes/origin/HEAD@{2026-05-12 15:03:17 -0700}: update by push
+37e91bf refs/remotes/origin/main@{2026-05-12 15:03:17 -0700}: update by push
+37e91bf refs/heads/main@{2026-05-12 15:03:10 -0700}: commit: Validate sensor frame samples
+37e91bf HEAD@{2026-05-12 15:03:10 -0700}: commit: Validate sensor frame samples
+9b14ee1 refs/heads/main@{2026-05-12 15:01:34 -0700}: pull --ff-only: Fast-forward
+9b14ee1 refs/remotes/origin/HEAD@{2026-05-12 15:01:34 -0700}: pull --ff-only: fast-forward
+9b14ee1 refs/remotes/origin/main@{2026-05-12 15:01:34 -0700}: pull --ff-only: fast-forward
+9b14ee1 HEAD@{2026-05-12 15:01:34 -0700}: pull --ff-only: Fast-forward
+7570e65 refs/remotes/origin/HEAD@{2026-05-12 14:04:21 -0700}: update by push
+7570e65 refs/remotes/origin/main@{2026-05-12 14:04:21 -0700}: update by push
+7570e65 refs/heads/main@{2026-05-12 14:04:13 -0700}: commit: Validate consensus route bundles
+7570e65 HEAD@{2026-05-12 14:04:13 -0700}: commit: Validate consensus route bundles
+ea86da3 refs/remotes/origin/HEAD@{2026-05-12 13:06:19 -0700}: update by push
+ea86da3 refs/remotes/origin/main@{2026-05-12 13:06:19 -0700}: update by push
+ea86da3 refs/heads/main@{2026-05-12 13:06:08 -0700}: commit: Validate graph manifest records
+ea86da3 HEAD@{2026-05-12 13:06:08 -0700}: commit: Validate graph manifest records
+9a3d45f refs/heads/main@{2026-05-12 13:05:11 -0700}: pull --ff-only: Fast-forward
+9a3d45f HEAD@{2026-05-12 13:05:11 -0700}: pull --ff-only: Fast-forward
+9a3d45f refs/remotes/origin/HEAD@{2026-05-12 13:04:59 -0700}: fetch origin main: fast-forward
+9a3d45f refs/remotes/origin/main@{2026-05-12 13:04:59 -0700}: fetch origin main: fast-forward
+2a31ab1 refs/remotes/origin/HEAD@{2026-05-12 12:09:06 -0700}: update by push
+2a31ab1 refs/remotes/origin/main@{2026-05-12 12:09:06 -0700}: update by push
+cb2038e refs/remotes/origin/HEAD@{2026-05-12 12:08:02 -0700}: pull --rebase origin main: fast-forward
+cb2038e refs/remotes/origin/main@{2026-05-12 12:08:02 -0700}: pull --rebase origin main: fast-forward
+2a31ab1 HEAD@{2026-05-12 12:08:02 -0700}: pull --rebase origin main (finish): returning to refs/heads/main
+2a31ab1 HEAD@{2026-05-12 12:08:02 -0700}: pull --rebase origin main (pick): Validate graph descriptor records
+90d6b74 refs/remotes/origin/HEAD@{2026-05-12 11:08:30 -0700}: update by push
+90d6b74 refs/remotes/origin/main@{2026-05-12 11:08:30 -0700}: update by push
+90d6b74 refs/heads/main@{2026-05-12 11:07:30 -0700}: commit: Validate diagram manifest records
+90d6b74 HEAD@{2026-05-12 11:07:30 -0700}: commit: Validate diagram manifest records
+2bf18aa refs/heads/main@{2026-05-12 11:07:15 -0700}: pull --rebase --autostash origin main: Fast-forward
+2bf18aa HEAD@{2026-05-12 11:07:15 -0700}: pull --rebase --autostash origin main: Fast-forward
+2bf18aa refs/remotes/origin/HEAD@{2026-05-12 11:07:07 -0700}: fetch origin main: fast-forward
+2bf18aa refs/remotes/origin/main@{2026-05-12 11:07:07 -0700}: fetch origin main: fast-forward
+ae0926b refs/remotes/origin/HEAD@{2026-05-12 10:07:37 -0700}: update by push
+ae0926b refs/remotes/origin/main@{2026-05-12 10:07:37 -0700}: update by push
+ae0926b refs/heads/main@{2026-05-12 10:07:26 -0700}: commit: Validate active flow records
+ae0926b HEAD@{2026-05-12 10:07:26 -0700}: commit: Validate active flow records
+6632b32 refs/heads/main@{2026-05-12 10:06:05 -0700}: pull --rebase --autostash: Fast-forward
+6632b32 refs/remotes/origin/HEAD@{2026-05-12 10:06:05 -0700}: pull --rebase --autostash: fast-forward
+6632b32 refs/remotes/origin/main@{2026-05-12 10:06:05 -0700}: pull --rebase --autostash: fast-forward
+6632b32 HEAD@{2026-05-12 10:06:05 -0700}: pull --rebase --autostash: Fast-forward
+8251d0f refs/heads/main@{2026-05-12 10:03:24 -0700}: pull --ff-only: Fast-forward
+8251d0f refs/remotes/origin/HEAD@{2026-05-12 10:03:24 -0700}: pull --ff-only: fast-forward
+8251d0f refs/remotes/origin/main@{2026-05-12 10:03:24 -0700}: pull --ff-only: fast-forward
+8251d0f HEAD@{2026-05-12 10:03:24 -0700}: pull --ff-only: Fast-forward
+158c8a2 refs/remotes/origin/HEAD@{2026-05-12 09:06:01 -0700}: update by push
+158c8a2 refs/remotes/origin/main@{2026-05-12 09:06:01 -0700}: update by push
+158c8a2 refs/heads/main@{2026-05-12 09:05:37 -0700}: commit: Validate graph audit records
+158c8a2 HEAD@{2026-05-12 09:05:37 -0700}: commit: Validate graph audit records
+19cd073 refs/heads/garden-diagram-newline-escape-20260512@{2026-05-12 09:05:06 -0700}: branch: Created from HEAD
+da562e5 refs/heads/main@{2026-05-12 09:02:24 -0700}: pull --ff-only origin main: Fast-forward
+da562e5 refs/remotes/origin/HEAD@{2026-05-12 09:02:24 -0700}: pull --ff-only origin main: fast-forward
+da562e5 refs/remotes/origin/main@{2026-05-12 09:02:24 -0700}: pull --ff-only origin main: fast-forward
+da562e5 HEAD@{2026-05-12 09:02:24 -0700}: pull --ff-only origin main: Fast-forward
+19cd073 refs/remotes/origin/HEAD@{2026-05-12 08:05:50 -0700}: update by push
+19cd073 refs/remotes/origin/main@{2026-05-12 08:05:50 -0700}: update by push
+19cd073 refs/heads/main@{2026-05-12 08:05:37 -0700}: commit: Validate query-plane records
+19cd073 HEAD@{2026-05-12 08:05:37 -0700}: commit: Validate query-plane records
+95f10f7 refs/heads/garden-query-response-invariants@{2026-05-12 08:03:47 -0700}: branch: Created from HEAD
+63c4e64 refs/heads/main@{2026-05-12 08:01:48 -0700}: pull --ff-only: Fast-forward
+63c4e64 refs/remotes/origin/HEAD@{2026-05-12 08:01:48 -0700}: pull --ff-only: fast-forward
+8d311af refs/remotes/origin/codex/garden-consensus-routes-validation@{2026-05-12 08:01:48 -0700}: pull --ff-only: storing head
+18ce11c refs/remotes/origin/codex/garden-query-response-validation@{2026-05-12 08:01:48 -0700}: pull --ff-only: storing head
+3a5cafd refs/remotes/origin/garden-average-single-window@{2026-05-12 08:01:48 -0700}: pull --ff-only: storing head
+ab25c28 refs/remotes/origin/garden-stats-iterables-20260512@{2026-05-12 08:01:48 -0700}: pull --ff-only: storing head
+63c4e64 refs/remotes/origin/main@{2026-05-12 08:01:48 -0700}: pull --ff-only: fast-forward
+63c4e64 HEAD@{2026-05-12 08:01:48 -0700}: pull --ff-only: Fast-forward
+95f10f7 refs/heads/main@{2026-05-12 07:23:49 -0700}: pull --rebase --autostash: Fast-forward
+95f10f7 refs/remotes/origin/HEAD@{2026-05-12 07:23:49 -0700}: pull --rebase --autostash: fast-forward
+95f10f7 refs/remotes/origin/main@{2026-05-12 07:23:49 -0700}: pull --rebase --autostash: fast-forward
+95f10f7 HEAD@{2026-05-12 07:23:49 -0700}: pull --rebase --autostash: Fast-forward
+44704cd refs/heads/garden-stats-iterables-20260512@{2026-05-12 07:23:46 -0700}: branch: Created from HEAD
+ed7c335 refs/remotes/origin/HEAD@{2026-05-12 07:23:06 -0700}: update by push
+ed7c335 refs/remotes/origin/main@{2026-05-12 07:23:06 -0700}: update by push
+44704cd refs/heads/garden-event-log-record-order-20260512@{2026-05-12 07:23:04 -0700}: branch: Created from HEAD
+ed7c335 refs/heads/main@{2026-05-12 07:22:53 -0700}: commit: Validate protobuf and sensor debug payloads
+ed7c335 HEAD@{2026-05-12 07:22:53 -0700}: commit: Validate protobuf and sensor debug payloads
+c6a7178 HEAD@{2026-05-12 07:22:26 -0700}: pull --rebase --autostash (finish): returning to refs/heads/main
+c6a7178 HEAD@{2026-05-12 07:22:26 -0700}: pull --rebase --autostash (pick): Validate graph metadata records
+44704cd refs/heads/garden-average-single-window@{2026-05-12 07:22:21 -0700}: branch: Created from HEAD
+9ff196f refs/remotes/origin/HEAD@{2026-05-12 07:22:06 -0700}: fetch origin: fast-forward
+34e38a6 refs/remotes/origin/garden/stats-average-single-window@{2026-05-12 07:22:06 -0700}: fetch origin: storing head
+9ff196f refs/remotes/origin/main@{2026-05-12 07:22:06 -0700}: fetch origin: fast-forward
+44704cd refs/heads/garden-eventlog-record-order-20260512@{2026-05-12 07:20:14 -0700}: branch: Created from HEAD
+44704cd refs/heads/main@{2026-05-11 22:27:45 -0700}: pull --ff-only origin main: Fast-forward
+44704cd HEAD@{2026-05-11 22:27:45 -0700}: pull --ff-only origin main: Fast-forward
+44704cd refs/remotes/origin/HEAD@{2026-05-11 22:27:40 -0700}: fetch origin main: fast-forward
+44704cd refs/remotes/origin/main@{2026-05-11 22:27:40 -0700}: fetch origin main: fast-forward
+ca3f638 refs/remotes/origin/HEAD@{2026-05-11 21:03:13 -0700}: update by push
+ca3f638 refs/remotes/origin/main@{2026-05-11 21:03:13 -0700}: update by push
+ca3f638 refs/heads/main@{2026-05-11 21:03:07 -0700}: commit: Validate typed envelope construction
+ca3f638 HEAD@{2026-05-11 21:03:07 -0700}: commit: Validate typed envelope construction
+0923166 refs/heads/main@{2026-05-11 21:01:17 -0700}: pull --ff-only: Fast-forward
+0923166 refs/remotes/origin/HEAD@{2026-05-11 21:01:17 -0700}: pull --ff-only: fast-forward
+0923166 refs/remotes/origin/main@{2026-05-11 21:01:17 -0700}: pull --ff-only: fast-forward
+0923166 HEAD@{2026-05-11 21:01:17 -0700}: pull --ff-only: Fast-forward
+a49550e refs/remotes/origin/HEAD@{2026-05-11 20:04:24 -0700}: update by push
+a49550e refs/remotes/origin/main@{2026-05-11 20:04:24 -0700}: update by push
+a49550e refs/heads/main@{2026-05-11 20:04:14 -0700}: commit: Validate join planning inputs
+a49550e HEAD@{2026-05-11 20:04:14 -0700}: commit: Validate join planning inputs
+e9548b9 refs/remotes/origin/codex/release-manyfold-0.1.32@{2026-05-11 20:01:58 -0700}: pull --ff-only: storing head
+59d8aa1 refs/heads/main@{2026-05-11 19:49:08 -0700}: pull --ff-only origin main: Fast-forward
+59d8aa1 refs/remotes/origin/HEAD@{2026-05-11 19:49:08 -0700}: pull --ff-only origin main: fast-forward
+59d8aa1 refs/remotes/origin/main@{2026-05-11 19:49:08 -0700}: pull --ff-only origin main: fast-forward
+59d8aa1 HEAD@{2026-05-11 19:49:08 -0700}: pull --ff-only origin main: Fast-forward
+e80b5c6 refs/heads/main@{2026-05-11 19:47:50 -0700}: pull --ff-only origin main: Fast-forward
+e80b5c6 HEAD@{2026-05-11 19:47:50 -0700}: pull --ff-only origin main: Fast-forward
+e80b5c6 refs/remotes/origin/HEAD@{2026-05-11 19:47:44 -0700}: fetch origin main: fast-forward
+e80b5c6 refs/remotes/origin/main@{2026-05-11 19:47:44 -0700}: fetch origin main: fast-forward
+0da555c refs/heads/main@{2026-05-11 19:46:37 -0700}: pull --ff-only: Fast-forward
+0da555c HEAD@{2026-05-11 19:46:37 -0700}: pull --ff-only: Fast-forward
+0da555c refs/remotes/origin/HEAD@{2026-05-11 19:46:25 -0700}: fetch origin main: fast-forward
+0da555c refs/remotes/origin/main@{2026-05-11 19:46:25 -0700}: fetch origin main: fast-forward
+6dc884e refs/remotes/origin/HEAD@{2026-05-11 19:45:46 -0700}: update by push
+6dc884e refs/remotes/origin/main@{2026-05-11 19:45:46 -0700}: update by push
+6dc884e refs/heads/main@{2026-05-11 19:45:26 -0700}: commit: Validate route retention policy inputs
+6dc884e HEAD@{2026-05-11 19:45:26 -0700}: commit: Validate route retention policy inputs
+47191ed refs/heads/main@{2026-05-11 19:44:41 -0700}: merge origin/main: Fast-forward
+47191ed HEAD@{2026-05-11 19:44:41 -0700}: merge origin/main: Fast-forward
+47191ed refs/remotes/origin/HEAD@{2026-05-11 19:44:30 -0700}: fetch origin main: fast-forward
+47191ed refs/remotes/origin/main@{2026-05-11 19:44:30 -0700}: fetch origin main: fast-forward
+751b244 refs/heads/main@{2026-05-11 19:44:24 -0700}: pull --ff-only origin main: Fast-forward
+751b244 HEAD@{2026-05-11 19:44:24 -0700}: pull --ff-only origin main: Fast-forward
+751b244 refs/remotes/origin/HEAD@{2026-05-11 19:44:18 -0700}: fetch origin main: fast-forward
+751b244 refs/remotes/origin/main@{2026-05-11 19:44:18 -0700}: fetch origin main: fast-forward
+8ab3a03 refs/remotes/origin/HEAD@{2026-05-11 19:43:56 -0700}: update by push
+8ab3a03 refs/remotes/origin/main@{2026-05-11 19:43:56 -0700}: update by push
+8ab3a03 HEAD@{2026-05-11 19:43:26 -0700}: rebase (finish): returning to refs/heads/main
+8ab3a03 HEAD@{2026-05-11 19:43:26 -0700}: rebase (pick): Validate memory chip inputs
+1f39ccb HEAD@{2026-05-11 19:43:26 -0700}: rebase (pick): Validate reactive thread helper inputs
+2fdbe6a refs/remotes/origin/HEAD@{2026-05-11 19:43:16 -0700}: fetch origin main: fast-forward
+2fdbe6a refs/remotes/origin/main@{2026-05-11 19:43:16 -0700}: fetch origin main: fast-forward
+0b62125 refs/remotes/origin/HEAD@{2026-05-11 19:42:47 -0700}: fetch origin main: fast-forward
+0b62125 refs/remotes/origin/main@{2026-05-11 19:42:47 -0700}: fetch origin main: fast-forward
+1a44359 refs/heads/main@{2026-05-11 19:41:12 -0700}: pull --ff-only origin main: Fast-forward
+1a44359 HEAD@{2026-05-11 19:41:12 -0700}: pull --ff-only origin main: Fast-forward
+1a44359 refs/remotes/origin/HEAD@{2026-05-11 19:40:59 -0700}: fetch origin main: fast-forward
+1a44359 refs/remotes/origin/main@{2026-05-11 19:40:59 -0700}: fetch origin main: fast-forward
+fa06c75 refs/remotes/origin/HEAD@{2026-05-11 19:40:53 -0700}: update by push
+fa06c75 refs/remotes/origin/main@{2026-05-11 19:40:53 -0700}: update by push
+fa06c75 HEAD@{2026-05-11 19:40:44 -0700}: rebase (finish): returning to refs/heads/main
+fa06c75 HEAD@{2026-05-11 19:40:44 -0700}: rebase (pick): Validate sensor filter key callbacks
+1e1f017 HEAD@{2026-05-11 19:40:44 -0700}: rebase (pick): Validate component schemas
+9215e64 refs/remotes/origin/HEAD@{2026-05-11 19:40:31 -0700}: fetch origin main: fast-forward
+9215e64 refs/remotes/origin/main@{2026-05-11 19:40:31 -0700}: fetch origin main: fast-forward
+0a56a93 refs/remotes/origin/HEAD@{2026-05-11 19:38:46 -0700}: fetch origin: fast-forward
+9785474 refs/remotes/origin/codex/example-catalog-positive-metadata@{2026-05-11 19:38:46 -0700}: fetch origin: storing head
+0a56a93 refs/remotes/origin/main@{2026-05-11 19:38:46 -0700}: fetch origin: fast-forward
+1a1476c refs/heads/garden/toml-metadata-tests@{2026-05-11 19:38:22 -0700}: branch: Created from HEAD
+c2f8fe4 refs/heads/garden-example-catalog-lookup-validation@{2026-05-11 19:37:01 -0700}: branch: Created from HEAD
+ec9b440 refs/heads/garden/rfc-coverage-counter@{2026-05-11 19:37:00 -0700}: branch: Created from HEAD
+da787df refs/heads/codex/garden-catalog-diagnostics@{2026-05-11 19:36:38 -0700}: branch: Created from HEAD
+ec9b440 refs/heads/codex/garden-example-catalog-module-names@{2026-05-11 19:35:56 -0700}: branch: Created from HEAD
+1a1476c refs/heads/codex/garden-rfc-coverage-counter@{2026-05-11 19:35:51 -0700}: branch: Created from HEAD
+db78c40 refs/heads/main@{2026-05-11 19:35:14 -0700}: pull --ff-only: Fast-forward
+db78c40 refs/remotes/origin/HEAD@{2026-05-11 19:35:14 -0700}: pull --ff-only: fast-forward
+db78c40 refs/remotes/origin/main@{2026-05-11 19:35:14 -0700}: pull --ff-only: fast-forward
+db78c40 HEAD@{2026-05-11 19:35:14 -0700}: pull --ff-only: Fast-forward
+902ff0a refs/heads/codex/garden-example-catalog-lookup-validation@{2026-05-11 19:35:07 -0700}: branch: Created from HEAD
+fdd42eb refs/remotes/origin/HEAD@{2026-05-11 19:34:49 -0700}: fetch origin main: fast-forward
+fdd42eb refs/remotes/origin/main@{2026-05-11 19:34:49 -0700}: fetch origin main: fast-forward
+da787df refs/heads/codex/materialize-sequence-snapshot@{2026-05-11 19:34:48 -0700}: branch: Created from HEAD
+a012721 refs/heads/garden/sensor-key-sort-module@{2026-05-11 19:33:53 -0700}: branch: Created from HEAD
+da787df refs/heads/garden/reactive-latency-history-dict@{2026-05-11 19:33:48 -0700}: branch: Created from HEAD
+2696fd5 refs/heads/main@{2026-05-11 19:33:22 -0700}: pull --rebase origin main: Fast-forward
+2696fd5 refs/remotes/origin/HEAD@{2026-05-11 19:33:22 -0700}: pull --rebase origin main: fast-forward
+2696fd5 refs/remotes/origin/main@{2026-05-11 19:33:22 -0700}: pull --rebase origin main: fast-forward
+2696fd5 HEAD@{2026-05-11 19:33:22 -0700}: pull --rebase origin main: Fast-forward
+e498472 refs/remotes/origin/HEAD@{2026-05-11 19:31:59 -0700}: update by push
+e498472 refs/remotes/origin/main@{2026-05-11 19:31:59 -0700}: update by push
+e498472 HEAD@{2026-05-11 19:31:43 -0700}: rebase (finish): returning to refs/heads/main
+e498472 HEAD@{2026-05-11 19:31:43 -0700}: rebase (pick): Validate graph and thread helper names
+f50c32e refs/remotes/origin/HEAD@{2026-05-11 19:31:41 -0700}: fetch origin main: fast-forward
+f50c32e refs/remotes/origin/main@{2026-05-11 19:31:41 -0700}: fetch origin main: fast-forward
+da787df refs/heads/garden/sensor-mapping-key-order@{2026-05-11 19:24:23 -0700}: branch: Created from HEAD
+da787df refs/heads/garden/cargo-feature-ordering-20260512@{2026-05-11 18:38:52 -0700}: branch: Created from HEAD
+da787df refs/heads/garden/export-order-determinism@{2026-05-11 18:38:43 -0700}: branch: Created from HEAD
+c2f8fe4 refs/heads/main@{2026-05-11 18:38:41 -0700}: pull --ff-only: Fast-forward
+c2f8fe4 HEAD@{2026-05-11 18:38:41 -0700}: pull --ff-only: Fast-forward
+c2f8fe4 refs/remotes/origin/HEAD@{2026-05-11 18:19:08 -0700}: fetch origin main: fast-forward
+c2f8fe4 refs/remotes/origin/main@{2026-05-11 18:19:08 -0700}: fetch origin main: fast-forward
+da787df refs/heads/garden/resolve-module-load-paths@{2026-05-11 18:18:46 -0700}: branch: Created from HEAD
+c229870 refs/heads/main@{2026-05-11 18:17:16 -0700}: pull --ff-only origin main: Fast-forward
+c229870 refs/remotes/origin/HEAD@{2026-05-11 18:17:16 -0700}: pull --ff-only origin main: fast-forward
+c229870 refs/remotes/origin/main@{2026-05-11 18:17:16 -0700}: pull --ff-only origin main: fast-forward
+c229870 HEAD@{2026-05-11 18:17:16 -0700}: pull --ff-only origin main: Fast-forward
+1a1476c refs/remotes/origin/HEAD@{2026-05-11 16:48:54 -0700}: update by push
+1a1476c refs/remotes/origin/main@{2026-05-11 16:48:54 -0700}: update by push
+1a1476c refs/heads/main@{2026-05-11 15:18:29 -0700}: commit: Validate latency recorder delay values
+1a1476c HEAD@{2026-05-11 15:18:29 -0700}: commit: Validate latency recorder delay values
+ec9b440 refs/remotes/origin/HEAD@{2026-05-11 11:31:34 -0700}: fetch origin main: fast-forward
+ec9b440 refs/remotes/origin/main@{2026-05-11 11:31:34 -0700}: fetch origin main: fast-forward
+a012721 refs/heads/main@{2026-05-11 10:27:32 -0700}: merge origin/main: Fast-forward
+a012721 HEAD@{2026-05-11 10:27:32 -0700}: merge origin/main: Fast-forward
+a012721 refs/remotes/origin/HEAD@{2026-05-11 09:40:40 -0700}: fetch --no-tags origin main: fast-forward
+a012721 refs/remotes/origin/main@{2026-05-11 09:40:40 -0700}: fetch --no-tags origin main: fast-forward
+6eb4ab9 refs/heads/main@{2026-05-11 08:55:26 -0700}: pull --rebase --autostash origin main: Fast-forward
+6eb4ab9 HEAD@{2026-05-11 08:55:26 -0700}: pull --rebase --autostash origin main: Fast-forward
+6eb4ab9 refs/remotes/origin/HEAD@{2026-05-11 08:35:07 -0700}: fetch origin main: fast-forward
+6eb4ab9 refs/remotes/origin/main@{2026-05-11 08:35:07 -0700}: fetch origin main: fast-forward
+902ff0a refs/remotes/origin/HEAD@{2026-05-11 07:30:02 -0700}: update by push
+902ff0a refs/remotes/origin/main@{2026-05-11 07:30:02 -0700}: update by push
+da787df refs/heads/codex/garden-keyspace-store-validation@{2026-05-11 06:37:40 -0700}: branch: Created from HEAD
+b552b86 refs/remotes/origin/HEAD@{2026-05-11 06:37:37 -0700}: pull --rebase --autostash: fast-forward
+b552b86 refs/remotes/origin/main@{2026-05-11 06:37:37 -0700}: pull --rebase --autostash: fast-forward
+902ff0a HEAD@{2026-05-11 06:37:37 -0700}: pull --rebase --autostash (finish): returning to refs/heads/main
+902ff0a HEAD@{2026-05-11 06:37:37 -0700}: pull --rebase --autostash (pick): Harden sensor and graph helper validation
+da787df refs/heads/garden-latency-recorder-stream-names@{2026-05-11 04:35:29 -0700}: branch: Created from HEAD
+da787df refs/heads/garden/reactive-threads-export-order@{2026-05-11 03:41:50 -0700}: branch: Created from HEAD
+da787df refs/heads/codex/garden-rx-subject-facade@{2026-05-11 03:06:32 -0700}: branch: Created from HEAD
+da787df refs/remotes/origin/HEAD@{2026-05-10 13:05:14 -0400}: update by push
+da787df refs/remotes/origin/main@{2026-05-10 13:05:14 -0400}: update by push
+da787df refs/heads/main@{2026-05-10 13:05:11 -0400}: commit: Harden local sensor adapter construction
+da787df HEAD@{2026-05-10 13:05:11 -0400}: commit: Harden local sensor adapter construction
+1edf557 refs/heads/main@{2026-05-10 13:04:26 -0400}: pull --rebase --autostash: Fast-forward
+1edf557 refs/remotes/origin/HEAD@{2026-05-10 13:04:26 -0400}: pull --rebase --autostash: fast-forward
+1edf557 refs/remotes/origin/main@{2026-05-10 13:04:26 -0400}: pull --rebase --autostash: fast-forward
+1edf557 HEAD@{2026-05-10 13:04:26 -0400}: pull --rebase --autostash: Fast-forward
+ee1a19c refs/heads/garden-stats-explicit-exports@{2026-05-10 13:03:03 -0400}: branch: Created from HEAD
+ee1a19c refs/remotes/origin/HEAD@{2026-05-10 12:05:15 -0400}: update by push
+ee1a19c refs/remotes/origin/main@{2026-05-10 12:05:15 -0400}: update by push
+07a21bb refs/remotes/origin/HEAD@{2026-05-10 12:04:30 -0400}: pull --rebase origin main: fast-forward
+07a21bb refs/remotes/origin/main@{2026-05-10 12:04:30 -0400}: pull --rebase origin main: fast-forward
+ee1a19c HEAD@{2026-05-10 12:04:30 -0400}: pull --rebase origin main (finish): returning to refs/heads/main
+ee1a19c HEAD@{2026-05-10 12:04:30 -0400}: pull --rebase origin main (pick): Validate sensor graph node configuration
+eeed85b refs/heads/main@{2026-05-10 12:02:09 -0400}: pull --ff-only origin main: Fast-forward
+eeed85b refs/remotes/origin/HEAD@{2026-05-10 12:02:09 -0400}: pull --ff-only origin main: fast-forward
+eeed85b refs/remotes/origin/main@{2026-05-10 12:02:09 -0400}: pull --ff-only origin main: fast-forward
+eeed85b HEAD@{2026-05-10 12:02:09 -0400}: pull --ff-only origin main: Fast-forward
+4c88133 refs/remotes/origin/HEAD@{2026-05-10 11:03:54 -0400}: update by push
+4c88133 refs/remotes/origin/main@{2026-05-10 11:03:54 -0400}: update by push
+4c88133 refs/heads/main@{2026-05-10 11:03:44 -0400}: commit: Reject blank component identifiers
+4c88133 HEAD@{2026-05-10 11:03:44 -0400}: commit: Reject blank component identifiers
+0ceaee7 refs/heads/garden/native-stub-export-order@{2026-05-10 11:03:00 -0400}: branch: Created from HEAD
+0ceaee7 refs/remotes/origin/HEAD@{2026-05-10 10:06:33 -0400}: update by push
+0ceaee7 refs/remotes/origin/main@{2026-05-10 10:06:33 -0400}: update by push
+0ceaee7 HEAD@{2026-05-10 10:05:50 -0400}: rebase (finish): returning to refs/heads/main
+0ceaee7 HEAD@{2026-05-10 10:05:50 -0400}: rebase (pick): Reject invalid moving average samples
+4f8269a refs/remotes/origin/HEAD@{2026-05-10 10:05:43 -0400}: fetch origin main: fast-forward
+4f8269a refs/remotes/origin/main@{2026-05-10 10:05:43 -0400}: fetch origin main: fast-forward
+c77df2c refs/heads/codex/garden-mailbox-script-helper@{2026-05-10 10:03:31 -0400}: branch: Created from HEAD
+9fc7653 refs/heads/main@{2026-05-10 10:02:08 -0400}: pull --ff-only: Fast-forward
+9fc7653 refs/remotes/origin/HEAD@{2026-05-10 10:02:08 -0400}: pull --ff-only: fast-forward
+9fc7653 refs/remotes/origin/main@{2026-05-10 10:02:08 -0400}: pull --ff-only: fast-forward
+9fc7653 HEAD@{2026-05-10 10:02:08 -0400}: pull --ff-only: Fast-forward
+c77df2c refs/remotes/origin/HEAD@{2026-05-10 09:02:44 -0400}: update by push
+c77df2c refs/remotes/origin/main@{2026-05-10 09:02:44 -0400}: update by push
+c77df2c refs/heads/main@{2026-05-10 09:02:34 -0400}: commit: Validate file store value payloads
+c77df2c HEAD@{2026-05-10 09:02:34 -0400}: commit: Validate file store value payloads
+224ecc9 refs/remotes/origin/HEAD@{2026-05-10 08:05:44 -0400}: update by push
+224ecc9 refs/remotes/origin/main@{2026-05-10 08:05:44 -0400}: update by push
+11222f5 refs/remotes/origin/HEAD@{2026-05-10 08:04:54 -0400}: pull --rebase origin main: fast-forward
+11222f5 refs/remotes/origin/main@{2026-05-10 08:04:54 -0400}: pull --rebase origin main: fast-forward
+224ecc9 HEAD@{2026-05-10 08:04:54 -0400}: pull --rebase origin main (finish): returning to refs/heads/main
+224ecc9 HEAD@{2026-05-10 08:04:54 -0400}: pull --rebase origin main (pick): Validate graph route-like inputs
+03272f1 refs/remotes/origin/HEAD@{2026-05-10 07:05:00 -0400}: update by push
+03272f1 refs/remotes/origin/main@{2026-05-10 07:05:00 -0400}: update by push
+455eb88 refs/remotes/origin/HEAD@{2026-05-10 07:04:15 -0400}: pull --rebase origin main: fast-forward
+455eb88 refs/remotes/origin/main@{2026-05-10 07:04:15 -0400}: pull --rebase origin main: fast-forward
+03272f1 HEAD@{2026-05-10 07:04:15 -0400}: pull --rebase origin main (finish): returning to refs/heads/main
+03272f1 HEAD@{2026-05-10 07:04:15 -0400}: pull --rebase origin main (pick): Validate graph operator callbacks
+d5112e2 refs/heads/garden/sensor-json-restore-order@{2026-05-10 07:02:36 -0400}: branch: Created from HEAD
+32b8c21 refs/heads/main@{2026-05-10 07:02:07 -0400}: pull --ff-only origin main: Fast-forward
+32b8c21 refs/remotes/origin/HEAD@{2026-05-10 07:02:07 -0400}: pull --ff-only origin main: fast-forward
+32b8c21 refs/remotes/origin/main@{2026-05-10 07:02:07 -0400}: pull --ff-only origin main: fast-forward
+32b8c21 HEAD@{2026-05-10 07:02:07 -0400}: pull --ff-only origin main: Fast-forward
+d5112e2 refs/remotes/origin/HEAD@{2026-05-10 06:03:46 -0400}: update by push
+d5112e2 refs/remotes/origin/main@{2026-05-10 06:03:46 -0400}: update by push
+d5112e2 refs/heads/main@{2026-05-10 06:03:42 -0400}: commit: Harden sensor payload construction
+d5112e2 HEAD@{2026-05-10 06:03:42 -0400}: commit: Harden sensor payload construction
+12fc1ed refs/heads/garden-reactive-env-diagnostics@{2026-05-10 06:03:29 -0400}: branch: Created from HEAD
+12fc1ed refs/remotes/origin/HEAD@{2026-05-10 05:05:47 -0400}: update by push
+12fc1ed refs/remotes/origin/main@{2026-05-10 05:05:47 -0400}: update by push
+12fc1ed refs/heads/main@{2026-05-10 05:05:40 -0400}: commit: Validate rate matched sensor setup
+12fc1ed HEAD@{2026-05-10 05:05:40 -0400}: commit: Validate rate matched sensor setup
+326bae3 refs/heads/main@{2026-05-10 05:04:51 -0400}: pull --rebase --autostash origin main: Fast-forward
+326bae3 HEAD@{2026-05-10 05:04:51 -0400}: pull --rebase --autostash origin main: Fast-forward
+326bae3 refs/remotes/origin/HEAD@{2026-05-10 05:04:44 -0400}: fetch origin main: fast-forward
+326bae3 refs/remotes/origin/main@{2026-05-10 05:04:44 -0400}: fetch origin main: fast-forward
+b527128 refs/heads/garden/protobuf-schema-message-type-guard@{2026-05-10 05:03:29 -0400}: branch: Created from HEAD
+b527128 refs/remotes/origin/HEAD@{2026-05-10 04:05:26 -0400}: update by push
+b527128 refs/remotes/origin/main@{2026-05-10 04:05:26 -0400}: update by push
+b527128 refs/heads/main@{2026-05-10 04:05:23 -0400}: commit: Validate graph pipeline node construction
+b527128 HEAD@{2026-05-10 04:05:23 -0400}: commit: Validate graph pipeline node construction
+d0d0762 refs/heads/main@{2026-05-10 04:03:09 -0400}: pull --ff-only: Fast-forward
+d0d0762 refs/remotes/origin/HEAD@{2026-05-10 04:03:09 -0400}: pull --ff-only: fast-forward
+d0d0762 refs/remotes/origin/main@{2026-05-10 04:03:09 -0400}: pull --ff-only: fast-forward
+d0d0762 HEAD@{2026-05-10 04:03:09 -0400}: pull --ff-only: Fast-forward
+d19f7ae refs/heads/garden/control-loop-duplicate-install@{2026-05-10 03:05:29 -0400}: branch: Created from HEAD
+0cfb464 refs/remotes/origin/HEAD@{2026-05-10 03:04:22 -0400}: update by push
+0cfb464 refs/remotes/origin/main@{2026-05-10 03:04:22 -0400}: update by push
+0cfb464 refs/heads/main@{2026-05-10 03:04:12 -0400}: commit: Validate direct route identity construction
+0cfb464 HEAD@{2026-05-10 03:04:12 -0400}: commit: Validate direct route identity construction
+d19f7ae refs/remotes/origin/HEAD@{2026-05-10 02:04:34 -0400}: update by push
+d19f7ae refs/remotes/origin/main@{2026-05-10 02:04:34 -0400}: update by push
+d19f7ae HEAD@{2026-05-10 02:03:48 -0400}: rebase (finish): returning to refs/heads/main
+d19f7ae HEAD@{2026-05-10 02:03:48 -0400}: rebase (pick): Validate local durable spool setup
+2aa99b3 refs/remotes/origin/HEAD@{2026-05-10 02:03:46 -0400}: fetch origin main: fast-forward
+2aa99b3 refs/remotes/origin/main@{2026-05-10 02:03:46 -0400}: fetch origin main: fast-forward
+1ec3359 refs/heads/garden/catalog-wrapper-module-registration@{2026-05-10 02:02:35 -0400}: branch: Created from HEAD
+1ec3359 refs/remotes/origin/HEAD@{2026-05-10 01:05:19 -0400}: update by push
+1ec3359 refs/remotes/origin/main@{2026-05-10 01:05:19 -0400}: update by push
+90db918 refs/remotes/origin/HEAD@{2026-05-10 01:04:33 -0400}: pull --rebase --autostash origin main: fast-forward
+90db918 refs/remotes/origin/main@{2026-05-10 01:04:33 -0400}: pull --rebase --autostash origin main: fast-forward
+1ec3359 HEAD@{2026-05-10 01:04:33 -0400}: pull --rebase --autostash origin main (finish): returning to refs/heads/main
+1ec3359 HEAD@{2026-05-10 01:04:33 -0400}: pull --rebase --autostash origin main (pick): Validate storage component construction
+3a00c8f refs/heads/garden-test-loader-exports@{2026-05-10 01:03:20 -0400}: branch: Created from HEAD
+3a00c8f refs/remotes/origin/HEAD@{2026-05-10 00:03:55 -0400}: update by push
+3a00c8f refs/remotes/origin/main@{2026-05-10 00:03:55 -0400}: update by push
+3a00c8f HEAD@{2026-05-10 00:03:43 -0400}: rebase (finish): returning to refs/heads/main
+3a00c8f HEAD@{2026-05-10 00:03:43 -0400}: rebase (continue): Validate source and sink route wrappers
+d7d29f8 refs/remotes/origin/HEAD@{2026-05-10 00:03:18 -0400}: fetch origin main: fast-forward
+d7d29f8 refs/remotes/origin/main@{2026-05-10 00:03:18 -0400}: fetch origin main: fast-forward
+56c707a refs/heads/main@{2026-05-10 00:01:54 -0400}: pull --ff-only: Fast-forward
+56c707a refs/remotes/origin/HEAD@{2026-05-10 00:01:54 -0400}: pull --ff-only: fast-forward
+56c707a refs/remotes/origin/main@{2026-05-10 00:01:54 -0400}: pull --ff-only: fast-forward
+56c707a HEAD@{2026-05-10 00:01:54 -0400}: pull --ff-only: Fast-forward
+501bdca refs/heads/garden-backoff-overflow-clamp@{2026-05-09 23:03:10 -0400}: branch: Created from HEAD
+62f83d2 refs/remotes/origin/HEAD@{2026-05-09 23:02:33 -0400}: update by push
+62f83d2 refs/remotes/origin/main@{2026-05-09 23:02:33 -0400}: update by push
+62f83d2 refs/heads/main@{2026-05-09 23:02:30 -0400}: commit: Validate lego catalog lookup text
+62f83d2 HEAD@{2026-05-09 23:02:30 -0400}: commit: Validate lego catalog lookup text
+501bdca refs/heads/main@{2026-05-09 23:01:08 -0400}: pull --ff-only origin main: Fast-forward
+501bdca HEAD@{2026-05-09 23:01:08 -0400}: pull --ff-only origin main: Fast-forward
+501bdca refs/remotes/origin/HEAD@{2026-05-09 23:01:07 -0400}: pull --ff-only origin main: fast-forward
+501bdca refs/remotes/origin/main@{2026-05-09 23:01:07 -0400}: pull --ff-only origin main: fast-forward
+747615a refs/remotes/origin/HEAD@{2026-05-09 22:03:05 -0400}: update by push
+747615a refs/remotes/origin/main@{2026-05-09 22:03:05 -0400}: update by push
+747615a refs/heads/main@{2026-05-09 22:03:01 -0400}: commit: Validate schema codec hooks
+747615a HEAD@{2026-05-09 22:03:01 -0400}: commit: Validate schema codec hooks
+f7f08d6 refs/heads/garden/lego-constructor-validation@{2026-05-09 22:02:10 -0400}: branch: Created from HEAD
+ebaed02 refs/heads/main@{2026-05-09 22:01:33 -0400}: pull --ff-only: Fast-forward
+ebaed02 refs/remotes/origin/HEAD@{2026-05-09 22:01:33 -0400}: pull --ff-only: fast-forward
+ebaed02 refs/remotes/origin/main@{2026-05-09 22:01:33 -0400}: pull --ff-only: fast-forward
+ebaed02 HEAD@{2026-05-09 22:01:33 -0400}: pull --ff-only: Fast-forward
+f7f08d6 refs/remotes/origin/HEAD@{2026-05-09 21:03:10 -0400}: update by push
+f7f08d6 refs/remotes/origin/main@{2026-05-09 21:03:10 -0400}: update by push
+f7f08d6 refs/heads/main@{2026-05-09 21:03:00 -0400}: commit: Validate embedded profile construction
+f7f08d6 HEAD@{2026-05-09 21:03:00 -0400}: commit: Validate embedded profile construction
+2a121c5 refs/heads/codex/garden-rfc-status-coverage@{2026-05-09 21:02:50 -0400}: branch: Created from HEAD
+2a121c5 refs/remotes/origin/HEAD@{2026-05-09 20:04:45 -0400}: update by push
+2a121c5 refs/remotes/origin/main@{2026-05-09 20:04:45 -0400}: update by push
+084f6e8 refs/remotes/origin/HEAD@{2026-05-09 20:04:07 -0400}: pull --rebase origin main: fast-forward
+084f6e8 refs/remotes/origin/main@{2026-05-09 20:04:07 -0400}: pull --rebase origin main: fast-forward
+2a121c5 HEAD@{2026-05-09 20:04:07 -0400}: pull --rebase origin main (finish): returning to refs/heads/main
+2a121c5 HEAD@{2026-05-09 20:04:07 -0400}: pull --rebase origin main (pick): Validate lazy payload sources
+5f79089 refs/heads/garden/catalog-metadata-validation@{2026-05-09 20:02:18 -0400}: branch: Created from HEAD
+4985d0d refs/heads/main@{2026-05-09 20:01:40 -0400}: pull --ff-only origin main: Fast-forward
+4985d0d refs/remotes/origin/HEAD@{2026-05-09 20:01:40 -0400}: pull --ff-only origin main: fast-forward
+4985d0d refs/remotes/origin/main@{2026-05-09 20:01:40 -0400}: pull --ff-only origin main: fast-forward
+4985d0d HEAD@{2026-05-09 20:01:40 -0400}: pull --ff-only origin main: Fast-forward
+5f79089 refs/remotes/origin/HEAD@{2026-05-09 19:04:03 -0400}: update by push
+5f79089 refs/remotes/origin/main@{2026-05-09 19:04:03 -0400}: update by push
+5f79089 refs/heads/main@{2026-05-09 19:03:59 -0400}: commit: Validate direct keyspace construction
+5f79089 HEAD@{2026-05-09 19:03:59 -0400}: commit: Validate direct keyspace construction
+f9d5684 refs/remotes/origin/HEAD@{2026-05-09 18:06:33 -0400}: update by push
+f9d5684 refs/remotes/origin/main@{2026-05-09 18:06:33 -0400}: update by push
+f9d5684 HEAD@{2026-05-09 18:05:52 -0400}: rebase (finish): returning to refs/heads/main
+f9d5684 HEAD@{2026-05-09 18:05:52 -0400}: rebase (pick): Validate graph flow policy overrides
+76ce72a refs/remotes/origin/HEAD@{2026-05-09 18:05:40 -0400}: fetch origin main --prune: fast-forward
+76ce72a refs/remotes/origin/main@{2026-05-09 18:05:40 -0400}: fetch origin main --prune: fast-forward
+c5b7dce refs/heads/codex/garden-manifest-exports@{2026-05-09 18:03:16 -0400}: branch: Created from HEAD
+8a9a954 refs/heads/main@{2026-05-09 18:03:10 -0400}: pull --ff-only origin main: Fast-forward
+8a9a954 refs/remotes/origin/HEAD@{2026-05-09 18:03:10 -0400}: pull --ff-only origin main: fast-forward
+8a9a954 refs/remotes/origin/main@{2026-05-09 18:03:10 -0400}: pull --ff-only origin main: fast-forward
+8a9a954 HEAD@{2026-05-09 18:03:10 -0400}: pull --ff-only origin main: Fast-forward
+c5b7dce refs/remotes/origin/HEAD@{2026-05-09 17:32:56 -0400}: fetch origin main: fast-forward
+c5b7dce refs/remotes/origin/main@{2026-05-09 17:32:56 -0400}: fetch origin main: fast-forward
+543db92 refs/heads/codex/order-file-declarations@{2026-05-09 17:32:21 -0400}: branch: Created from HEAD
+fb36858 refs/heads/codex/object-shaped-manifest-api@{2026-05-09 17:12:06 -0400}: commit: Add object-shaped graph manifests
+8fa6bf4 refs/heads/codex/object-shaped-manifest-api@{2026-05-09 17:11:58 -0400}: branch: Created from HEAD
+543db92 refs/remotes/origin/HEAD@{2026-05-09 17:07:32 -0400}: update by push
+543db92 refs/remotes/origin/main@{2026-05-09 17:07:32 -0400}: update by push
+543db92 HEAD@{2026-05-09 17:06:41 -0400}: rebase (finish): returning to refs/heads/main
+543db92 HEAD@{2026-05-09 17:06:41 -0400}: rebase (pick): Validate direct route value construction
+842ec3e refs/remotes/origin/HEAD@{2026-05-09 17:06:34 -0400}: pull --ff-only origin main: fast-forward
+842ec3e refs/remotes/origin/main@{2026-05-09 17:06:34 -0400}: pull --ff-only origin main: fast-forward
+a4ede92 refs/heads/garden/module-scope-import-contract@{2026-05-09 17:05:11 -0400}: branch: Created from HEAD
+a4ede92 refs/heads/main@{2026-05-09 17:02:05 -0400}: pull --ff-only origin main: Fast-forward
+a4ede92 HEAD@{2026-05-09 17:02:05 -0400}: pull --ff-only origin main: Fast-forward
+a4ede92 refs/remotes/origin/HEAD@{2026-05-09 17:02:04 -0400}: fetch origin main: fast-forward
+a4ede92 refs/remotes/origin/main@{2026-05-09 17:02:04 -0400}: fetch origin main: fast-forward
+8fa6bf4 HEAD@{2026-05-09 17:02:04 -0400}: checkout: moving from main to main
+8fa6bf4 refs/remotes/origin/HEAD@{2026-05-09 16:07:12 -0400}: update by push
+8fa6bf4 refs/remotes/origin/main@{2026-05-09 16:07:12 -0400}: update by push
+8fa6bf4 refs/heads/main@{2026-05-09 16:07:03 -0400}: commit: Validate sensor identity values
+8fa6bf4 HEAD@{2026-05-09 16:07:03 -0400}: commit: Validate sensor identity values
+6900f2d refs/heads/garden/test-examples-import-hygiene@{2026-05-09 16:05:42 -0400}: branch: Created from HEAD
+6900f2d refs/heads/main@{2026-05-09 16:03:57 -0400}: pull --ff-only origin main: Fast-forward
+6900f2d HEAD@{2026-05-09 16:03:57 -0400}: pull --ff-only origin main: Fast-forward
+6900f2d refs/remotes/origin/HEAD@{2026-05-09 15:54:22 -0400}: fetch origin main: fast-forward
+6900f2d refs/remotes/origin/main@{2026-05-09 15:54:22 -0400}: fetch origin main: fast-forward
+b4af0ed refs/heads/codex/address-pr167-comments@{2026-05-09 15:53:41 -0400}: commit: Address composite subscription review feedback
+76e9858 refs/heads/codex/address-pr167-comments@{2026-05-09 15:53:38 -0400}: branch: Created from HEAD
+76e9858 refs/remotes/origin/HEAD@{2026-05-09 15:46:15 -0400}: update by push
+76e9858 refs/remotes/origin/main@{2026-05-09 15:46:15 -0400}: update by push
+3e13420 refs/remotes/origin/HEAD@{2026-05-09 15:44:14 -0400}: fetch origin main:refs/remotes/origin/main --tags: fast-forward
+3e13420 refs/remotes/origin/main@{2026-05-09 15:44:14 -0400}: fetch origin main:refs/remotes/origin/main --tags: fast-forward
+76e9858 HEAD@{2026-05-09 15:44:14 -0400}: rebase (finish): returning to refs/heads/main
+76e9858 HEAD@{2026-05-09 15:44:14 -0400}: rebase (pick): Validate sensor value objects
+8657501 refs/remotes/origin/HEAD@{2026-05-09 15:42:48 -0400}: fetch origin main --tags: fast-forward
+8657501 refs/remotes/origin/main@{2026-05-09 15:42:48 -0400}: fetch origin main --tags: fast-forward
+6775790 refs/remotes/origin/HEAD@{2026-05-09 15:36:04 -0400}: update by push
+6775790 refs/remotes/origin/main@{2026-05-09 15:36:04 -0400}: update by push
+6775790 HEAD@{2026-05-09 15:35:07 -0400}: rebase (finish): returning to refs/heads/main
+6775790 HEAD@{2026-05-09 15:35:07 -0400}: rebase (pick): Validate sensor location values
+0408928 refs/remotes/origin/HEAD@{2026-05-09 15:34:54 -0400}: fetch --prune origin: fast-forward
+64a46dc refs/remotes/origin/codex/garden-rx-testing-exports@{2026-05-09 15:34:54 -0400}: fetch --prune origin: storing head
+ec2f76c refs/remotes/origin/codex/sorted-test-support-exports@{2026-05-09 15:34:54 -0400}: fetch --prune origin: storing head
+69feef4 refs/remotes/origin/codex/structured-pyproject-metadata-test@{2026-05-09 15:34:54 -0400}: fetch --prune origin: storing head
+2a5f512 refs/remotes/origin/garden/reference-example-blank-metadata-20260509@{2026-05-09 15:34:54 -0400}: fetch --prune origin: storing head
+0408928 refs/remotes/origin/main@{2026-05-09 15:34:54 -0400}: fetch --prune origin: fast-forward
+8807eac refs/heads/garden/backoff-attempt-index-validation@{2026-05-09 15:34:36 -0400}: branch: Created from HEAD
+75c248a refs/heads/codex/v1-distributed-graph-vision@{2026-05-09 15:33:47 -0400}: commit: Expand v1 distributed graph vision
+4257bb0 refs/heads/main@{2026-05-09 15:28:13 -0400}: pull --rebase --autostash origin main: Fast-forward
+4257bb0 HEAD@{2026-05-09 15:28:13 -0400}: pull --rebase --autostash origin main: Fast-forward
+4257bb0 refs/remotes/origin/HEAD@{2026-05-09 15:27:53 -0400}: fetch origin main: fast-forward
+4257bb0 refs/remotes/origin/main@{2026-05-09 15:27:53 -0400}: fetch origin main: fast-forward
+c6877e1 refs/heads/codex/v1-distributed-graph-vision@{2026-05-09 15:25:39 -0400}: commit: Document v1 distributed graph vision
+8807eac refs/heads/codex/v1-distributed-graph-vision@{2026-05-09 15:24:21 -0400}: branch: Created from HEAD
+bb4b9c2 refs/remotes/origin/HEAD@{2026-05-09 15:24:08 -0400}: update by push
+bb4b9c2 refs/remotes/origin/main@{2026-05-09 15:24:08 -0400}: update by push
+bb4b9c2 refs/heads/main@{2026-05-09 15:24:03 -0400}: commit: Validate sensor backoff attempt indexes
+bb4b9c2 HEAD@{2026-05-09 15:24:03 -0400}: commit: Validate sensor backoff attempt indexes
+8807eac refs/heads/garden-reference-example-whitespace@{2026-05-09 15:23:38 -0400}: branch: Created from HEAD
+8807eac refs/heads/garden/reference-example-blank-metadata-20260509@{2026-05-09 15:23:33 -0400}: branch: Created from HEAD
+8807eac refs/heads/garden/reference-example-blank-metadata@{2026-05-09 15:23:03 -0400}: branch: Created from HEAD
+8807eac refs/heads/codex/define-durable-key-parts@{2026-05-09 10:36:22 -0400}: branch: Created from HEAD
+8807eac refs/heads/main@{2026-05-09 10:29:25 -0400}: pull --ff-only origin main: Fast-forward
+8807eac HEAD@{2026-05-09 10:29:25 -0400}: pull --ff-only origin main: Fast-forward
+8807eac refs/remotes/origin/HEAD@{2026-05-09 10:29:15 -0400}: fetch origin main --tags --prune: fast-forward
+8807eac refs/remotes/origin/main@{2026-05-09 10:29:15 -0400}: fetch origin main --tags --prune: fast-forward
+7e2c0f0 refs/remotes/origin/HEAD@{2026-05-09 10:28:37 -0400}: update by push
+7e2c0f0 refs/remotes/origin/main@{2026-05-09 10:28:37 -0400}: update by push
+7e2c0f0 refs/heads/main@{2026-05-09 10:28:34 -0400}: commit: Deduplicate 0.1.27 artifact checks
+7e2c0f0 HEAD@{2026-05-09 10:28:34 -0400}: commit: Deduplicate 0.1.27 artifact checks
+01e4cf9 refs/remotes/origin/HEAD@{2026-05-09 10:28:14 -0400}: update by push
+01e4cf9 refs/remotes/origin/main@{2026-05-09 10:28:14 -0400}: update by push
+01e4cf9 refs/heads/main@{2026-05-09 10:28:12 -0400}: commit: Document 0.1.27 artifact checks
+01e4cf9 HEAD@{2026-05-09 10:28:12 -0400}: commit: Document 0.1.27 artifact checks
+e28154b HEAD@{2026-05-09 10:27:24 -0400}: pull --rebase origin main (finish): returning to refs/heads/main
+e28154b refs/remotes/origin/HEAD@{2026-05-09 10:27:09 -0400}: update by push
+e28154b refs/remotes/origin/main@{2026-05-09 10:27:09 -0400}: update by push
+b0ce905 HEAD@{2026-05-09 10:26:11 -0400}: pull --rebase --autostash origin main (finish): returning to refs/heads/main
+b0ce905 HEAD@{2026-05-09 10:26:11 -0400}: pull --rebase --autostash origin main (pick): Release manyfold 0.1.27
+eff51b7 refs/remotes/origin/HEAD@{2026-05-09 10:25:53 -0400}: fetch origin main: fast-forward
+eff51b7 refs/remotes/origin/main@{2026-05-09 10:25:53 -0400}: fetch origin main: fast-forward
+9a0fbf6 refs/heads/main@{2026-05-09 10:24:12 -0400}: rebase (finish): refs/heads/main onto 9a0fbf6d41fdf0bb27c7d31cd5e28f081ac8a0ed
+9a0fbf6 HEAD@{2026-05-09 10:24:12 -0400}: rebase (finish): returning to refs/heads/main
+9a0fbf6 HEAD@{2026-05-09 10:24:12 -0400}: rebase (start): checkout origin/main
+9d6350e refs/heads/garden/sorted-test-support-exports@{2026-05-09 10:24:08 -0400}: branch: Created from HEAD
+9a0fbf6 refs/remotes/origin/HEAD@{2026-05-09 10:24:06 -0400}: fetch origin main: fast-forward
+9a0fbf6 refs/remotes/origin/main@{2026-05-09 10:24:06 -0400}: fetch origin main: fast-forward
+c8bb7a5 refs/heads/garden/test-support-reactivex-availability@{2026-05-09 10:23:06 -0400}: branch: Created from HEAD
+b4f155b refs/remotes/origin/HEAD@{2026-05-09 10:23:04 -0400}: update by push
+b4f155b refs/remotes/origin/main@{2026-05-09 10:23:04 -0400}: update by push
+9d6350e refs/heads/garden/coalesce-cleanup@{2026-05-09 10:22:58 -0400}: branch: Created from HEAD
+c8bb7a5 refs/heads/codex/garden-test-pythonpath-canonical@{2026-05-09 10:22:55 -0400}: branch: Created from HEAD
+b4f155b HEAD@{2026-05-09 10:22:29 -0400}: rebase (finish): returning to refs/heads/main
+b4f155b HEAD@{2026-05-09 10:22:29 -0400}: rebase (pick): Harden numeric policy validation
+0b1c879 refs/remotes/origin/HEAD@{2026-05-09 10:22:16 -0400}: fetch origin main: fast-forward
+0b1c879 refs/remotes/origin/main@{2026-05-09 10:22:16 -0400}: fetch origin main: fast-forward
+c8bb7a5 refs/heads/garden/graph-registry-snapshots@{2026-05-09 10:22:04 -0400}: branch: Created from HEAD
+ce5223e refs/remotes/origin/HEAD@{2026-05-09 10:21:52 -0400}: fetch origin main: fast-forward
+ce5223e refs/remotes/origin/main@{2026-05-09 10:21:52 -0400}: fetch origin main: fast-forward
+5841da4 refs/heads/main@{2026-05-09 10:21:05 -0400}: pull --ff-only origin main: Fast-forward
+5841da4 refs/remotes/origin/HEAD@{2026-05-09 10:21:05 -0400}: pull --ff-only origin main: fast-forward
+5841da4 refs/remotes/origin/main@{2026-05-09 10:21:05 -0400}: pull --ff-only origin main: fast-forward
+5841da4 HEAD@{2026-05-09 10:21:05 -0400}: pull --ff-only origin main: Fast-forward
+4da3072 HEAD@{2026-05-09 10:21:04 -0400}: reset: moving to HEAD
+933912c refs/heads/garden/sorted-example-exports@{2026-05-09 10:20:55 -0400}: push
+0f4acae refs/heads/garden/rx-facade-exports@{2026-05-09 10:20:54 -0400}: branch: Created from HEAD
+0f4acae refs/heads/garden/isolated-thread-name-validation@{2026-05-09 10:20:50 -0400}: branch: Created from HEAD
+65a9f99 refs/remotes/origin/HEAD@{2026-05-09 10:20:49 -0400}: fetch origin main: fast-forward
+65a9f99 refs/remotes/origin/main@{2026-05-09 10:20:49 -0400}: fetch origin main: fast-forward
+4da3072 refs/heads/main@{2026-05-09 10:20:17 -0400}: pull --ff-only origin main: Fast-forward
+4da3072 HEAD@{2026-05-09 10:20:17 -0400}: pull --ff-only origin main: Fast-forward
+9d6350e HEAD@{2026-05-09 10:20:16 -0400}: reset: moving to HEAD
+4da3072 refs/remotes/origin/HEAD@{2026-05-09 10:20:12 -0400}: fetch origin main: fast-forward
+4da3072 refs/remotes/origin/main@{2026-05-09 10:20:12 -0400}: fetch origin main: fast-forward
+0f4acae refs/heads/garden/diagram-node-name-guard@{2026-05-09 10:20:09 -0400}: branch: Created from HEAD
+c8bb7a5 refs/heads/garden/sorted-example-exports@{2026-05-09 10:20:01 -0400}: branch: Created from HEAD
+c8bb7a5 refs/heads/codex/garden-graph-registry-validation@{2026-05-09 10:19:35 -0400}: branch: Created from HEAD
+054e694 refs/remotes/origin/HEAD@{2026-05-09 10:19:32 -0400}: fetch origin main: fast-forward
+054e694 refs/remotes/origin/main@{2026-05-09 10:19:32 -0400}: fetch origin main: fast-forward
+c8bb7a5 refs/heads/garden/logging-subscribe-rollback@{2026-05-09 10:19:29 -0400}: branch: Created from HEAD
+0f4acae refs/heads/codex/garden-classifier-metadata@{2026-05-09 10:19:08 -0400}: branch: Created from HEAD
+0db5a92 refs/remotes/origin/codex/garden-rfc-checklist-parser@{2026-05-09 10:18:49 -0400}: update by push
+0f4acae refs/heads/codex/structured-pyproject-metadata-test@{2026-05-09 10:18:01 -0400}: branch: Created from HEAD
+c8bb7a5 refs/heads/codex/garden-rx-testing-exports@{2026-05-09 08:39:46 -0400}: branch: Created from HEAD
+9d6350e refs/remotes/origin/HEAD@{2026-05-09 08:37:40 -0400}: update by push
+9d6350e refs/remotes/origin/main@{2026-05-09 08:37:40 -0400}: update by push
+9d6350e refs/heads/main@{2026-05-09 08:36:25 -0400}: commit: Validate sensor timing and capacitor policies
+9d6350e HEAD@{2026-05-09 08:36:25 -0400}: commit: Validate sensor timing and capacitor policies
+c8bb7a5 refs/heads/garden/cargo-metadata-ordering@{2026-05-09 08:36:24 -0400}: branch: Created from HEAD
+0f4acae refs/heads/codex/garden-rfc-checklist-parser@{2026-05-09 08:15:12 -0400}: branch: Created from HEAD
+0f4acae refs/heads/codex/garden-rx-facade-imports@{2026-05-09 08:13:23 -0400}: branch: Created from HEAD
+c8bb7a5 refs/heads/garden-diagram-direction-determinism@{2026-05-09 08:13:16 -0400}: branch: Created from HEAD
+c8bb7a5 refs/heads/garden/schema-shape-validation@{2026-05-09 08:12:47 -0400}: branch: Created from HEAD
+0f4acae refs/heads/garden/rx-testing-facade-exports@{2026-05-09 06:21:42 -0400}: branch: Created from HEAD
+0f4acae refs/heads/codex/garden-pythonpath-normalization@{2026-05-09 06:21:28 -0400}: branch: Created from HEAD
+c8bb7a5 refs/remotes/origin/HEAD@{2026-05-09 05:07:36 -0400}: update by push
+c8bb7a5 refs/remotes/origin/main@{2026-05-09 05:07:36 -0400}: update by push
+cf0e631 refs/remotes/origin/codex/garden-rx-facade-exports@{2026-05-08 23:34:44 -0400}: update by push
+0f4acae refs/heads/codex/garden-rx-facade-exports@{2026-05-08 23:18:20 -0400}: branch: Created from HEAD
+c8bb7a5 HEAD@{2026-05-08 23:01:05 -0400}: rebase (finish): returning to refs/heads/main
+c8bb7a5 HEAD@{2026-05-08 23:01:05 -0400}: rebase (pick): Validate sensor batching size inputs
+dc927aa refs/remotes/origin/HEAD@{2026-05-08 23:00:51 -0400}: fetch origin main: fast-forward
+dc927aa refs/remotes/origin/main@{2026-05-08 23:00:51 -0400}: fetch origin main: fast-forward
+0f4acae refs/heads/garden/rx-operator-exports@{2026-05-08 17:32:45 -0400}: branch: Created from HEAD
+0f4acae refs/remotes/origin/HEAD@{2026-05-08 09:16:29 -0400}: update by push
+0f4acae refs/remotes/origin/main@{2026-05-08 09:16:29 -0400}: update by push
+2ed0f3d refs/remotes/origin/HEAD@{2026-05-08 09:16:28 -0400}: fetch origin main: fast-forward
+2ed0f3d refs/remotes/origin/main@{2026-05-08 09:16:28 -0400}: fetch origin main: fast-forward
+0f4acae HEAD@{2026-05-08 09:16:28 -0400}: rebase (finish): returning to refs/heads/main
+0f4acae HEAD@{2026-05-08 09:16:28 -0400}: rebase (pick): Validate consensus JSON encoders
+1b47a95 refs/heads/codex/garden-repo-path-baseexception-cleanup@{2026-05-08 09:13:42 -0400}: branch: Created from HEAD
+8f41108 refs/heads/main@{2026-05-08 09:10:43 -0400}: pull --ff-only origin main: Fast-forward
+8f41108 HEAD@{2026-05-08 09:10:43 -0400}: pull --ff-only origin main: Fast-forward
+8f41108 refs/remotes/origin/HEAD@{2026-05-08 09:10:42 -0400}: fetch origin main: fast-forward
+8f41108 refs/remotes/origin/main@{2026-05-08 09:10:42 -0400}: fetch origin main: fast-forward
+92f6384 refs/heads/garden-mailbox-capacity-bool@{2026-05-08 07:06:08 -0400}: branch: Created from HEAD
+1b47a95 refs/remotes/origin/HEAD@{2026-05-08 07:03:22 -0400}: update by push
+1b47a95 refs/remotes/origin/main@{2026-05-08 07:03:22 -0400}: update by push
+1b47a95 refs/heads/main@{2026-05-08 07:03:18 -0400}: commit: Validate embedded profile field types
+1b47a95 HEAD@{2026-05-08 07:03:18 -0400}: commit: Validate embedded profile field types
+92f6384 refs/heads/main@{2026-05-08 07:01:58 -0400}: pull --ff-only: Fast-forward
+92f6384 refs/remotes/origin/HEAD@{2026-05-08 07:01:58 -0400}: pull --ff-only: fast-forward
+92f6384 refs/remotes/origin/main@{2026-05-08 07:01:58 -0400}: pull --ff-only: fast-forward
+92f6384 HEAD@{2026-05-08 07:01:58 -0400}: pull --ff-only: Fast-forward
+41bc970 refs/remotes/origin/HEAD@{2026-05-08 06:02:49 -0400}: update by push
+41bc970 refs/remotes/origin/main@{2026-05-08 06:02:49 -0400}: update by push
+923dad5 refs/heads/garden/embedded-scalar-bulk-layer@{2026-05-08 06:02:47 -0400}: branch: Created from HEAD
+41bc970 refs/heads/main@{2026-05-08 06:02:41 -0400}: commit: Validate consensus JSON tuple shapes
+41bc970 HEAD@{2026-05-08 06:02:41 -0400}: commit: Validate consensus JSON tuple shapes
+923dad5 refs/heads/main@{2026-05-08 06:00:49 -0400}: pull --ff-only origin main: Fast-forward
+923dad5 refs/remotes/origin/HEAD@{2026-05-08 06:00:49 -0400}: pull --ff-only origin main: fast-forward
+923dad5 refs/remotes/origin/main@{2026-05-08 06:00:49 -0400}: pull --ff-only origin main: fast-forward
+923dad5 HEAD@{2026-05-08 06:00:49 -0400}: pull --ff-only origin main: Fast-forward
+90ad07b refs/heads/garden/readme-featured-groups@{2026-05-08 05:04:59 -0400}: branch: Created from HEAD
+50c04de refs/heads/garden-consensus-validation-20260508@{2026-05-08 05:04:29 -0400}: branch: Created from HEAD
+366f250 refs/remotes/origin/HEAD@{2026-05-08 05:02:55 -0400}: update by push
+366f250 refs/remotes/origin/main@{2026-05-08 05:02:55 -0400}: update by push
+366f250 refs/heads/main@{2026-05-08 05:02:47 -0400}: commit: Harden graph integer policy validation
+366f250 HEAD@{2026-05-08 05:02:47 -0400}: commit: Harden graph integer policy validation
+50c04de refs/heads/main@{2026-05-08 05:01:37 -0400}: pull --ff-only origin main: Fast-forward
+50c04de HEAD@{2026-05-08 05:01:37 -0400}: pull --ff-only origin main: Fast-forward
+50c04de refs/remotes/origin/HEAD@{2026-05-08 05:01:28 -0400}: fetch origin main: fast-forward
+50c04de refs/remotes/origin/main@{2026-05-08 05:01:28 -0400}: fetch origin main: fast-forward
+88e0bfe refs/remotes/origin/HEAD@{2026-05-08 04:19:33 -0400}: update by push
+88e0bfe refs/remotes/origin/main@{2026-05-08 04:19:33 -0400}: update by push
+88e0bfe refs/heads/main@{2026-05-08 04:19:31 -0400}: commit: Validate integer policy sizes
+88e0bfe HEAD@{2026-05-08 04:19:31 -0400}: commit: Validate integer policy sizes
+90ad07b refs/heads/garden-replicated-log-entry-validation@{2026-05-08 04:08:56 -0400}: branch: Created from HEAD
+90ad07b HEAD@{2026-05-08 03:16:17 -0400}: checkout: moving from main to main
+90ad07b refs/remotes/origin/HEAD@{2026-05-08 02:46:54 -0400}: update by push
+90ad07b refs/remotes/origin/main@{2026-05-08 02:46:54 -0400}: update by push
+90ad07b refs/heads/main@{2026-05-08 02:46:51 -0400}: commit: Validate route enum values at construction
+90ad07b HEAD@{2026-05-08 02:46:51 -0400}: commit: Validate route enum values at construction
+f075812 refs/remotes/origin/HEAD@{2026-05-08 02:44:48 -0400}: update by push
+f075812 refs/remotes/origin/main@{2026-05-08 02:44:48 -0400}: update by push
+b41346e refs/remotes/origin/HEAD@{2026-05-08 02:44:15 -0400}: fetch --no-write-fetch-head origin main:refs/remotes/origin/main: fast-forward
+b41346e refs/remotes/origin/main@{2026-05-08 02:44:15 -0400}: fetch --no-write-fetch-head origin main:refs/remotes/origin/main: fast-forward
+f075812 HEAD@{2026-05-08 02:44:15 -0400}: rebase (finish): returning to refs/heads/main
+f075812 HEAD@{2026-05-08 02:44:15 -0400}: rebase (pick): Validate sensor integer policy fields
+bc90c89 refs/heads/garden/schema-any-version-tokens@{2026-05-08 02:43:16 -0400}: branch: Created from HEAD
+9721551 refs/heads/main@{2026-05-08 02:43:06 -0400}: pull --ff-only origin main: Fast-forward
+9721551 HEAD@{2026-05-08 02:43:06 -0400}: pull --ff-only origin main: Fast-forward
+9721551 refs/remotes/origin/HEAD@{2026-05-08 02:43:01 -0400}: fetch --no-write-fetch-head origin main:refs/remotes/origin/main: fast-forward
+9721551 refs/remotes/origin/main@{2026-05-08 02:43:01 -0400}: fetch --no-write-fetch-head origin main:refs/remotes/origin/main: fast-forward
+acf235a refs/remotes/origin/HEAD@{2026-05-08 02:38:09 -0400}: update by push
+acf235a refs/remotes/origin/main@{2026-05-08 02:38:09 -0400}: update by push
+01e6c59 refs/remotes/origin/HEAD@{2026-05-08 02:22:08 -0400}: pull --rebase origin main: fast-forward
+01e6c59 refs/remotes/origin/main@{2026-05-08 02:22:08 -0400}: pull --rebase origin main: fast-forward
+acf235a HEAD@{2026-05-08 02:22:08 -0400}: pull --rebase origin main (finish): returning to refs/heads/main
+acf235a HEAD@{2026-05-08 02:22:08 -0400}: pull --rebase origin main (pick): Validate sensor retry exception types
+bc90c89 refs/heads/garden-stable-average-summation@{2026-05-08 01:09:48 -0400}: branch: Created from HEAD
+bc90c89 refs/remotes/origin/HEAD@{2026-05-07 23:14:50 -0400}: update by push
+bc90c89 refs/remotes/origin/main@{2026-05-07 23:14:50 -0400}: update by push
+bc90c89 HEAD@{2026-05-07 23:12:38 -0400}: rebase (finish): returning to refs/heads/main
+bc90c89 HEAD@{2026-05-07 23:12:38 -0400}: rebase (pick): Add lego dependency closure queries
+aa14b38 refs/remotes/origin/HEAD@{2026-05-07 23:12:28 -0400}: fetch origin main: fast-forward
+aa14b38 refs/remotes/origin/main@{2026-05-07 23:12:28 -0400}: fetch origin main: fast-forward
+58eae13 refs/heads/garden/sequence-counter-int-validation@{2026-05-07 23:06:08 -0400}: branch: Created from HEAD
+ad3c5ed refs/heads/main@{2026-05-07 23:04:58 -0400}: pull --ff-only origin main: Fast-forward
+ad3c5ed HEAD@{2026-05-07 23:04:58 -0400}: pull --ff-only origin main: Fast-forward
+ad3c5ed refs/remotes/origin/HEAD@{2026-05-07 23:04:38 -0400}: fetch origin main --prune: fast-forward
+ad3c5ed refs/remotes/origin/main@{2026-05-07 23:04:38 -0400}: fetch origin main --prune: fast-forward
+58eae13 refs/remotes/origin/HEAD@{2026-05-07 22:05:00 -0400}: update by push
+58eae13 refs/remotes/origin/main@{2026-05-07 22:05:00 -0400}: update by push
+58eae13 refs/heads/main@{2026-05-07 22:04:51 -0400}: commit: Accept whitespace-prefixed consensus JSON
+58eae13 HEAD@{2026-05-07 22:04:51 -0400}: commit: Accept whitespace-prefixed consensus JSON
+eabaa53 refs/heads/codex/validate-lego-dependencies@{2026-05-07 22:04:22 -0400}: branch: Created from HEAD
+498c814 refs/heads/main@{2026-05-07 22:03:33 -0400}: pull --ff-only: Fast-forward
+498c814 HEAD@{2026-05-07 22:03:33 -0400}: pull --ff-only: Fast-forward
+498c814 refs/remotes/origin/HEAD@{2026-05-07 22:03:26 -0400}: fetch origin main --tags: fast-forward
+498c814 refs/remotes/origin/main@{2026-05-07 22:03:26 -0400}: fetch origin main --tags: fast-forward
+eabaa53 refs/remotes/origin/HEAD@{2026-05-07 21:26:42 -0400}: update by push
+eabaa53 refs/remotes/origin/main@{2026-05-07 21:26:42 -0400}: update by push
+eabaa53 refs/heads/main@{2026-05-07 21:26:37 -0400}: commit: Reject invalid memory record counters
+eabaa53 HEAD@{2026-05-07 21:26:37 -0400}: commit: Reject invalid memory record counters
+55a90db refs/heads/codex/garden-rfc-checklist-path-protocol@{2026-05-07 21:26:30 -0400}: branch: Created from HEAD
+55a90db refs/remotes/origin/HEAD@{2026-05-07 00:04:46 -0700}: update by push
+55a90db refs/remotes/origin/main@{2026-05-07 00:04:46 -0700}: update by push
+55a90db refs/heads/main@{2026-05-07 00:04:30 -0700}: commit: Reject invalid graph control epochs
+55a90db HEAD@{2026-05-07 00:04:30 -0700}: commit: Reject invalid graph control epochs
+ba9b6b2 refs/heads/codex/garden-event-log-record-reads@{2026-05-07 00:04:04 -0700}: branch: Created from HEAD
+ba9b6b2 refs/heads/main@{2026-05-06 23:03:53 -0700}: pull --ff-only origin main: Fast-forward
+ba9b6b2 refs/remotes/origin/HEAD@{2026-05-06 23:03:53 -0700}: pull --ff-only origin main: fast-forward
+ba9b6b2 refs/remotes/origin/main@{2026-05-06 23:03:53 -0700}: pull --ff-only origin main: fast-forward
+ba9b6b2 HEAD@{2026-05-06 23:03:53 -0700}: pull --ff-only origin main: Fast-forward
+62345e6 refs/heads/codex/garden-repo-path-normalization@{2026-05-06 23:03:48 -0700}: branch: Created from HEAD
+62345e6 HEAD@{2026-05-06 23:02:35 -0700}: checkout: moving from main to codex/strict-sensor-top-level-json
+62345e6 HEAD@{2026-05-06 23:01:57 -0700}: checkout: moving from codex/strict-sensor-control-validation to main
+1ece344 refs/remotes/origin/codex/strict-sensor-control-validation@{2026-05-06 22:59:22 -0700}: update by push
+1ece344 refs/heads/codex/strict-sensor-control-validation@{2026-05-06 22:59:13 -0700}: commit: Release manyfold 0.2.0
+1ece344 HEAD@{2026-05-06 22:59:13 -0700}: commit: Release manyfold 0.2.0
+62345e6 HEAD@{2026-05-06 22:54:37 -0700}: checkout: moving from main to codex/strict-sensor-control-validation
+62345e6 refs/heads/codex/strict-sensor-control-validation@{2026-05-06 22:54:03 -0700}: branch: Created from HEAD
+62345e6 refs/heads/main@{2026-05-06 22:04:21 -0700}: pull --ff-only origin main: Fast-forward
+62345e6 refs/remotes/origin/HEAD@{2026-05-06 22:04:21 -0700}: pull --ff-only origin main: fast-forward
+62345e6 refs/remotes/origin/main@{2026-05-06 22:04:21 -0700}: pull --ff-only origin main: fast-forward
+62345e6 HEAD@{2026-05-06 22:04:21 -0700}: pull --ff-only origin main: Fast-forward
+54eea8f HEAD@{2026-05-06 22:03:48 -0700}: checkout: moving from main to codex/strict-legacy-consensus-bools
+54eea8f refs/heads/codex/garden-env-diagnostics@{2026-05-06 22:03:30 -0700}: branch: Created from HEAD
+54eea8f refs/heads/main@{2026-05-06 22:02:26 -0700}: pull --ff-only --tags: Fast-forward
+54eea8f refs/remotes/origin/HEAD@{2026-05-06 22:02:26 -0700}: pull --ff-only --tags: fast-forward
+54eea8f refs/remotes/origin/main@{2026-05-06 22:02:26 -0700}: pull --ff-only --tags: fast-forward
+54eea8f HEAD@{2026-05-06 22:02:26 -0700}: pull --ff-only --tags: Fast-forward
+d406045 refs/heads/codex/tuple-export-contracts@{2026-05-06 21:05:09 -0700}: branch: Created from HEAD
+4229fe6 refs/heads/main@{2026-05-06 21:03:35 -0700}: pull --ff-only origin main: Fast-forward
+4229fe6 refs/remotes/origin/HEAD@{2026-05-06 21:03:35 -0700}: pull --ff-only origin main: fast-forward
+4229fe6 refs/remotes/origin/main@{2026-05-06 21:03:35 -0700}: pull --ff-only origin main: fast-forward
+4229fe6 HEAD@{2026-05-06 21:03:35 -0700}: pull --ff-only origin main: Fast-forward
+d406045 HEAD@{2026-05-06 21:02:58 -0700}: checkout: moving from main to codex/finite-sensor-timing
+d406045 refs/heads/main@{2026-05-06 20:04:23 -0700}: pull --ff-only origin main: Fast-forward
+d406045 refs/remotes/origin/HEAD@{2026-05-06 20:04:23 -0700}: pull --ff-only origin main: fast-forward
+d406045 refs/remotes/origin/main@{2026-05-06 20:04:23 -0700}: pull --ff-only origin main: fast-forward
+d406045 HEAD@{2026-05-06 20:04:23 -0700}: pull --ff-only origin main: Fast-forward
+157d78d refs/heads/garden/explicit-rx-helper-exports@{2026-05-06 20:03:17 -0700}: branch: Created from HEAD
+157d78d HEAD@{2026-05-06 19:26:29 -0700}: checkout: moving from main to codex/immutable-closeable-envelopes
+157d78d refs/heads/main@{2026-05-06 19:23:42 -0700}: pull --ff-only origin main: Fast-forward
+157d78d refs/remotes/origin/HEAD@{2026-05-06 19:23:42 -0700}: pull --ff-only origin main: fast-forward
+157d78d refs/remotes/origin/main@{2026-05-06 19:23:42 -0700}: pull --ff-only origin main: fast-forward
+157d78d HEAD@{2026-05-06 19:23:42 -0700}: pull --ff-only origin main: Fast-forward
+7e157f3 HEAD@{2026-05-06 19:21:37 -0700}: Branch: renamed refs/heads/codex/audit-query-filters to refs/heads/codex/idempotent-core-connect
+7e157f3 HEAD@{2026-05-06 19:21:04 -0700}: checkout: moving from main to codex/audit-query-filters
+7e157f3 refs/heads/main@{2026-05-06 19:19:31 -0700}: pull --ff-only origin main: Fast-forward
+7e157f3 refs/remotes/origin/HEAD@{2026-05-06 19:19:31 -0700}: pull --ff-only origin main: fast-forward
+7e157f3 refs/remotes/origin/main@{2026-05-06 19:19:31 -0700}: pull --ff-only origin main: fast-forward
+7e157f3 HEAD@{2026-05-06 19:19:31 -0700}: pull --ff-only origin main: Fast-forward
+61b23df HEAD@{2026-05-06 19:18:10 -0700}: checkout: moving from main to codex/chronological-route-audit
+61b23df refs/heads/main@{2026-05-06 19:15:29 -0700}: pull --ff-only: Fast-forward
+61b23df refs/remotes/origin/HEAD@{2026-05-06 19:15:29 -0700}: pull --ff-only: fast-forward
+61b23df refs/remotes/origin/main@{2026-05-06 19:15:29 -0700}: pull --ff-only: fast-forward
+61b23df HEAD@{2026-05-06 19:15:29 -0700}: pull --ff-only: Fast-forward
+cb241e1 HEAD@{2026-05-06 19:15:22 -0700}: checkout: moving from codex/always-shipping-20260506 to main
+51da8c9 refs/remotes/origin/HEAD@{2026-05-06 19:02:41 -0700}: update by push
+51da8c9 refs/remotes/origin/main@{2026-05-06 19:02:41 -0700}: update by push
+51da8c9 refs/heads/codex/always-shipping-20260506@{2026-05-06 19:02:33 -0700}: commit: Reject malformed sensor identity containers
+51da8c9 HEAD@{2026-05-06 19:02:33 -0700}: commit: Reject malformed sensor identity containers
+7e6be11 refs/remotes/origin/HEAD@{2026-05-06 18:03:56 -0700}: update by push
+7e6be11 refs/remotes/origin/main@{2026-05-06 18:03:56 -0700}: update by push
+7e6be11 HEAD@{2026-05-06 18:03:42 -0700}: rebase (finish): returning to refs/heads/codex/always-shipping-20260506
+7e6be11 HEAD@{2026-05-06 18:03:42 -0700}: rebase (pick): Reject empty route and schema identifiers
+dd59146 refs/remotes/origin/HEAD@{2026-05-06 18:03:39 -0700}: fetch origin main --tags: fast-forward
+dd59146 refs/remotes/origin/main@{2026-05-06 18:03:39 -0700}: fetch origin main --tags: fast-forward
+cde3835 refs/heads/codex/always-shipping-20260506@{2026-05-06 18:02:30 -0700}: merge origin/main: Fast-forward
+cde3835 HEAD@{2026-05-06 18:02:30 -0700}: merge origin/main: Fast-forward
+cde3835 refs/remotes/origin/HEAD@{2026-05-06 18:02:19 -0700}: fetch origin main --tags: fast-forward
+cde3835 refs/remotes/origin/main@{2026-05-06 18:02:19 -0700}: fetch origin main --tags: fast-forward
+fb17f18 refs/heads/codex/stabilize-frame-slot-order@{2026-05-06 17:04:28 -0700}: branch: Created from HEAD
+114166c refs/remotes/origin/HEAD@{2026-05-06 17:02:45 -0700}: update by push
+114166c refs/remotes/origin/main@{2026-05-06 17:02:45 -0700}: update by push
+114166c refs/heads/codex/always-shipping-20260506@{2026-05-06 17:02:35 -0700}: commit: Reject invalid JSON event types
+114166c HEAD@{2026-05-06 17:02:35 -0700}: commit: Reject invalid JSON event types
+fb17f18 refs/heads/codex/always-shipping-20260506@{2026-05-06 17:01:38 -0700}: merge origin/main: Fast-forward
+fb17f18 HEAD@{2026-05-06 17:01:38 -0700}: merge origin/main: Fast-forward
+fb17f18 refs/remotes/origin/HEAD@{2026-05-06 17:01:34 -0700}: fetch origin main --tags: fast-forward
+fb17f18 refs/remotes/origin/main@{2026-05-06 17:01:34 -0700}: fetch origin main --tags: fast-forward
+99a7a9e refs/heads/garden-strict-consensus-json@{2026-05-06 16:04:23 -0700}: branch: Created from HEAD
+0427b70 refs/remotes/origin/HEAD@{2026-05-06 16:03:12 -0700}: update by push
+0427b70 refs/remotes/origin/main@{2026-05-06 16:03:12 -0700}: update by push
+0427b70 refs/heads/codex/always-shipping-20260506@{2026-05-06 16:03:00 -0700}: commit: Harden sensor string schema decoding
+0427b70 HEAD@{2026-05-06 16:03:00 -0700}: commit: Harden sensor string schema decoding
+99a7a9e refs/heads/codex/always-shipping-20260506@{2026-05-06 16:01:38 -0700}: merge origin/main: Fast-forward
+99a7a9e HEAD@{2026-05-06 16:01:38 -0700}: merge origin/main: Fast-forward
+99a7a9e refs/remotes/origin/HEAD@{2026-05-06 16:01:34 -0700}: fetch origin main --tags: fast-forward
+99a7a9e refs/remotes/origin/main@{2026-05-06 16:01:34 -0700}: fetch origin main --tags: fast-forward
+66e5d63 refs/heads/garden/catalog-duplicate-order@{2026-05-06 15:04:00 -0700}: branch: Created from HEAD
+9c1cbec refs/remotes/origin/HEAD@{2026-05-06 15:03:27 -0700}: update by push
+9c1cbec refs/remotes/origin/main@{2026-05-06 15:03:27 -0700}: update by push
+9c1cbec refs/heads/codex/always-shipping-20260506@{2026-05-06 15:03:21 -0700}: commit: Require JSON strings in consensus schemas
+9c1cbec HEAD@{2026-05-06 15:03:21 -0700}: commit: Require JSON strings in consensus schemas
+66e5d63 refs/heads/codex/always-shipping-20260506@{2026-05-06 15:02:34 -0700}: merge origin/main: Fast-forward
+66e5d63 refs/remotes/origin/HEAD@{2026-05-06 15:02:34 -0700}: fetch origin main --tags: fast-forward
+66e5d63 refs/remotes/origin/main@{2026-05-06 15:02:34 -0700}: fetch origin main --tags: fast-forward
+66e5d63 HEAD@{2026-05-06 15:02:34 -0700}: merge origin/main: Fast-forward
+0c78cb3 refs/remotes/origin/HEAD@{2026-05-06 14:03:51 -0700}: update by push
+0c78cb3 refs/remotes/origin/main@{2026-05-06 14:03:51 -0700}: update by push
+0c78cb3 refs/heads/codex/always-shipping-20260506@{2026-05-06 14:03:44 -0700}: commit: Require quorum voters to be JSON arrays
+0c78cb3 HEAD@{2026-05-06 14:03:44 -0700}: commit: Require quorum voters to be JSON arrays
+4262b64 refs/heads/codex/always-shipping-20260506@{2026-05-06 14:02:43 -0700}: merge origin/main: Fast-forward
+4262b64 HEAD@{2026-05-06 14:02:43 -0700}: merge origin/main: Fast-forward
+4262b64 refs/remotes/origin/HEAD@{2026-05-06 14:02:40 -0700}: fetch origin main --tags: fast-forward
+4262b64 refs/remotes/origin/main@{2026-05-06 14:02:40 -0700}: fetch origin main --tags: fast-forward
+1460175 refs/heads/garden-rfc-appendix-heading-20260506@{2026-05-06 13:03:08 -0700}: branch: Created from HEAD
+f973c9c refs/remotes/origin/HEAD@{2026-05-06 13:02:44 -0700}: update by push
+f973c9c refs/remotes/origin/main@{2026-05-06 13:02:44 -0700}: update by push
+f973c9c refs/heads/codex/always-shipping-20260506@{2026-05-06 13:02:31 -0700}: commit: Reject non-finite primitive floats
+f973c9c HEAD@{2026-05-06 13:02:31 -0700}: commit: Reject non-finite primitive floats
+1460175 refs/remotes/origin/HEAD@{2026-05-06 12:04:49 -0700}: update by push
+1460175 refs/remotes/origin/main@{2026-05-06 12:04:49 -0700}: update by push
+1460175 HEAD@{2026-05-06 12:04:32 -0700}: rebase (finish): returning to refs/heads/codex/always-shipping-20260506
+1460175 HEAD@{2026-05-06 12:04:32 -0700}: rebase (pick): Reject non-finite sensor JSON numbers
+c7b48b0 refs/remotes/origin/HEAD@{2026-05-06 12:04:28 -0700}: fetch origin main --tags: fast-forward
+c7b48b0 refs/remotes/origin/main@{2026-05-06 12:04:28 -0700}: fetch origin main --tags: fast-forward
+149bae9 refs/heads/codex/always-shipping-20260506@{2026-05-06 12:02:42 -0700}: merge origin/main: Fast-forward
+149bae9 HEAD@{2026-05-06 12:02:42 -0700}: merge origin/main: Fast-forward
+149bae9 refs/remotes/origin/HEAD@{2026-05-06 12:02:37 -0700}: fetch origin main --tags: fast-forward
+149bae9 refs/remotes/origin/main@{2026-05-06 12:02:37 -0700}: fetch origin main --tags: fast-forward
+edf9399 refs/heads/codex/stabilize-sensor-json-key-coercion@{2026-05-06 11:04:31 -0700}: branch: Created from HEAD
+95d7deb refs/remotes/origin/HEAD@{2026-05-06 11:03:29 -0700}: update by push
+95d7deb refs/remotes/origin/main@{2026-05-06 11:03:29 -0700}: update by push
+95d7deb refs/heads/codex/always-shipping-20260506@{2026-05-06 11:03:10 -0700}: commit: Harden sensor numeric JSON decoding
+95d7deb HEAD@{2026-05-06 11:03:10 -0700}: commit: Harden sensor numeric JSON decoding
+edf9399 refs/remotes/origin/HEAD@{2026-05-06 10:03:58 -0700}: update by push
+edf9399 refs/remotes/origin/main@{2026-05-06 10:03:58 -0700}: update by push
+fa43eb4 refs/remotes/origin/HEAD@{2026-05-06 10:03:46 -0700}: pull --rebase origin main: fast-forward
+fa43eb4 refs/remotes/origin/main@{2026-05-06 10:03:46 -0700}: pull --rebase origin main: fast-forward
+edf9399 HEAD@{2026-05-06 10:03:46 -0700}: pull --rebase origin main (finish): returning to refs/heads/codex/always-shipping-20260506
+edf9399 HEAD@{2026-05-06 10:03:46 -0700}: pull --rebase origin main (pick): Require JSON integers in consensus schemas
+3edda72 refs/heads/garden/reactive-thread-drain-limit@{2026-05-06 10:01:50 -0700}: branch: Created from HEAD
+3edda72 refs/remotes/origin/HEAD@{2026-05-06 09:03:48 -0700}: update by push
+3edda72 refs/remotes/origin/main@{2026-05-06 09:03:48 -0700}: update by push
+3edda72 refs/heads/codex/always-shipping-20260506@{2026-05-06 09:03:37 -0700}: commit: Require JSON integers in sensor schemas
+3edda72 HEAD@{2026-05-06 09:03:37 -0700}: commit: Require JSON integers in sensor schemas
+d037194 refs/heads/codex/always-shipping-20260506@{2026-05-06 09:03:25 -0700}: pull --rebase --autostash origin main: Fast-forward
+d037194 HEAD@{2026-05-06 09:03:25 -0700}: pull --rebase --autostash origin main: Fast-forward
+d037194 refs/remotes/origin/HEAD@{2026-05-06 09:03:19 -0700}: fetch origin main --tags: fast-forward
+d037194 refs/remotes/origin/main@{2026-05-06 09:03:19 -0700}: fetch origin main --tags: fast-forward
+57c4300 refs/remotes/origin/HEAD@{2026-05-06 08:05:15 -0700}: update by push
+57c4300 refs/remotes/origin/main@{2026-05-06 08:05:15 -0700}: update by push
+5f5908a refs/remotes/origin/HEAD@{2026-05-06 08:05:05 -0700}: fetch origin main --tags: fast-forward
+5f5908a refs/remotes/origin/main@{2026-05-06 08:05:05 -0700}: fetch origin main --tags: fast-forward
+57c4300 HEAD@{2026-05-06 08:05:05 -0700}: rebase (finish): returning to refs/heads/codex/always-shipping-20260506
+57c4300 HEAD@{2026-05-06 08:05:05 -0700}: rebase (pick): Reject string stale flags in health status JSON
+2616cb0 refs/heads/codex/always-shipping-20260506@{2026-05-06 08:02:44 -0700}: branch: Created from origin/main
+2616cb0 HEAD@{2026-05-06 08:02:44 -0700}: checkout: moving from codex/reject-pending-utf8-text to codex/always-shipping-20260506
+2616cb0 refs/remotes/origin/HEAD@{2026-05-06 07:24:12 -0700}: fetch origin main --tags: fast-forward
+2616cb0 refs/remotes/origin/main@{2026-05-06 07:24:12 -0700}: fetch origin main --tags: fast-forward
+d75a58a refs/heads/codex/reject-pending-utf8-text@{2026-05-06 07:22:31 -0700}: pull --ff-only origin main: Fast-forward
+d75a58a HEAD@{2026-05-06 07:22:31 -0700}: pull --ff-only origin main: Fast-forward
+d75a58a refs/remotes/origin/HEAD@{2026-05-06 07:21:50 -0700}: update by push
+d75a58a refs/remotes/origin/main@{2026-05-06 07:21:50 -0700}: update by push
+c651af1 refs/heads/codex/reject-pending-utf8-text@{2026-05-06 07:20:25 -0700}: merge origin/main: Fast-forward
+c651af1 HEAD@{2026-05-06 07:20:25 -0700}: merge origin/main: Fast-forward
+c651af1 refs/remotes/origin/HEAD@{2026-05-06 07:20:06 -0700}: fetch origin --prune: fast-forward
+c651af1 refs/remotes/origin/main@{2026-05-06 07:20:06 -0700}: fetch origin --prune: fast-forward
+0b6a123 refs/remotes/origin/HEAD@{2026-05-06 07:17:21 -0700}: update by push
+0b6a123 refs/remotes/origin/main@{2026-05-06 07:17:21 -0700}: update by push
+eb32a25 refs/heads/codex/reject-pending-utf8-text@{2026-05-06 07:16:28 -0700}: commit: Reject text appends during pending UTF-8 decode
+eb32a25 HEAD@{2026-05-06 07:16:28 -0700}: commit: Reject text appends during pending UTF-8 decode
+922d605 refs/heads/codex/reject-pending-utf8-text@{2026-05-06 07:16:27 -0700}: pull --rebase --autostash origin main: Fast-forward
+922d605 refs/remotes/origin/HEAD@{2026-05-06 07:16:27 -0700}: pull --rebase --autostash origin main: fast-forward
+922d605 refs/remotes/origin/main@{2026-05-06 07:16:27 -0700}: pull --rebase --autostash origin main: fast-forward
+922d605 HEAD@{2026-05-06 07:16:27 -0700}: pull --rebase --autostash origin main: Fast-forward
+8430c03 refs/remotes/origin/HEAD@{2026-05-06 07:16:01 -0700}: fetch origin main --tags: fast-forward
+8430c03 refs/remotes/origin/main@{2026-05-06 07:16:01 -0700}: fetch origin main --tags: fast-forward
+c50df35 refs/heads/codex/reject-pending-utf8-text@{2026-05-06 07:15:43 -0700}: branch: Created from origin/main
+c50df35 HEAD@{2026-05-06 07:15:43 -0700}: checkout: moving from codex/post-release-memory-thread-safety to codex/reject-pending-utf8-text
+1d4b839 refs/heads/codex/post-release-memory-thread-safety@{2026-05-06 07:14:49 -0700}: commit: Reject mixed text during pending UTF-8 decode
+1d4b839 HEAD@{2026-05-06 07:14:49 -0700}: commit: Reject mixed text during pending UTF-8 decode
+c50df35 refs/remotes/origin/HEAD@{2026-05-06 07:14:47 -0700}: pull --rebase --autostash origin main: fast-forward
+c50df35 refs/remotes/origin/main@{2026-05-06 07:14:47 -0700}: pull --rebase --autostash origin main: fast-forward
+1f98d8c HEAD@{2026-05-06 07:14:47 -0700}: pull --rebase --autostash origin main (finish): returning to refs/heads/codex/post-release-memory-thread-safety
+1f98d8c HEAD@{2026-05-06 07:14:47 -0700}: pull --rebase --autostash origin main (pick): Sort 0.1.24 release file list
+564cf45 HEAD@{2026-05-06 07:14:47 -0700}: pull --rebase --autostash origin main (pick): Complete 0.1.24 release changelog
+a0d646d refs/remotes/origin/HEAD@{2026-05-06 07:14:28 -0700}: fetch origin main: fast-forward
+a0d646d refs/remotes/origin/main@{2026-05-06 07:14:28 -0700}: fetch origin main: fast-forward
+1a6eebd refs/heads/codex/post-release-memory-thread-safety@{2026-05-06 07:13:47 -0700}: branch: Created from origin/main
+1a6eebd HEAD@{2026-05-06 07:13:47 -0700}: checkout: moving from codex/always-be-shipping to codex/post-release-memory-thread-safety
+1a6eebd refs/remotes/origin/HEAD@{2026-05-06 07:13:45 -0700}: fetch origin main --tags: fast-forward
+1a6eebd refs/remotes/origin/main@{2026-05-06 07:13:45 -0700}: fetch origin main --tags: fast-forward
+3f8ae68 refs/heads/codex/always-be-shipping@{2026-05-06 07:13:42 -0700}: revert: Revert "Complete 0.1.24 release changelog"
+3f8ae68 HEAD@{2026-05-06 07:13:42 -0700}: revert: Revert "Complete 0.1.24 release changelog"
+7916b65 refs/remotes/origin/HEAD@{2026-05-06 07:13:34 -0700}: fetch origin main --tags: fast-forward
+7916b65 refs/remotes/origin/main@{2026-05-06 07:13:34 -0700}: fetch origin main --tags: fast-forward
+dc0d9ae refs/remotes/origin/HEAD@{2026-05-06 07:13:22 -0700}: pull --rebase --autostash origin main: fast-forward
+dc0d9ae refs/remotes/origin/main@{2026-05-06 07:13:22 -0700}: pull --rebase --autostash origin main: fast-forward
+4b87833 HEAD@{2026-05-06 07:13:22 -0700}: pull --rebase --autostash origin main (finish): returning to refs/heads/codex/always-be-shipping
+4b87833 HEAD@{2026-05-06 07:13:22 -0700}: pull --rebase --autostash origin main (pick): Complete 0.1.24 release changelog
+bf40bda refs/remotes/origin/HEAD@{2026-05-06 07:12:58 -0700}: fetch origin --prune: fast-forward
+bf40bda refs/remotes/origin/main@{2026-05-06 07:12:58 -0700}: fetch origin --prune: fast-forward
+4c47900 refs/heads/codex/always-be-shipping@{2026-05-06 07:12:39 -0700}: pull --ff-only origin main: Fast-forward
+4c47900 HEAD@{2026-05-06 07:12:39 -0700}: pull --ff-only origin main: Fast-forward
+4c47900 refs/remotes/origin/HEAD@{2026-05-06 07:12:19 -0700}: fetch origin main --tags: fast-forward
+4c47900 refs/remotes/origin/main@{2026-05-06 07:12:19 -0700}: fetch origin main --tags: fast-forward
+bb99fea refs/remotes/origin/HEAD@{2026-05-06 07:11:58 -0700}: update by push
+bb99fea refs/remotes/origin/main@{2026-05-06 07:11:58 -0700}: update by push
+bb99fea refs/heads/codex/always-be-shipping@{2026-05-06 07:11:39 -0700}: commit: Complete 0.1.24 release changelog
+bb99fea HEAD@{2026-05-06 07:11:39 -0700}: commit: Complete 0.1.24 release changelog
+44ed3e2 refs/remotes/origin/HEAD@{2026-05-06 07:11:15 -0700}: update by push
+44ed3e2 refs/remotes/origin/main@{2026-05-06 07:11:15 -0700}: update by push
+44ed3e2 HEAD@{2026-05-06 07:11:00 -0700}: pull --rebase --autostash origin main (finish): returning to refs/heads/codex/always-be-shipping
+44ed3e2 HEAD@{2026-05-06 07:11:00 -0700}: pull --rebase --autostash origin main (pick): Expect sorted mailbox bridge topology
+2e31046 HEAD@{2026-05-06 07:11:00 -0700}: pull --rebase --autostash origin main (pick): Complete 0.1.24 release changelog
+bc82a25 refs/remotes/origin/HEAD@{2026-05-06 07:10:50 -0700}: fetch origin main: fast-forward
+bc82a25 refs/remotes/origin/main@{2026-05-06 07:10:50 -0700}: fetch origin main: fast-forward
+03ec6b1 refs/remotes/origin/HEAD@{2026-05-06 07:10:26 -0700}: update by push
+03ec6b1 refs/remotes/origin/main@{2026-05-06 07:10:26 -0700}: update by push
+03ec6b1 worktrees/manyfold-peripheral-control-cleanup/HEAD@{2026-05-06 07:10:24 -0700}: rebase (finish): returning to refs/heads/codex/peripheral-control-cleanup
+03ec6b1 worktrees/manyfold-peripheral-control-cleanup/HEAD@{2026-05-06 07:10:24 -0700}: rebase (pick): Clean up peripheral control subscribe failures
+00cfb27 refs/remotes/origin/HEAD@{2026-05-06 07:10:23 -0700}: fetch origin main: fast-forward
+00cfb27 refs/remotes/origin/main@{2026-05-06 07:10:23 -0700}: fetch origin main: fast-forward
+23268c6 refs/heads/codex/always-be-shipping@{2026-05-06 07:09:52 -0700}: merge origin/main: Fast-forward
+23268c6 HEAD@{2026-05-06 07:09:52 -0700}: merge origin/main: Fast-forward
+23268c6 refs/remotes/origin/HEAD@{2026-05-06 07:09:44 -0700}: fetch origin main --tags: fast-forward
+23268c6 refs/remotes/origin/main@{2026-05-06 07:09:44 -0700}: fetch origin main --tags: fast-forward
+3995dac refs/remotes/origin/HEAD@{2026-05-06 07:09:33 -0700}: fetch origin main: fast-forward
+3995dac refs/remotes/origin/main@{2026-05-06 07:09:33 -0700}: fetch origin main: fast-forward
+05e8023 refs/remotes/origin/HEAD@{2026-05-06 07:09:25 -0700}: update by push
+05e8023 refs/remotes/origin/main@{2026-05-06 07:09:25 -0700}: update by push
+05e8023 HEAD@{2026-05-06 07:09:20 -0700}: pull --rebase --autostash origin main (finish): returning to refs/heads/codex/always-be-shipping
+05e8023 HEAD@{2026-05-06 07:09:20 -0700}: pull --rebase --autostash origin main (pick): Complete 0.1.24 release notes
+5fa54dc HEAD@{2026-05-06 07:09:20 -0700}: pull --rebase --autostash origin main (pick): Guard resumed memory event tracking
+1ef4220 HEAD@{2026-05-06 07:09:19 -0700}: pull --rebase --autostash origin main (pick): Update 0.1.24 release notes for memory resume
+6976395 HEAD@{2026-05-06 07:09:19 -0700}: pull --rebase --autostash origin main (pick): Stabilize coalesced pipeline timing test
+5b3dfca HEAD@{2026-05-06 07:09:19 -0700}: pull --rebase --autostash origin main (pick): Ignore noncanonical event log keys
+d5cfdd9 refs/remotes/origin/HEAD@{2026-05-06 07:09:12 -0700}: fetch origin main --prune: fast-forward
+d5cfdd9 refs/remotes/origin/main@{2026-05-06 07:09:12 -0700}: fetch origin main --prune: fast-forward
+8303d85 refs/heads/codex/background-observable-completion@{2026-05-06 07:09:05 -0700}: commit: Complete background threaded observable on exit
+fd391a3 refs/heads/codex/background-observable-completion@{2026-05-06 07:08:00 -0700}: branch: Created from origin/main
+9a46b72 refs/heads/garden-reference-example-exports@{2026-05-06 07:07:48 -0700}: branch: Created from HEAD
+001d383 refs/heads/garden-rx-root-facade-exports@{2026-05-06 07:07:47 -0700}: branch: Created from HEAD
+bdbb0bc refs/heads/codex/tighten-static-index-helpers@{2026-05-06 07:07:44 -0700}: branch: Created from HEAD
+fd391a3 refs/remotes/origin/HEAD@{2026-05-06 07:07:44 -0700}: fetch origin main --prune: fast-forward
+fd391a3 refs/remotes/origin/main@{2026-05-06 07:07:44 -0700}: fetch origin main --prune: fast-forward
+0880aea refs/heads/codex/peripheral-control-cleanup@{2026-05-06 07:07:35 -0700}: branch: Created from origin/main
+0880aea worktrees/manyfold-peripheral-control-cleanup/HEAD@{2026-05-06 07:07:35 -0700}: reset: moving to HEAD
+0880aea worktrees/manyfold-peripheral-control-cleanup/HEAD@{2026-05-06 07:07:35 -0700}: 
+0880aea refs/remotes/origin/HEAD@{2026-05-06 07:07:22 -0700}: pull --ff-only origin main: fast-forward
+0880aea refs/remotes/origin/main@{2026-05-06 07:07:22 -0700}: pull --ff-only origin main: fast-forward
+f3ce1c2 refs/remotes/origin/HEAD@{2026-05-06 07:07:02 -0700}: fetch origin main --prune: fast-forward
+f3ce1c2 refs/remotes/origin/main@{2026-05-06 07:07:02 -0700}: fetch origin main --prune: fast-forward
+723343d refs/heads/codex/background-observable-teardown@{2026-05-06 07:06:44 -0700}: merge origin/main: Fast-forward
+723343d refs/remotes/origin/HEAD@{2026-05-06 07:06:27 -0700}: fetch origin --prune: fast-forward
+68c577c refs/remotes/origin/codex/sort-debug-routes@{2026-05-06 07:06:27 -0700}: fetch origin --prune: storing head
+723343d refs/remotes/origin/main@{2026-05-06 07:06:27 -0700}: fetch origin --prune: fast-forward
+0485074 refs/heads/codex/background-observable-teardown@{2026-05-06 07:06:19 -0700}: branch: Created from origin/main
+9a46b72 refs/heads/garden/rx-facade-export-snapshot@{2026-05-06 07:05:46 -0700}: branch: Created from HEAD
+0485074 refs/remotes/origin/HEAD@{2026-05-06 07:05:12 -0700}: fetch origin main --tags: fast-forward
+0485074 refs/remotes/origin/main@{2026-05-06 07:05:12 -0700}: fetch origin main --tags: fast-forward
+3af42fe refs/heads/codex/sort-topology-query@{2026-05-06 07:05:02 -0700}: branch: Created from HEAD
+e791118 refs/remotes/origin/HEAD@{2026-05-06 07:04:46 -0700}: fetch origin main: fast-forward
+e791118 refs/remotes/origin/main@{2026-05-06 07:04:46 -0700}: fetch origin main: fast-forward
+bed994b refs/heads/codex/always-be-shipping@{2026-05-06 07:03:25 -0700}: pull --rebase --autostash origin main: Fast-forward
+bed994b refs/remotes/origin/HEAD@{2026-05-06 07:03:25 -0700}: pull --rebase --autostash origin main: fast-forward
+bed994b refs/remotes/origin/main@{2026-05-06 07:03:25 -0700}: pull --rebase --autostash origin main: fast-forward
+bed994b HEAD@{2026-05-06 07:03:25 -0700}: pull --rebase --autostash origin main: Fast-forward
+bdbb0bc refs/heads/garden/rfc-checklist-write-if-changed@{2026-05-06 07:03:03 -0700}: branch: Created from HEAD
+9a46b72 refs/heads/codex/always-be-shipping@{2026-05-06 06:20:04 -0700}: merge origin/main: Fast-forward
+9a46b72 HEAD@{2026-05-06 06:20:04 -0700}: merge origin/main: Fast-forward
+001d383 HEAD@{2026-05-06 05:34:53 -0700}: reset: moving to HEAD
+9a46b72 refs/remotes/origin/HEAD@{2026-05-06 04:48:53 -0700}: fetch origin main: fast-forward
+9a46b72 refs/remotes/origin/main@{2026-05-06 04:48:53 -0700}: fetch origin main: fast-forward
+001d383 refs/remotes/origin/HEAD@{2026-05-06 02:31:18 -0700}: update by push
+001d383 refs/remotes/origin/main@{2026-05-06 02:31:18 -0700}: update by push
+bdbb0bc refs/heads/codex/sort-topology-edges@{2026-05-05 23:15:50 -0700}: branch: Created from HEAD
+bdbb0bc refs/heads/garden/rx-subject-facade-exports-2@{2026-05-05 23:15:47 -0700}: branch: Created from HEAD
+001d383 refs/heads/codex/always-be-shipping@{2026-05-05 23:13:20 -0700}: commit: Harden durable component writes
+001d383 HEAD@{2026-05-05 23:13:20 -0700}: commit: Harden durable component writes
+bdbb0bc refs/heads/codex/garden-mailbox-drain-borrows@{2026-05-05 23:13:16 -0700}: branch: Created from HEAD
+f61623a refs/heads/codex/always-be-shipping@{2026-05-05 22:16:37 -0700}: rebase (finish): refs/heads/codex/always-be-shipping onto f61623a3ce05cce11ac18d3dc4307b56881b749a
+f61623a HEAD@{2026-05-05 22:16:37 -0700}: rebase (finish): returning to refs/heads/codex/always-be-shipping
+f61623a HEAD@{2026-05-05 22:16:37 -0700}: rebase (start): checkout origin/main
+3af42fe HEAD@{2026-05-05 22:16:37 -0700}: reset: moving to HEAD
+bdbb0bc refs/heads/garden/rx-subject-leaf-exports@{2026-05-05 22:16:33 -0700}: branch: Created from HEAD
+f61623a refs/remotes/origin/HEAD@{2026-05-05 22:16:26 -0700}: fetch origin main --tags: fast-forward
+f61623a refs/remotes/origin/main@{2026-05-05 22:16:26 -0700}: fetch origin main --tags: fast-forward
+3af42fe refs/heads/codex/always-be-shipping@{2026-05-05 22:16:23 -0700}: merge origin/main: Fast-forward
+3af42fe HEAD@{2026-05-05 22:16:23 -0700}: merge origin/main: Fast-forward
+bdbb0bc HEAD@{2026-05-05 22:16:17 -0700}: reset: moving to HEAD
+bdbb0bc refs/heads/codex/deterministic-mailbox-credit@{2026-05-05 22:14:31 -0700}: branch: Created from HEAD
+bdbb0bc refs/heads/codex/narrow-rx-subject-leaf-exports@{2026-05-05 22:12:26 -0700}: branch: Created from HEAD
+bdbb0bc refs/heads/garden/rx-subject-facade-exports@{2026-05-05 22:12:04 -0700}: branch: Created from HEAD
+bdbb0bc refs/heads/garden/mailbox-descriptor-errors@{2026-05-05 22:10:19 -0700}: branch: Created from HEAD
+bdbb0bc refs/heads/garden/native-topology-determinism-20260506@{2026-05-05 21:45:39 -0700}: branch: Created from HEAD
+3af42fe refs/remotes/origin/HEAD@{2026-05-05 21:45:39 -0700}: fetch origin main --tags: fast-forward
+3af42fe refs/remotes/origin/main@{2026-05-05 21:45:39 -0700}: fetch origin main --tags: fast-forward
+bdbb0bc refs/heads/garden-local-uv-cache-note@{2026-05-05 21:27:29 -0700}: branch: Created from HEAD
+bdbb0bc refs/heads/garden-rfc-checklist-appendix-parser@{2026-05-05 20:48:15 -0700}: branch: Created from HEAD
+bdbb0bc refs/heads/garden/sort-native-topology@{2026-05-04 23:39:37 -0700}: branch: Created from HEAD
+bdbb0bc refs/remotes/origin/HEAD@{2026-05-04 06:07:56 -0700}: update by push
+bdbb0bc refs/remotes/origin/main@{2026-05-04 06:07:56 -0700}: update by push
+bdbb0bc refs/heads/codex/always-be-shipping@{2026-05-04 06:07:54 -0700}: commit: Release manyfold 0.1.23
+bdbb0bc HEAD@{2026-05-04 06:07:54 -0700}: commit: Release manyfold 0.1.23
+c3c801e refs/heads/codex/always-be-shipping@{2026-05-04 06:06:47 -0700}: merge origin/main: Fast-forward
+c3c801e HEAD@{2026-05-04 06:06:47 -0700}: merge origin/main: Fast-forward
+198ecc3 HEAD@{2026-05-04 06:06:47 -0700}: reset: moving to HEAD
+c3c801e refs/remotes/origin/HEAD@{2026-05-04 06:06:36 -0700}: fetch origin main: fast-forward
+c3c801e refs/remotes/origin/main@{2026-05-04 06:06:36 -0700}: fetch origin main: fast-forward
+05bf4a8 refs/heads/codex/garden-example-catalog-import-scope@{2026-05-04 06:04:26 -0700}: branch: Created from HEAD
+198ecc3 refs/remotes/origin/HEAD@{2026-05-04 06:04:08 -0700}: update by push
+198ecc3 refs/remotes/origin/main@{2026-05-04 06:04:08 -0700}: update by push
+198ecc3 refs/heads/codex/always-be-shipping@{2026-05-04 06:04:05 -0700}: commit: Clean up failed durable spool setup
+198ecc3 HEAD@{2026-05-04 06:04:05 -0700}: commit: Clean up failed durable spool setup
+05bf4a8 refs/remotes/origin/HEAD@{2026-05-04 05:35:34 -0700}: update by push
+05bf4a8 refs/remotes/origin/main@{2026-05-04 05:35:34 -0700}: update by push
+05bf4a8 HEAD@{2026-05-04 05:19:50 -0700}: rebase (finish): returning to refs/heads/codex/always-be-shipping
+05bf4a8 HEAD@{2026-05-04 05:19:50 -0700}: rebase (pick): Preserve event log commit order
+6311941 refs/remotes/origin/HEAD@{2026-05-04 05:19:48 -0700}: fetch origin main: fast-forward
+6311941 refs/remotes/origin/main@{2026-05-04 05:19:48 -0700}: fetch origin main: fast-forward
+1eab3cd refs/heads/garden-rx-marbles-exports@{2026-05-04 05:18:40 -0700}: branch: Created from HEAD
+e27bffe refs/remotes/origin/HEAD@{2026-05-04 05:18:33 -0700}: update by push
+e27bffe refs/remotes/origin/main@{2026-05-04 05:18:33 -0700}: update by push
+e27bffe refs/heads/codex/always-be-shipping@{2026-05-04 05:18:21 -0700}: commit: Clean up failed flow shaper setup
+e27bffe HEAD@{2026-05-04 05:18:21 -0700}: commit: Clean up failed flow shaper setup
+3834bcb refs/heads/codex/always-be-shipping@{2026-05-04 05:17:30 -0700}: merge origin/main: Fast-forward
+3834bcb HEAD@{2026-05-04 05:17:30 -0700}: merge origin/main: Fast-forward
+3834bcb refs/remotes/origin/HEAD@{2026-05-04 05:17:29 -0700}: fetch origin main: fast-forward
+3834bcb refs/remotes/origin/main@{2026-05-04 05:17:29 -0700}: fetch origin main: fast-forward
+1eab3cd refs/remotes/origin/HEAD@{2026-05-04 03:22:11 -0700}: update by push
+1eab3cd refs/remotes/origin/main@{2026-05-04 03:22:11 -0700}: update by push
+1eab3cd HEAD@{2026-05-04 03:21:33 -0700}: rebase (finish): returning to refs/heads/codex/always-be-shipping
+1eab3cd HEAD@{2026-05-04 03:21:33 -0700}: rebase (pick): Publish persisted None snapshots
+ebb78ae refs/remotes/origin/HEAD@{2026-05-04 03:21:25 -0700}: fetch origin main: fast-forward
+ebb78ae refs/remotes/origin/main@{2026-05-04 03:21:25 -0700}: fetch origin main: fast-forward
+e8803d7 refs/remotes/origin/HEAD@{2026-05-04 03:17:53 -0700}: update by push
+e8803d7 refs/remotes/origin/main@{2026-05-04 03:17:53 -0700}: update by push
+20ea595 refs/remotes/origin/HEAD@{2026-05-04 03:17:04 -0700}: fetch origin main: fast-forward
+20ea595 refs/remotes/origin/main@{2026-05-04 03:17:04 -0700}: fetch origin main: fast-forward
+e8803d7 HEAD@{2026-05-04 03:17:04 -0700}: rebase (finish): returning to refs/heads/codex/always-be-shipping
+e8803d7 HEAD@{2026-05-04 03:17:04 -0700}: rebase (pick): Subscribe before replaying graph operators
+5f148d7 refs/heads/codex/always-be-shipping@{2026-05-04 03:15:58 -0700}: rebase (finish): refs/heads/codex/always-be-shipping onto 5f148d7f406c39f57217d8e31ed4af71b9c2b1dd
+5f148d7 HEAD@{2026-05-04 03:15:58 -0700}: rebase (finish): returning to refs/heads/codex/always-be-shipping
+5f148d7 HEAD@{2026-05-04 03:15:58 -0700}: rebase (start): checkout origin/main
+5f148d7 refs/remotes/origin/HEAD@{2026-05-04 03:15:54 -0700}: fetch origin main: fast-forward
+5f148d7 refs/remotes/origin/main@{2026-05-04 03:15:54 -0700}: fetch origin main: fast-forward
+4ce0be8 refs/remotes/origin/HEAD@{2026-05-04 03:14:08 -0700}: fetch --no-write-fetch-head origin main: fast-forward
+4ce0be8 refs/remotes/origin/main@{2026-05-04 03:14:08 -0700}: fetch --no-write-fetch-head origin main: fast-forward
+f3a98d3 refs/heads/codex/sort-debug-routes@{2026-05-04 03:13:46 -0700}: branch: Created from HEAD
+d22109a refs/heads/codex/garden-diagram-metadata-order@{2026-05-04 03:11:48 -0700}: branch: Created from HEAD
+5e6091b refs/heads/codex/always-be-shipping@{2026-05-04 03:11:07 -0700}: merge origin/main: Fast-forward
+5e6091b HEAD@{2026-05-04 03:11:07 -0700}: merge origin/main: Fast-forward
+5e6091b refs/remotes/origin/HEAD@{2026-05-04 03:11:05 -0700}: fetch origin main: fast-forward
+5e6091b refs/remotes/origin/main@{2026-05-04 03:11:05 -0700}: fetch origin main: fast-forward
+d22109a refs/remotes/origin/HEAD@{2026-05-04 02:55:14 -0700}: update by push
+d22109a refs/remotes/origin/main@{2026-05-04 02:55:14 -0700}: update by push
+d22109a refs/heads/codex/always-be-shipping@{2026-05-04 02:55:08 -0700}: commit: Treat None as join state
+d22109a HEAD@{2026-05-04 02:55:08 -0700}: commit: Treat None as join state
+5e98f9a refs/heads/garden-route-missing-parts@{2026-05-04 02:28:39 -0700}: branch: Created from HEAD
+5e98f9a refs/heads/codex/garden-schema-any-token-errors@{2026-05-04 01:30:40 -0700}: branch: Created from HEAD
+f3a98d3 refs/heads/codex/always-be-shipping@{2026-05-04 01:30:16 -0700}: pull --rebase --autostash: Fast-forward
+f3a98d3 HEAD@{2026-05-04 01:30:16 -0700}: pull --rebase --autostash: Fast-forward
+f3a98d3 refs/remotes/origin/HEAD@{2026-05-04 01:30:10 -0700}: fetch origin main: fast-forward
+f3a98d3 refs/remotes/origin/main@{2026-05-04 01:30:10 -0700}: fetch origin main: fast-forward
+5e98f9a refs/heads/codex/garden-reactive-latency-order@{2026-05-03 23:13:04 -0700}: branch: Created from HEAD
+5e98f9a refs/remotes/origin/HEAD@{2026-05-03 22:04:30 -0700}: update by push
+5e98f9a refs/remotes/origin/main@{2026-05-03 22:04:30 -0700}: update by push
+5e98f9a HEAD@{2026-05-03 22:03:53 -0700}: rebase (finish): returning to refs/heads/codex/always-be-shipping
+5e98f9a HEAD@{2026-05-03 22:03:53 -0700}: rebase (pick): Validate bulk sensor route pairing
+9317a28 refs/remotes/origin/HEAD@{2026-05-03 22:03:49 -0700}: fetch origin main: fast-forward
+9317a28 refs/remotes/origin/main@{2026-05-03 22:03:49 -0700}: fetch origin main: fast-forward
+59fb188 refs/heads/codex/always-be-shipping@{2026-05-03 22:01:57 -0700}: merge origin/main: Fast-forward
+59fb188 refs/remotes/origin/HEAD@{2026-05-03 22:01:57 -0700}: fetch origin main: fast-forward
+59fb188 refs/remotes/origin/main@{2026-05-03 22:01:57 -0700}: fetch origin main: fast-forward
+59fb188 HEAD@{2026-05-03 22:01:57 -0700}: merge origin/main: Fast-forward
+3c6bfa7 refs/heads/codex/stabilize-embedded-validation-issues@{2026-05-03 21:04:25 -0700}: branch: Created from HEAD
+22c6d10 refs/remotes/origin/HEAD@{2026-05-03 21:04:11 -0700}: update by push
+22c6d10 refs/remotes/origin/main@{2026-05-03 21:04:11 -0700}: update by push
+22c6d10 refs/heads/codex/always-be-shipping@{2026-05-03 21:04:00 -0700}: commit: Clean up failed pipeline replay nodes
+22c6d10 HEAD@{2026-05-03 21:04:00 -0700}: commit: Clean up failed pipeline replay nodes
+3c6bfa7 refs/remotes/origin/HEAD@{2026-05-03 20:06:37 -0700}: update by push
+3c6bfa7 refs/remotes/origin/main@{2026-05-03 20:06:37 -0700}: update by push
+3c6bfa7 refs/heads/codex/always-be-shipping@{2026-05-03 20:06:33 -0700}: commit: Replay latest through fluent pipelines
+3c6bfa7 HEAD@{2026-05-03 20:06:33 -0700}: commit: Replay latest through fluent pipelines
+b2fc02f refs/heads/codex/always-be-shipping@{2026-05-03 20:05:29 -0700}: merge origin/main: Fast-forward
+b2fc02f refs/remotes/origin/HEAD@{2026-05-03 20:05:29 -0700}: fetch origin main: fast-forward
+b2fc02f refs/remotes/origin/main@{2026-05-03 20:05:29 -0700}: fetch origin main: fast-forward
+b2fc02f HEAD@{2026-05-03 20:05:29 -0700}: merge origin/main: Fast-forward
+cb241e1 refs/heads/garden/append-entry-json-schema@{2026-05-03 20:04:01 -0700}: branch: Created from HEAD
+cb241e1 refs/heads/main@{2026-05-03 19:40:21 -0700}: pull --ff-only origin main: Fast-forward
+cb241e1 refs/remotes/origin/HEAD@{2026-05-03 19:40:21 -0700}: pull --ff-only origin main: fast-forward
+cb241e1 refs/remotes/origin/main@{2026-05-03 19:40:21 -0700}: pull --ff-only origin main: fast-forward
+f4a8e22 refs/remotes/origin/HEAD@{2026-05-03 19:11:29 -0700}: update by push
+f4a8e22 refs/remotes/origin/main@{2026-05-03 19:11:29 -0700}: update by push
+f4a8e22 refs/heads/codex/always-be-shipping@{2026-05-03 19:11:19 -0700}: commit: Expose native queue depth snapshots
+f4a8e22 HEAD@{2026-05-03 19:11:19 -0700}: commit: Expose native queue depth snapshots
+169bbc6 refs/heads/codex/always-be-shipping@{2026-05-03 19:09:01 -0700}: branch: Reset to origin/main
+169bbc6 HEAD@{2026-05-03 19:09:01 -0700}: checkout: moving from codex/publish-0.1.22 to codex/always-be-shipping
+169bbc6 refs/remotes/origin/HEAD@{2026-05-03 19:08:53 -0700}: fetch origin main: fast-forward
+169bbc6 refs/remotes/origin/main@{2026-05-03 19:08:53 -0700}: fetch origin main: fast-forward
+12f6041 refs/remotes/origin/HEAD@{2026-05-03 18:43:22 -0700}: fetch origin main: fast-forward
+12f6041 refs/remotes/origin/main@{2026-05-03 18:43:22 -0700}: fetch origin main: fast-forward
+d5d0add refs/heads/codex/publish-0.1.22@{2026-05-03 18:42:57 -0700}: commit: Bump manyfold to 0.1.22
+d5d0add HEAD@{2026-05-03 18:42:57 -0700}: commit: Bump manyfold to 0.1.22
+8303cca refs/heads/codex/publish-0.1.22@{2026-05-03 18:38:49 -0700}: branch: Created from origin/main
+8303cca refs/remotes/origin/HEAD@{2026-05-03 18:38:49 -0700}: fetch origin main: fast-forward
+8303cca refs/remotes/origin/main@{2026-05-03 18:38:49 -0700}: fetch origin main: fast-forward
+8303cca HEAD@{2026-05-03 18:38:49 -0700}: checkout: moving from codex/remove-public-share-api to codex/publish-0.1.22
+29e1bb5 refs/remotes/origin/HEAD@{2026-05-03 18:37:50 -0700}: fetch origin main: fast-forward
+29e1bb5 refs/remotes/origin/main@{2026-05-03 18:37:50 -0700}: fetch origin main: fast-forward
+e90cbb4 refs/heads/garden/compact-sensor-json@{2026-05-03 18:37:35 -0700}: branch: Created from HEAD
+447dc61 refs/heads/codex/remove-public-share-api@{2026-05-03 18:37:08 -0700}: commit: Remove public share sequence API
+447dc61 HEAD@{2026-05-03 18:37:08 -0700}: commit: Remove public share sequence API
+e90cbb4 HEAD@{2026-05-03 18:36:25 -0700}: reset: moving to e90cbb4db1ac535852c8f6a3d7e5b10286aa524b
+e90cbb4 refs/heads/codex/remove-public-share-api@{2026-05-03 18:36:10 -0700}: branch: Created from origin/main
+e90cbb4 HEAD@{2026-05-03 18:36:10 -0700}: checkout: moving from codex/always-be-shipping to codex/remove-public-share-api
+e90cbb4 refs/remotes/origin/HEAD@{2026-05-03 18:04:55 -0700}: update by push
+e90cbb4 refs/remotes/origin/main@{2026-05-03 18:04:55 -0700}: update by push
+e90cbb4 refs/heads/codex/always-be-shipping@{2026-05-03 18:04:45 -0700}: commit: Encode consensus messages as JSON
+e90cbb4 HEAD@{2026-05-03 18:04:45 -0700}: commit: Encode consensus messages as JSON
+7f35392 refs/heads/codex/always-be-shipping@{2026-05-03 18:04:07 -0700}: merge origin/main: Fast-forward
+7f35392 HEAD@{2026-05-03 18:04:07 -0700}: merge origin/main: Fast-forward
+7f35392 refs/remotes/origin/HEAD@{2026-05-03 18:04:03 -0700}: fetch origin main: fast-forward
+7f35392 refs/remotes/origin/main@{2026-05-03 18:04:03 -0700}: fetch origin main: fast-forward
+d47c7ae refs/heads/codex/always-be-shipping@{2026-05-03 18:02:18 -0700}: merge origin/main: Fast-forward
+d47c7ae refs/remotes/origin/HEAD@{2026-05-03 18:02:18 -0700}: fetch origin main: fast-forward
+d47c7ae refs/remotes/origin/main@{2026-05-03 18:02:18 -0700}: fetch origin main: fast-forward
+d47c7ae HEAD@{2026-05-03 18:02:18 -0700}: merge origin/main: Fast-forward
+a7ea1be refs/heads/codex/avoid-average-window-slices@{2026-05-03 18:01:48 -0700}: branch: Created from HEAD
+a7ea1be refs/remotes/origin/HEAD@{2026-05-03 17:03:04 -0700}: update by push
+a7ea1be refs/remotes/origin/main@{2026-05-03 17:03:04 -0700}: update by push
+a7ea1be refs/heads/codex/always-be-shipping@{2026-05-03 17:02:57 -0700}: commit: Serialize event log appends
+a7ea1be HEAD@{2026-05-03 17:02:57 -0700}: commit: Serialize event log appends
+af36bd7 refs/heads/codex/consensus-node-validation@{2026-05-03 17:02:38 -0700}: branch: Created from HEAD
+af36bd7 refs/heads/codex/always-be-shipping@{2026-05-03 17:01:04 -0700}: reset: moving to origin/main
+af36bd7 refs/remotes/origin/HEAD@{2026-05-03 17:01:04 -0700}: fetch origin main: fast-forward
+af36bd7 refs/remotes/origin/main@{2026-05-03 17:01:04 -0700}: fetch origin main: fast-forward
+af36bd7 HEAD@{2026-05-03 17:01:04 -0700}: reset: moving to origin/main
+4a1332e refs/heads/codex/sort-top-level-exports@{2026-05-03 16:05:05 -0700}: branch: Created from HEAD
+1c8f298 refs/remotes/origin/HEAD@{2026-05-03 16:03:34 -0700}: update by push
+1c8f298 refs/remotes/origin/main@{2026-05-03 16:03:34 -0700}: update by push
+1c8f298 refs/heads/codex/always-be-shipping@{2026-05-03 16:03:29 -0700}: commit: Detect unprotected write feedback paths
+1c8f298 HEAD@{2026-05-03 16:03:29 -0700}: commit: Detect unprotected write feedback paths
+4a1332e refs/heads/codex/always-be-shipping@{2026-05-03 16:01:51 -0700}: reset: moving to origin/main
+4a1332e refs/remotes/origin/HEAD@{2026-05-03 16:01:51 -0700}: fetch origin main: fast-forward
+4a1332e refs/remotes/origin/main@{2026-05-03 16:01:51 -0700}: fetch origin main: fast-forward
+4a1332e HEAD@{2026-05-03 16:01:51 -0700}: reset: moving to origin/main
+ea9befe HEAD@{2026-05-03 16:01:51 -0700}: checkout: moving from codex/always-be-shipping to codex/always-be-shipping
+a740431 refs/heads/codex/sorted-schema-validation@{2026-05-03 15:04:48 -0700}: commit: Sort schema mismatch validation issues
+ea9befe refs/heads/codex/sorted-schema-validation@{2026-05-03 15:04:27 -0700}: branch: Created from origin/main
+ea9befe refs/remotes/origin/HEAD@{2026-05-03 15:03:08 -0700}: update by push
+ea9befe refs/remotes/origin/main@{2026-05-03 15:03:08 -0700}: update by push
+ea9befe refs/heads/codex/always-be-shipping@{2026-05-03 15:02:58 -0700}: commit: Reject corrupt UTF-8 sensor text
+ea9befe HEAD@{2026-05-03 15:02:58 -0700}: commit: Reject corrupt UTF-8 sensor text
+7aece72 refs/remotes/origin/HEAD@{2026-05-03 14:05:15 -0700}: update by push
+7aece72 refs/remotes/origin/main@{2026-05-03 14:05:15 -0700}: update by push
+7aece72 HEAD@{2026-05-03 14:04:40 -0700}: rebase (finish): returning to refs/heads/codex/always-be-shipping
+7aece72 HEAD@{2026-05-03 14:04:40 -0700}: rebase (pick): Subscribe before starting peripherals
+0a32a96 refs/remotes/origin/HEAD@{2026-05-03 14:04:36 -0700}: fetch origin main: fast-forward
+0a32a96 refs/remotes/origin/main@{2026-05-03 14:04:36 -0700}: fetch origin main: fast-forward
+5620faf refs/heads/codex/always-be-shipping@{2026-05-03 14:02:57 -0700}: branch: Created from origin/main
+5620faf HEAD@{2026-05-03 14:02:57 -0700}: checkout: moving from codex/retain-explicit-watermarks to codex/always-be-shipping
+5620faf refs/remotes/origin/HEAD@{2026-05-03 14:02:50 -0700}: fetch origin main: fast-forward
+5620faf refs/remotes/origin/main@{2026-05-03 14:02:50 -0700}: fetch origin main: fast-forward
+a17592c refs/heads/codex/example-shared-imports@{2026-05-03 14:02:31 -0700}: branch: Created from HEAD
+a17592c refs/remotes/origin/HEAD@{2026-05-03 13:03:38 -0700}: update by push
+a17592c refs/remotes/origin/main@{2026-05-03 13:03:38 -0700}: update by push
+60f3bd5 refs/remotes/origin/HEAD@{2026-05-03 12:05:43 -0700}: update by push
+60f3bd5 refs/remotes/origin/main@{2026-05-03 12:05:43 -0700}: update by push
+60f3bd5 refs/heads/codex/retain-explicit-watermarks@{2026-05-03 12:05:26 -0700}: commit: Retain explicit watermarks before source data
+60f3bd5 HEAD@{2026-05-03 12:05:26 -0700}: commit: Retain explicit watermarks before source data
+afa231c refs/heads/codex/retain-explicit-watermarks@{2026-05-03 12:04:41 -0700}: branch: Reset to origin/main
+afa231c HEAD@{2026-05-03 12:04:41 -0700}: checkout: moving from codex/coalesce-latest-node to codex/retain-explicit-watermarks
+afa231c refs/remotes/origin/HEAD@{2026-05-03 12:04:22 -0700}: fetch origin main: fast-forward
+afa231c refs/remotes/origin/main@{2026-05-03 12:04:22 -0700}: fetch origin main: fast-forward
+44ab8c8 refs/heads/codex/retain-explicit-watermarks@{2026-05-03 12:03:56 -0700}: branch: Created from HEAD
+bb590cb HEAD@{2026-05-03 12:03:30 -0700}: checkout: moving from codex/coalesce-latest-node to codex/rx-facade-stable-exports
+bb590cb refs/remotes/origin/HEAD@{2026-05-03 12:03:21 -0700}: fetch origin main: fast-forward
+bb590cb refs/remotes/origin/main@{2026-05-03 12:03:21 -0700}: fetch origin main: fast-forward
+98ba40f refs/remotes/origin/codex/coalesce-latest-node@{2026-05-03 11:56:03 -0700}: update by push
+98ba40f refs/heads/codex/coalesce-latest-node@{2026-05-03 11:55:59 -0700}: commit: Expose public event stream
+98ba40f HEAD@{2026-05-03 11:55:59 -0700}: commit: Expose public event stream
+1e3dd55 refs/heads/codex/cache-typed-route-ref@{2026-05-03 11:43:24 -0700}: commit: Cache typed route refs
+44ab8c8 refs/heads/codex/cache-typed-route-ref@{2026-05-03 11:43:23 -0700}: branch: Created from HEAD
+44ab8c8 refs/remotes/origin/HEAD@{2026-05-03 11:41:38 -0700}: fetch origin main --quiet: fast-forward
+44ab8c8 refs/remotes/origin/main@{2026-05-03 11:41:38 -0700}: fetch origin main --quiet: fast-forward
+bd5f6df refs/remotes/origin/HEAD@{2026-05-03 11:35:41 -0700}: fetch origin main: fast-forward
+bd5f6df refs/remotes/origin/main@{2026-05-03 11:35:41 -0700}: fetch origin main: fast-forward
+95c61e5 refs/remotes/origin/HEAD@{2026-05-03 11:31:52 -0700}: fetch origin main: fast-forward
+95c61e5 refs/remotes/origin/main@{2026-05-03 11:31:52 -0700}: fetch origin main: fast-forward
+ae071dd refs/remotes/origin/codex/coalesce-latest-node@{2026-05-03 11:31:28 -0700}: update by push
+ae071dd refs/heads/codex/coalesce-latest-node@{2026-05-03 11:31:23 -0700}: commit: Release manyfold stream API
+ae071dd HEAD@{2026-05-03 11:31:23 -0700}: commit: Release manyfold stream API
+e02eaed refs/remotes/origin/HEAD@{2026-05-03 11:02:39 -0700}: fetch origin main: fast-forward
+e02eaed refs/remotes/origin/main@{2026-05-03 11:02:39 -0700}: fetch origin main: fast-forward
+291a692 refs/heads/codex/stats-moving-average@{2026-05-03 10:49:35 -0700}: commit: Show moving average graph internals
+99a4365 refs/heads/codex/stats-moving-average@{2026-05-03 10:46:39 -0700}: commit: Add derivative route helper
+7254aeb refs/heads/codex/stats-moving-average@{2026-05-03 10:43:38 -0700}: commit: Add moving average stream helper
+295d377 refs/heads/codex/stats-moving-average@{2026-05-03 10:36:14 -0700}: branch: Created from origin/main
+295d377 refs/remotes/origin/HEAD@{2026-05-03 10:36:11 -0700}: fetch origin main: fast-forward
+295d377 refs/remotes/origin/main@{2026-05-03 10:36:11 -0700}: fetch origin main: fast-forward
+ccfa36d refs/heads/codex/devex-front-page-examples@{2026-05-03 10:30:29 -0700}: commit: Improve devex examples
+3ab6a50 refs/heads/codex/devex-front-page-examples@{2026-05-03 10:30:20 -0700}: branch: Created from HEAD
+1c1fe37 refs/remotes/origin/codex/coalesce-latest-node@{2026-05-03 10:25:40 -0700}: update by push
+1c1fe37 refs/heads/codex/coalesce-latest-node@{2026-05-03 10:25:38 -0700}: commit: Add reactive thread starting value helper
+1c1fe37 HEAD@{2026-05-03 10:25:38 -0700}: commit: Add reactive thread starting value helper
+52dce45 refs/remotes/origin/codex/coalesce-latest-node@{2026-05-03 10:19:38 -0700}: update by push
+52dce45 refs/heads/codex/coalesce-latest-node@{2026-05-03 10:19:36 -0700}: commit: Add stream logging node
+52dce45 HEAD@{2026-05-03 10:19:36 -0700}: commit: Add stream logging node
+821dddb refs/remotes/origin/codex/coalesce-latest-node@{2026-05-03 10:15:23 -0700}: update by push
+821dddb HEAD@{2026-05-03 10:14:50 -0700}: rebase (finish): returning to refs/heads/codex/coalesce-latest-node
+821dddb HEAD@{2026-05-03 10:14:50 -0700}: rebase (pick): Add coalesce latest pipeline node
+3ab6a50 refs/remotes/origin/HEAD@{2026-05-03 10:14:30 -0700}: fetch origin main --tags: fast-forward
+3ab6a50 refs/remotes/origin/main@{2026-05-03 10:14:30 -0700}: fetch origin main --tags: fast-forward
+2f1e45e refs/heads/codex/release-0.1.18@{2026-05-03 10:13:59 -0700}: commit: release manyfold 0.1.18
+d93610e refs/heads/codex/coalesce-latest-node@{2026-05-03 10:13:40 -0700}: rebase (finish): refs/heads/codex/coalesce-latest-node onto d93610e468eb5b6eeeb1369d03e3a555462ffa2a
+d93610e HEAD@{2026-05-03 10:13:40 -0700}: rebase (finish): returning to refs/heads/codex/coalesce-latest-node
+d93610e HEAD@{2026-05-03 10:13:40 -0700}: rebase (start): checkout origin/main
+d93610e refs/heads/codex/release-0.1.18@{2026-05-03 10:12:29 -0700}: branch: Created from origin/main
+d93610e refs/remotes/origin/HEAD@{2026-05-03 10:12:23 -0700}: fetch origin main --tags: fast-forward
+d93610e refs/remotes/origin/main@{2026-05-03 10:12:23 -0700}: fetch origin main --tags: fast-forward
+bf1dd5c refs/heads/codex/thread-pooling-nodes@{2026-05-03 10:10:28 -0700}: commit: add graph node thread placement
+f488c17 refs/heads/codex/coalesce-latest-node@{2026-05-03 10:08:01 -0700}: branch: Created from origin/main
+f488c17 HEAD@{2026-05-03 10:08:01 -0700}: checkout: moving from codex/onboarding-readme-docs to codex/coalesce-latest-node
+f488c17 refs/remotes/origin/HEAD@{2026-05-03 10:07:50 -0700}: fetch origin main: fast-forward
+f488c17 refs/remotes/origin/main@{2026-05-03 10:07:50 -0700}: fetch origin main: fast-forward
+afa13e8 refs/heads/codex/thread-pooling-nodes@{2026-05-03 10:06:11 -0700}: branch: Created from HEAD
+afa13e8 refs/remotes/origin/HEAD@{2026-05-03 10:05:10 -0700}: fetch origin main: fast-forward
+afa13e8 refs/remotes/origin/main@{2026-05-03 10:05:10 -0700}: fetch origin main: fast-forward
+4a59d15 refs/heads/codex/keyspace-key-scan@{2026-05-03 10:04:27 -0700}: branch: Created from HEAD
+4a59d15 refs/remotes/origin/HEAD@{2026-05-03 09:59:06 -0700}: fetch --prune origin: fast-forward
+4a59d15 refs/remotes/origin/main@{2026-05-03 09:59:06 -0700}: fetch --prune origin: fast-forward
+8bb04ec refs/heads/codex/onboarding-readme-docs@{2026-05-03 09:57:12 -0700}: commit: Shorten README and add onboarding docs
+8bb04ec HEAD@{2026-05-03 09:57:12 -0700}: commit: Shorten README and add onboarding docs
+6f06111 HEAD@{2026-05-03 09:56:07 -0700}: checkout: moving from codex/graph-route-pipeline to codex/onboarding-readme-docs
+d88ca68 refs/heads/codex/graph-route-pipeline@{2026-05-03 09:54:00 -0700}: commit: Add graph route pipeline nodes
+d88ca68 HEAD@{2026-05-03 09:54:00 -0700}: commit: Add graph route pipeline nodes
+6f06111 refs/heads/codex/graph-route-pipeline@{2026-05-03 09:53:50 -0700}: branch: Created from HEAD
+6f06111 HEAD@{2026-05-03 09:53:50 -0700}: checkout: moving from codex/onboarding-readme-docs to codex/graph-route-pipeline
+6f06111 refs/heads/codex/onboarding-readme-docs@{2026-05-03 09:51:30 -0700}: branch: Created from origin/main
+6f06111 HEAD@{2026-05-03 09:51:30 -0700}: checkout: moving from codex/graph-diagram-rendering to codex/onboarding-readme-docs
+6f06111 refs/remotes/origin/HEAD@{2026-05-03 09:51:14 -0700}: fetch --prune origin: fast-forward
+6f06111 refs/remotes/origin/main@{2026-05-03 09:51:14 -0700}: fetch --prune origin: fast-forward
+55b3b95 refs/remotes/origin/HEAD@{2026-05-03 09:48:14 -0700}: fetch --prune origin: fast-forward
+55b3b95 refs/remotes/origin/main@{2026-05-03 09:48:14 -0700}: fetch --prune origin: fast-forward
+929800b HEAD@{2026-05-03 09:46:08 -0700}: rebase (finish): returning to refs/heads/codex/graph-diagram-rendering
+929800b HEAD@{2026-05-03 09:46:08 -0700}: rebase (pick): Refresh README narrative and logical board image
+dd82476 refs/remotes/origin/HEAD@{2026-05-03 09:43:39 -0700}: fetch origin main: fast-forward
+dd82476 refs/remotes/origin/main@{2026-05-03 09:43:39 -0700}: fetch origin main: fast-forward
+6f3b0b7 refs/heads/codex/import-generic@{2026-05-03 09:42:11 -0700}: branch: Created from origin/main
+6f3b0b7 refs/heads/main@{2026-05-03 09:36:07 -0700}: pull --ff-only: Fast-forward
+6f3b0b7 refs/remotes/origin/HEAD@{2026-05-03 09:35:33 -0700}: fetch --prune origin: fast-forward
+6f3b0b7 refs/remotes/origin/main@{2026-05-03 09:35:33 -0700}: fetch --prune origin: fast-forward
+96c1d73 refs/remotes/origin/HEAD@{2026-05-03 09:35:15 -0700}: fetch origin main: fast-forward
+96c1d73 refs/remotes/origin/main@{2026-05-03 09:35:15 -0700}: fetch origin main: fast-forward
+2081e66 refs/heads/codex/graph-diagram-rendering@{2026-05-03 09:34:48 -0700}: branch: Created from origin/main
+2081e66 refs/remotes/origin/HEAD@{2026-05-03 09:34:18 -0700}: fetch origin main --tags: fast-forward
+2081e66 refs/remotes/origin/main@{2026-05-03 09:34:18 -0700}: fetch origin main --tags: fast-forward
+a9d4a4e refs/heads/codex/lego-catalog-indexes@{2026-05-03 09:21:38 -0700}: commit: Cache lego catalog query indexes
+fa4e353 refs/heads/codex/lego-catalog-indexes@{2026-05-03 09:20:40 -0700}: branch: Created from origin/main
+fa4e353 refs/remotes/origin/HEAD@{2026-05-03 09:20:35 -0700}: fetch origin main: fast-forward
+fa4e353 refs/remotes/origin/main@{2026-05-03 09:20:35 -0700}: fetch origin main: fast-forward
+69ae184 refs/remotes/origin/HEAD@{2026-05-03 09:15:40 -0700}: fetch origin main --tags: fast-forward
+69ae184 refs/remotes/origin/main@{2026-05-03 09:15:40 -0700}: fetch origin main --tags: fast-forward
+389bddf HEAD@{2026-05-03 09:13:50 -0700}: checkout: moving from codex/port-heart-rx-helpers to codex/migrate-reactive-threads
+fdb4b85 HEAD@{2026-05-03 09:13:50 -0700}: reset: moving to HEAD
+9fc3198 refs/heads/codex/repo-path-module-load-cleanup@{2026-05-03 09:09:33 -0700}: 
+389bddf refs/heads/codex/repo-path-module-load-cleanup@{2026-05-03 09:09:06 -0700}: branch: Created from HEAD
+389bddf refs/remotes/origin/HEAD@{2026-05-03 09:06:19 -0700}: fetch --prune origin: fast-forward
+389bddf refs/remotes/origin/main@{2026-05-03 09:06:19 -0700}: fetch --prune origin: fast-forward
+745bf07 refs/heads/main@{2026-05-03 09:05:41 -0700}: pull --ff-only origin main: Fast-forward
+745bf07 refs/remotes/origin/HEAD@{2026-05-03 09:05:41 -0700}: pull --ff-only origin main: fast-forward
+745bf07 refs/remotes/origin/main@{2026-05-03 09:05:41 -0700}: pull --ff-only origin main: fast-forward
+07704ad refs/remotes/origin/HEAD@{2026-05-03 09:02:50 -0700}: update by push
+07704ad refs/remotes/origin/main@{2026-05-03 09:02:50 -0700}: update by push
+077e26e refs/remotes/origin/HEAD@{2026-05-03 08:58:43 -0700}: update by push
+077e26e refs/remotes/origin/main@{2026-05-03 08:58:43 -0700}: update by push
+a9e7f2c refs/heads/codex/port-heart-rx-helpers@{2026-05-03 08:23:07 -0700}: branch: Created from HEAD
+a9e7f2c HEAD@{2026-05-03 08:23:07 -0700}: checkout: moving from main to codex/port-heart-rx-helpers
+a9e7f2c refs/heads/main@{2026-05-03 08:22:09 -0700}: pull --ff-only origin main: Fast-forward
+a9e7f2c refs/remotes/origin/HEAD@{2026-05-03 08:22:09 -0700}: pull --ff-only origin main: fast-forward
+a9e7f2c refs/remotes/origin/main@{2026-05-03 08:22:09 -0700}: pull --ff-only origin main: fast-forward
+a9e7f2c HEAD@{2026-05-03 08:22:09 -0700}: pull --ff-only origin main: Fast-forward
+3fd5f9a HEAD@{2026-05-03 08:20:36 -0700}: checkout: moving from main to codex/private-rx
+3fd5f9a refs/heads/main@{2026-05-03 08:20:27 -0700}: pull --ff-only: Fast-forward
+3fd5f9a HEAD@{2026-05-03 08:20:27 -0700}: pull --ff-only: Fast-forward
+3fd5f9a refs/remotes/origin/HEAD@{2026-05-03 08:05:06 -0700}: update by push
+3fd5f9a refs/remotes/origin/main@{2026-05-03 08:05:06 -0700}: update by push
+3053e83 refs/remotes/origin/HEAD@{2026-05-03 07:05:15 -0700}: update by push
+3053e83 refs/remotes/origin/main@{2026-05-03 07:05:15 -0700}: update by push
+b961aa9 refs/remotes/origin/HEAD@{2026-05-03 06:03:28 -0700}: update by push
+b961aa9 refs/remotes/origin/main@{2026-05-03 06:03:28 -0700}: update by push
+07dffeb refs/remotes/origin/HEAD@{2026-05-03 05:04:27 -0700}: update by push
+07dffeb refs/remotes/origin/main@{2026-05-03 05:04:27 -0700}: update by push
+dbacd05 refs/remotes/origin/HEAD@{2026-05-03 04:05:10 -0700}: update by push
+dbacd05 refs/remotes/origin/main@{2026-05-03 04:05:10 -0700}: update by push
+441c774 refs/remotes/origin/HEAD@{2026-05-03 03:04:14 -0700}: update by push
+441c774 refs/remotes/origin/main@{2026-05-03 03:04:14 -0700}: update by push
+e2d92e2 refs/remotes/origin/HEAD@{2026-05-03 02:05:33 -0700}: update by push
+e2d92e2 refs/remotes/origin/main@{2026-05-03 02:05:33 -0700}: update by push
+a6fcd64 refs/remotes/origin/HEAD@{2026-05-03 01:05:08 -0700}: update by push
+a6fcd64 refs/remotes/origin/main@{2026-05-03 01:05:08 -0700}: update by push
+a6fcd64 refs/heads/main@{2026-05-03 01:05:02 -0700}: commit: Release manyfold 0.1.8
+a6fcd64 HEAD@{2026-05-03 01:05:02 -0700}: commit: Release manyfold 0.1.8
+12d2083 refs/remotes/origin/HEAD@{2026-05-03 00:05:11 -0700}: update by push
+12d2083 refs/remotes/origin/main@{2026-05-03 00:05:11 -0700}: update by push
+12d2083 refs/heads/main@{2026-05-03 00:05:02 -0700}: commit: Release manyfold 0.1.7
+12d2083 HEAD@{2026-05-03 00:05:02 -0700}: commit: Release manyfold 0.1.7
+021ca37 refs/heads/garden/keyspace-scan-cleanup@{2026-05-03 00:03:24 -0700}: branch: Created from HEAD
+021ca37 refs/remotes/origin/HEAD@{2026-05-02 23:03:55 -0700}: update by push
+021ca37 refs/remotes/origin/main@{2026-05-02 23:03:55 -0700}: update by push
+021ca37 refs/heads/main@{2026-05-02 23:03:46 -0700}: commit: Release manyfold 0.1.6
+021ca37 HEAD@{2026-05-02 23:03:46 -0700}: commit: Release manyfold 0.1.6
+a82fc31 refs/remotes/origin/HEAD@{2026-05-02 22:35:21 -0700}: update by push
+a82fc31 refs/remotes/origin/main@{2026-05-02 22:35:21 -0700}: update by push
+a82fc31 refs/heads/main@{2026-05-02 22:35:15 -0700}: commit: Release manyfold 0.1.5
+a82fc31 HEAD@{2026-05-02 22:35:15 -0700}: commit: Release manyfold 0.1.5
+c49a4c2 refs/remotes/origin/HEAD@{2026-05-02 22:24:05 -0700}: update by push
+c49a4c2 refs/remotes/origin/main@{2026-05-02 22:24:05 -0700}: update by push
+c49a4c2 refs/heads/main@{2026-05-02 22:24:01 -0700}: commit: Release manyfold 0.1.4
+c49a4c2 HEAD@{2026-05-02 22:24:01 -0700}: commit: Release manyfold 0.1.4
+7e8d216 refs/heads/main@{2026-05-02 22:18:59 -0700}: pull --ff-only origin main: Fast-forward
+7e8d216 refs/remotes/origin/HEAD@{2026-05-02 22:18:59 -0700}: pull --ff-only origin main: fast-forward
+7e8d216 refs/remotes/origin/main@{2026-05-02 22:18:59 -0700}: pull --ff-only origin main: fast-forward
+7e8d216 HEAD@{2026-05-02 22:18:59 -0700}: pull --ff-only origin main: Fast-forward
+3096e74 HEAD@{2026-05-02 22:18:32 -0700}: checkout: moving from main to codex/managed-graph-nodes
+3096e74 refs/remotes/origin/HEAD@{2026-05-02 22:04:39 -0700}: update by push
+3096e74 refs/remotes/origin/main@{2026-05-02 22:04:39 -0700}: update by push
+3096e74 refs/heads/main@{2026-05-02 22:04:36 -0700}: commit: Release 0.1.3 with sensor IO edge fixes
+3096e74 HEAD@{2026-05-02 22:04:36 -0700}: commit: Release 0.1.3 with sensor IO edge fixes
+ac16bb5 refs/heads/codex/remove-unused-proto@{2026-05-02 21:59:28 -0700}: commit: Remove unused proto scaffold
+738a1c8 refs/heads/codex/remove-unused-proto@{2026-05-02 21:59:24 -0700}: branch: Created from HEAD
+738a1c8 refs/remotes/origin/HEAD@{2026-05-02 21:51:44 -0700}: update by push
+738a1c8 refs/remotes/origin/main@{2026-05-02 21:51:44 -0700}: update by push
+738a1c8 refs/heads/main@{2026-05-02 21:51:28 -0700}: commit: Release 0.1.2 with FileStore key escaping
+738a1c8 HEAD@{2026-05-02 21:51:28 -0700}: commit: Release 0.1.2 with FileStore key escaping
+05a0c34 refs/heads/main@{2026-05-02 21:50:05 -0700}: pull --ff-only origin main: Fast-forward
+05a0c34 HEAD@{2026-05-02 21:50:05 -0700}: pull --ff-only origin main: Fast-forward
+f812836 HEAD@{2026-05-02 21:50:04 -0700}: reset: moving to HEAD
+05a0c34 refs/remotes/origin/HEAD@{2026-05-02 21:49:59 -0700}: fetch origin main --tags: fast-forward
+05a0c34 refs/remotes/origin/main@{2026-05-02 21:49:59 -0700}: fetch origin main --tags: fast-forward
+f812836 refs/heads/codex/fix-memory-resume-duplication@{2026-05-02 21:36:56 -0700}: branch: Created from HEAD
+f812836 refs/heads/main@{2026-05-02 21:32:11 -0700}: pull --ff-only origin main: Fast-forward
+f812836 refs/remotes/origin/HEAD@{2026-05-02 21:32:11 -0700}: pull --ff-only origin main: fast-forward
+f812836 refs/remotes/origin/main@{2026-05-02 21:32:11 -0700}: pull --ff-only origin main: fast-forward
+f812836 HEAD@{2026-05-02 21:32:11 -0700}: pull --ff-only origin main: Fast-forward
+56a37bd HEAD@{2026-05-02 21:31:34 -0700}: checkout: moving from main to codex/agents-style-guidance
+56a37bd refs/heads/main@{2026-05-02 21:30:53 -0700}: pull --ff-only: Fast-forward
+56a37bd HEAD@{2026-05-02 21:30:53 -0700}: pull --ff-only: Fast-forward
+56a37bd refs/remotes/origin/HEAD@{2026-05-02 21:29:24 -0700}: fetch --prune origin: fast-forward
+56a37bd refs/remotes/origin/main@{2026-05-02 21:29:24 -0700}: fetch --prune origin: fast-forward
+ad5cc37 refs/heads/codex/group-imports-linting@{2026-05-02 21:28:38 -0700}: commit: group imports and add ruff linting
+4b74cb6 refs/heads/codex/group-imports-linting@{2026-05-02 21:24:40 -0700}: branch: Created from HEAD
+4b74cb6 refs/remotes/origin/HEAD@{2026-05-02 21:12:31 -0700}: update by push
+4b74cb6 refs/remotes/origin/main@{2026-05-02 21:12:31 -0700}: update by push
+4b74cb6 HEAD@{2026-05-02 21:12:17 -0700}: rebase (finish): returning to refs/heads/main
+4b74cb6 HEAD@{2026-05-02 21:12:17 -0700}: rebase (pick): Fix UTF-8 text chunk handling in delimited sensor buffer
+e0b61f0 refs/remotes/origin/HEAD@{2026-05-02 21:11:57 -0700}: fetch origin main --tags: fast-forward
+e0b61f0 refs/remotes/origin/main@{2026-05-02 21:11:57 -0700}: fetch origin main --tags: fast-forward
+d116673 refs/heads/codex/create-worktree-agentsmd@{2026-05-02 21:09:29 -0700}: commit: Add AGENTS startup guidance
+8d820f9 refs/heads/codex/create-worktree-agentsmd@{2026-05-02 21:09:17 -0700}: branch: Created from HEAD
+8d820f9 refs/heads/codex/utf8-delimited-buffer-fix@{2026-05-02 21:07:52 -0700}: branch: Created from HEAD
+8d820f9 refs/remotes/origin/HEAD@{2026-05-02 16:34:48 -0700}: update by push
+8d820f9 refs/remotes/origin/main@{2026-05-02 16:34:48 -0700}: update by push
+8d820f9 refs/heads/main@{2026-05-02 16:34:44 -0700}: commit: fmt
+8d820f9 HEAD@{2026-05-02 16:34:44 -0700}: commit: fmt
+029a8be refs/remotes/origin/HEAD@{2026-05-02 16:23:00 -0700}: update by push
+029a8be refs/remotes/origin/main@{2026-05-02 16:23:00 -0700}: update by push
+029a8be refs/heads/main@{2026-05-02 16:22:58 -0700}: commit: Update PyPI workflow actions
+029a8be HEAD@{2026-05-02 16:22:58 -0700}: commit: Update PyPI workflow actions
+c758af5 refs/remotes/origin/HEAD@{2026-05-02 16:18:36 -0700}: update by push
+c758af5 refs/remotes/origin/main@{2026-05-02 16:18:36 -0700}: update by push
+c758af5 refs/heads/main@{2026-05-02 16:18:33 -0700}: commit: Use current macOS Intel runner for PyPI wheels
+c758af5 HEAD@{2026-05-02 16:18:33 -0700}: commit: Use current macOS Intel runner for PyPI wheels
+62d5bc7 refs/remotes/origin/HEAD@{2026-05-02 16:05:28 -0700}: update by push
+62d5bc7 refs/remotes/origin/main@{2026-05-02 16:05:28 -0700}: update by push
+62d5bc7 refs/heads/main@{2026-05-02 16:05:24 -0700}: commit: Set up PyPI publishing
+62d5bc7 HEAD@{2026-05-02 16:05:24 -0700}: commit: Set up PyPI publishing

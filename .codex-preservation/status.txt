@@ -1,0 +1,22 @@
+On branch main
+Your branch is behind 'origin/main' by 13 commits, and can be fast-forwarded.
+
+Changes to be committed:
+	modified:   README.md
+	modified:   docs/using_manyfold.md
+
+Unmerged paths:
+	both modified:   python/manyfold/architecture/__init__.py
+	both modified:   tests/test_architecture_pubsub.py
+
+Changes not staged for commit:
+	modified:   README.md
+	modified:   python/manyfold/architecture/pubsub.py
+
+Untracked files:
+	.DS_Store
+	docs/.DS_Store
+	examples/.DS_Store
+	python/.DS_Store
+	python/manyfold/architecture/interfaces.py
+

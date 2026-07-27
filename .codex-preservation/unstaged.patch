@@ -1,0 +1,1121 @@
+diff --cc python/manyfold/architecture/__init__.py
+index 22f1304b71407706a5f0a050978da0a7f029766f,1c5aead0ba2c41782c99a27a8546b9acf9648c4c..0000000000000000000000000000000000000000
+--- i/python/manyfold/architecture/__init__.py
++++ w/python/manyfold/architecture/__init__.py
+@@@ -6,10 -6,12 +6,16 @@@ from .datastream_processor import 
+      DataStreamProcessor as DataStreamProcessor,
+      DataStreamRecord as DataStreamRecord,
+  )
++ from .interfaces import (
++     BluetoothControllerInterface as BluetoothControllerInterface,
++     Interface as Interface,
++     InterfaceEvent as InterfaceEvent,
++     SerialBusInterface as SerialBusInterface,
++ )
+ +from .locks import (
+ +    ManyFoldLock as ManyFoldLock,
+ +    ManyFoldLockLease as ManyFoldLockLease,
+ +)
+  from .native._elements import (
+      CalibratedClock as CalibratedClock,
+      Capacitor as Capacitor,
+@@@ -30,26 -32,14 +36,27 @@@
+  from .pubsub import (
+      InMemoryPubSub as InMemoryPubSub,
+      PubSub as PubSub,
+ +    PubSubCallbackSubscription as PubSubCallbackSubscription,
+      PubSubDelivery as PubSubDelivery,
+ +    PubSubFabric as PubSubFabric,
+      PubSubMessage as PubSubMessage,
+ +    PubSubObservable as PubSubObservable,
+ +    PubSubSchedule as PubSubSchedule,
+      PubSubSubscription as PubSubSubscription,
+ +    PubSubTopic as PubSubTopic,
+ +    ServiceDiscoveryRequirement as ServiceDiscoveryRequirement,
+      StreamRow as StreamRow,
+  )
+ +from .workers import (
+ +    DEFAULT_WORKER_TOPIC as DEFAULT_WORKER_TOPIC,
+ +    WorkerEvent as WorkerEvent,
+ +    WorkerHandle as WorkerHandle,
+ +    WorkerRef as WorkerRef,
+ +    WorkerRuntime as WorkerRuntime,
+ +)
+  
+  __all__ = [
++     "BluetoothControllerInterface",
+      "CalibratedClock",
+      "Capacitor",
+      "Clock",
+@@@ -59,8 -48,8 +66,10 @@@
+      "DataStreamRecord",
+      "Ground",
+      "InMemoryPubSub",
++     "Interface",
++     "InterfaceEvent",
+ +    "ManyFoldLock",
+ +    "ManyFoldLockLease",
+      "MonotonicLogicalClock",
+      "NtpTimeProvider",
+      "Pad",
+@@@ -78,7 -62,7 +87,8 @@@
+      "Regulator",
+      "Relay",
+      "Resistor",
++     "SerialBusInterface",
+ +    "ServiceDiscoveryRequirement",
+      "StreamRow",
+      "SystemTimeProvider",
+      "Via",
+diff --cc tests/test_architecture_pubsub.py
+index 1e0e977ac5950a8ca86f55f50f11f07bc4fb7d5f,e4aa9bfd93630584306b857a200c70e9eef9aff8..0000000000000000000000000000000000000000
+--- i/tests/test_architecture_pubsub.py
++++ w/tests/test_architecture_pubsub.py
+@@@ -16,8 -12,7 +17,9 @@@ from manyfold.architecture import 
+      ClockCalibrationSample,
+      DataStreamProcessor,
+      Ground,
++     Interface,
+ +    ManyFoldLock,
+ +    ManyFoldLockLease,
+      MonotonicLogicalClock,
+      NtpTimeProvider,
+      Probe,
+@@@ -30,7 -20,7 +32,8 @@@
+      Regulator,
+      Relay,
+      Resistor,
++     SerialBusInterface,
+ +    ServiceDiscoveryRequirement,
+      StreamRow,
+      SystemTimeProvider,
+      Via,
+@@@ -488,439 -323,110 +491,542 @@@ class PubSubStreamTests(unittest.TestCa
+          with self.assertRaisesRegex(ValueError, "schema is already fixed"):
+              stream.publish(_Humidity(percent=45.0))
+  
+ +    def test_pubsub_stream_subscribe_delivers_published_rows(self) -> None:
+ +        stream = PubSub(
+ +            topic="sensor.environment.temperature",
+ +            schema=Temperature,
+ +        )
+ +        observed: list[float] = []
+ +
+ +        subscription = stream.subscribe(lambda row: observed.append(row.degrees))
+ +
+ +        self.assertIsInstance(subscription, PubSubCallbackSubscription)
+ +        stream.publish(Temperature(degrees=72.4, unit="F"))
+ +        stream.publish(Temperature(degrees=72.9, unit="F"))
+ +
+ +        self.assertEqual(observed, [72.4, 72.9])
+ +
+ +    def test_pubsub_stream_subscription_can_replay_latest_and_dispose(self) -> None:
+ +        stream = PubSub(
+ +            topic="sensor.environment.temperature",
+ +            schema=Temperature,
+ +        )
+ +        observed: list[float] = []
+ +        stream.publish(Temperature(degrees=72.4, unit="F"))
+ +
+ +        subscription = stream.subscribe(
+ +            lambda row: observed.append(row.degrees),
+ +            replay_latest=True,
+ +        )
+ +
+ +        self.assertEqual(observed, [72.4])
+ +        self.assertFalse(subscription.is_disposed)
+ +        self.assertTrue(subscription.dispose())
+ +        self.assertTrue(subscription.is_disposed)
+ +        self.assertFalse(subscription.dispose())
+ +        stream.publish(Temperature(degrees=72.9, unit="F"))
+ +        self.assertEqual(observed, [72.4])
+ +
+ +    def test_pubsub_stream_map_and_filter_can_drive_callbacks(self) -> None:
+ +        stream = PubSub(
+ +            topic="sensor.environment.temperature",
+ +            schema=Temperature,
+ +        )
+ +        observed: list[str] = []
+ +
+ +        values = stream.filter(lambda row: row.degrees >= 72.5).map(
+ +            lambda row: f"{row.degrees:.1f}{row.unit}"
+ +        )
+ +        self.assertIsInstance(values, PubSubObservable)
+ +        values.subscribe(observed.append)
+ +
+ +        stream.publish(Temperature(degrees=72.4, unit="F"))
+ +        stream.publish(Temperature(degrees=72.9, unit="F"))
+ +
+ +        self.assertEqual(observed, ["72.9F"])
+ +
+ +    def test_pubsub_live_stream_supports_initial_scan_tap_callback_and_pipe(self) -> None:
+ +        stream = PubSub(
+ +            topic="heart.values",
+ +            schema=GamepadEvent,
+ +        )
+ +        observed: list[object] = []
+ +        tapped: list[int] = []
+ +
+ +        subscription = (
+ +            stream.start_with(0)
+ +            .pipe(
+ +                lambda values: values.map(
+ +                    lambda value: value if isinstance(value, int) else value.value
+ +                ),
+ +                lambda values: values.scan(lambda total, value: total + value, 0),
+ +                lambda values: values.do_action(tapped.append),
+ +            )
+ +            .callback(observed.append)
+ +        )
+ +
+ +        stream.publish(
+ +            GamepadEvent(
+ +                source_id="gamepad.1",
+ +                event_time=10,
+ +                frame_index=1,
+ +                delta_ms=16.0,
+ +                value=2,
+ +            ),
+ +            event_time=10,
+ +        )
+ +        stream.publish(
+ +            GamepadEvent(
+ +                source_id="gamepad.1",
+ +                event_time=20,
+ +                frame_index=2,
+ +                delta_ms=17.0,
+ +                value=3,
+ +            ),
+ +            event_time=20,
+ +        )
+ +
+ +        self.assertFalse(subscription.is_disposed)
+ +        self.assertEqual(observed, [0, 2, 5])
+ +        self.assertEqual(tapped, [0, 2, 5])
+ +
+ +    def test_pubsub_live_stream_accepts_heart_operator_compatibility_aliases(
+ +        self,
+ +    ) -> None:
+ +        stream = PubSub(
+ +            topic="heart.compat.values",
+ +            schema=GamepadEvent,
+ +        )
+ +        observed: list[int] = []
+ +        tapped: list[int] = []
+ +
+ +        subscription = (
+ +            stream.map(lambda row: row.value, name="value")
+ +            .filter(lambda value: value >= 0, name="non-negative")
+ +            .scan(lambda total, value: total + value, seed=10)
+ +            .do_action(on_next=tapped.append)
+ +            .distinct_until_changed()
+ +            .pairwise()
+ +            .take(2)
+ +            .callback(lambda pair: observed.append(pair[1]), name="collect")
+ +        )
+ +
+ +        stream.publish(
+ +            GamepadEvent(
+ +                source_id="gamepad.1",
+ +                event_time=10,
+ +                frame_index=1,
+ +                delta_ms=16.0,
+ +                value=1,
+ +            ),
+ +            event_time=10,
+ +        )
+ +        stream.publish(
+ +            GamepadEvent(
+ +                source_id="gamepad.1",
+ +                event_time=20,
+ +                frame_index=2,
+ +                delta_ms=16.0,
+ +                value=2,
+ +            ),
+ +            event_time=20,
+ +        )
+ +        stream.publish(
+ +            GamepadEvent(
+ +                source_id="gamepad.1",
+ +                event_time=30,
+ +                frame_index=3,
+ +                delta_ms=16.0,
+ +                value=3,
+ +            ),
+ +            event_time=30,
+ +        )
+ +
+ +        self.assertTrue(subscription.is_disposed)
+ +        self.assertEqual(tapped, [11, 13, 16])
+ +        self.assertEqual(observed, [13, 16])
+ +
+ +    def test_pubsub_subscribe_accepts_observer_and_on_next_callback(self) -> None:
+ +        stream = PubSub(topic="heart.compat.subscribe", schema=Temperature)
+ +        observed: list[float] = []
+ +
+ +        class Observer:
+ +            def on_next(self, row: object) -> None:
+ +                observed.append(row.degrees)  # type: ignore[attr-defined]
+ +
+ +        stream.subscribe(Observer())
+ +        stream.map(lambda row: row.degrees).subscribe(on_next=observed.append)
+ +
+ +        stream.publish(Temperature(degrees=72.4, unit="F"))
+ +
+ +        self.assertEqual(observed, [72.4, 72.4])
+ +
+ +    def test_pubsub_live_stream_with_latest_from_pairs_source_with_latest_other(
+ +        self,
+ +    ) -> None:
+ +        frames = PubSub(topic="heart.frames", schema=FrameTick)
+ +        acceleration = PubSub(topic="heart.acceleration", schema=Acceleration)
+ +        observed: list[tuple[int, float]] = []
+ +
+ +        frames.with_latest_from(acceleration).subscribe(
+ +            lambda pair: observed.append((pair[0].frame_index, pair[1].x))
+ +        )
+ +
+ +        frames.publish(FrameTick(event_time=10, frame_index=1, delta_ms=16.0), event_time=10)
+ +        acceleration.publish(Acceleration(event_time=15, x=1.0, y=2.0, z=3.0), event_time=15)
+ +        frames.publish(FrameTick(event_time=20, frame_index=2, delta_ms=17.0), event_time=20)
+ +        acceleration.publish(Acceleration(event_time=25, x=4.0, y=5.0, z=6.0), event_time=25)
+ +        frames.publish(FrameTick(event_time=30, frame_index=3, delta_ms=18.0), event_time=30)
+ +
+ +        self.assertEqual(observed, [(2, 1.0), (3, 4.0)])
+ +
+ +    def test_pubsub_live_stream_with_latest_from_accepts_multiple_sources(
+ +        self,
+ +    ) -> None:
+ +        frames = PubSub(topic="heart.frames.multi", schema=FrameTick)
+ +        acceleration = PubSub(topic="heart.acceleration.multi", schema=Acceleration)
+ +        temperature = PubSub(topic="heart.temperature.multi", schema=Temperature)
+ +        observed: list[tuple[int, float, float]] = []
+ +
+ +        frames.with_latest_from(acceleration, temperature).subscribe(
+ +            lambda latest: observed.append(
+ +                (latest[0].frame_index, latest[1].x, latest[2].degrees)
+ +            )
+ +        )
+ +
+ +        acceleration.publish(Acceleration(event_time=10, x=1.0, y=2.0, z=3.0), event_time=10)
+ +        frames.publish(FrameTick(event_time=20, frame_index=1, delta_ms=16.0), event_time=20)
+ +        temperature.publish(Temperature(degrees=72.4, unit="F"), event_time=30)
+ +        frames.publish(FrameTick(event_time=40, frame_index=2, delta_ms=17.0), event_time=40)
+ +
+ +        self.assertEqual(observed, [(2, 1.0, 72.4)])
+ +
+ +    def test_pubsub_live_stream_flat_map_expands_inner_streams(self) -> None:
+ +        selections = PubSub(topic="heart.selection", schema=StreamSelection)
+ +        left = PubSub(topic="heart.left", schema=Temperature)
+ +        right = PubSub(topic="heart.right", schema=Temperature)
+ +        streams = {"left": left, "right": right}
+ +        observed: list[float] = []
+ +
+ +        left.publish(Temperature(degrees=70.0, unit="F"))
+ +        right.publish(Temperature(degrees=80.0, unit="F"))
+ +        selections.flat_map(lambda row: streams[row.target]).subscribe(
+ +            lambda row: observed.append(row.degrees)
+ +        )
+ +
+ +        selections.publish(StreamSelection(target="left"))
+ +        selections.publish(StreamSelection(target="right"))
+ +
+ +        self.assertEqual(observed, [70.0, 80.0])
+ +
+ +    def test_pubsub_live_stream_switch_latest_uses_only_latest_inner_stream(self) -> None:
+ +        selections = PubSub(topic="heart.switch", schema=StreamSelection)
+ +        left = PubSub(topic="heart.switch.left", schema=Temperature)
+ +        right = PubSub(topic="heart.switch.right", schema=Temperature)
+ +        streams = {"left": left, "right": right}
+ +        observed: list[float] = []
+ +
+ +        selections.switch_latest(lambda row: streams[row.target]).subscribe(
+ +            lambda row: observed.append(row.degrees)
+ +        )
+ +
+ +        selections.publish(StreamSelection(target="left"))
+ +        left.publish(Temperature(degrees=70.0, unit="F"))
+ +        selections.publish(StreamSelection(target="right"))
+ +        left.publish(Temperature(degrees=71.0, unit="F"))
+ +        right.publish(Temperature(degrees=80.0, unit="F"))
+ +
+ +        self.assertEqual(observed, [70.0, 80.0])
+ +
+ +    def test_pubsub_sql_helpers_cover_common_stream_operations(self) -> None:
+ +        stream = PubSub(
+ +            topic="heart.input",
+ +            schema=GamepadEvent,
+ +        )
+ +
+ +        stream.publish(
+ +            GamepadEvent(
+ +                source_id="gamepad.1",
+ +                event_time=10,
+ +                frame_index=1,
+ +                delta_ms=16.0,
+ +                value=0,
+ +            ),
+ +            event_time=10,
+ +        )
+ +        stream.publish(
+ +            GamepadEvent(
+ +                source_id="gamepad.2",
+ +                event_time=20,
+ +                frame_index=2,
+ +                delta_ms=17.0,
+ +                value=1,
+ +            ),
+ +            event_time=20,
+ +        )
+ +        stream.publish(
+ +            GamepadEvent(
+ +                source_id="gamepad.1",
+ +                event_time=30,
+ +                frame_index=3,
+ +                delta_ms=16.5,
+ +                value=1,
+ +            ),
+ +            event_time=30,
+ +        )
+ +        stream.publish(
+ +            GamepadEvent(
+ +                source_id="gamepad.1",
+ +                event_time=40,
+ +                frame_index=4,
+ +                delta_ms=17.5,
+ +                value=2,
+ +            ),
+ +            event_time=40,
+ +        )
+ +
+ +        self.assertEqual(
+ +            [row.frame_index for row in stream.where(source_id="gamepad.1")],
+ +            [1, 3, 4],
+ +        )
+ +        self.assertEqual(
+ +            stream.project("event_time", "frame_index", "delta_ms"),
+ +            [
+ +                {"event_time": 10, "frame_index": 1, "delta_ms": 16.0},
+ +                {"event_time": 20, "frame_index": 2, "delta_ms": 17.0},
+ +                {"event_time": 30, "frame_index": 3, "delta_ms": 16.5},
+ +                {"event_time": 40, "frame_index": 4, "delta_ms": 17.5},
+ +            ],
+ +        )
+ +        self.assertEqual(stream.take()[0].frame_index, 1)
+ +        self.assertEqual(
+ +            [row.frame_index for row in stream.distinct_until_changed("value")],
+ +            [1, 2, 4],
+ +        )
+ +        self.assertEqual(
+ +            stream.pairwise("value"),
+ +            [
+ +                {"previous_value": 0, "current_value": 1},
+ +                {"previous_value": 1, "current_value": 1},
+ +                {"previous_value": 1, "current_value": 2},
+ +            ],
+ +        )
+ +
+ +    def test_pubsub_sql_helpers_reject_invalid_inputs(self) -> None:
+ +        stream = PubSub(topic="raw")
+ +
+ +        with self.assertRaisesRegex(ValueError, "where requires"):
+ +            stream.where()
+ +        with self.assertRaisesRegex(ValueError, "project requires"):
+ +            stream.project()
+ +        with self.assertRaisesRegex(ValueError, "count must be positive"):
+ +            stream.take(0)
+ +        with self.assertRaisesRegex(ValueError, "field must be a SQL identifier"):
+ +            stream.project("not valid")
+ +
+ +    def test_pubsub_latest_join_matches_each_row_to_latest_prior_topic_row(self) -> None:
+ +        fabric = PubSubFabric(namespace="test-latest-join")
+ +        frames = fabric.topic("frame_ticks", schema=FrameTick)
+ +        acceleration = fabric.topic("acceleration", schema=Acceleration)
+ +
+ +        acceleration.publish(Acceleration(event_time=5, x=1.0, y=2.0, z=3.0), event_time=5)
+ +        frames.publish(FrameTick(event_time=10, frame_index=1, delta_ms=16.0), event_time=10)
+ +        acceleration.publish(Acceleration(event_time=15, x=4.0, y=5.0, z=6.0), event_time=15)
+ +        frames.publish(FrameTick(event_time=20, frame_index=2, delta_ms=17.0), event_time=20)
+ +
+ +        rows = frames.latest_join(acceleration, "x", "y", "z", prefix="latest_accel")
+ +
+ +        self.assertEqual(
+ +            [
+ +                (
+ +                    row.frame_index,
+ +                    row.latest_accel_x,
+ +                    row.latest_accel_y,
+ +                    row.latest_accel_z,
+ +                )
+ +                for row in rows
+ +            ],
+ +            [
+ +                (1, 1.0, 2.0, 3.0),
+ +                (2, 4.0, 5.0, 6.0),
+ +            ],
+ +        )
+ +
+ +    def test_pubsub_recursive_sum_accumulates_numeric_field_by_offset(self) -> None:
+ +        frames = PubSub(topic="frame_ticks", schema=FrameTick)
+ +        frames.publish(FrameTick(event_time=10, frame_index=1, delta_ms=16.0), event_time=10)
+ +        frames.publish(FrameTick(event_time=20, frame_index=2, delta_ms=17.0), event_time=20)
+ +        frames.publish(FrameTick(event_time=30, frame_index=3, delta_ms=18.0), event_time=30)
+ +
+ +        self.assertEqual(
+ +            frames.recursive_sum("delta_ms"),
+ +            [
+ +                {"seq": 0, "elapsed_ms": 0.0},
+ +                {"seq": 1, "elapsed_ms": 17.0},
+ +                {"seq": 2, "elapsed_ms": 35.0},
+ +            ],
+ +        )
+ +
+ +    def test_pubsub_query_composes_recursive_ctes_with_scoped_stream(self) -> None:
+ +        frames = PubSub(topic="frame_ticks", schema=FrameTick)
+ +        frames.publish(FrameTick(event_time=10, frame_index=1, delta_ms=16.0), event_time=10)
+ +        frames.publish(FrameTick(event_time=20, frame_index=2, delta_ms=17.0), event_time=20)
+ +
+ +        rows = frames.query(
+ +            """
+ +            WITH RECURSIVE state(seq, elapsed_ms) AS (
+ +              SELECT 0, 0.0
+ +              UNION ALL
+ +              SELECT frame.offset, state.elapsed_ms + frame.delta_ms
+ +              FROM state
+ +              JOIN stream frame ON frame.offset = state.seq + 1
+ +            )
+ +            SELECT *
+ +            FROM state
+ +            """
+ +        )
+ +
+ +        self.assertEqual(
+ +            rows,
+ +            [
+ +                {"seq": 0, "elapsed_ms": 0.0},
+ +                {"seq": 1, "elapsed_ms": 17.0},
+ +            ],
+ +        )
+ +
+ +    def test_pubsub_stream_encodes_optional_scalar_fields_as_sql_nulls(self) -> None:
+ +        stream = PubSub(
+ +            topic="sensor.environment.temperature",
+ +            schema=OptionalTemperature,
+ +        )
+ +
+ +        stream.publish(OptionalTemperature(degrees=None, unit="F"))
+ +        stream.publish(OptionalTemperature(degrees=72.9, unit="F"))
+ +
+ +        rows = stream.query(
+ +            """
+ +            SELECT degrees, unit
+ +            FROM stream
+ +            ORDER BY offset
+ +            """
+ +        )
+ +
+ +        self.assertEqual(
+ +            rows,
+ +            [
+ +                {"degrees": None, "unit": "F"},
+ +                {"degrees": 72.9, "unit": "F"},
+ +            ],
+ +        )
+ +        self.assertEqual(
+ +            rows[0].as_model(OptionalTemperature),
+ +            OptionalTemperature(degrees=None, unit="F"),
+ +        )
+ +
+  
++ class InterfaceTests(unittest.TestCase):
++     def test_interface_publishes_normalized_pubsub_events(self) -> None:
++         interface = Interface("test-source")
++ 
++         emitted = interface.connect("source-a", payload={"kind": "sensor"})
++         interface.publish_data("source-a", b"\x01\x02")
++ 
++         latest = interface.latest()
++         self.assertIsNotNone(latest)
++         self.assertEqual(emitted.event_type, "connected")
++         self.assertEqual(interface.topic, "interface.test-source")
++         self.assertEqual(interface.connected_sources(), ("source-a",))
++         self.assertEqual(latest.interface, "test-source")
++         self.assertEqual(latest.source_id, "source-a")
++         self.assertEqual(latest.event_type, "data")
++         self.assertTrue(latest.connected)
++         self.assertEqual(latest.sequence, 2)
++         self.assertEqual(latest.payload, "0102")
++         self.assertEqual(latest.payload_encoding, "hex")
++         self.assertEqual(
++             interface.query(
++                 """
++                 SELECT COUNT(*) AS event_count
++                 FROM stream
++                 WHERE source_id = :source_id
++                 """,
++                 {"source_id": "source-a"},
++             )[0].event_count,
++             2,
++         )
++ 
++     def test_bluetooth_controller_interface_tracks_lossy_disconnect_cycles(self) -> None:
++         controllers = BluetoothControllerInterface("controllers")
++ 
++         controllers.connect_controller(
++             "joy-0",
++             name="8BitDo Lite 2",
++             address="AA:BB:CC:DD:EE:FF",
++         )
++         controllers.publish_controller_state(
++             "joy-0",
++             {"dpad_x": 1, "south": True},
++             schema={"dpad_x": "int", "south": "bool"},
++         )
++         controllers.disconnect_controller("joy-0", reason="link lost")
++         controllers.connect_controller("joy-0", name="8BitDo Lite 2")
++ 
++         self.assertEqual(controllers.connected_sources(), ("joy-0",))
++         rows = controllers.query(
++             """
++             SELECT event_type, connected, payload_encoding
++             FROM stream
++             ORDER BY sequence
++             """
++         )
++         self.assertEqual(
++             [row.event_type for row in rows],
++             [
++                 "controller.connected",
++                 "controller.state",
++                 "controller.disconnected",
++                 "controller.connected",
++             ],
++         )
++         self.assertEqual([row.connected for row in rows], [True, True, False, True])
++         self.assertEqual(rows[1].payload_encoding, "json")
++ 
++     def test_serial_bus_interface_carries_schema_to_frames(self) -> None:
++         serial = SerialBusInterface("serial")
++ 
++         serial.discover_bus("/dev/ttyUSB0")
++         serial.publish_bus_schema(
++             "/dev/ttyUSB0",
++             {"rotation": "int", "pressed": "bool"},
++         )
++         frame = serial.publish_frame("/dev/ttyUSB0", {"rotation": 3, "pressed": True})
++ 
++         self.assertTrue(serial.is_connected("/dev/ttyUSB0"))
++         self.assertEqual(frame.event_type, "serial.frame")
++         self.assertEqual(
++             frame.schema,
++             '{"pressed":"bool","rotation":"int"}',
++         )
++         self.assertEqual(serial.schema_for("/dev/ttyUSB0"), frame.schema)
++         latest = serial.latest()
++         self.assertIsNotNone(latest)
++         self.assertEqual(latest.event_type, "serial.frame")
++         self.assertEqual(latest.schema, frame.schema)
++ 
++     def test_serial_bus_interface_releases_schema_when_bus_disappears(self) -> None:
++         serial = SerialBusInterface("serial")
++ 
++         serial.discover_bus("bus-a", schema="packet-v1")
++         serial.lose_bus("bus-a", reason="removed")
++ 
++         self.assertFalse(serial.is_connected("bus-a"))
++         self.assertEqual(serial.schema_for("bus-a"), "")
++         latest = serial.latest()
++         self.assertIsNotNone(latest)
++         self.assertEqual(latest.event_type, "serial.disconnected")
++         self.assertFalse(latest.connected)
++ 
++ 
+  class NativeArchitectureElementTests(unittest.TestCase):
+      def test_native_architecture_namespace_exports_manyfold_elements(self) -> None:
+          elements = (
+diff --git i/README.md w/README.md
+index dab57f2c571376ed5e9d1b6bd48346c15d804227..aa53e41196c16e60cec90ff4261ef4613fb09ad2 100644
+--- i/README.md
++++ w/README.md
+@@ -4,33 +4,24 @@
+   <img src="docs/assets/manyfold-topology-graph.png" alt="A schematic logical board with overlapping graph regions and circuit-style routes" width="640">
+ </p>
+ 
+-Manyfold is a component library for execution graphs.
++Manyfold is a Python component library for programs that become easier to
++understand when their data flow is explicit.
+ 
+-It helps make graph-shaped programs easier to build, inspect, and explain.
+-Routes, schemas, buffers, demand, time, payload access, writes, taints, and
+-lineage are modeled as graph concerns instead of being hidden in callback code
+-or queue configuration.
+-
+-Think of it as a logical board: routes are traces, ports are pads, components
+-shape execution, and overlapping regions show where ownership, policy, and data
+-flow meet.
++Start with a typed stream. If the program grows, promote its routing,
++computation, buffering, demand, and execution policy into an inspectable graph.
++The same values remain visible from application code instead of disappearing
++behind callbacks and queues.
+ 
+ This repository is an RFC-stage Python package with a PyO3/Rust extension. It
+-is not a production runtime yet, but the package is runnable and the examples
+-exercise the supported surface.
++is runnable, but it is not a production runtime yet. The supported examples are
++tested with the package.
+ 
+-## Start Fast
++## Start with a changing value
+ 
+ ```sh
+ uv sync
+-uv run python examples/simple_latest.py
+-uv run python -m unittest tests.test_examples
+ ```
+ 
+-## A Small Graph in Motion
+-
+-### Publish Values
+-
+ ```python
+ from dataclasses import dataclass
+ 
+@@ -43,21 +34,19 @@ class Temperature:
+     unit: str
+ 
+ 
+-temperature = PubSub()
++temperature = PubSub(
++    topic="sensor.environment.temperature",
++    schema=Temperature,
++)
+ 
+ temperature.publish(Temperature(degrees=72.4, unit="F"))
+ temperature.publish(Temperature(degrees=72.9, unit="F"))
++
+ latest = temperature.latest()
+-latest_row = temperature.query_one(
+-    """
+-    SELECT pad_name, offset + 1 AS seq_source, degrees, unit
+-    FROM stream
+-    ORDER BY event_time DESC, process_sequence DESC
+-    LIMIT 1
+-    """
+-)
+-if latest is not None and latest_row is not None:
+-    print(f"latest #{latest_row['seq_source']}: {latest.degrees}{latest.unit}")
++if latest is None:
++    raise RuntimeError("temperature stream is empty")
++
++print(f"latest #{latest.seq_source}: {latest.degrees}{latest.unit}")
+ ```
+ 
+ Output:
+@@ -66,152 +55,136 @@ Output:
+ latest #2: 72.9F
+ ```
+ 
+-When a topic matters, pass it explicitly. Dotted topics keep the same ownership
+-shape as a route name:
++That is the complete publish/read path. You do not need to write SQL and call
++`latest()` for the same value. `latest()` is the concise choice when you want
++current state; SQL is available when the question is more specific.
+ 
+-- `owner` is the component or subsystem responsible for the signal.
+-- `family` groups related streams.
+-- `stream` names this specific signal.
++The explicit topic gives the stream a stable application identity. Its dotted
++parts read from broad ownership to a specific signal: `sensor` owns the
++`environment` family, which contains `temperature`. For local experiments,
++`PubSub()` can create an ephemeral topic and infer a dataclass or Pydantic
++schema from the first value.
+ 
+-`PubSub` is a stream backed by PubSub delivery and a Rust SQL
+-stream processor, so `latest()` is an ordinary ordered `query_one(...)` under
+-the hood. If no topic is provided, the stream gets an ephemeral UUID5 topic.
+-`latest()` returns a row object, so SQL-backed fields can be read as
+-`latest.degrees` or `latest["degrees"]`. The SQL table exposes `pad_name` for
+-filtering and joins. If no schema is provided, the first structured model
+-publish fixes the stream schema lazily.
+-Pydantic models work through their `model_fields` and `model_dump()` surface;
+-dataclasses work through type annotations.
+-The current runtime encodes those values as FlatBuffer bytes in `payload` and
+-materializes the logical fields as typed SQL columns during Rust ingestion.
+-Callers may still pass generated FlatBuffer bytes, builder `Output()`, or table
+-objects. The queue assigns a default `event_time` when callers do not provide
+-one, and `key` defaults to `None`; distributed queue implementations own their
+-ordering contract.
++## Choose the surface that matches the problem
+ 
+-Manyfold-native architecture elements remain available from
+-`manyfold.architecture.native` for lower-level topology descriptions, but
+-`PubSub` is the primary application stream surface. Behavior-heavy substrates
+-stay backed by the runtime implementation.
++| If you want to… | Start with… | Why |
++| --- | --- | --- |
++| Publish changing state and read its current value | `PubSub.publish()` and `latest()` | Smallest typed stream surface |
++| Filter, aggregate, or inspect retained history | `PubSub` query helpers or `query()` | The retained stream is exposed as a SQL relation |
++| React to new values | `PubSub.subscribe()`, `map()`, and `filter()` | Disposable live callbacks without building a graph |
++| Make computation or flow policy inspectable | `Graph`, typed routes, and graph components | Routing, demand, storage, and execution become explicit |
++| Adapt a device or outside system | Architecture interfaces backed by `PubSub` | Lifecycle, schema, data, and errors share one queryable stream |
+ 
+-### Outside Interfaces
++These surfaces are a progression, not a checklist. Use only the layer that
++answers the problem you have.
+ 
+-Use architecture interfaces when external sources have lifecycle or schema
+-state that needs to compose with streams:
++## Ask a stream a specific question
++
++Use built-in helpers for common operations such as `latest()`, `average()`,
++`where()`, and `take()`. Use SQL when you need a custom projection, filter,
++window, or join:
+ 
+ ```python
+-from manyfold.architecture import BluetoothControllerInterface, SerialBusInterface
+-
+-controllers = BluetoothControllerInterface("controllers")
+-controllers.connect_controller("joy-0", name="8BitDo Lite 2")
+-controllers.publish_controller_state("joy-0", {"dpad_x": 1, "south": True})
+-controllers.disconnect_controller("joy-0", reason="link lost")
+-
+-serial = SerialBusInterface("serial")
+-serial.discover_bus("/dev/ttyUSB0")
+-serial.publish_bus_schema("/dev/ttyUSB0", {"rotation": "int", "pressed": "bool"})
+-serial.publish_frame("/dev/ttyUSB0", {"rotation": 3, "pressed": True})
++warm_readings = temperature.query(
++    """
++    SELECT offset + 1 AS sequence, degrees, unit
++    FROM stream
++    WHERE degrees >= :minimum
++    ORDER BY offset
++    """,
++    {"minimum": 72.5},
++)
++print([(row.sequence, row.degrees, row.unit) for row in warm_readings])
+ ```
+ 
+-Both adapters publish normalized lifecycle, schema, data, and error events to a
+-`PubSub` stream, so Bluetooth reconnect churn and serial bus discovery remain
+-queryable beside the payloads they produce.
++Output:
+ 
+-### Stats: Compute Values
++```text
++[(2, 72.9, 'F')]
++```
++
++The `stream` relation is scoped to this `PubSub` topic. Retention is bounded by
++`retained_messages`, so a query describes retained stream state rather than an
++unbounded event archive. Structured schema fields become typed SQL columns;
++the encoded value remains available as `payload`.
++
++## Make behavior part of the graph
++
++Callbacks are enough when reacting to a value is the whole job. Use `Graph`
++when the connection itself matters: when someone should be able to inspect
++where a value came from, how it was transformed, where it runs, or what bounds
++its flow.
+ 
+ ```python
++from manyfold import Graph, Schema, route
++
++graph = Graph()
+ temperature = route(
+     owner="sensor",
+     family="environment",
+     stream="temperature",
+     schema=Schema.float(name="Temperature"),
+ )
+-average_temperature = temperature.derivative_route(
+-    stream="average_temperature",
++average = temperature.derivative_route(
++    stream="average",
+     schema=Schema.float(name="AverageTemperature"),
+ )
+ 
+-subscription = graph.observe(temperature, replay_latest=False).moving_average(
+-    window_size=3
+-).connect(average_temperature)
++subscription = (
++    graph.observe(temperature, replay_latest=False)
++    .moving_average(window_size=3)
++    .connect(average)
++)
++
+ for reading in (72.4, 72.9, 73.7):
+     graph.publish(temperature, reading)
++
++latest_average = graph.latest(average)
+ subscription.dispose()
++if latest_average is None:
++    raise RuntimeError("average route is empty")
+ 
+-latest_average = graph.latest(average_temperature)
+-assert latest_average is not None
+ print(f"average: {latest_average.value:.1f}F")
+-
+-node = next(
+-    node
+-    for node in graph.diagram_nodes()
+-    if dict(node.metadata).get("statistic") == "moving_average"
+-)
+-print(dict(node.metadata))
+ ```
+ 
+ Output:
+ 
+ ```text
+ average: 73.0F
+-{'statistic': 'moving_average', 'storage': 'sliding_capacitor', 'window_size': '3'}
+ ```
+ 
+-The shape is the same: computed values are just values published to another
+-typed route. The moving average also renders as a graph-visible node backed by
+-a sliding capacitor, so derived state and operational inspection stay in the
+-same vocabulary.
++The moving average is now a graph-visible node between two typed routes.
++Manyfold uses the same model for bounded capacitors, demand gates, mailboxes,
++joins, windows, watchdogs, write shadows, thread placement, and other execution
++decisions. Add those components when the behavior must be operated or
++explained—not merely because they exist.
+ 
+-### Model Consensus
++## Bring outside state into the same model
+ 
+-```python
+-from manyfold import Consensus
++Architecture interfaces normalize an external source's lifecycle, schema,
++data, and errors into a `PubSub` stream. For example,
++`BluetoothControllerInterface` keeps controller connect/disconnect cycles beside
++sampled state, while `SerialBusInterface` keeps bus discovery and schema changes
++beside frames.
+ 
+-consensus = Consensus.install(graph, nodes=("node-a", "node-b"))
+-consensus.tick(1)
+-consensus.tick(2)
+-consensus.propose(1, "set mode=auto")
+-consensus.propose(2, "set temp=21")
++This is useful when downstream code needs to answer both “what is the latest
++reading?” and “was the device connected with the expected schema?” without
++maintaining a separate state convention. See
++[Using Manyfold](docs/using_manyfold.md#interfaces) for the complete examples.
+ 
+-print(consensus.latest_leader())
+-print(consensus.latest_log())
+-```
++## The mental model
+ 
+-Output:
++Think of a Manyfold graph as a logical board:
+ 
+-```text
+-('node-a', 3, True)
+-((1, 'set mode=auto'), (2, 'set temp=21'))
+-```
++- routes are named, typed traces;
++- components transform or control flow;
++- ports show the boundary of a part;
++- the manifest and runtime snapshots expose what is connected and retained.
+ 
+-The consensus component uses Raft-shaped leader election and replicated-log
+-concepts from Diego Ongaro and John Ousterhout's
+-[“In Search of an Understandable Consensus Algorithm”](https://www.usenix.org/conference/atc14/technical-sessions/presentation/ongaro)
+-(USENIX ATC 2014).
+-
+-## Read Next
+-
+-- [Onboarding](docs/onboarding.md): repo setup, first commands, and where to look first.
+-- [Using Manyfold](docs/using_manyfold.md): routes, graphs, observation, flow components, and examples.
+-- [Performance](docs/performance.md): how to represent performance concerns as graph concerns.
+-- [Distributed systems catalog](docs/distributed_systems_lego_catalog.md): higher-level component ideas.
+-- [v1.0.0 Vision](docs/v1_0_0_vision.md): a far-off but reachable target for distributed graph computing and primitive building.
+-- [Wiregraph RFC](docs/rfc/wiregraph_rfc_rev2.md): the larger design target.
+-
+-## What It Models
+-
+-- Typed routes for logical signals.
+-- Replayable latest-value reads and Rx-style observation.
+-- Graph-visible node thread placement for main, background, pooled, or isolated
+-  execution.
+-- Graph-visible capacitors, resistors, watchdogs, mailboxes, windows, and joins.
+-- Explicit demand, retention, lazy payload access, and write-shadow state.
+-- Lineage, taints, route audit snapshots, and topology queries.
+-- Local file-backed stores and a small consensus component scaffold.
+-
+-The public Python surface is intentionally narrow at the top level. Advanced
+-helpers live under `manyfold.graph`, and the examples are the best way to see
+-which parts are supported today.
++The public `manyfold` namespace covers the common graph API. Application streams
++and interface adapters live under `manyfold.architecture`; lower-level topology
++descriptions live under `manyfold.architecture.native`; advanced graph helpers
++live under `manyfold.graph`.
+ 
+ ## Examples
+ 
+@@ -253,6 +226,15 @@ list, and RFC reference suite all derive from the shared example catalog,
+ so supported versus archived status lives in one place.
+ <!-- manyfold:featured-examples:end -->
+ 
++## Go deeper
++
++- [Using Manyfold](docs/using_manyfold.md) develops the stream and graph APIs.
++- [Performance](docs/performance.md) explains how flow and performance concerns
++  become graph components.
++- [Onboarding](docs/onboarding.md) covers repository setup and contribution.
++- [Wiregraph RFC](docs/rfc/wiregraph_rfc_rev2.md) describes the larger design
++  target.
++
+ ## Verify
+ 
+ Use `uv run` for Python commands.
+diff --git i/python/manyfold/architecture/pubsub.py w/python/manyfold/architecture/pubsub.py
+index aa4f3a49f22aea849d0cdf013c8650ef8b7d5e39..7d05b8bf2e87d389c815e36d1c7a2c29b2d1ab05 100644
+--- i/python/manyfold/architecture/pubsub.py
++++ w/python/manyfold/architecture/pubsub.py
+@@ -452,6 +452,11 @@ class PubSub:
+             return None
+         return float(row.average)
+ 
++    @property
++    def value(self) -> "PubSubValueView":
++        """Return value-oriented helpers over this topic."""
++        return PubSubValueView(self)
++
+     def _infer_stream_schema(self, model: type) -> None:
+         self.schema = model
+         self._stream_schema = _coerce_stream_schema(self.topic, model)
+@@ -855,6 +860,133 @@ class PubSubObservable:
+         return PubSubObservable(subscribe_factory=subscribe)
+ 
+ 
++@dataclass(frozen=True)
++class ImmutableValue:
++    """Immutable value snapshot read from a PubSub topic."""
++
++    value: object
++    row: "StreamRow"
++
++
++@dataclass(frozen=True)
++class Value:
++    """Current value snapshot read from a mutable PubSub topic."""
++
++    value: object
++    row: "StreamRow"
++
++
++class PubSubValueView:
++    """Value-oriented read view over a PubSub topic."""
++
++    def __init__(self, pubsub: PubSub) -> None:
++        self._pubsub = pubsub
++
++    @property
++    def current(self) -> "PubSubCurrentValueView":
++        """Return mutable current-value helpers for this topic."""
++        return PubSubCurrentValueView(self._pubsub)
++
++    def latest(self) -> ImmutableValue | None:
++        """Return the latest immutable value snapshot."""
++        row = self._pubsub.latest()
++        if row is None:
++            return None
++        return ImmutableValue(value=_row_value(self._pubsub, row), row=row)
++
++    def subscribe(
++        self,
++        callback: Callable[[ImmutableValue], object] | object | None = None,
++        on_error: Callable[[Exception], object] | None = None,
++        on_completed: Callable[[], object] | None = None,
++        scheduler: object | None = None,
++        *,
++        on_next: Callable[[ImmutableValue], object] | None = None,
++        replay_latest: bool = False,
++    ) -> PubSubCallbackSubscription:
++        """Call ``callback`` with immutable value snapshots."""
++        del on_error, on_completed, scheduler
++        callback = _callback_from_observer(
++            "PubSubValueView.subscribe",
++            callback,
++            on_next=on_next,
++        )
++        if not callable(callback):
++            raise TypeError("PubSubValueView.subscribe requires a callable callback")
++        return self._pubsub.subscribe(
++            lambda row: callback(ImmutableValue(value=_row_value(self._pubsub, row), row=row)),
++            replay_latest=replay_latest,
++        )
++
++    def map(
++        self,
++        transform: Callable[[ImmutableValue], object],
++    ) -> PubSubObservable:
++        """Return a live stream of transformed immutable value snapshots."""
++        if not callable(transform):
++            raise TypeError("PubSubValueView.map requires a callable transform")
++        return PubSubObservable(self._pubsub).map(
++            lambda row: transform(ImmutableValue(value=_row_value(self._pubsub, row), row=row))
++        )
++
++
++class PubSubCurrentValueView:
++    """BehaviorSubject-like current value facade over a PubSub topic."""
++
++    def __init__(self, pubsub: PubSub) -> None:
++        self._pubsub = pubsub
++
++    def latest(self) -> Value | None:
++        """Return the latest current value snapshot."""
++        row = self._pubsub.latest()
++        if row is None:
++            return None
++        return Value(value=_row_value(self._pubsub, row), row=row)
++
++    def publish(self, value: object) -> None:
++        """Publish a new current value."""
++        self._pubsub.publish(value)
++
++    def on_next(self, value: object) -> None:
++        """Alias for ``publish`` for Subject-like code paths."""
++        self.publish(value)
++
++    def subscribe(
++        self,
++        callback: Callable[[Value], object] | object | None = None,
++        on_error: Callable[[Exception], object] | None = None,
++        on_completed: Callable[[], object] | None = None,
++        scheduler: object | None = None,
++        *,
++        on_next: Callable[[Value], object] | None = None,
++        replay_latest: bool = False,
++    ) -> PubSubCallbackSubscription:
++        """Call ``callback`` with current value snapshots."""
++        del on_error, on_completed, scheduler
++        callback = _callback_from_observer(
++            "PubSubCurrentValueView.subscribe",
++            callback,
++            on_next=on_next,
++        )
++        if not callable(callback):
++            raise TypeError("PubSubCurrentValueView.subscribe requires a callable callback")
++        return self._pubsub.subscribe(
++            lambda row: callback(Value(value=_row_value(self._pubsub, row), row=row)),
++            replay_latest=replay_latest,
++        )
++
++    def map(
++        self,
++        transform: Callable[[Value], object],
++    ) -> PubSubObservable:
++        """Return a live stream of transformed current value snapshots."""
++        if not callable(transform):
++            raise TypeError("PubSubCurrentValueView.map requires a callable transform")
++        return PubSubObservable(self._pubsub).map(
++            lambda row: transform(Value(value=_row_value(self._pubsub, row), row=row))
++        )
++
++
+ class PubSubFabric:
+     """Shared PubSub runtime that owns multiple topic handles."""
+ 

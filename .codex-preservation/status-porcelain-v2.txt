@@ -1,0 +1,14 @@
+# branch.oid 612169fa1d7a1946d6de41bb5b87bd3b4d7e0080
+# branch.head main
+# branch.upstream origin/main
+# branch.ab +0 -13
+1 MM N... 100644 100644 100644 e4c9e0b86394664c57ba9b75632f86ecf25dc750 dab57f2c571376ed5e9d1b6bd48346c15d804227 README.md
+1 M. N... 100644 100644 100644 abae736c9616fe3601097d77e11f6eef2bd6fce1 4f73feb2c66cee6060c5d211cd1e1fbb994d4d81 docs/using_manyfold.md
+1 .M N... 100644 100644 100644 aa4f3a49f22aea849d0cdf013c8650ef8b7d5e39 aa4f3a49f22aea849d0cdf013c8650ef8b7d5e39 python/manyfold/architecture/pubsub.py
+u UU N... 100644 100644 100644 100644 988d2b551f277c913c3d5ccd58ffe3ea408936c9 22f1304b71407706a5f0a050978da0a7f029766f 1c5aead0ba2c41782c99a27a8546b9acf9648c4c python/manyfold/architecture/__init__.py
+u UU N... 100644 100644 100644 100644 33169d4515c67ddd096e4c7c0ceac2cb6919f4f0 1e0e977ac5950a8ca86f55f50f11f07bc4fb7d5f e4aa9bfd93630584306b857a200c70e9eef9aff8 tests/test_architecture_pubsub.py
+? .DS_Store
+? docs/.DS_Store
+? examples/.DS_Store
+? python/.DS_Store
+? python/manyfold/architecture/interfaces.py

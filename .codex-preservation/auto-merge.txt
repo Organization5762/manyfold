@@ -1,0 +1,3 @@
+AUTO_MERGE=627e42c565d56d210fef02cc945feddf9c255596
+git_path=.git/AUTO_MERGE
+object_status=missing
