@@ -158,29 +158,30 @@ class _DeliverySender:
         outcome: DeliveryOutcome,
     ) -> None:
         with self._runtime.transition():
-            self._runtime.change(peer_negative_acknowledgements=1)
             if outcome.kind is DeliveryOutcomeKind.RETRYABLE:
                 record = self._journal.schedule_outbox_nack(
                     message_id,
                     now=time(),
                 )
-                if record is not None:
-                    self._runtime.emit(
-                        DeliveryEventKind.RETRY_SCHEDULED,
-                        message_id,
-                        record.channel,
-                        record.source_key,
-                        store=DeliveryStore.OUTBOX,
-                        correlation_id=record.correlation_id,
-                        attempt=record.attempts,
-                        outcome=outcome,
-                    )
-                return
-            record = self._journal.delete_outbox(message_id)
-            self._enqueue_control(
-                _Control(_DeliveryOperation.CONFIRM, message_id)
-            )
+            else:
+                record = self._journal.delete_outbox(message_id)
+                self._enqueue_control(
+                    _Control(_DeliveryOperation.CONFIRM, message_id)
+                )
             if record is None:
+                return
+            self._runtime.change(peer_negative_acknowledgements=1)
+            if outcome.kind is DeliveryOutcomeKind.RETRYABLE:
+                self._runtime.emit(
+                    DeliveryEventKind.RETRY_SCHEDULED,
+                    message_id,
+                    record.channel,
+                    record.source_key,
+                    store=DeliveryStore.OUTBOX,
+                    correlation_id=record.correlation_id,
+                    attempt=record.attempts,
+                    outcome=outcome,
+                )
                 return
             kind = (
                 DeliveryEventKind.EXPIRED
