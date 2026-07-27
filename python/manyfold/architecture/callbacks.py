@@ -121,30 +121,32 @@ class CallbackDelivery:
         """Submit one no-argument callback for placement-aware execution."""
         if not callable(callback):
             raise TypeError("callback must be callable")
+        if self.placement.kind == "inline":
+            with self._lock:
+                if self._closed:
+                    return False
+                task = _CallbackTask(self, callback)
+            task()
+            return True
         with self._lock:
             if self._closed:
                 return False
             task = _CallbackTask(self, callback)
-            if self.placement.kind != "inline":
-                self._pending.add(task)
-        if self.placement.kind == "inline":
-            task()
-            return True
-        if self.placement.kind == "main":
-            if _enqueue_main_thread_callback(task, self.placement.queue_limit):
-                return True
-            self._forget_task(task)
-            task.cancel()
-            return False
-        if self._worker is None:
-            self._forget_task(task)
-            task.cancel()
-            raise RuntimeError("callback worker is not initialized")
-        if self._worker.submit(task):
-            return True
-        self._forget_task(task)
-        task.cancel()
-        return False
+            if self.placement.kind == "main":
+                if not _enqueue_main_thread_callback(
+                    task,
+                    self.placement.queue_limit,
+                ):
+                    task.cancel()
+                    return False
+            elif self._worker is None:
+                task.cancel()
+                raise RuntimeError("callback worker is not initialized")
+            elif not self._worker.submit(task):
+                task.cancel()
+                return False
+            self._pending.add(task)
+        return True
 
     def close(self) -> None:
         """Stop accepting callbacks and cancel queued callback work."""
@@ -154,6 +156,8 @@ class CallbackDelivery:
             self._closed = True
             pending = tuple(self._pending)
             self._pending.clear()
+        if self.placement.kind == "main":
+            _discard_main_thread_callbacks(pending)
         for task in pending:
             task.cancel()
         if self._worker is not None:
@@ -180,6 +184,20 @@ def _enqueue_main_thread_callback(
             return False
         _main_thread_callbacks.append(callback)
     return True
+
+
+def _discard_main_thread_callbacks(callbacks: tuple["_CallbackTask", ...]) -> None:
+    if not callbacks:
+        return
+    discarded = set(callbacks)
+    with _main_thread_lock:
+        retained = [
+            callback
+            for callback in _main_thread_callbacks
+            if callback not in discarded
+        ]
+        _main_thread_callbacks.clear()
+        _main_thread_callbacks.extend(retained)
 
 
 def _require_thread_name(value: str | None) -> str:

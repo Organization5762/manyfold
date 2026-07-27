@@ -410,7 +410,7 @@ class PubSubStreamTests(unittest.TestCase):
         stream.close()
 
         self.assertEqual(observed, [])
-        self.assertEqual(drain_main_thread_callbacks(), 1)
+        self.assertEqual(drain_main_thread_callbacks(), 0)
         self.assertEqual(observed, [])
 
     def test_pubsub_subscription_dispose_cancels_pending_main_thread_callback(
@@ -430,8 +430,37 @@ class PubSubStreamTests(unittest.TestCase):
         stream.publish(Temperature(degrees=72.0, unit="F"))
         self.assertTrue(subscription.dispose())
 
-        self.assertEqual(drain_main_thread_callbacks(), 1)
+        self.assertEqual(drain_main_thread_callbacks(), 0)
         self.assertEqual(observed, [])
+
+    def test_pubsub_close_releases_pending_main_thread_callback_queue_capacity(
+        self,
+    ) -> None:
+        drain_main_thread_callbacks()
+        first = PubSub(
+            topic="context.main-thread-capacity-first",
+            schema=Temperature,
+        )
+        first.subscribe(
+            lambda _row: None,
+            callback_placement=CallbackPlacement.main_thread(queue_limit=1),
+        )
+        first.publish(Temperature(degrees=72.0, unit="F"))
+        first.close()
+
+        observed: list[float] = []
+        second = PubSub(
+            topic="context.main-thread-capacity-second",
+            schema=Temperature,
+        )
+        second.subscribe(
+            lambda row: observed.append(row.degrees),
+            callback_placement=CallbackPlacement.main_thread(queue_limit=1),
+        )
+        second.publish(Temperature(degrees=73.0, unit="F"))
+
+        self.assertEqual(drain_main_thread_callbacks(), 1)
+        self.assertEqual(observed, [73.0])
 
     def test_pubsub_close_cancels_pending_spawned_thread_callback_delivery(
         self,
