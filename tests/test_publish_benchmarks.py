@@ -16,12 +16,14 @@ from tests.test_support import subprocess_test_env
 class PublishBenchmarkTests(unittest.TestCase):
     def test_full_matrix_reports_distinct_publish_paths_and_final_state(self) -> None:
         result = publish_benchmarks.run_publish_benchmarks(
+            first_publish_samples=3,
             iterations=16,
             require_clean=False,
             runs=2,
             warmup_iterations=2,
         )
 
+        self.assertEqual(result["first_publish_samples"], 3)
         self.assertEqual(result["iterations"], 16)
         self.assertEqual(result["runs"], 2)
         self.assertEqual(result["warmup_iterations"], 2)
@@ -42,6 +44,24 @@ class PublishBenchmarkTests(unittest.TestCase):
             self.assertGreater(
                 workload["per_route_first_publish"]["average"],
                 0.0,
+            )
+            self.assertEqual(
+                workload["per_route_first_publish"]["samples_per_run"],
+                3,
+            )
+            self.assertEqual(
+                tuple(
+                    len(samples)
+                    for samples in workload["per_route_first_publish"]["raw_samples"]
+                ),
+                (3, 3),
+            )
+            self.assertEqual(
+                workload["per_route_first_publish"]["run_final_states"],
+                (
+                    workload["per_route_first_publish"]["run_final_state"],
+                    workload["per_route_first_publish"]["run_final_state"],
+                ),
             )
             self.assertGreaterEqual(
                 workload["steady_publish"]["relative_stdev_percent"],
@@ -116,6 +136,14 @@ class PublishBenchmarkTests(unittest.TestCase):
                 iterations=0,
                 require_clean=False,
             )
+        with self.assertRaisesRegex(
+            ValueError,
+            "first_publish_samples must be positive",
+        ):
+            publish_benchmarks.run_publish_benchmarks(
+                first_publish_samples=0,
+                require_clean=False,
+            )
         with self.assertRaisesRegex(TypeError, "runs must be an integer"):
             publish_benchmarks.run_publish_benchmarks(  # type: ignore[arg-type]
                 require_clean=False,
@@ -136,6 +164,8 @@ class PublishBenchmarkTests(unittest.TestCase):
                     "-m",
                     "manyfold.private.profiling.publish_benchmarks",
                     "sparse_drop_nowait",
+                    "--first-publish-samples",
+                    "3",
                     "--iterations",
                     "16",
                     "--runs",
@@ -160,6 +190,7 @@ class PublishBenchmarkTests(unittest.TestCase):
                 output,
             )
         self.assertIn("revision", output["provenance"])
+        self.assertEqual(output["first_publish_samples"], 3)
         self.assertEqual(
             output["workloads"][0]["workload"],
             "sparse_drop_nowait",
@@ -193,6 +224,54 @@ class PublishBenchmarkTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "subscription teardown failed"):
             session.dispose()
 
+        self.assertEqual(publish_benchmarks._any_schema_value_count(), start_count)
+
+    def test_first_publish_failure_disposes_every_created_session(self) -> None:
+        start_count = publish_benchmarks._any_schema_value_count()
+        created_sessions = 0
+        disposed_sessions = 0
+
+        def setup() -> publish_benchmarks._WorkloadSession:
+            nonlocal created_sessions
+            created_sessions += 1
+            graph = Graph()
+            target = route(
+                plane=Plane.Read,
+                layer=Layer.Logical,
+                owner="publish_benchmark_test",
+                family="cleanup",
+                stream="first_publish_failure",
+                variant=Variant.Event,
+                schema=Schema.any("PublishBenchmarkFirstPublishFailure"),
+            )
+
+            def fail_delivery(_value: object) -> None:
+                raise RuntimeError("first publish delivery failed")
+
+            subscription = graph.observe(
+                target,
+                replay_latest=False,
+            ).subscribe(fail_delivery)
+
+            def record_disposal() -> dict[str, int | bool]:
+                nonlocal disposed_sessions
+                disposed_sessions += 1
+                return {}
+
+            return publish_benchmarks._session(
+                graph,
+                publish_one=lambda: graph.publish(target, object()),
+                final_state=lambda _events: {},
+                disposables=(subscription,),
+                after_dispose=record_disposal,
+                process_local_value_baseline=start_count,
+            )
+
+        with self.assertRaisesRegex(RuntimeError, "first publish delivery failed"):
+            publish_benchmarks._run_first_publish_samples(setup, samples=3)
+
+        self.assertEqual(created_sessions, 1)
+        self.assertEqual(disposed_sessions, created_sessions)
         self.assertEqual(publish_benchmarks._any_schema_value_count(), start_count)
 
 

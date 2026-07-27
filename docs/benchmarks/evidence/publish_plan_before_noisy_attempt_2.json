@@ -1,0 +1,1205 @@
+{
+  "environment": {
+    "cargo": "cargo 1.96.1 (356927216 2026-06-26)",
+    "cpu_count": 14,
+    "cpu_model": "Apple M4 Pro",
+    "implementation": "CPython",
+    "machine": "arm64",
+    "manyfold_version": "0.1.42",
+    "native_bridge_version": "0.1.42",
+    "native_module": "/Users/lampe/.codex/worktrees/4fbcabe6-cdf0-4bd1-8b22-d601faf75e8a/manyfold-durable-mesh/python/manyfold/_manyfold_rust.abi3.so",
+    "native_module_sha256": "5cfe5fb63e8bcdcfed1315f89ab2cf09985181230322ed524f100c44bedf5531",
+    "platform": "macOS-15.4.1-arm64-arm-64bit",
+    "python": "3.12.11",
+    "python_build": [
+      "main",
+      "Jun 26 2025 21:44:36"
+    ],
+    "python_compiler": "Clang 20.1.4 ",
+    "python_executable": "/Users/lampe/.local/share/uv/python/cpython-3.12.11-macos-aarch64-none/bin/python3.12",
+    "rustc": "rustc 1.96.1 (31fca3adb 2026-06-26)"
+  },
+  "generated_at": "2026-07-27T03:38:14.315151+00:00",
+  "iterations": 100000,
+  "provenance": {
+    "dirty": false,
+    "revision": "febb45b39666db7c052d963e921a2bb2e3890f76",
+    "status": [],
+    "tree": "bdcabd635a9a91f9341bdf5b97712b64cffe47f8"
+  },
+  "runs": 7,
+  "schema_version": 2,
+  "warmup_iterations": 10000,
+  "workloads": [
+    {
+      "end_to_end_seconds": {
+        "average": 12.607594863000227,
+        "maximum": 24.343700166995404,
+        "minimum": 5.439913792011794,
+        "relative_stdev_percent": 62.73434764072848,
+        "runs": [
+          5.439913792011794,
+          5.619203666006797,
+          6.615864499995951,
+          6.056908500002464,
+          22.233562249995884,
+          17.944011165993288,
+          24.343700166995404
+        ],
+        "stdev": 7.909292390489188
+      },
+      "final_state": {
+        "all_events_delivered_inline": true,
+        "delivered": 110001,
+        "graph_owned_subscriptions_after_dispose": 0,
+        "python_materialized_payloads_after_dispose": 0,
+        "source_accepted_events": 110001,
+        "source_history": 8,
+        "state_accepted_events": 110001,
+        "state_history": 8,
+        "subscribers_after_dispose": 0
+      },
+      "per_route_first_publish": {
+        "average": 435.81528422821845,
+        "maximum": 2523.167000617832,
+        "minimum": 56.45799683406949,
+        "relative_stdev_percent": 195.64238605474503,
+        "runs": [
+          140.08300786372274,
+          60.0829953327775,
+          56.45799683406949,
+          99.20798765961081,
+          62.12500738911331,
+          109.58299390040338,
+          2523.167000617832
+        ],
+        "stdev": 852.6394208553554
+      },
+      "run_final_states": [
+        {
+          "all_events_delivered_inline": true,
+          "delivered": 110001,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "source_accepted_events": 110001,
+          "source_history": 8,
+          "state_accepted_events": 110001,
+          "state_history": 8,
+          "subscribers_after_dispose": 0
+        },
+        {
+          "all_events_delivered_inline": true,
+          "delivered": 110001,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "source_accepted_events": 110001,
+          "source_history": 8,
+          "state_accepted_events": 110001,
+          "state_history": 8,
+          "subscribers_after_dispose": 0
+        },
+        {
+          "all_events_delivered_inline": true,
+          "delivered": 110001,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "source_accepted_events": 110001,
+          "source_history": 8,
+          "state_accepted_events": 110001,
+          "state_history": 8,
+          "subscribers_after_dispose": 0
+        },
+        {
+          "all_events_delivered_inline": true,
+          "delivered": 110001,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "source_accepted_events": 110001,
+          "source_history": 8,
+          "state_accepted_events": 110001,
+          "state_history": 8,
+          "subscribers_after_dispose": 0
+        },
+        {
+          "all_events_delivered_inline": true,
+          "delivered": 110001,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "source_accepted_events": 110001,
+          "source_history": 8,
+          "state_accepted_events": 110001,
+          "state_history": 8,
+          "subscribers_after_dispose": 0
+        },
+        {
+          "all_events_delivered_inline": true,
+          "delivered": 110001,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "source_accepted_events": 110001,
+          "source_history": 8,
+          "state_accepted_events": 110001,
+          "state_history": 8,
+          "subscribers_after_dispose": 0
+        },
+        {
+          "all_events_delivered_inline": true,
+          "delivered": 110001,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "source_accepted_events": 110001,
+          "source_history": 8,
+          "state_accepted_events": 110001,
+          "state_history": 8,
+          "subscribers_after_dispose": 0
+        }
+      ],
+      "steady_publish": {
+        "average": 118.3626070842729,
+        "maximum": 226.47087374993134,
+        "minimum": 48.69383792000008,
+        "relative_stdev_percent": 64.27795383086516,
+        "runs": [
+          48.69383792000008,
+          51.82741500000702,
+          60.85564584005624,
+          55.038356660079444,
+          216.73846708989,
+          168.9136533299461,
+          226.47087374993134
+        ],
+        "stdev": 76.08106193463726
+      },
+      "workload": "materializer_fanout_nowait"
+    },
+    {
+      "end_to_end_seconds": {
+        "average": 8.928569940717093,
+        "maximum": 17.41923804199905,
+        "minimum": 3.901358417002484,
+        "relative_stdev_percent": 49.83802592012236,
+        "runs": [
+          6.981817792009679,
+          8.017864500012365,
+          13.404012375001912,
+          17.41923804199905,
+          7.744837791993632,
+          5.030860667000525,
+          3.901358417002484
+        ],
+        "stdev": 4.449823001350839
+      },
+      "final_state": {
+        "all_source_events_accepted": true,
+        "all_state_events_accepted": true,
+        "graph_owned_subscriptions_after_dispose": 0,
+        "python_materialized_payloads": 0,
+        "python_materialized_payloads_after_dispose": 0,
+        "source_accepted_events": 110001,
+        "source_history": 8,
+        "state_accepted_events": 110001,
+        "state_history": 8
+      },
+      "per_route_first_publish": {
+        "average": 130.61914276996893,
+        "maximum": 249.0839979145676,
+        "minimum": 61.25000072643161,
+        "relative_stdev_percent": 41.877034153428575,
+        "runs": [
+          139.7079904563725,
+          127.25000851787627,
+          87.74999878369272,
+          131.5420086029917,
+          117.74999438785017,
+          249.0839979145676,
+          61.25000072643161
+        ],
+        "stdev": 54.69942302869552
+      },
+      "run_final_states": [
+        {
+          "all_source_events_accepted": true,
+          "all_state_events_accepted": true,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "python_materialized_payloads": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "source_accepted_events": 110001,
+          "source_history": 8,
+          "state_accepted_events": 110001,
+          "state_history": 8
+        },
+        {
+          "all_source_events_accepted": true,
+          "all_state_events_accepted": true,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "python_materialized_payloads": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "source_accepted_events": 110001,
+          "source_history": 8,
+          "state_accepted_events": 110001,
+          "state_history": 8
+        },
+        {
+          "all_source_events_accepted": true,
+          "all_state_events_accepted": true,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "python_materialized_payloads": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "source_accepted_events": 110001,
+          "source_history": 8,
+          "state_accepted_events": 110001,
+          "state_history": 8
+        },
+        {
+          "all_source_events_accepted": true,
+          "all_state_events_accepted": true,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "python_materialized_payloads": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "source_accepted_events": 110001,
+          "source_history": 8,
+          "state_accepted_events": 110001,
+          "state_history": 8
+        },
+        {
+          "all_source_events_accepted": true,
+          "all_state_events_accepted": true,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "python_materialized_payloads": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "source_accepted_events": 110001,
+          "source_history": 8,
+          "state_accepted_events": 110001,
+          "state_history": 8
+        },
+        {
+          "all_source_events_accepted": true,
+          "all_state_events_accepted": true,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "python_materialized_payloads": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "source_accepted_events": 110001,
+          "source_history": 8,
+          "state_accepted_events": 110001,
+          "state_history": 8
+        },
+        {
+          "all_source_events_accepted": true,
+          "all_state_events_accepted": true,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "python_materialized_payloads": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "source_accepted_events": 110001,
+          "source_history": 8,
+          "state_accepted_events": 110001,
+          "state_history": 8
+        }
+      ],
+      "steady_publish": {
+        "average": 80.8069174985576,
+        "maximum": 158.88555124998675,
+        "minimum": 35.51784916999168,
+        "relative_stdev_percent": 50.31587509873131,
+        "runs": [
+          61.54132707990357,
+          76.03674958008924,
+          120.44180083001265,
+          158.88555124998675,
+          68.63269458001014,
+          44.59244999990915,
+          35.51784916999168
+        ],
+        "stdev": 40.658707679709096
+      },
+      "workload": "materializer_unobserved_nowait"
+    },
+    {
+      "end_to_end_seconds": {
+        "average": 2.2026737439986652,
+        "maximum": 2.6443736249930225,
+        "minimum": 2.0211631249985658,
+        "relative_stdev_percent": 8.951841392987516,
+        "runs": [
+          2.1407659159885952,
+          2.0730374999984633,
+          2.1884118330053752,
+          2.0211631249985658,
+          2.071093209000537,
+          2.2798710000060964,
+          2.6443736249930225
+        ],
+        "stdev": 0.1971798599677404
+      },
+      "final_state": {
+        "graph_owned_subscriptions_after_dispose": 0,
+        "latest_preserves_identity": true,
+        "python_materialized_payloads_after_dispose": 0,
+        "released_by_benchmark_cleanup": true,
+        "released_by_graph": false,
+        "retained_history": 8,
+        "retained_process_local_values": 8
+      },
+      "per_route_first_publish": {
+        "average": 484.12514193582217,
+        "maximum": 2717.208000831306,
+        "minimum": 95.16699356026947,
+        "relative_stdev_percent": 188.322009456718,
+        "runs": [
+          2717.208000831306,
+          95.16699356026947,
+          111.79200373589993,
+          111.70799552928656,
+          127.91699555236846,
+          101.29199654329568,
+          123.792007798329
+        ],
+        "stdev": 911.7141955787284
+      },
+      "run_final_states": [
+        {
+          "graph_owned_subscriptions_after_dispose": 0,
+          "latest_preserves_identity": true,
+          "python_materialized_payloads_after_dispose": 0,
+          "released_by_benchmark_cleanup": true,
+          "released_by_graph": false,
+          "retained_history": 8,
+          "retained_process_local_values": 8
+        },
+        {
+          "graph_owned_subscriptions_after_dispose": 0,
+          "latest_preserves_identity": true,
+          "python_materialized_payloads_after_dispose": 0,
+          "released_by_benchmark_cleanup": true,
+          "released_by_graph": false,
+          "retained_history": 8,
+          "retained_process_local_values": 8
+        },
+        {
+          "graph_owned_subscriptions_after_dispose": 0,
+          "latest_preserves_identity": true,
+          "python_materialized_payloads_after_dispose": 0,
+          "released_by_benchmark_cleanup": true,
+          "released_by_graph": false,
+          "retained_history": 8,
+          "retained_process_local_values": 8
+        },
+        {
+          "graph_owned_subscriptions_after_dispose": 0,
+          "latest_preserves_identity": true,
+          "python_materialized_payloads_after_dispose": 0,
+          "released_by_benchmark_cleanup": true,
+          "released_by_graph": false,
+          "retained_history": 8,
+          "retained_process_local_values": 8
+        },
+        {
+          "graph_owned_subscriptions_after_dispose": 0,
+          "latest_preserves_identity": true,
+          "python_materialized_payloads_after_dispose": 0,
+          "released_by_benchmark_cleanup": true,
+          "released_by_graph": false,
+          "retained_history": 8,
+          "retained_process_local_values": 8
+        },
+        {
+          "graph_owned_subscriptions_after_dispose": 0,
+          "latest_preserves_identity": true,
+          "python_materialized_payloads_after_dispose": 0,
+          "released_by_benchmark_cleanup": true,
+          "released_by_graph": false,
+          "retained_history": 8,
+          "retained_process_local_values": 8
+        },
+        {
+          "graph_owned_subscriptions_after_dispose": 0,
+          "latest_preserves_identity": true,
+          "python_materialized_payloads_after_dispose": 0,
+          "released_by_benchmark_cleanup": true,
+          "released_by_graph": false,
+          "retained_history": 8,
+          "retained_process_local_values": 8
+        }
+      ],
+      "steady_publish": {
+        "average": 19.98640625286498,
+        "maximum": 23.16283292006119,
+        "minimum": 18.157223330053966,
+        "relative_stdev_percent": 7.847289830237994,
+        "runs": [
+          18.87144084001193,
+          19.460719589988003,
+          19.768894169974374,
+          18.157223330053966,
+          19.220584169961512,
+          21.263148750003893,
+          23.16283292006119
+        ],
+        "stdev": 1.5683912253111243
+      },
+      "workload": "process_local_nowait"
+    },
+    {
+      "end_to_end_seconds": {
+        "average": 2.8571590058563743,
+        "maximum": 2.9725857909943443,
+        "minimum": 2.568295124990982,
+        "relative_stdev_percent": 4.386528775047249,
+        "runs": [
+          2.9028623749909457,
+          2.568295124990982,
+          2.8428767090081237,
+          2.852131958003156,
+          2.925255082998774,
+          2.9725857909943443,
+          2.9361060000082944
+        ],
+        "stdev": 0.12533010194074376
+      },
+      "final_state": {
+        "graph_owned_subscriptions_after_dispose": 0,
+        "latest_payload_bytes": 16,
+        "python_materialized_payloads_after_dispose": 0,
+        "retained_history": 8
+      },
+      "per_route_first_publish": {
+        "average": 134.9999989283138,
+        "maximum": 301.70800164341927,
+        "minimum": 67.12500180583447,
+        "relative_stdev_percent": 57.51109710674409,
+        "runs": [
+          71.04199903551489,
+          67.12500180583447,
+          135.12499572243541,
+          301.70800164341927,
+          67.58299423381686,
+          133.37499694898725,
+          169.0420031081885
+        ],
+        "stdev": 77.63998047776603
+      },
+      "run_final_states": [
+        {
+          "graph_owned_subscriptions_after_dispose": 0,
+          "latest_payload_bytes": 16,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 8
+        },
+        {
+          "graph_owned_subscriptions_after_dispose": 0,
+          "latest_payload_bytes": 16,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 8
+        },
+        {
+          "graph_owned_subscriptions_after_dispose": 0,
+          "latest_payload_bytes": 16,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 8
+        },
+        {
+          "graph_owned_subscriptions_after_dispose": 0,
+          "latest_payload_bytes": 16,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 8
+        },
+        {
+          "graph_owned_subscriptions_after_dispose": 0,
+          "latest_payload_bytes": 16,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 8
+        },
+        {
+          "graph_owned_subscriptions_after_dispose": 0,
+          "latest_payload_bytes": 16,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 8
+        },
+        {
+          "graph_owned_subscriptions_after_dispose": 0,
+          "latest_payload_bytes": 16,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 8
+        }
+      ],
+      "steady_publish": {
+        "average": 25.97891339427276,
+        "maximum": 27.11249833999318,
+        "minimum": 23.265117919945624,
+        "relative_stdev_percent": 4.7176298765781475,
+        "runs": [
+          26.382733329955954,
+          23.265117919945624,
+          26.139033750077942,
+          25.411082499922486,
+          26.548535839974647,
+          27.11249833999318,
+          26.993392080039484
+        ],
+        "stdev": 1.2255889798985737
+      },
+      "workload": "raw_route_publish"
+    },
+    {
+      "end_to_end_seconds": {
+        "average": 3.2084958867115865,
+        "maximum": 6.90511133299151,
+        "minimum": 2.3358064579952043,
+        "relative_stdev_percent": 47.687505663481716,
+        "runs": [
+          2.3962605000124313,
+          3.026134333005757,
+          2.9125577499944484,
+          2.4900114169868175,
+          6.90511133299151,
+          2.3935894159949385,
+          2.3358064579952043
+        ],
+        "stdev": 1.5300516576881658
+      },
+      "final_state": {
+        "accepted_events": 110001,
+        "all_events_accepted": true,
+        "graph_owned_subscriptions_after_dispose": 0,
+        "python_materialized_payloads_after_dispose": 0,
+        "retained_history": 32
+      },
+      "per_route_first_publish": {
+        "average": 53.785714304207694,
+        "maximum": 73.70799721684307,
+        "minimum": 33.20901305414736,
+        "relative_stdev_percent": 25.29076876827209,
+        "runs": [
+          33.20901305414736,
+          53.08300023898482,
+          63.041996327228844,
+          51.41699512023479,
+          37.45799767784774,
+          64.58300049416721,
+          73.70799721684307
+        ],
+        "stdev": 13.602820635040615
+      },
+      "run_final_states": [
+        {
+          "accepted_events": 110001,
+          "all_events_accepted": true,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 32
+        },
+        {
+          "accepted_events": 110001,
+          "all_events_accepted": true,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 32
+        },
+        {
+          "accepted_events": 110001,
+          "all_events_accepted": true,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 32
+        },
+        {
+          "accepted_events": 110001,
+          "all_events_accepted": true,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 32
+        },
+        {
+          "accepted_events": 110001,
+          "all_events_accepted": true,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 32
+        },
+        {
+          "accepted_events": 110001,
+          "all_events_accepted": true,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 32
+        },
+        {
+          "accepted_events": 110001,
+          "all_events_accepted": true,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 32
+        }
+      ],
+      "steady_publish": {
+        "average": 29.912235177138687,
+        "maximum": 66.91766042000381,
+        "minimum": 21.24004999990575,
+        "relative_stdev_percent": 51.13586902521846,
+        "runs": [
+          21.88718000004883,
+          27.5360583300062,
+          27.041965829994297,
+          23.225600000005215,
+          66.91766042000381,
+          21.537131660006708,
+          21.24004999990575
+        ],
+        "stdev": 15.295881402696962
+      },
+      "workload": "retained_history_publish"
+    },
+    {
+      "end_to_end_seconds": {
+        "average": 1.4682218334304966,
+        "maximum": 1.628408667005715,
+        "minimum": 1.3726357499981532,
+        "relative_stdev_percent": 5.914898550155242,
+        "runs": [
+          1.442597792003653,
+          1.509018124997965,
+          1.628408667005715,
+          1.38181308300409,
+          1.3726357499981532,
+          1.407559167011641,
+          1.5355202499922598
+        ],
+        "stdev": 0.08684383193864316
+      },
+      "final_state": {
+        "accepted_events": 110001,
+        "all_events_accepted": true,
+        "graph_owned_subscriptions_after_dispose": 0,
+        "latest_payload_bytes": 16,
+        "python_materialized_payloads": 0,
+        "python_materialized_payloads_after_dispose": 0,
+        "retained_history": 8
+      },
+      "per_route_first_publish": {
+        "average": 94.9287142637851,
+        "maximum": 125.58299931697547,
+        "minimum": 68.91699740663171,
+        "relative_stdev_percent": 21.084592735323437,
+        "runs": [
+          88.9999937498942,
+          93.66699669044465,
+          68.91699740663171,
+          122.04200902488083,
+          90.20899597089738,
+          75.08300768677145,
+          125.58299931697547
+        ],
+        "stdev": 20.015332791397977
+      },
+      "run_final_states": [
+        {
+          "accepted_events": 110001,
+          "all_events_accepted": true,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "latest_payload_bytes": 16,
+          "python_materialized_payloads": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 8
+        },
+        {
+          "accepted_events": 110001,
+          "all_events_accepted": true,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "latest_payload_bytes": 16,
+          "python_materialized_payloads": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 8
+        },
+        {
+          "accepted_events": 110001,
+          "all_events_accepted": true,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "latest_payload_bytes": 16,
+          "python_materialized_payloads": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 8
+        },
+        {
+          "accepted_events": 110001,
+          "all_events_accepted": true,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "latest_payload_bytes": 16,
+          "python_materialized_payloads": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 8
+        },
+        {
+          "accepted_events": 110001,
+          "all_events_accepted": true,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "latest_payload_bytes": 16,
+          "python_materialized_payloads": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 8
+        },
+        {
+          "accepted_events": 110001,
+          "all_events_accepted": true,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "latest_payload_bytes": 16,
+          "python_materialized_payloads": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 8
+        },
+        {
+          "accepted_events": 110001,
+          "all_events_accepted": true,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "latest_payload_bytes": 16,
+          "python_materialized_payloads": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 8
+        }
+      ],
+      "steady_publish": {
+        "average": 13.245296131416191,
+        "maximum": 14.389108750037849,
+        "minimum": 12.196738749917131,
+        "relative_stdev_percent": 5.846324730808366,
+        "runs": [
+          13.161705829988932,
+          13.696437499893364,
+          14.389108750037849,
+          12.196738749917131,
+          12.470820000016829,
+          12.718932919960935,
+          14.083329170098295
+        ],
+        "stdev": 0.7743630233997886
+      },
+      "workload": "sparse_drop_nowait"
+    },
+    {
+      "end_to_end_seconds": {
+        "average": 2.901084416712235,
+        "maximum": 3.178188500009128,
+        "minimum": 2.6066072919929866,
+        "relative_stdev_percent": 8.272057089123479,
+        "runs": [
+          3.163381999998819,
+          3.1667153330054134,
+          2.6066072919929866,
+          2.817274874993018,
+          3.178188500009128,
+          2.7207819589966675,
+          2.6546409579896135
+        ],
+        "stdev": 0.23997935915410096
+      },
+      "final_state": {
+        "all_events_delivered_inline": true,
+        "delivered": 110001,
+        "graph_owned_subscriptions_after_dispose": 0,
+        "python_materialized_payloads_after_dispose": 0,
+        "retained_history": 8,
+        "subscribers": 1,
+        "subscribers_after_dispose": 0
+      },
+      "per_route_first_publish": {
+        "average": 115.59528606345079,
+        "maximum": 147.12499978486449,
+        "minimum": 62.12500738911331,
+        "relative_stdev_percent": 23.34685601002594,
+        "runs": [
+          110.2499954868108,
+          103.16699626855552,
+          62.12500738911331,
+          141.62500156089664,
+          147.12499978486449,
+          134.5000055152923,
+          110.37499643862247
+        ],
+        "stdev": 26.98786499161144
+      },
+      "run_final_states": [
+        {
+          "all_events_delivered_inline": true,
+          "delivered": 110001,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 8,
+          "subscribers": 1,
+          "subscribers_after_dispose": 0
+        },
+        {
+          "all_events_delivered_inline": true,
+          "delivered": 110001,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 8,
+          "subscribers": 1,
+          "subscribers_after_dispose": 0
+        },
+        {
+          "all_events_delivered_inline": true,
+          "delivered": 110001,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 8,
+          "subscribers": 1,
+          "subscribers_after_dispose": 0
+        },
+        {
+          "all_events_delivered_inline": true,
+          "delivered": 110001,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 8,
+          "subscribers": 1,
+          "subscribers_after_dispose": 0
+        },
+        {
+          "all_events_delivered_inline": true,
+          "delivered": 110001,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 8,
+          "subscribers": 1,
+          "subscribers_after_dispose": 0
+        },
+        {
+          "all_events_delivered_inline": true,
+          "delivered": 110001,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 8,
+          "subscribers": 1,
+          "subscribers_after_dispose": 0
+        },
+        {
+          "all_events_delivered_inline": true,
+          "delivered": 110001,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 8,
+          "subscribers": 1,
+          "subscribers_after_dispose": 0
+        }
+      ],
+      "steady_publish": {
+        "average": 26.486050475713064,
+        "maximum": 29.03867375003756,
+        "minimum": 23.9061733399285,
+        "relative_stdev_percent": 7.937433475201002,
+        "runs": [
+          28.5251770800096,
+          28.95225250002113,
+          24.537345419958,
+          25.73608916005469,
+          29.03867375003756,
+          24.706642079981975,
+          23.9061733399285
+        ],
+        "stdev": 2.102312636717883
+      },
+      "workload": "subscriber_delivery_nowait"
+    },
+    {
+      "end_to_end_seconds": {
+        "average": 2.1506806905734783,
+        "maximum": 2.353805292004836,
+        "minimum": 2.0284542909939773,
+        "relative_stdev_percent": 5.157631644493748,
+        "runs": [
+          2.353805292004836,
+          2.0949412920017494,
+          2.079269541995018,
+          2.059147625011974,
+          2.0284542909939773,
+          2.175680416999967,
+          2.2634663750068285
+        ],
+        "stdev": 0.11092418786903438
+      },
+      "final_state": {
+        "graph_owned_subscriptions_after_dispose": 0,
+        "latest_payload_bytes": 16,
+        "python_materialized_payloads_after_dispose": 0,
+        "retained_history": 8
+      },
+      "per_route_first_publish": {
+        "average": 71.06557105933982,
+        "maximum": 100.58299812953919,
+        "minimum": 58.74999624211341,
+        "relative_stdev_percent": 23.969128010856046,
+        "runs": [
+          58.74999624211341,
+          60.999998822808266,
+          95.1670081121847,
+          60.12499216012657,
+          61.25000072643161,
+          60.58400322217494,
+          100.58299812953919
+        ],
+        "stdev": 17.03379769885903
+      },
+      "run_final_states": [
+        {
+          "graph_owned_subscriptions_after_dispose": 0,
+          "latest_payload_bytes": 16,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 8
+        },
+        {
+          "graph_owned_subscriptions_after_dispose": 0,
+          "latest_payload_bytes": 16,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 8
+        },
+        {
+          "graph_owned_subscriptions_after_dispose": 0,
+          "latest_payload_bytes": 16,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 8
+        },
+        {
+          "graph_owned_subscriptions_after_dispose": 0,
+          "latest_payload_bytes": 16,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 8
+        },
+        {
+          "graph_owned_subscriptions_after_dispose": 0,
+          "latest_payload_bytes": 16,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 8
+        },
+        {
+          "graph_owned_subscriptions_after_dispose": 0,
+          "latest_payload_bytes": 16,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 8
+        },
+        {
+          "graph_owned_subscriptions_after_dispose": 0,
+          "latest_payload_bytes": 16,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 8
+        }
+      ],
+      "steady_publish": {
+        "average": 19.59351738139438,
+        "maximum": 21.540291659912327,
+        "minimum": 18.470192090026103,
+        "relative_stdev_percent": 5.506860329035241,
+        "runs": [
+          21.540291659912327,
+          18.93715833997703,
+          18.860654159943806,
+          18.71561207997729,
+          18.470192090026103,
+          19.91724042003625,
+          20.713472919887863
+        ],
+        "stdev": 1.0789876357386319
+      },
+      "workload": "typed_bytes_publish"
+    },
+    {
+      "end_to_end_seconds": {
+        "average": 3.2828964999997488,
+        "maximum": 3.635816333000548,
+        "minimum": 2.8604372080008034,
+        "relative_stdev_percent": 8.106046721234279,
+        "runs": [
+          2.8604372080008034,
+          3.0323512500035577,
+          3.635816333000548,
+          3.5641059589979704,
+          3.2820510000019567,
+          3.460946374994819,
+          3.144567374998587
+        ],
+        "stdev": 0.2661131240997445
+      },
+      "final_state": {
+        "decoded_latest": true,
+        "graph_owned_subscriptions_after_dispose": 0,
+        "python_materialized_payloads_after_dispose": 0,
+        "retained_history": 8
+      },
+      "per_route_first_publish": {
+        "average": 119.19042818980026,
+        "maximum": 176.99999443721026,
+        "minimum": 71.25000411178917,
+        "relative_stdev_percent": 27.67647978805713,
+        "runs": [
+          149.33300553821027,
+          123.8330005435273,
+          71.25000411178917,
+          176.99999443721026,
+          93.08299922849983,
+          100.08399840444326,
+          119.74999506492168
+        ],
+        "stdev": 32.98771476724882
+      },
+      "run_final_states": [
+        {
+          "decoded_latest": true,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 8
+        },
+        {
+          "decoded_latest": true,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 8
+        },
+        {
+          "decoded_latest": true,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 8
+        },
+        {
+          "decoded_latest": true,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 8
+        },
+        {
+          "decoded_latest": true,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 8
+        },
+        {
+          "decoded_latest": true,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 8
+        },
+        {
+          "decoded_latest": true,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 8
+        }
+      ],
+      "steady_publish": {
+        "average": 29.623972321403148,
+        "maximum": 33.795675419969484,
+        "minimum": 25.43026875006035,
+        "relative_stdev_percent": 9.375676341248097,
+        "runs": [
+          25.43026875006035,
+          27.38211541000055,
+          33.795675419969484,
+          31.772292499954347,
+          29.946038329944713,
+          31.670475419959985,
+          27.370940419932595
+        ],
+        "stdev": 2.7774477642756796
+      },
+      "workload": "typed_encoded_nowait"
+    },
+    {
+      "end_to_end_seconds": {
+        "average": 3.513699095282521,
+        "maximum": 3.5852547910035355,
+        "minimum": 3.3638273339893203,
+        "relative_stdev_percent": 2.0775633673208143,
+        "runs": [
+          3.3638273339893203,
+          3.5852547910035355,
+          3.5841606670001056,
+          3.504801208997378,
+          3.5316060409968486,
+          3.559786666999571,
+          3.4664569579908857
+        ],
+        "stdev": 0.07299932524147253
+      },
+      "final_state": {
+        "decoded_latest": true,
+        "graph_owned_subscriptions_after_dispose": 0,
+        "python_materialized_payloads_after_dispose": 0,
+        "retained_history": 8
+      },
+      "per_route_first_publish": {
+        "average": 98.44642980689449,
+        "maximum": 190.7909900182858,
+        "minimum": 43.45799970906228,
+        "relative_stdev_percent": 43.589352357342236,
+        "runs": [
+          43.45799970906228,
+          83.70900468435138,
+          115.75000826269388,
+          81.41699072439224,
+          98.62500883173198,
+          190.7909900182858,
+          75.37500641774386
+        ],
+        "stdev": 42.91216117175083
+      },
+      "run_final_states": [
+        {
+          "decoded_latest": true,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 8
+        },
+        {
+          "decoded_latest": true,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 8
+        },
+        {
+          "decoded_latest": true,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 8
+        },
+        {
+          "decoded_latest": true,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 8
+        },
+        {
+          "decoded_latest": true,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 8
+        },
+        {
+          "decoded_latest": true,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 8
+        },
+        {
+          "decoded_latest": true,
+          "graph_owned_subscriptions_after_dispose": 0,
+          "python_materialized_payloads_after_dispose": 0,
+          "retained_history": 8
+        }
+      ],
+      "steady_publish": {
+        "average": 32.12132303430865,
+        "maximum": 32.94737999996869,
+        "minimum": 31.470482910081046,
+        "relative_stdev_percent": 1.6582462565923943,
+        "runs": [
+          31.470482910081046,
+          32.83791000008932,
+          31.95554625010118,
+          32.06067416991573,
+          32.02741499990225,
+          32.94737999996869,
+          31.549852910102345
+        ],
+        "stdev": 0.5326506367843736
+      },
+      "workload": "typed_encoded_publish"
+    }
+  ]
+}

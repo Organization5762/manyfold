@@ -62,6 +62,7 @@ WORKLOADS: tuple[PublishWorkload, ...] = (
 def run_publish_benchmarks(
     workloads: Sequence[PublishWorkload] = WORKLOADS,
     *,
+    first_publish_samples: int = 64,
     iterations: int = 100_000,
     require_clean: bool = True,
     runs: int = 7,
@@ -69,6 +70,7 @@ def run_publish_benchmarks(
 ) -> dict[str, object]:
     """Run selected publish workloads and return a reusable evidence artifact."""
 
+    _require_positive_int(first_publish_samples, "first_publish_samples")
     _require_positive_int(iterations, "iterations")
     _require_positive_int(runs, "runs")
     _require_positive_int(warmup_iterations, "warmup_iterations")
@@ -86,15 +88,17 @@ def run_publish_benchmarks(
         )
     return {
         "environment": _environment(),
+        "first_publish_samples": first_publish_samples,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "iterations": iterations,
         "provenance": provenance,
         "runs": runs,
-        "schema_version": 2,
+        "schema_version": 3,
         "warmup_iterations": warmup_iterations,
         "workloads": tuple(
             _run_repeated(
                 workload,
+                first_publish_samples=first_publish_samples,
                 iterations=iterations,
                 runs=runs,
                 warmup_iterations=warmup_iterations,
@@ -112,6 +116,7 @@ def _main(argv: list[str] | None = None) -> int:
         choices=WORKLOADS,
         help="workloads to run; defaults to the full publish matrix",
     )
+    parser.add_argument("--first-publish-samples", type=int, default=64)
     parser.add_argument("--iterations", type=int, default=100_000)
     parser.add_argument("--runs", type=int, default=7)
     parser.add_argument("--warmup-iterations", type=int, default=10_000)
@@ -124,6 +129,7 @@ def _main(argv: list[str] | None = None) -> int:
         return 0
     result = run_publish_benchmarks(
         args.workloads or WORKLOADS,
+        first_publish_samples=args.first_publish_samples,
         iterations=args.iterations,
         require_clean=not args.allow_dirty,
         runs=args.runs,
@@ -140,6 +146,7 @@ def _main(argv: list[str] | None = None) -> int:
 def _run_repeated(
     workload: PublishWorkload,
     *,
+    first_publish_samples: int,
     iterations: int,
     runs: int,
     warmup_iterations: int,
@@ -150,34 +157,77 @@ def _run_repeated(
         iterations=max(1, min(iterations, 16)),
         warmup_iterations=max(1, min(warmup_iterations, 16)),
     )
-    cold_event_us: list[float] = []
     end_to_end_seconds: list[float] = []
     final_states: list[dict[str, int | bool]] = []
+    first_publish_event_us: list[float] = []
+    first_publish_final_states: list[dict[str, int | bool]] = []
+    first_publish_raw_samples: list[tuple[float, ...]] = []
     steady_event_us: list[float] = []
     for _ in range(runs):
+        first_publish_result = _run_first_publish_samples(
+            setup,
+            samples=first_publish_samples,
+        )
         result = _run_once(
             setup,
             iterations=iterations,
             warmup_iterations=warmup_iterations,
         )
-        cold_event_us.append(result["cold_event_us"])
         end_to_end_seconds.append(result["end_to_end_seconds"])
         final_states.append(result["final_state"])
+        first_publish_event_us.append(first_publish_result["average_event_us"])
+        first_publish_final_states.append(first_publish_result["final_state"])
+        first_publish_raw_samples.append(first_publish_result["event_us"])
         steady_event_us.append(result["steady_event_us"])
-    first_state = final_states[0]
-    for run_index, state in enumerate(final_states[1:], start=2):
-        if state != first_state:
-            raise RuntimeError(
-                f"publish benchmark {workload!r} final state changed in run "
-                f"{run_index}: expected {first_state!r}, observed {state!r}"
-            )
+    first_state = _require_equal_states(workload, "steady", final_states)
+    first_publish_state = _require_equal_states(
+        workload,
+        "per-route first-publish",
+        first_publish_final_states,
+    )
     return {
-        "per_route_first_publish": _timing_summary(cold_event_us),
         "end_to_end_seconds": _timing_summary(end_to_end_seconds),
         "final_state": first_state,
+        "per_route_first_publish": {
+            **_timing_summary(first_publish_event_us),
+            "raw_samples": tuple(first_publish_raw_samples),
+            "run_final_state": first_publish_state,
+            "run_final_states": tuple(first_publish_final_states),
+            "samples_per_run": first_publish_samples,
+        },
         "run_final_states": tuple(final_states),
         "steady_publish": _timing_summary(steady_event_us),
         "workload": workload,
+    }
+
+
+def _run_first_publish_samples(
+    setup: Callable[[], _WorkloadSession],
+    *,
+    samples: int,
+) -> dict[str, Any]:
+    event_us: list[float] = []
+    final_states: list[dict[str, int | bool]] = []
+    for _ in range(samples):
+        session = setup()
+        try:
+            started = time.perf_counter()
+            session.publish_one()
+            event_us.append((time.perf_counter() - started) * 1_000_000.0)
+            final_state = session.final_state(1)
+        finally:
+            disposal_state = session.dispose()
+        final_state.update(disposal_state)
+        final_states.append(final_state)
+    first_state = _require_equal_states(
+        "fresh route",
+        "per-route first-publish sample",
+        final_states,
+    )
+    return {
+        "average_event_us": statistics.fmean(event_us),
+        "event_us": tuple(event_us),
+        "final_state": first_state,
     }
 
 
@@ -191,9 +241,7 @@ def _run_once(
     session = setup()
     total_events = 1 + warmup_iterations + iterations
     try:
-        cold_started = time.perf_counter()
         session.publish_one()
-        cold_event_us = (time.perf_counter() - cold_started) * 1_000_000.0
         for _ in range(warmup_iterations):
             session.publish_one()
         steady_started = time.perf_counter()
@@ -207,7 +255,6 @@ def _run_once(
         disposal_state = session.dispose()
     final_state.update(disposal_state)
     return {
-        "cold_event_us": cold_event_us,
         "end_to_end_seconds": time.perf_counter() - end_to_end_started,
         "final_state": final_state,
         "steady_event_us": steady_event_us,
@@ -495,6 +542,21 @@ def _session(
         final_state=final_state,
         dispose=dispose,
     )
+
+
+def _require_equal_states(
+    workload: str,
+    measurement: str,
+    states: Sequence[dict[str, int | bool]],
+) -> dict[str, int | bool]:
+    first_state = states[0]
+    for run_index, state in enumerate(states[1:], start=2):
+        if state != first_state:
+            raise RuntimeError(
+                f"publish benchmark {workload!r} {measurement} final state changed "
+                f"in run {run_index}: expected {first_state!r}, observed {state!r}"
+            )
+    return first_state
 
 
 def _timing_summary(values: Sequence[float]) -> dict[str, object]:

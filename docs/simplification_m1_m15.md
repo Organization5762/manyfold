@@ -180,14 +180,18 @@ provenance.
 
 The first-publish metric is named `per_route_first_publish`: the unmeasured
 preflight warms process and native globals, while each measured value uses a
-fresh `Graph` and route and therefore includes per-route policy compilation.
-Formal CLI runs reject a dirty worktree. Provenance is sampled before the output
-artifact is created, and includes the loaded native extension's SHA-256 digest.
+mean of 64 fresh `Graph`/fresh-route samples. Each sample times only its first
+publish; setup, verification, disposal, and process-local cleanup are outside
+the hot timer. The reported RSD compares seven run means and the artifact keeps
+all 448 raw samples per workload. Formal CLI runs reject a dirty worktree.
+Provenance is sampled before the output artifact is created, and includes the
+loaded native extension's SHA-256 digest.
 
 Frozen before/after command:
 
 ```sh
 uv run python -m manyfold.private.profiling.publish_benchmarks \
+  --first-publish-samples 64 \
   --iterations 100000 \
   --runs 7 \
   --warmup-iterations 10000 \
@@ -205,6 +209,7 @@ observed variance.
 | Artifact | Input commit | SHA-256 | Verdict |
 | --- | --- | --- | --- |
 | `publish_plan_before_noisy_attempt_1.json` | `982a2eecc3588e6c8eacde4ff4e3eac4d020e393` | `d309e5e0476a6d661150a54ca67a11677f95ded3e2f4addfd3bb9d2fec108af9` | Semantics and provenance accepted. Performance rejected: every per-route first-publish row and seven warmed rows exceeded 10% RSD. Preserved as noisy evidence, never used for comparison. |
+| `publish_plan_before_noisy_attempt_2.json` | `febb45b39666db7c052d963e921a2bb2e3890f76` | `8c3e0be8944bfe8b4719e5b15dd201b58f714f383f53562f00d958abfe739727` | Semantics and provenance accepted. Performance rejected: all ten single-sample per-route first-publish rows exceeded 10% RSD; three warmed rows also failed. Preserved as the evidence that required repeated fresh-route samples. |
 | `publish_plan_before.json` | Pending | Pending | A quiet-host run must satisfy the declared variance gate before M2/M3. |
 
 The benchmark currently records whether `Graph.dispose()` releases
