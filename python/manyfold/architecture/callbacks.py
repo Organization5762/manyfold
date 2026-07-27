@@ -126,26 +126,30 @@ class CallbackDelivery:
                 if self._closed:
                     return False
                 task = _CallbackTask(self, callback)
+                self._pending.add(task)
             task()
             return True
         with self._lock:
             if self._closed:
                 return False
             task = _CallbackTask(self, callback)
+            self._pending.add(task)
             if self.placement.kind == "main":
                 if not _enqueue_main_thread_callback(
                     task,
                     self.placement.queue_limit,
                 ):
+                    self._pending.discard(task)
                     task.cancel()
                     return False
             elif self._worker is None:
+                self._pending.discard(task)
                 task.cancel()
                 raise RuntimeError("callback worker is not initialized")
             elif not self._worker.submit(task):
+                self._pending.discard(task)
                 task.cancel()
                 return False
-            self._pending.add(task)
         return True
 
     def close(self) -> None:
@@ -166,9 +170,11 @@ class CallbackDelivery:
     def _complete_task(self, task: "_CallbackTask") -> Callable[[], object] | None:
         with self._lock:
             self._pending.discard(task)
-            if self._closed:
-                return None
-        return task._take_callback()
+            is_closed = self._closed
+        callback = task._take_callback()
+        if is_closed:
+            return None
+        return callback
 
     def _forget_task(self, task: "_CallbackTask") -> None:
         with self._lock:
