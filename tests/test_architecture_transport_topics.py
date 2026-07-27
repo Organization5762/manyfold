@@ -100,6 +100,69 @@ class DurableTransportTopicTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "positive"):
             MeshTopicPolicy.live_latest("heart.frame_ticks", max_sources=0)
 
+    def test_raw_bytes_schema_binds_live_latest_without_envelope(self) -> None:
+        mesh_a = TransportMesh(
+            NodeIdentity("cluster", "raw-a", "raw-a-1"),
+            connector_config=_transport_config(),
+        )
+        mesh_b = TransportMesh(
+            NodeIdentity("cluster", "raw-b", "raw-b-1"),
+            connector_config=_transport_config(),
+        )
+        self._meshes.extend((mesh_a, mesh_b))
+        frames_a = PubSub(
+            topic="heart.rendered_frames",
+            schema=bytes,
+            schedule=False,
+        )
+        frames_b = PubSub(
+            topic="heart.rendered_frames",
+            schema=bytes,
+            schedule=False,
+        )
+        binding = mesh_a.bind(
+            frames_a,
+            policy=MeshTopicPolicy.live_latest(
+                "heart.rendered_frames",
+                max_sources=2,
+            ),
+        )
+        mesh_b.bind(
+            frames_b,
+            policy=MeshTopicPolicy.live_latest(
+                "heart.rendered_frames",
+                max_sources=2,
+            ),
+        )
+        observed: list[bytes] = []
+        subscription = frames_b.subscribe(
+            lambda row: observed.append(row.payload)
+        )
+        self.addCleanup(subscription.dispose)
+        address = mesh_a.listen("raw-b")
+        mesh_b.apply_discovery((PeerDiscovery("raw-a", address),))
+        self.assertTrue(
+            _wait_for(
+                lambda: mesh_a.health().remote_subscriptions == 1,
+                timeout=3.0,
+            )
+        )
+
+        frames_a.publish(b"\x00\xff\x7f", key="display-1")
+
+        self.assertTrue(
+            _wait_for(lambda: observed == [b"\x00\xff\x7f"], timeout=3.0),
+            (observed, mesh_a.peer_health(), mesh_b.peer_health()),
+        )
+        self.assertFalse(binding.retains_journal_rows)
+        self.assertEqual(frames_a.latest().payload, b"\x00\xff\x7f")
+        self.assertFalse(
+            _diagnostic(
+                mesh_a,
+                "heart.rendered_frames",
+            ).retains_journal_rows
+        )
+
     def test_three_peer_append_latest_partition_recovery_and_shutdown(self) -> None:
         mesh_a, topics_a, addresses = self._hub("a", ("b", "c"))
         mesh_b, topics_b = self._spoke("b", "a", addresses["b"])

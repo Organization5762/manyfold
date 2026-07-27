@@ -110,6 +110,7 @@ class Navigation:
 navigation = PubSubTopic("navigation.commands", schema=Navigation)
 sensor_state = PubSubTopic("navigation.states", schema=Navigation)
 frame_ticks = PubSubTopic("heart.frame_ticks", schema=Navigation)
+rendered_frames = PubSubTopic("heart.rendered_frames", schema=bytes)
 mesh = TransportMesh(
     identity,
     connector_config=transport_config,
@@ -136,6 +137,13 @@ mesh.bind(
         max_sources=1,
     ),
 )
+mesh.bind(
+    rendered_frames,
+    policy=MeshTopicPolicy.live_latest(
+        "heart.rendered_frames",
+        max_sources=2,
+    ),
+)
 
 navigation.publish(
     Navigation("open-settings", "controller-1"),
@@ -160,6 +168,12 @@ Use it for frame ticks, rendered frames, audio, and bounded debug streams. Use
 durable append for navigation/input commands, durable latest with TTL for
 low-rate sensor state, and the separate Raft path for coordinated world/device
 state.
+
+Use `PubSubTopic(name, schema=bytes)` for raw rendered frames or other typed
+byte streams. `publish(pixel_bytes, key=source_id)` binds and transports the
+bytes directly; no model envelope, base64 conversion, or payload `key_field` is
+required. Model schemas remain appropriate when the topic needs queryable
+scalar fields.
 
 `MeshTopicBinding.retains_journal_rows` describes whether the configured class
 may journal. `durable_topic_diagnostics()` reports whether rows actually exist

@@ -1406,6 +1406,8 @@ def _composite_subscription(
 def _coerce_stream_schema(topic: str, value: type | None) -> _StreamSchema | None:
     if value is None:
         return None
+    if value is bytes:
+        return None
     if isinstance(value, type):
         return _StreamSchema(
             name=_topic_schema_name(topic, value.__name__),
