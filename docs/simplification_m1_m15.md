@@ -434,9 +434,11 @@ narrowing.
 - Published #280 `ae411bc423aa68227d346ad65d8f816b70e3a8d5` remains
   under substantive rereview. Published #281 remains
   `3c62dd1c08eb0bd18e7647a82889b332c585b3b3`; local `596b22b` is
-  unpublished. PR #282 head `9e1721199923476893f5ea214aca30ce56733e91`
-  is candidate-only pending dedicated verdict and hosted CI; `fa1d1336` is
-  stale. PR #279 has no candidate.
+  unpublished. PR #282 head `b8123ef208141d57ec7848c2a0578b01afc94c59`
+  remains blocked despite green CI: fan-out conflates a closed
+  `deliver() == false` result with queue pressure, and disposal can race
+  callback registration and strand cleanup listeners. Earlier head `9e172119`
+  is stale. PR #279 has no candidate.
 - PR3 remains independent of those candidates and must record exact base/head
   ancestry. No Heart pin guidance is valid until the required verdicts and
   hosted checks are green.
