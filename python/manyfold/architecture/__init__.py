@@ -33,6 +33,12 @@ from .enrollment import (
     NodeIdentityStore as NodeIdentityStore,
     RotationRequest as RotationRequest,
 )
+from .interfaces import (
+    BluetoothControllerInterface as BluetoothControllerInterface,
+    Interface as Interface,
+    InterfaceEvent as InterfaceEvent,
+    SerialBusInterface as SerialBusInterface,
+)
 from .locks import (
     Lock as Lock,
     LockLease as LockLease,
@@ -207,6 +213,7 @@ from .workers import (
 
 __all__ = [
     "AuthenticatedPeerSession",
+    "BluetoothControllerInterface",
     "CalibratedClock",
     "CallbackDelivery",
     "CallbackPlacement",
@@ -255,6 +262,8 @@ __all__ = [
     "HistoricalValue",
     "ImmutableValue",
     "InMemoryPubSub",
+    "Interface",
+    "InterfaceEvent",
     "LinkHealth",
     "LinkState",
     "Lock",
@@ -342,6 +351,7 @@ __all__ = [
     "RpcResponse",
     "RpcShutdownTimeout",
     "RpcTimeout",
+    "SerialBusInterface",
     "ServiceDiscoveryRequirement",
     "StaticSeedDiscovery",
     "StreamRow",
