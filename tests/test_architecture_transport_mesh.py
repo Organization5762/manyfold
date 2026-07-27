@@ -316,6 +316,23 @@ class ArchitectureTransportMeshTests(unittest.TestCase):
         with self.assertRaises(MeshClosed):
             mesh.subscribe("late")
 
+    def test_context_exit_closes_mesh_after_exception(self) -> None:
+        mesh = self._mesh("context-closed")
+
+        with self.assertRaisesRegex(RuntimeError, "application failure"):
+            with mesh as active:
+                subscription = active.subscribe("local")
+                active.publish("local", b"retained")
+                raise RuntimeError("application failure")
+
+        self.assertTrue(mesh.health().is_closed)
+        self.assertEqual(mesh.health().local_subscriptions, 0)
+        self.assertEqual(mesh.health().publications_queued, 0)
+        self.assertTrue(subscription.dispose())
+        mesh.close()
+        with self.assertRaises(MeshClosed):
+            mesh.subscribe("late")
+
     def test_mesh_contracts_reject_invalid_configuration_and_routes(self) -> None:
         with self.assertRaisesRegex(ValueError, "max_peers"):
             MeshConfig(max_peers=0)
