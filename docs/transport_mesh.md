@@ -75,7 +75,7 @@ through authenticated mesh peers, not signed end to end.
 | `receive(...)` | Remove one publication from the bounded local queue. |
 | `peer_health()` | Report each underlying link, discovery source, interested topics, and latest routing error. |
 | `health()` | Report bounded peer/subscription/queue counts and duplicate suppression. |
-| `close()` | Dispose links and readers, clear every routing index and payload reference, and unblock receivers. |
+| `close()` / context exit | Dispose links and readers, clear every routing index and payload reference, and unblock receivers. |
 
 `PeerDiscovery.transport_config` can override the mesh connector configuration
 for peers with different TLS hostname or trust settings. Listener configuration

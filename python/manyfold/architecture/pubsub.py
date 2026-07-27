@@ -52,7 +52,12 @@ def PubSubTopic(
     pubsub: str | None = None,
     fabric: str | None = None,
 ) -> "PubSub":
-    """Return a topic from a namespace-scoped process-local PubSub runtime."""
+    """Return a topic from a namespace-scoped process-local PubSub runtime.
+
+    A topic returned by this helper borrows its named fabric. Closing the topic
+    handle releases that handle's callbacks, but the shared fabric and retained
+    stream data remain alive until ``PubSubFabric.close()`` closes the fabric.
+    """
     resolved_namespace = _resolve_namespace(namespace, pubsub=pubsub, fabric=fabric)
     topic_name = _resolve_topic_name(name)
     boot_lock = ManyFoldLock.for_resource(f"pubsub:{resolved_namespace}:boot")
@@ -102,6 +107,7 @@ class PubSub:
         service_discovery: bool = True,
         _runtime: PubSubRuntime | None = None,
         _schedule: "PubSubSchedule | None" = None,
+        _owner: "PubSubFabric | None" = None,
     ) -> None:
         resolved_topic = _resolve_topic(topic)
         self.topic = resolved_topic
@@ -130,12 +136,48 @@ class PubSub:
                 self._stream_schema.table,
             )
         self._callbacks: dict[int, Callable[[StreamRow], object]] = {}
+        self._callback_deliveries: dict[int, CallbackDelivery] = {}
         self._next_callback_id = 1
+        self._owner = _owner
+        self._closed = False
+        self._context_depth = 0
+        self._lifecycle_lock = ThreadLock()
 
     @property
     def value(self) -> "PubSubValueSurface":
         """Return semantic value views over this PubSub stream."""
         return PubSubValueSurface(self)
+
+    @property
+    def is_closed(self) -> bool:
+        """Return whether this stream handle has released its owned callbacks."""
+        with self._lifecycle_lock:
+            return self._closed
+
+    def __enter__(self) -> "PubSub":
+        with self._lifecycle_lock:
+            if self._closed:
+                raise RuntimeError(f"PubSub stream {self.topic!r} is closed")
+            self._context_depth += 1
+        return self
+
+    def __exit__(self, *_error: object) -> None:
+        should_close = False
+        with self._lifecycle_lock:
+            if self._context_depth > 0:
+                self._context_depth -= 1
+                should_close = self._context_depth == 0
+        if should_close:
+            self.close()
+
+    def close(self) -> None:
+        """Release topic-scoped callbacks and close this stream handle.
+
+        Direct ``PubSub(...)`` instances own their runtime handle. Fabric-owned
+        topics close only this borrowed topic handle; the named fabric remains
+        available for future ``PubSubTopic(...)`` calls until the fabric closes.
+        """
+        self._close(detach_owner=True)
 
     def lock(self) -> Lock:
         """Return this PubSub runtime's canonical infrastructure lock."""
@@ -147,10 +189,12 @@ class PubSub:
 
     def observability_metrics(self) -> tuple[object, ...]:
         """Return Rust-recorded observability metrics emitted by this PubSub."""
+        self._require_open()
         return tuple(self._runtime.observability_metrics())
 
     def observability_logs(self) -> tuple[object, ...]:
         """Return Rust-recorded observability logs emitted by this PubSub."""
+        self._require_open()
         return tuple(self._runtime.observability_logs())
 
     def publish(
@@ -162,6 +206,7 @@ class PubSub:
         **fields: object,
     ) -> None:
         """Publish a model value, bytes payload, or schema field values."""
+        self._require_open()
         if fields:
             if payload is not None:
                 raise ValueError("publish accepts either a payload or fields, not both")
@@ -204,6 +249,7 @@ class PubSub:
         replay_latest: bool = False,
     ) -> "PubSubCallbackSubscription":
         """Call ``callback`` for rows published after subscription."""
+        self._require_open()
         del on_error, on_completed, scheduler
         callback = _callback_from_observer(
             "PubSub.subscribe",
@@ -222,22 +268,34 @@ class PubSub:
                 "PubSub.subscribe",
             )
 
-        callback_id = self._next_callback_id
-        self._next_callback_id += 1
-        self._callbacks[callback_id] = deliver
+        with self._lifecycle_lock:
+            if self._closed:
+                delivery.close()
+                raise RuntimeError(f"PubSub stream {self.topic!r} is closed")
+            callback_id = self._next_callback_id
+            self._next_callback_id += 1
+            self._callbacks[callback_id] = deliver
+            self._callback_deliveries[callback_id] = delivery
 
         def dispose() -> bool:
-            removed = self._callbacks.pop(callback_id, None) is not None
-            delivery.close()
+            with self._lifecycle_lock:
+                removed = self._callbacks.pop(callback_id, None) is not None
+                stored_delivery = self._callback_deliveries.pop(callback_id, None)
+            (stored_delivery or delivery).close()
             return removed
 
         subscription = PubSubCallbackSubscription(
             dispose,
+            is_disposed_callback=lambda: self._callback_is_disposed(callback_id),
         )
         if replay_latest:
-            latest = self.latest()
-            if latest is not None and callback_id in self._callbacks:
-                deliver(latest)
+            try:
+                latest = self.latest()
+                if latest is not None and callback_id in self._callbacks:
+                    deliver(latest)
+            except Exception:
+                subscription.dispose()
+                raise
         return subscription
 
     def callback(
@@ -502,6 +560,7 @@ class PubSub:
         parameters: Mapping[str, object] | None = None,
     ) -> list[StreamRow]:
         """Run SQL against this stream's scoped ``stream`` relation."""
+        self._require_open()
         query_parameters = dict(parameters or {})
         if "__manyfold_stream_topic" in query_parameters:
             raise ValueError("query parameter '__manyfold_stream_topic' is reserved")
@@ -559,13 +618,45 @@ class PubSub:
         )
 
     def _publish_to_callbacks(self) -> None:
-        if not self._callbacks:
+        with self._lifecycle_lock:
+            if self._closed or not self._callbacks:
+                return
+            callbacks = tuple(self._callbacks.values())
+        if not callbacks:
             return
         row = self.latest()
         if row is None:
             return
-        for callback in tuple(self._callbacks.values()):
+        for callback in callbacks:
             callback(row)
+
+    def _require_open(self) -> None:
+        with self._lifecycle_lock:
+            if self._closed:
+                raise RuntimeError(f"PubSub stream {self.topic!r} is closed")
+
+    def _callback_is_disposed(self, callback_id: int) -> bool:
+        with self._lifecycle_lock:
+            return self._closed or callback_id not in self._callbacks
+
+    def _close(self, *, detach_owner: bool) -> None:
+        owner: PubSubFabric | None
+        with self._lifecycle_lock:
+            if self._closed:
+                return
+            self._closed = True
+            self._context_depth = 0
+            deliveries = tuple(self._callback_deliveries.values())
+            self._callbacks.clear()
+            self._callback_deliveries.clear()
+            owner = self._owner
+        for delivery in deliveries:
+            delivery.close()
+        if detach_owner and owner is not None:
+            owner._detach_topic(self.topic, self)
+
+    def _close_from_fabric(self) -> None:
+        self._close(detach_owner=False)
 
 
 class PubSubCallbackSubscription:
@@ -1093,29 +1184,75 @@ class PubSubFabric:
             retained_messages=retained_messages,
         )
         self._topics: dict[str, PubSub] = {}
+        self._closed = False
+        self._lock = ThreadLock()
 
     @property
     def topics(self) -> tuple[str, ...]:
         """Return topics already attached to this fabric."""
-        return tuple(self._topics)
+        with self._lock:
+            return tuple(self._topics)
+
+    @property
+    def is_closed(self) -> bool:
+        """Return whether this fabric has closed its topic handles."""
+        with self._lock:
+            return self._closed
+
+    def __enter__(self) -> "PubSubFabric":
+        self._require_open()
+        return self
+
+    def __exit__(self, *_error: object) -> None:
+        self.close()
+
+    def close(self) -> None:
+        """Close every attached topic handle and release this named fabric."""
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+            topics = tuple(self._topics.values())
+            self._topics.clear()
+        with self.boot_lock.take(owner=f"PubSubFabric.close:{self.namespace}"):
+            if _PUBSUB_FABRICS.get(self.namespace) is self:
+                del _PUBSUB_FABRICS[self.namespace]
+        for topic in topics:
+            topic._close_from_fabric()
 
     def topic(self, topic: str, *, schema: type | None = None) -> PubSub:
         """Return the topic handle, creating it on first use."""
         resolved_topic = _resolve_topic(topic)
-        existing = self._topics.get(resolved_topic)
-        if existing is not None:
-            if schema is not None and existing.schema is not schema:
-                raise ValueError("PubSubTopic schema is already fixed")
-            return existing
-        created = PubSub(
-            topic=resolved_topic,
-            schema=schema,
-            schedule=True,
-            _runtime=self._runtime,
-            _schedule=self.schedule,
-        )
-        self._topics[resolved_topic] = created
+        with self._lock:
+            self._require_open_locked()
+            existing = self._topics.get(resolved_topic)
+            if existing is not None:
+                if schema is not None and existing.schema is not schema:
+                    raise ValueError("PubSubTopic schema is already fixed")
+                return existing
+            created = PubSub(
+                topic=resolved_topic,
+                schema=schema,
+                schedule=True,
+                _runtime=self._runtime,
+                _schedule=self.schedule,
+                _owner=self,
+            )
+            self._topics[resolved_topic] = created
         return created
+
+    def _detach_topic(self, topic: str, handle: PubSub) -> None:
+        with self._lock:
+            if self._topics.get(topic) is handle:
+                del self._topics[topic]
+
+    def _require_open(self) -> None:
+        with self._lock:
+            self._require_open_locked()
+
+    def _require_open_locked(self) -> None:
+        if self._closed:
+            raise RuntimeError(f"PubSub fabric {self.namespace!r} is closed")
 
 
 class PubSubValueSurface:

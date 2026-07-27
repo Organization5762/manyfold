@@ -349,6 +349,86 @@ class PubSubStreamTests(unittest.TestCase):
         self.assertEqual(fabric.boot_lock.name, boot_lock.name)
         self.assertEqual(fabric.boot_lock.path, boot_lock.path)
 
+    def test_pubsub_context_exit_closes_private_runtime_handle(self) -> None:
+        with PubSub(topic="context.temperature", schema=Temperature) as temperature:
+            temperature.publish(Temperature(degrees=72.9, unit="F"))
+            latest = temperature.latest()
+
+            self.assertIsNotNone(latest)
+            self.assertEqual(latest.degrees, 72.9)
+
+        self.assertTrue(temperature.is_closed)
+        with self.assertRaisesRegex(RuntimeError, "closed"):
+            temperature.publish(Temperature(degrees=73.1, unit="F"))
+
+    def test_pubsub_context_closes_after_exception_and_double_close_is_safe(
+        self,
+    ) -> None:
+        stream = PubSub(topic="context.exception", schema=Temperature)
+
+        with self.assertRaisesRegex(RuntimeError, "application failure"):
+            with stream:
+                stream.publish(Temperature(degrees=71.5, unit="F"))
+                raise RuntimeError("application failure")
+
+        self.assertTrue(stream.is_closed)
+        stream.close()
+        stream.close()
+        with self.assertRaisesRegex(RuntimeError, "closed"):
+            stream.latest()
+
+    def test_pubsub_context_stops_background_callback_delivery(self) -> None:
+        callback_threads: Queue[int] = Queue()
+
+        with PubSub(topic="context.callbacks", schema=Temperature) as stream:
+            subscription = stream.subscribe(
+                lambda _row: callback_threads.put(get_ident()),
+                callback_placement=CallbackPlacement.spawned_thread(
+                    "context-callbacks",
+                ),
+            )
+            stream.publish(Temperature(degrees=72.4, unit="F"))
+            self.assertNotEqual(callback_threads.get(timeout=1.0), get_ident())
+            self.assertFalse(subscription.is_disposed)
+
+        self.assertTrue(subscription.is_disposed)
+        with self.assertRaisesRegex(RuntimeError, "closed"):
+            stream.publish(Temperature(degrees=72.5, unit="F"))
+
+    def test_pubsub_topic_context_closes_borrowed_handle_not_named_fabric(
+        self,
+    ) -> None:
+        namespace = "test-context-borrowed-topic"
+
+        with PubSubTopic("input", namespace=namespace) as outer:
+            outer.publish(b"first")
+            with PubSubTopic("input", namespace=namespace) as inner:
+                self.assertIs(outer, inner)
+                inner.publish(b"second")
+            self.assertFalse(outer.is_closed)
+            outer.publish(b"third")
+
+        self.assertTrue(outer.is_closed)
+        fresh = PubSubTopic("input", namespace=namespace)
+        try:
+            self.assertIsNot(fresh, outer)
+            self.assertFalse(fresh.is_closed)
+            self.assertEqual(fresh.latest().payload, b"third")
+        finally:
+            fresh.close()
+
+    def test_pubsub_fabric_context_owns_and_closes_attached_topics(self) -> None:
+        fabric = PubSubFabric(namespace="test-fabric-context")
+
+        with fabric as active:
+            topic = active.topic("owned", schema=Temperature)
+            topic.publish(Temperature(degrees=70.0, unit="F"))
+
+        self.assertTrue(fabric.is_closed)
+        self.assertTrue(topic.is_closed)
+        with self.assertRaisesRegex(RuntimeError, "fabric .* closed"):
+            fabric.topic("late")
+
     def test_pubsub_exposes_lock_and_clock_endpoints_without_proxy_api(self) -> None:
         stream = PubSub(topic="heart.proxyless", schema=GamepadEvent)
         lock = stream.lock()
