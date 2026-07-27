@@ -12,6 +12,10 @@ from threading import Event, Thread
 
 from manyfold.architecture._transport_delivery_journal import _DeliveryJournal
 from manyfold.architecture._transport_delivery_journal_errors import _JournalError
+from manyfold.architecture._transport_delivery_lock import (
+    _LOCK_PROCESS_MARKER,
+    _OWNER_LOCK_OFFSET,
+)
 from manyfold.architecture._transport_delivery_policy import (
     DeliveryConfig,
     TopicDeliveryPolicy,
@@ -247,6 +251,34 @@ class TransportDeliveryLockTests(unittest.TestCase):
         )
         reopened = _DeliveryJournal(self._config(path))
         reopened.close()
+
+    def test_holder_status_frame_is_exact_ascii_bytes(self) -> None:
+        path = self._root / "canonical-status.sqlite3"
+        token = "0" * 64
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "manyfold.architecture._transport_delivery_lock_holder",
+                str(path),
+                str(_OWNER_LOCK_OFFSET),
+                token,
+                _LOCK_PROCESS_MARKER,
+            ],
+            input=b"",
+            check=False,
+            capture_output=True,
+            env=subprocess_test_env(),
+            timeout=5.0,
+        )
+
+        identity = path.stat()
+        expected = (
+            f"{token} ready {identity.st_dev} {identity.st_ino}\n"
+        ).encode("ascii")
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertEqual(result.stdout, expected)
+        self.assertNotIn(b"\r", result.stdout)
 
     def test_holder_reports_non_contention_lock_failure(self) -> None:
         path = self._root / "invalid-offset.sqlite3"

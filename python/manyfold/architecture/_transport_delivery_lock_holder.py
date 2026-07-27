@@ -44,10 +44,12 @@ def _main(arguments: Sequence[str] | None = None) -> int:
             windows_error = getattr(lock_error, "winerror", None)
             status = "error"
             detail = f" errno={error_number} winerror={windows_error}"
-        sys.stdout.write(
-            f"{token} {status} {identity.st_dev} {identity.st_ino}{detail}\n"
+        sys.stdout.buffer.write(
+            f"{token} {status} {identity.st_dev} {identity.st_ino}{detail}\n".encode(
+                "ascii"
+            )
         )
-        sys.stdout.flush()
+        sys.stdout.buffer.flush()
         if lock_error is not None:
             return 3
         while sys.stdin.buffer.read(_CONTROL_READ_BYTES):
