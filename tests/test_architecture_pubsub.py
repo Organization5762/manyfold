@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import subprocess
 import sys
 import unittest
@@ -373,6 +374,33 @@ class PubSubStreamTests(unittest.TestCase):
         boot_lock = ManyFoldLock.for_resource("pubsub:manual:boot")
         self.assertEqual(fabric.boot_lock.name, boot_lock.name)
         self.assertEqual(fabric.boot_lock.path, boot_lock.path)
+
+    def test_pubsub_fabric_does_not_retain_dropped_borrowed_topic_handles(
+        self,
+    ) -> None:
+        fabric = PubSubFabric(namespace="test-borrowed-handle-weak-registry")
+        try:
+            def create_and_drop_handles() -> None:
+                for index in range(200):
+                    handle = fabric.topic("input", schema=Temperature)
+                    if index == 199:
+                        handle.publish(Temperature(degrees=72.0, unit="F"))
+
+            create_and_drop_handles()
+            gc.collect()
+
+            self.assertLessEqual(len(fabric._topic_handles), 1)
+            retained = fabric.topic("input")
+            self.assertIs(retained.schema, Temperature)
+            latest = retained.latest()
+            self.assertIsNotNone(latest)
+            self.assertEqual(latest.degrees, 72.0)
+            with self.assertRaisesRegex(ValueError, "schema is already fixed"):
+                fabric.topic("input", schema=_Humidity)
+            live = fabric.topic("input")
+        finally:
+            fabric.close()
+        self.assertTrue(live.is_closed)
 
     def test_pubsub_context_exit_closes_private_runtime_handle(self) -> None:
         with PubSub(topic="context.temperature", schema=Temperature) as temperature:

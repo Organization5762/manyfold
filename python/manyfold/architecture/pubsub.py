@@ -13,6 +13,7 @@ from time import time_ns
 from types import NoneType
 from typing import Union, get_args, get_origin, get_type_hints
 from uuid import UUID, uuid5
+from weakref import WeakSet
 
 from manyfold._manyfold_rust import (
     FlatBufferField,
@@ -1250,7 +1251,7 @@ class PubSubFabric:
         )
         self._topics: set[str] = set()
         self._topic_schemas: dict[str, type] = {}
-        self._topic_handles: set[PubSub] = set()
+        self._topic_handles: WeakSet[PubSub] = WeakSet()
         self._closed = False
         self._lock = ThreadLock()
 
