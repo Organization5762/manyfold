@@ -38,6 +38,20 @@ PRIVATE_PROFILING_MODULES = frozenset(
         "runtime_benchmarks",
     }
 )
+POSIX_ONLY_MODULES = frozenset(
+    {
+        "crypt",
+        "fcntl",
+        "grp",
+        "pty",
+        "pwd",
+        "resource",
+        "spwd",
+        "syslog",
+        "termios",
+        "tty",
+    }
+)
 RUNTIME_ASSERT_ROOTS = (
     PROJECT_ROOT / "python" / "manyfold",
     PROJECT_ROOT / "python" / "manyfold_example_catalog.py",
@@ -104,6 +118,18 @@ class ProjectMetadataTests(unittest.TestCase):
             violation
             for path in _runtime_python_source_paths()
             for violation in _assert_statements(path)
+        )
+
+        self.assertEqual(violations, ())
+
+    def test_architecture_has_no_unconditional_posix_only_imports(self) -> None:
+        architecture_root = (
+            PROJECT_ROOT / "python" / "manyfold" / "architecture"
+        )
+        violations = tuple(
+            violation
+            for path in sorted(architecture_root.rglob("*.py"))
+            for violation in _unconditional_posix_imports(path)
         )
 
         self.assertEqual(violations, ())
@@ -816,3 +842,80 @@ def _function_local_imports(path: Path) -> tuple[str, ...]:
                 break
             parent = parents.get(parent)
     return tuple(violations)
+
+
+def _unconditional_posix_imports(path: Path) -> tuple[str, ...]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    parents: dict[ast.AST, ast.AST] = {}
+    for parent in ast.walk(tree):
+        for child in ast.iter_child_nodes(parent):
+            parents[child] = parent
+
+    violations: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Import | ast.ImportFrom):
+            continue
+        for module in _imported_modules(node):
+            if module in POSIX_ONLY_MODULES:
+                if _has_function_parent(node, parents):
+                    continue
+                if _is_non_windows_import(node, parents):
+                    continue
+                violations.append(
+                    f"{path.relative_to(PROJECT_ROOT)}:{node.lineno}:{module}"
+                )
+    return tuple(violations)
+
+
+def _imported_modules(node: ast.Import | ast.ImportFrom) -> tuple[str, ...]:
+    if isinstance(node, ast.Import):
+        return tuple(alias.name.split(".", 1)[0] for alias in node.names)
+    if node.module is None:
+        return ()
+    return (node.module.split(".", 1)[0],)
+
+
+def _has_function_parent(
+    node: ast.AST,
+    parents: dict[ast.AST, ast.AST],
+) -> bool:
+    parent = parents.get(node)
+    while parent is not None:
+        if isinstance(parent, ast.FunctionDef | ast.AsyncFunctionDef):
+            return True
+        parent = parents.get(parent)
+    return False
+
+
+def _is_non_windows_import(
+    node: ast.AST,
+    parents: dict[ast.AST, ast.AST],
+) -> bool:
+    child = node
+    parent = parents.get(child)
+    while parent is not None:
+        if isinstance(parent, ast.If):
+            comparison = parent.test
+            if (
+                isinstance(comparison, ast.Compare)
+                and isinstance(comparison.left, ast.Attribute)
+                and isinstance(comparison.left.value, ast.Name)
+                and comparison.left.value.id == "os"
+                and comparison.left.attr == "name"
+                and len(comparison.ops) == 1
+                and len(comparison.comparators) == 1
+                and isinstance(comparison.comparators[0], ast.Constant)
+            ):
+                value = comparison.comparators[0].value
+                in_body = child in parent.body
+                if isinstance(comparison.ops[0], ast.Eq):
+                    return (in_body and value == "posix") or (
+                        not in_body and value == "nt"
+                    )
+                if isinstance(comparison.ops[0], ast.NotEq):
+                    return (in_body and value == "nt") or (
+                        not in_body and value == "posix"
+                    )
+        child = parent
+        parent = parents.get(child)
+    return False

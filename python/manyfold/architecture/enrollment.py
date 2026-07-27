@@ -5,7 +5,6 @@ from __future__ import annotations
 import base64
 import contextlib
 import datetime as dt
-import fcntl
 import hashlib
 import hmac
 import ipaddress
@@ -19,6 +18,7 @@ import uuid
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from types import ModuleType
 from typing import Any, Final, final
 from urllib.parse import quote, unquote
 
@@ -28,6 +28,12 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 
 from .transport import NodeIdentity
+
+_fcntl: ModuleType | None
+if os.name == "posix":
+    import fcntl as _fcntl
+else:
+    _fcntl = None
 
 _UTC: Final = dt.timezone.utc
 _TOKEN_TTL: Final = dt.timedelta(minutes=10)
@@ -274,6 +280,7 @@ class NodeIdentityStore:
     """Own durable ``NodeIdentity`` keys and reloadable transport security."""
 
     def __init__(self, root: Path, state: dict[str, Any]) -> None:
+        _require_posix_enrollment()
         self._root = root
         self._state = state
 
@@ -289,6 +296,7 @@ class NodeIdentityStore:
         now: dt.datetime | None = None,
     ) -> tuple[NodeIdentityStore, EnrollmentToken]:
         """Create a closed cluster authority and its first enrolled node."""
+        _require_posix_enrollment()
         current = _now(now)
         path = _new_root(root)
         identity = NodeIdentity(cluster_id or str(uuid.uuid4()), node_id)
@@ -338,6 +346,7 @@ class NodeIdentityStore:
         now: dt.datetime | None = None,
     ) -> tuple[NodeIdentityStore, EnrollmentRequest]:
         """Persist a new node key and CSR without trusting a discovery result."""
+        _require_posix_enrollment()
         proof = _token(token)
         _token_window(proof, _now(now), _CLOCK_SKEW)
         path = _new_root(root)
@@ -369,6 +378,7 @@ class NodeIdentityStore:
         require_enrolled: bool = True,
     ) -> NodeIdentityStore:
         """Open strict-permission state, ignoring incomplete temporary writes."""
+        _require_posix_enrollment()
         path = Path(root)
         _secure_directory(path)
         state = _read_json(path / "identity.json")
@@ -1282,16 +1292,26 @@ def _fsync(path: Path) -> None:
         os.close(descriptor)
 
 
+def _require_posix_enrollment() -> ModuleType:
+    if _fcntl is None:
+        raise NotImplementedError(
+            "NodeIdentityStore requires POSIX advisory file locking; "
+            "Windows enrollment is not implemented"
+        )
+    return _fcntl
+
+
 @contextlib.contextmanager
 def _lock(root: Path) -> Iterator[None]:
+    file_locks = _require_posix_enrollment()
     path = root / ".identity.lock"
     descriptor = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
     try:
         os.chmod(path, 0o600)
-        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        file_locks.flock(descriptor, file_locks.LOCK_EX)
         yield
     finally:
-        fcntl.flock(descriptor, fcntl.LOCK_UN)
+        file_locks.flock(descriptor, file_locks.LOCK_UN)
         os.close(descriptor)
 
 

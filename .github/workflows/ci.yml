@@ -98,7 +98,10 @@ jobs:
         run: uv sync --locked
 
       - name: Verify durable journal ownership
-        run: uv run python -m unittest -v tests.test_transport_delivery_lock
+        run: >-
+          uv run python -m unittest -v
+          tests.test_architecture_transport_exports
+          tests.test_transport_delivery_lock
 
   memory-regression:
     name: Memory regression benchmarks

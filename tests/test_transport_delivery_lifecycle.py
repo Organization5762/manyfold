@@ -411,17 +411,27 @@ class TransportDeliveryLifecycleTests(unittest.TestCase):
         self,
     ) -> None:
         transport = self._track_transport(
-            TcpTransport.connect(
+            TcpTransport.listen(
                 NodeIdentity("cluster", "sender-fatal"),
-                TcpAddress("127.0.0.1", 9),
                 config=_transport_config(),
-                expected_peer_node_id="missing",
+                expected_peer_node_id="sender-fatal-peer",
             )
         )
+        peer = self._track_transport(
+            TcpTransport.connect(
+                NodeIdentity("cluster", "sender-fatal-peer"),
+                transport.address,
+                config=_transport_config(),
+                expected_peer_node_id="sender-fatal",
+            )
+        )
+        self.assertTrue(transport.wait_until_connected(timeout=2.0))
+        self.assertTrue(peer.wait_until_connected(timeout=2.0))
         config = self._config(self._root / "sender-fatal.sqlite3")
         delivery = self._track_delivery(DurableDelivery(transport, config))
         receive_result: Queue[BaseException] = Queue()
         started = Event()
+        sender_denied = Event()
         receiver_waiter = Thread(
             target=lambda: self._capture_blocked_receive(
                 delivery,
@@ -469,10 +479,13 @@ class TransportDeliveryLifecycleTests(unittest.TestCase):
                     action == sqlite3.SQLITE_SELECT
                     and current_thread().name.endswith("-sender")
                 ):
+                    sender_denied.set()
                     return sqlite3.SQLITE_DENY
                 return sqlite3.SQLITE_OK
 
             delivery._journal._connection.set_authorizer(deny_sender_reads)
+        delivery._sender.wake()
+        self.assertTrue(sender_denied.wait(timeout=1.0))
         health = self._wait_health(delivery, lambda snapshot: snapshot.closed)
         receiver_waiter.join(timeout=1.0)
 
