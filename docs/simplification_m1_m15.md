@@ -432,7 +432,10 @@ narrowing.
   never be pinned, merged, or used to preserve hidden `Graph` fallbacks.
 - Heart PR #954 head `d86556c6` is the producer-identity prerequisite.
 - Published #280 `ae411bc423aa68227d346ad65d8f816b70e3a8d5` remains
-  under substantive rereview. Published #281 remains
+  blocked. Its pending startup validation materializes all retained outbox
+  payloads into one `O(total journal bytes)` tuple instead of a bounded
+  stream/batch, and its benchmark provenance lacks a git tree SHA. Published
+  #281 remains
   `3c62dd1c08eb0bd18e7647a82889b332c585b3b3`; local `596b22b` is
   unpublished. PR #282 head `b8123ef208141d57ec7848c2a0578b01afc94c59`
   remains blocked despite green CI: fan-out conflates a closed
