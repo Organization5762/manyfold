@@ -64,6 +64,48 @@ semantic leaf/mode that replaces it. Rows marked as defects freeze evidence,
 not the bug: their future contract intentionally differs. `Graph.` denotes the
 native PyO3 graph, not the Python facade.
 
+### Compiler facts and precedence
+
+Every executable row contains one complete frozen `PublishFacts` value; no fact
+is inferred from a case name or prose such as “same.” The tuple contains:
+
+- target kind and API (`publish` or `publish_nowait`);
+- raw/typed schema category, process-local ownership, bytes passthrough, and
+  source sparse-native compatibility;
+- source topology, materializer presence/target count, every target's
+  sparse-native compatibility, and source/target topology isolation;
+- source/target delivery subscribers and source/target taint;
+- encoded payload emptiness, Ephemeral layer, Write/Request route, and
+  `control_epoch` presence.
+
+Predicates include the negation of every earlier dominant row, so
+`matching_leaves(facts)` must contain exactly one leaf. The compiler and golden
+coverage test use this order:
+
+| Precedence | Mutually exclusive predicate | `PublishDecisionLeaf` |
+| ---: | --- | --- |
+| 1 | `LifecycleBinding` | `LIFECYCLE_BINDING` |
+| 2 | `WriteBinding` but not lifecycle | `WRITE_BINDING` |
+| 3 | Typed/raw source has materializers and source or any materialized target has outgoing topology | `COMPOSITE_GRAPH` |
+| 4 | Source has outgoing topology and is not composite | `ROUTED_GRAPH` |
+| 5 | Topology-isolated materializer satisfies every drop-safety fact, nowait, and has one target | `MATERIALIZE_DROP_ONE` |
+| 6 | Same complete drop-safety predicate with more than one target | `MATERIALIZE_DROP_ALL` |
+| 7 | Any remaining topology-isolated materializer | `MATERIALIZE_RETURN` |
+| 8 | Isolated raw `RouteRef` with no materializer | `RAW_UNROUTED` |
+| 9 | Isolated typed source with control | `CONTROLLED_SOURCE` |
+| 10 | Isolated typed source without control and with source taint | `TAINTED_SOURCE` |
+| 11 | Remaining isolated typed source whose encoded payload is empty | `EMPTY_PAYLOAD` |
+| 12 | Remaining isolated typed Ephemeral source | `EPHEMERAL_SOURCE` |
+| 13 | Remaining isolated typed Write/Request source | `WRITE_REQUEST_SOURCE` |
+| 14 | Remaining process-local source with delivery | `PROCESS_LOCAL_OBSERVED` |
+| 15 | Remaining process-local source without delivery | `PROCESS_LOCAL_UNOBSERVED` |
+| 16 | Remaining non-bytes-passthrough typed source | `ENCODED_SOURCE` |
+| 17 | Remaining sparse-compatible source with delivery | `SPARSE_OBSERVED` |
+| 18 | Remaining sparse-compatible source without delivery | `SPARSE_UNOBSERVED` |
+
+The final assertion rejects zero matches, multiple matches, an uncovered enum
+member, or a case whose expected leaf differs from the sole predicate match.
+
 ### Binding, raw, sparse, and routed leaves
 
 | Case | API | Conditions and `PublishDecisionLeaf` | Current native call sequence | `PublishMode` | Golden state contract |
@@ -82,8 +124,34 @@ native PyO3 graph, not the Python facade.
 | `typed_sparse_source_subscriber_nowait` | `publish_nowait` | direct source subscriber; `SPARSE_OBSERVED` | `Graph.emit_single_if_unrouted` | `SOURCE_ENVELOPE` | Exactly one inline callback before return; reentrant publication is caller-backpressured and queue-free. |
 | `typed_routed_publish` | `publish` | typed route with native routing; `ROUTED_GRAPH` | Current branch `SINGLE_THEN_ROUTED`: `Graph.emit_single_if_unrouted` returns `None`, then `Graph.emit` | `ROUTED_ENVELOPES` | Every routed envelope is recorded/delivered once under its own retention policy. |
 | `typed_routed_nowait` | `publish_nowait` | typed route with native routing; `ROUTED_GRAPH` | Current branch `NOWAIT_SINGLE_THEN_PUBLISH`: `Graph.emit_single_if_unrouted` returns `None`; Python `publish` retries it, then calls `Graph.emit` | `ROUTED_ENVELOPES` | Same outputs and state as `publish`; M3 removes the duplicate native probe without preserving it as a leaf. |
+| `routed_control_publish` | `publish` | source topology plus control; sole match `ROUTED_GRAPH` because source specializations require isolation | `Graph.emit_single_if_unrouted` returns `None`, then `Graph.emit` | `ROUTED_ENVELOPES` | Control metadata and guarded-write validation reach every traversed route exactly once. |
+| `routed_control_nowait` | `publish_nowait` | same full facts and control; `ROUTED_GRAPH` | `Graph.emit_single_if_unrouted` returns `None`; Python `publish` retries it, then calls `Graph.emit` | `ROUTED_ENVELOPES` | Same control/state/delivery as `publish` without a future duplicate probe. |
+| `routed_process_local_publish` | `publish` | source topology plus `Schema.any()`; sole match `ROUTED_GRAPH` because process-local leaves require isolation | `Graph.emit_single_if_unrouted` returns `None`, then `Graph.emit` | `ROUTED_ENVELOPES` | Original object identity reaches every compatible route; one encoded token owner is shared/referenced correctly and all route indexes release. |
+| `routed_process_local_nowait` | `publish_nowait` | same full facts; `ROUTED_GRAPH` | `Graph.emit_single_if_unrouted` returns `None`; Python `publish` currently re-encodes before `Graph.emit` | `ROUTED_ENVELOPES` | Future plan encodes once, preserves identity, and leaves no orphan token from fallback. |
+| `routed_empty_publish` | `publish` | source topology and encoded payload `b\"\"`; sole match `ROUTED_GRAPH` because `EMPTY_PAYLOAD` requires isolation | `Graph.emit_single_if_unrouted` returns `None`, then `Graph.emit` | `ROUTED_ENVELOPES` | Every traversed route advances with the empty payload under its own replay/latest bounds. |
+| `routed_empty_nowait` | `publish_nowait` | same full facts; `ROUTED_GRAPH` | `Graph.emit_single_if_unrouted` returns `None`; Python `publish` retries it, then calls `Graph.emit` | `ROUTED_ENVELOPES` | Exact routed parity; empty payload never becomes an isolated-source early return. |
 
 ### Native materializer leaves
+
+`DROP_SAFE_FACTS` is one complete reusable fact value, not a loose shortcut. It
+requires `publish_nowait`; nonempty bytes; source and every target
+sparse-native compatible; no process-local, Ephemeral, or Write/Request source
+or target; no control; no source/target taint; no source/target delivery
+subscriber; and no outgoing topology on the source or any target. Target count
+then selects one versus all. The golden table toggles one fact at a time:
+
+| Rejection case | Changed fact | Sole legal leaf | Required mode |
+| --- | --- | --- | --- |
+| `drop_reject_source_process_local` | process-local source, source sparse compatibility false | `MATERIALIZE_RETURN` | `MATERIALIZED_ENVELOPES` |
+| `drop_reject_target_process_local` | one process-local/non-sparse target | `MATERIALIZE_RETURN` | `MATERIALIZED_ENVELOPES` |
+| `drop_reject_empty` | encoded source bytes empty | `MATERIALIZE_RETURN` | `MATERIALIZED_ENVELOPES` |
+| `drop_reject_ephemeral` | source or target Ephemeral | `MATERIALIZE_RETURN` | `MATERIALIZED_ENVELOPES` |
+| `drop_reject_write_request` | source or target Write/Request | `MATERIALIZE_RETURN` | `MATERIALIZED_ENVELOPES` |
+| `drop_reject_control` | `control_epoch` present | `MATERIALIZE_RETURN` | `MATERIALIZED_ENVELOPES` |
+| `drop_reject_source_taint` | source tainted | `MATERIALIZE_RETURN` | `MATERIALIZED_ENVELOPES` |
+| `drop_reject_target_taint` | target tainted | `MATERIALIZE_RETURN` | `MATERIALIZED_ENVELOPES` |
+| `drop_reject_delivery` | source or target delivery subscriber | `MATERIALIZE_RETURN` | `MATERIALIZED_ENVELOPES` |
+| `drop_reject_target_topology` | target has outgoing topology | `COMPOSITE_GRAPH` | `ROUTED_ENVELOPES` |
 
 | Case | API | Conditions and `PublishDecisionLeaf` | Current native call | `PublishMode` | Golden state and callback contract |
 | --- | --- | --- | --- | --- | --- |
@@ -99,6 +167,8 @@ native PyO3 graph, not the Python facade.
 | `materializer_source_and_target_delivery` | both | one target; source and target subscribers; `MATERIALIZE_RETURN` | `Graph.emit_single_if_unrouted_with_lineage_no_parents_and_materializers` | `MATERIALIZED_ENVELOPES` | Callback order is `[source, target]`; each count one; callbacks finish before return. |
 | `materializer_many_delivery_order` | both | two targets; subscribers on source and both targets; `MATERIALIZE_RETURN` | `Graph.emit_single_if_unrouted_with_lineage_no_parents_and_materializers` | `MATERIALIZED_ENVELOPES` | Callback order is source then targets in registration order; each count one. |
 | `materializer_control` | both | materializer present and `control_epoch` supplied; `MATERIALIZE_RETURN` | Defect branch `CONTROL_SOURCE_ONLY`: `Graph.emit_single_if_unrouted`, currently leaving the target stale | `MATERIALIZED_ENVELOPES` | Future source and every target advance exactly once with control metadata; `publish`/`publish_nowait` state and delivery are equal. |
+| `composite_control_publish` | `publish` | source topology, materializer, and control; sole match `COMPOSITE_GRAPH` | Defect `Graph.emit_single_if_unrouted` returns `None`, then `Graph.emit` advances routed topology but leaves materialized target stale | `ROUTED_ENVELOPES` | Source topology and every materialized/downstream target advance once with the same control metadata. |
+| `composite_control_nowait` | `publish_nowait` | same full facts; `COMPOSITE_GRAPH` | Defect `Graph.emit_single_if_unrouted` returns `None`; Python `publish` retries it, then `Graph.emit` still omits materialization | `ROUTED_ENVELOPES` | Exact composite state/control/delivery parity without duplicate probes. |
 | `materializer_source_routed_publish` | `publish` | source has outgoing topology and one materializer; `COMPOSITE_GRAPH` | Defect branch: `Graph.emit_single_if_unrouted_with_lineage_no_parents_and_materializers` returns `None`, then `Graph.emit`; routed target advances but materialized target stays stale | `ROUTED_ENVELOPES` | Source topology and materialized target both advance once in deterministic order. |
 | `materializer_source_routed_nowait` | `publish_nowait` | one target, default producer, same composite source; `COMPOSITE_GRAPH` | Defect sequence: `Graph.emit_single_if_unrouted_and_materializer_drop_python` returns false; `Graph.emit_single_if_unrouted_with_lineage_no_parents_and_materializers` and `Graph.emit_single_if_unrouted` return `None`; Python `publish` retries the materializer call, then reaches `Graph.emit`; materialized target stays stale | `ROUTED_ENVELOPES` | Exact state/delivery parity with composite `publish`, with no duplicate probe. |
 | `materialized_target_routed_publish` | `publish` | materialized target has outgoing topology; `COMPOSITE_GRAPH` | Defect branch `Graph.emit_single_if_unrouted_with_lineage_no_parents_and_materializers` advances source/target but leaves downstream stale | `ROUTED_ENVELOPES` | Source, materialized target, and its downstream route each advance once. |
@@ -181,6 +251,30 @@ A literal `RouteRetentionPolicy(history_limit=0)` remains invalid public input
 and has a separate validation case; it is not the representation used by the
 resolved numeric replay bound.
 
+### Immutable plan and per-call variants
+
+One frozen `PublishPlan` owns the encoder, route-scoped dependency versions,
+resolved retention/ownership actions, and a complete precompiled variant table
+keyed by `(api, payload_is_empty, has_control)`. Each frozen `PublishVariant`
+contains the sole semantic leaf, native mode, delivery/materializer targets,
+and retention actions. Encoding occurs once, then `PublishPlan.select(...)` is
+a constant-time table lookup; it never recompiles policy in the hot call.
+
+Producer identity, context tracking, debug emission, and audit emission are
+execution arguments/effects around the selected variant. They cannot replace
+the plan, add a leaf, or change the native mode. The executable alternation row
+uses one topology-isolated, one-target materializer plan:
+
+| Call on the same plan object | Selected leaf | Selected mode | Identity assertion |
+| --- | --- | --- | --- |
+| nonempty uncontrolled `publish_nowait` | `MATERIALIZE_DROP_ONE` | `SINGLE_MATERIALIZED_DROP` | Capture plan object and dependency versions. |
+| nonempty controlled `publish_nowait` | `MATERIALIZE_RETURN` | `MATERIALIZED_ENVELOPES` | Same plan object; only precompiled variant changes. |
+| nonempty uncontrolled `publish_nowait` again | `MATERIALIZE_DROP_ONE` | `SINGLE_MATERIALIZED_DROP` | Same plan object and original variant object reused. |
+
+Companion rows alternate `publish`/`publish_nowait` and empty/nonempty payloads
+on one unchanged route, proving API, control, and payload contents are call
+facts rather than invalidation triggers.
+
 The plan key is route identity plus route-scoped dependency versions. A
 materializer plan depends on the source and every target's topology,
 subscriptions, retention, and taint versions. The golden matrix asserts both
@@ -200,6 +294,7 @@ positive and negative invalidation:
 | Unrelated route subscriber churn | Existing plan object remains current; no global subscriber generation recompiles it. |
 | Unrelated route retention reconfiguration | Existing plan object and bounds remain current. |
 | Unrelated route taint add/repair | Existing plan object remains current; no global taint generation recompiles it. |
+| Alternate API, empty/nonempty payload, or control on the same route | Existing plan object remains identical; only the matching precompiled variant changes. |
 
 Context membership, debug emission, write audit emission, producer identity, and
 `control_epoch` are explicit per-call effects, not hidden plan-key state.
@@ -327,15 +422,15 @@ narrowing.
 - Heart commit `8d34cd85` is superseded. It may supply policy evidence but must
   never be pinned, merged, or used to preserve hidden `Graph` fallbacks.
 - Heart PR #954 head `d86556c6` is the producer-identity prerequisite.
-- Manyfold PR #282 head
-  `fa1d1336c504a8f6f5ded57e4b0a60e7570b44ea` is candidate-only pending a
-  dedicated supervisor verdict and hosted CI. Earlier heads `4ae2d835` and
-  `b1370145` are blocked/stale. No M or Heart branch may compose over #282
-  without the new exact verdict.
-- Published #281 remains `3c62dd1`; unpublished `a92efa1` is blocked on
-  STARTING/start-close races and leaked worker, subscription, and name-registry
-  state. PR3 remains independent and must record exact base/head ancestry; no
-  Heart pin guidance is valid yet.
+- Published #280 `ae411bc423aa68227d346ad65d8f816b70e3a8d5` remains
+  under substantive rereview. Published #281 remains
+  `3c62dd1c08eb0bd18e7647a82889b332c585b3b3`; local `596b22b` is
+  unpublished. PR #282 head `9e1721199923476893f5ea214aca30ce56733e91`
+  is candidate-only pending dedicated verdict and hosted CI; `fa1d1336` is
+  stale. PR #279 has no candidate.
+- PR3 remains independent of those candidates and must record exact base/head
+  ancestry. No Heart pin guidance is valid until the required verdicts and
+  hosted checks are green.
 - The authoritative forward consumer gate is current Heart after #954 and the
   H work, pinned to the settled Manyfold stack. Record that SHA and focused
   command before M11–M14 are complete.
