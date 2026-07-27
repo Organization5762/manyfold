@@ -94,6 +94,29 @@ Manyfold-native architecture elements remain available from
 `PubSub` is the primary application stream surface. Behavior-heavy substrates
 stay backed by the runtime implementation.
 
+### Outside Interfaces
+
+Use architecture interfaces when external sources have lifecycle or schema
+state that needs to compose with streams:
+
+```python
+from manyfold.architecture import BluetoothControllerInterface, SerialBusInterface
+
+controllers = BluetoothControllerInterface("controllers")
+controllers.connect_controller("joy-0", name="8BitDo Lite 2")
+controllers.publish_controller_state("joy-0", {"dpad_x": 1, "south": True})
+controllers.disconnect_controller("joy-0", reason="link lost")
+
+serial = SerialBusInterface("serial")
+serial.discover_bus("/dev/ttyUSB0")
+serial.publish_bus_schema("/dev/ttyUSB0", {"rotation": "int", "pressed": "bool"})
+serial.publish_frame("/dev/ttyUSB0", {"rotation": 3, "pressed": True})
+```
+
+Both adapters publish normalized lifecycle, schema, data, and error events to a
+`PubSub` stream, so Bluetooth reconnect churn and serial bus discovery remain
+queryable beside the payloads they produce.
+
 ### Stats: Compute Values
 
 ```python
