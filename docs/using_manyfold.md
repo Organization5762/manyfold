@@ -254,6 +254,49 @@ Use `stream.query(...)` for SQL scoped to one PubSub stream and
 assigns a default `event_time` when callers do not provide one; distributed
 queue implementations own that ordering contract.
 
+## Interfaces
+
+Use `Interface` adapters when an outside source has connection state or schema
+state that should be visible beside its data. The adapter publishes normalized
+events into a `PubSub` stream, so application code can query lifecycle, schema,
+and payload history through the same SQL surface as ordinary streams.
+
+```python
+from manyfold.architecture import BluetoothControllerInterface, SerialBusInterface
+
+
+controllers = BluetoothControllerInterface("controllers")
+controllers.connect_controller("joy-0", name="8BitDo Lite 2")
+controllers.publish_controller_state(
+    "joy-0",
+    {"dpad_x": 1, "south": True},
+    schema={"dpad_x": "int", "south": "bool"},
+)
+controllers.disconnect_controller("joy-0", reason="link lost")
+
+serial = SerialBusInterface("serial")
+serial.discover_bus("/dev/ttyUSB0")
+serial.publish_bus_schema("/dev/ttyUSB0", {"rotation": "int", "pressed": "bool"})
+serial.publish_frame("/dev/ttyUSB0", {"rotation": 3, "pressed": True})
+
+latest = serial.latest()
+if latest is not None:
+    print(f"{latest.source_id}: {latest.event_type} {latest.schema}")
+```
+
+Output:
+
+```text
+/dev/ttyUSB0: serial.frame {"pressed":"bool","rotation":"int"}
+```
+
+`BluetoothControllerInterface` is for lossy controller connection cycles:
+connect, publish sampled state, disconnect, then reconnect under the same stable
+controller id. `SerialBusInterface` is for buses that appear, disappear, and
+need schema discovery before downstream consumers can interpret frames. Both
+keep active-source state bounded to currently connected sources and retain only
+the event history configured on their underlying `PubSub`.
+
 ## Inspect
 
 Manyfold is useful when the runtime can answer operational questions:

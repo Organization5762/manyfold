@@ -10,12 +10,14 @@ from threading import Event, Thread, get_ident
 from uuid import UUID
 
 from manyfold.architecture import (
+    BluetoothControllerInterface,
     CalibratedClock,
     Capacitor,
     Clock,
     ClockCalibrationSample,
     DataStreamProcessor,
     Ground,
+    Interface,
     ManyFoldLock,
     ManyFoldLockLease,
     MonotonicLogicalClock,
@@ -30,6 +32,7 @@ from manyfold.architecture import (
     Regulator,
     Relay,
     Resistor,
+    SerialBusInterface,
     ServiceDiscoveryRequirement,
     StreamRow,
     SystemTimeProvider,
@@ -919,6 +922,109 @@ class PubSubStreamTests(unittest.TestCase):
             rows[0].as_model(OptionalTemperature),
             OptionalTemperature(degrees=None, unit="F"),
         )
+
+
+class InterfaceTests(unittest.TestCase):
+    def test_interface_publishes_normalized_pubsub_events(self) -> None:
+        interface = Interface("test-source")
+
+        emitted = interface.connect("source-a", payload={"kind": "sensor"})
+        interface.publish_data("source-a", b"\x01\x02")
+
+        latest = interface.latest()
+        self.assertIsNotNone(latest)
+        self.assertEqual(emitted.event_type, "connected")
+        self.assertEqual(interface.topic, "interface.test-source")
+        self.assertEqual(interface.connected_sources(), ("source-a",))
+        self.assertEqual(latest.interface, "test-source")
+        self.assertEqual(latest.source_id, "source-a")
+        self.assertEqual(latest.event_type, "data")
+        self.assertTrue(latest.connected)
+        self.assertEqual(latest.sequence, 2)
+        self.assertEqual(latest.payload, "0102")
+        self.assertEqual(latest.payload_encoding, "hex")
+        self.assertEqual(
+            interface.query(
+                """
+                SELECT COUNT(*) AS event_count
+                FROM stream
+                WHERE source_id = :source_id
+                """,
+                {"source_id": "source-a"},
+            )[0].event_count,
+            2,
+        )
+
+    def test_bluetooth_controller_interface_tracks_lossy_disconnect_cycles(self) -> None:
+        controllers = BluetoothControllerInterface("controllers")
+
+        controllers.connect_controller(
+            "joy-0",
+            name="8BitDo Lite 2",
+            address="AA:BB:CC:DD:EE:FF",
+        )
+        controllers.publish_controller_state(
+            "joy-0",
+            {"dpad_x": 1, "south": True},
+            schema={"dpad_x": "int", "south": "bool"},
+        )
+        controllers.disconnect_controller("joy-0", reason="link lost")
+        controllers.connect_controller("joy-0", name="8BitDo Lite 2")
+
+        self.assertEqual(controllers.connected_sources(), ("joy-0",))
+        rows = controllers.query(
+            """
+            SELECT event_type, connected, payload_encoding
+            FROM stream
+            ORDER BY sequence
+            """
+        )
+        self.assertEqual(
+            [row.event_type for row in rows],
+            [
+                "controller.connected",
+                "controller.state",
+                "controller.disconnected",
+                "controller.connected",
+            ],
+        )
+        self.assertEqual([row.connected for row in rows], [True, True, False, True])
+        self.assertEqual(rows[1].payload_encoding, "json")
+
+    def test_serial_bus_interface_carries_schema_to_frames(self) -> None:
+        serial = SerialBusInterface("serial")
+
+        serial.discover_bus("/dev/ttyUSB0")
+        serial.publish_bus_schema(
+            "/dev/ttyUSB0",
+            {"rotation": "int", "pressed": "bool"},
+        )
+        frame = serial.publish_frame("/dev/ttyUSB0", {"rotation": 3, "pressed": True})
+
+        self.assertTrue(serial.is_connected("/dev/ttyUSB0"))
+        self.assertEqual(frame.event_type, "serial.frame")
+        self.assertEqual(
+            frame.schema,
+            '{"pressed":"bool","rotation":"int"}',
+        )
+        self.assertEqual(serial.schema_for("/dev/ttyUSB0"), frame.schema)
+        latest = serial.latest()
+        self.assertIsNotNone(latest)
+        self.assertEqual(latest.event_type, "serial.frame")
+        self.assertEqual(latest.schema, frame.schema)
+
+    def test_serial_bus_interface_releases_schema_when_bus_disappears(self) -> None:
+        serial = SerialBusInterface("serial")
+
+        serial.discover_bus("bus-a", schema="packet-v1")
+        serial.lose_bus("bus-a", reason="removed")
+
+        self.assertFalse(serial.is_connected("bus-a"))
+        self.assertEqual(serial.schema_for("bus-a"), "")
+        latest = serial.latest()
+        self.assertIsNotNone(latest)
+        self.assertEqual(latest.event_type, "serial.disconnected")
+        self.assertFalse(latest.connected)
 
 
 class NativeArchitectureElementTests(unittest.TestCase):

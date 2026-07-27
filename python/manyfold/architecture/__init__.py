@@ -6,6 +6,12 @@ from .datastream_processor import (
     DataStreamProcessor as DataStreamProcessor,
     DataStreamRecord as DataStreamRecord,
 )
+from .interfaces import (
+    BluetoothControllerInterface as BluetoothControllerInterface,
+    Interface as Interface,
+    InterfaceEvent as InterfaceEvent,
+    SerialBusInterface as SerialBusInterface,
+)
 from .locks import (
     ManyFoldLock as ManyFoldLock,
     ManyFoldLockLease as ManyFoldLockLease,
@@ -50,6 +56,7 @@ from .workers import (
 )
 
 __all__ = [
+    "BluetoothControllerInterface",
     "CalibratedClock",
     "Capacitor",
     "Clock",
@@ -59,6 +66,8 @@ __all__ = [
     "DataStreamRecord",
     "Ground",
     "InMemoryPubSub",
+    "Interface",
+    "InterfaceEvent",
     "ManyFoldLock",
     "ManyFoldLockLease",
     "MonotonicLogicalClock",
@@ -78,6 +87,7 @@ __all__ = [
     "Regulator",
     "Relay",
     "Resistor",
+    "SerialBusInterface",
     "ServiceDiscoveryRequirement",
     "StreamRow",
     "SystemTimeProvider",
