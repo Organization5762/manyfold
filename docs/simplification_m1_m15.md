@@ -442,9 +442,10 @@ narrowing.
   unpublished and blocked. Its STARTED-to-RUNNING ordering and 18 focused tests
   pass, but a second same-object start can return successfully while the first
   is still STARTING with `is_running == false`; its docs also incorrectly claim
-  subscriber callbacks are lock-free. PR #282 candidate
-  `f0e3163ecfa1a077031be2261207563d1b8b08c6` is under dedicated exact-head
-  review and hosted CI. Predecessor
+  subscriber callbacks are lock-free. PR #282
+  `f0e3163ecfa1a077031be2261207563d1b8b08c6` is formally blocked despite
+  green CI: when close wins the registration race, `subscribe()` can dispose
+  while holding `_lifecycle_lock` and re-enter the same lock. Predecessor
   `b8123ef208141d57ec7848c2a0578b01afc94c59` is stale and blocked: fan-out
   conflates a closed `deliver() == false` result with queue pressure, and
   disposal can race callback registration and strand cleanup listeners. PR
