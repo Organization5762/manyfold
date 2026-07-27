@@ -437,6 +437,10 @@ narrowing.
   payloads into one `O(total journal bytes)` tuple instead of a bounded
   stream/batch, its benchmark provenance lacks a git tree SHA, and its pending
   usage fast path copies peer totals into public topic-capacity fields.
+  Validator rejection is implemented as `DROPPED` plus NACK/retry despite
+  being documented as terminal, while #279 maps every `DROPPED` outcome to
+  `DELIVERY_FAILED`; composition requires explicit terminality and an
+  exhaustion-order regression.
   Published #281 remains
   `3c62dd1c08eb0bd18e7647a82889b332c585b3b3`; local `e962d13` is
   unpublished and blocked. Its STARTED-to-RUNNING ordering and 18 focused tests
