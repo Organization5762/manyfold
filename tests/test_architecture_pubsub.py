@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import gc
 import subprocess
 import sys
 import unittest
 from dataclasses import dataclass
 from os import getpid
-from queue import Queue
-from threading import Event, Thread, get_ident
+from queue import Empty, Queue
+from threading import Barrier, Event, Thread, get_ident
 from uuid import UUID
 
 from manyfold.architecture import (
@@ -306,7 +307,7 @@ class PubSubStreamTests(unittest.TestCase):
             {"percent": None},
         )
 
-    def test_pubsub_topic_reuses_existing_topic_and_schema(self) -> None:
+    def test_pubsub_topic_reuses_fabric_runtime_and_schema(self) -> None:
         first = PubSubTopic(
             "input",
             schema=Temperature,
@@ -318,12 +319,37 @@ class PubSubStreamTests(unittest.TestCase):
             namespace="test-schema-lock",
         )
 
-        self.assertIs(first, second)
+        self.assertIsNot(first, second)
+        self.assertIs(first._runtime, second._runtime)
+        self.assertIs(second.schema, Temperature)
         with self.assertRaisesRegex(ValueError, "schema is already fixed"):
             PubSubTopic(
                 "input",
                 schema=_Humidity,
                 namespace="test-schema-lock",
+            )
+
+    def test_pubsub_topic_preserves_lazily_inferred_schema_after_detach(
+        self,
+    ) -> None:
+        first = PubSubTopic(
+            "input",
+            namespace="test-lazy-schema-lock",
+        )
+        first.publish(Temperature(degrees=72.0, unit="F"))
+        first.close()
+
+        second = PubSubTopic(
+            "input",
+            namespace="test-lazy-schema-lock",
+        )
+
+        self.assertIs(second.schema, Temperature)
+        with self.assertRaisesRegex(ValueError, "schema is already fixed"):
+            PubSubTopic(
+                "input",
+                schema=_Humidity,
+                namespace="test-lazy-schema-lock",
             )
 
     def test_pubsub_topic_defaults_to_default_namespace_ephemeral_name_and_no_schema(
@@ -348,6 +374,559 @@ class PubSubStreamTests(unittest.TestCase):
         boot_lock = ManyFoldLock.for_resource("pubsub:manual:boot")
         self.assertEqual(fabric.boot_lock.name, boot_lock.name)
         self.assertEqual(fabric.boot_lock.path, boot_lock.path)
+
+    def test_pubsub_fabric_does_not_retain_dropped_borrowed_topic_handles(
+        self,
+    ) -> None:
+        fabric = PubSubFabric(namespace="test-borrowed-handle-weak-registry")
+        try:
+            def create_and_drop_handles() -> None:
+                for index in range(200):
+                    handle = fabric.topic("input", schema=Temperature)
+                    if index == 199:
+                        handle.publish(Temperature(degrees=72.0, unit="F"))
+
+            create_and_drop_handles()
+            gc.collect()
+
+            self.assertLessEqual(len(fabric._topic_handles), 1)
+            retained = fabric.topic("input")
+            self.assertIs(retained.schema, Temperature)
+            latest = retained.latest()
+            self.assertIsNotNone(latest)
+            self.assertEqual(latest.degrees, 72.0)
+            with self.assertRaisesRegex(ValueError, "schema is already fixed"):
+                fabric.topic("input", schema=_Humidity)
+            live = fabric.topic("input")
+        finally:
+            fabric.close()
+        self.assertTrue(live.is_closed)
+
+    def test_pubsub_context_exit_closes_private_runtime_handle(self) -> None:
+        with PubSub(topic="context.temperature", schema=Temperature) as temperature:
+            temperature.publish(Temperature(degrees=72.9, unit="F"))
+            latest = temperature.latest()
+
+            self.assertIsNotNone(latest)
+            self.assertEqual(latest.degrees, 72.9)
+
+        self.assertTrue(temperature.is_closed)
+        with self.assertRaisesRegex(RuntimeError, "closed"):
+            temperature.publish(Temperature(degrees=73.1, unit="F"))
+
+    def test_pubsub_context_closes_after_exception_and_double_close_is_safe(
+        self,
+    ) -> None:
+        stream = PubSub(topic="context.exception", schema=Temperature)
+
+        with self.assertRaisesRegex(RuntimeError, "application failure"):
+            with stream:
+                stream.publish(Temperature(degrees=71.5, unit="F"))
+                raise RuntimeError("application failure")
+
+        self.assertTrue(stream.is_closed)
+        stream.close()
+        stream.close()
+        with self.assertRaisesRegex(RuntimeError, "closed"):
+            stream.latest()
+
+    def test_pubsub_context_stops_background_callback_delivery(self) -> None:
+        callback_threads: Queue[int] = Queue()
+
+        with PubSub(topic="context.callbacks", schema=Temperature) as stream:
+            subscription = stream.subscribe(
+                lambda _row: callback_threads.put(get_ident()),
+                callback_placement=CallbackPlacement.spawned_thread(
+                    "context-callbacks",
+                ),
+            )
+            stream.publish(Temperature(degrees=72.4, unit="F"))
+            self.assertNotEqual(callback_threads.get(timeout=1.0), get_ident())
+            self.assertFalse(subscription.is_disposed)
+
+        self.assertTrue(subscription.is_disposed)
+        with self.assertRaisesRegex(RuntimeError, "closed"):
+            stream.publish(Temperature(degrees=72.5, unit="F"))
+
+    def test_pubsub_spawned_thread_callback_can_close_own_stream(self) -> None:
+        stream = PubSub(topic="context.self-close-callback", schema=Temperature)
+        closed = Queue()
+        errors: Queue[Exception] = Queue()
+
+        def close_stream(_row: StreamRow) -> None:
+            try:
+                stream.close()
+            except Exception as error:
+                errors.put(error)
+            closed.put(stream.is_closed)
+
+        stream.subscribe(
+            close_stream,
+            callback_placement=CallbackPlacement.spawned_thread(
+                "context-self-close-callback",
+            ),
+        )
+        stream.publish(Temperature(degrees=72.4, unit="F"))
+
+        self.assertTrue(closed.get(timeout=1.0))
+        with self.assertRaises(Empty):
+            errors.get(timeout=0.1)
+
+    def test_pubsub_close_cancels_pending_main_thread_callback_delivery(
+        self,
+    ) -> None:
+        stream = PubSub(topic="context.main-thread-cancel", schema=Temperature)
+        observed: list[float] = []
+        drain_main_thread_callbacks()
+
+        stream.subscribe(
+            lambda row: observed.append(row.degrees),
+            callback_placement=CallbackPlacement.main_thread(),
+        )
+        stream.publish(Temperature(degrees=72.0, unit="F"))
+        stream.close()
+
+        self.assertEqual(observed, [])
+        self.assertEqual(drain_main_thread_callbacks(), 0)
+        self.assertEqual(observed, [])
+
+    def test_pubsub_subscription_dispose_cancels_pending_main_thread_callback(
+        self,
+    ) -> None:
+        stream = PubSub(
+            topic="context.main-thread-subscription-cancel",
+            schema=Temperature,
+        )
+        observed: list[float] = []
+        drain_main_thread_callbacks()
+
+        subscription = stream.subscribe(
+            lambda row: observed.append(row.degrees),
+            callback_placement=CallbackPlacement.main_thread(),
+        )
+        stream.publish(Temperature(degrees=72.0, unit="F"))
+        self.assertTrue(subscription.dispose())
+
+        self.assertEqual(drain_main_thread_callbacks(), 0)
+        self.assertEqual(observed, [])
+
+    def test_pubsub_publish_racing_dispose_does_not_deliver_after_dispose(
+        self,
+    ) -> None:
+        delivered_after_dispose = Queue()
+        publish_errors: Queue[Exception] = Queue()
+
+        for attempt in range(200):
+            stream = PubSub(
+                topic=f"context.dispose-publish-race.{attempt}",
+                schema=Temperature,
+                retained_messages=4096,
+            )
+            for seed in range(256):
+                stream.publish(Temperature(degrees=float(seed), unit="F"))
+
+            dispose_returned = Event()
+
+            def observe(_row: StreamRow) -> None:
+                if dispose_returned.is_set():
+                    delivered_after_dispose.put(attempt)
+
+            subscription = stream.subscribe(observe)
+            start = Barrier(3)
+
+            def publish() -> None:
+                try:
+                    start.wait(timeout=1.0)
+                    stream.publish(Temperature(degrees=1000.0 + attempt, unit="F"))
+                except Exception as error:
+                    publish_errors.put(error)
+
+            def dispose() -> None:
+                try:
+                    start.wait(timeout=1.0)
+                    subscription.dispose()
+                    dispose_returned.set()
+                except Exception as error:
+                    publish_errors.put(error)
+
+            publisher = Thread(target=publish)
+            disposer = Thread(target=dispose)
+            publisher.start()
+            disposer.start()
+            start.wait(timeout=1.0)
+            publisher.join(timeout=2.0)
+            disposer.join(timeout=2.0)
+            self.assertFalse(publisher.is_alive())
+            self.assertFalse(disposer.is_alive())
+            stream.close()
+
+        with self.assertRaises(Empty):
+            delivered_after_dispose.get(timeout=0.1)
+        with self.assertRaises(Empty):
+            publish_errors.get(timeout=0.1)
+
+    def test_pubsub_observable_dispose_racing_publish_treats_close_as_cancel(
+        self,
+    ) -> None:
+        delivered_after_dispose = Queue()
+        publish_errors: Queue[Exception] = Queue()
+        drain_main_thread_callbacks()
+
+        for attempt in range(200):
+            stream = PubSub(
+                topic=f"context.observable-dispose-publish-race.{attempt}",
+                schema=Temperature,
+                retained_messages=4096,
+            )
+            for seed in range(256):
+                stream.publish(Temperature(degrees=float(seed), unit="F"))
+
+            dispose_returned = Event()
+
+            def observe(_degrees: float) -> None:
+                if dispose_returned.is_set():
+                    delivered_after_dispose.put(attempt)
+
+            subscription = stream.map(lambda row: row.degrees).subscribe(
+                observe,
+                callback_placement=CallbackPlacement.main_thread(),
+            )
+            start = Barrier(3)
+
+            def publish() -> None:
+                try:
+                    start.wait(timeout=1.0)
+                    stream.publish(Temperature(degrees=1000.0 + attempt, unit="F"))
+                except Exception as error:
+                    publish_errors.put(error)
+
+            def dispose() -> None:
+                try:
+                    start.wait(timeout=1.0)
+                    subscription.dispose()
+                    dispose_returned.set()
+                except Exception as error:
+                    publish_errors.put(error)
+
+            publisher = Thread(target=publish)
+            disposer = Thread(target=dispose)
+            publisher.start()
+            disposer.start()
+            start.wait(timeout=1.0)
+            publisher.join(timeout=2.0)
+            disposer.join(timeout=2.0)
+            self.assertFalse(publisher.is_alive())
+            self.assertFalse(disposer.is_alive())
+            stream.close()
+
+        drain_main_thread_callbacks()
+        with self.assertRaises(Empty):
+            delivered_after_dispose.get(timeout=0.1)
+        with self.assertRaises(Empty):
+            error = publish_errors.get(timeout=0.1)
+            raise AssertionError("publish or dispose raised") from error
+
+    def test_pubsub_publish_racing_close_does_not_deliver_after_close(self) -> None:
+        delivered_after_close = Queue()
+        publish_errors: Queue[tuple[int, float, Exception]] = Queue()
+        close_errors: Queue[tuple[int, Exception]] = Queue()
+
+        for attempt in range(200):
+            namespace = f"context-close-publish-race-{attempt}"
+            stream = PubSubTopic(
+                "temperature",
+                namespace=namespace,
+                schema=Temperature,
+            )
+            for seed in range(256):
+                stream.publish(Temperature(degrees=float(seed), unit="F"))
+
+            close_returned = Event()
+
+            def observe(_row: StreamRow) -> None:
+                if close_returned.is_set():
+                    delivered_after_close.put(attempt)
+
+            stream.subscribe(observe)
+            start = Barrier(3)
+
+            def publish() -> None:
+                degrees = 1000.0 + attempt
+                try:
+                    start.wait(timeout=1.0)
+                    stream.publish(Temperature(degrees=degrees, unit="F"))
+                except Exception as error:
+                    publish_errors.put((attempt, degrees, error))
+
+            def close() -> None:
+                try:
+                    start.wait(timeout=1.0)
+                    stream.close()
+                    close_returned.set()
+                except Exception as error:
+                    close_errors.put((attempt, error))
+
+            publisher = Thread(target=publish)
+            closer = Thread(target=close)
+            publisher.start()
+            closer.start()
+            start.wait(timeout=1.0)
+            publisher.join(timeout=2.0)
+            closer.join(timeout=2.0)
+            self.assertFalse(publisher.is_alive())
+            self.assertFalse(closer.is_alive())
+
+        with self.assertRaises(Empty):
+            delivered_after_close.get(timeout=0.1)
+        with self.assertRaises(Empty):
+            attempt, error = close_errors.get(timeout=0.1)
+            raise AssertionError(
+                f"close raised during publish race attempt {attempt}"
+            ) from error
+        while True:
+            try:
+                attempt, degrees, error = publish_errors.get_nowait()
+            except Empty:
+                break
+            retained = PubSubTopic(
+                "temperature",
+                namespace=f"context-close-publish-race-{attempt}",
+            )
+            try:
+                latest = retained.latest()
+                retained_degrees = None if latest is None else latest.degrees
+            finally:
+                retained.close()
+            if retained_degrees == degrees:
+                self.fail(
+                    "publish raised after retaining its value during close race: "
+                    f"{error!r}"
+                )
+
+    def test_pubsub_subscribe_racing_close_does_not_deadlock(self) -> None:
+        subscribe_errors: Queue[Exception] = Queue()
+
+        for attempt in range(200):
+            stream = PubSub(
+                topic=f"context.subscribe-close-race.{attempt}",
+                schema=Temperature,
+            )
+            subscriptions: Queue[PubSubCallbackSubscription] = Queue()
+            start = Barrier(3)
+
+            def subscribe() -> None:
+                try:
+                    start.wait(timeout=1.0)
+                    subscriptions.put(stream.subscribe(lambda _row: None))
+                except RuntimeError as error:
+                    if "closed" not in str(error):
+                        subscribe_errors.put(error)
+                except Exception as error:
+                    subscribe_errors.put(error)
+
+            def close() -> None:
+                try:
+                    start.wait(timeout=1.0)
+                    stream.close()
+                except Exception as error:
+                    subscribe_errors.put(error)
+
+            subscriber = Thread(target=subscribe)
+            closer = Thread(target=close)
+            subscriber.start()
+            closer.start()
+            start.wait(timeout=1.0)
+            subscriber.join(timeout=2.0)
+            closer.join(timeout=2.0)
+
+            self.assertFalse(subscriber.is_alive())
+            self.assertFalse(closer.is_alive())
+            while True:
+                try:
+                    subscription = subscriptions.get_nowait()
+                except Empty:
+                    break
+                self.assertTrue(subscription.is_disposed)
+
+        with self.assertRaises(Empty):
+            error = subscribe_errors.get(timeout=0.1)
+            raise AssertionError("subscribe or close raised") from error
+
+    def test_subscription_dispose_callback_added_during_dispose_runs(self) -> None:
+        dispose_entered = Event()
+        release_dispose = Event()
+        cleanup_ran = Queue()
+
+        def dispose_callback() -> bool:
+            dispose_entered.set()
+            self.assertTrue(release_dispose.wait(timeout=1.0))
+            return True
+
+        subscription = PubSubCallbackSubscription(dispose_callback)
+        disposer = Thread(target=subscription.dispose)
+        disposer.start()
+        self.assertTrue(dispose_entered.wait(timeout=1.0))
+
+        subscription._add_dispose_callback(lambda: cleanup_ran.put(True))
+        release_dispose.set()
+        disposer.join(timeout=2.0)
+
+        self.assertFalse(disposer.is_alive())
+        self.assertTrue(cleanup_ran.get(timeout=1.0))
+
+    def test_subscription_is_disposed_rechecks_after_external_callback(
+        self,
+    ) -> None:
+        external_entered = Event()
+        release_external = Event()
+        observed = Queue()
+
+        def external_is_disposed() -> bool:
+            external_entered.set()
+            self.assertTrue(release_external.wait(timeout=1.0))
+            return False
+
+        subscription = PubSubCallbackSubscription(
+            lambda: True,
+            is_disposed_callback=external_is_disposed,
+        )
+
+        def check_disposed() -> None:
+            observed.put(subscription.is_disposed)
+
+        checker = Thread(target=check_disposed)
+        checker.start()
+        self.assertTrue(external_entered.wait(timeout=1.0))
+        self.assertTrue(subscription.dispose())
+        release_external.set()
+        checker.join(timeout=2.0)
+
+        self.assertFalse(checker.is_alive())
+        self.assertTrue(observed.get(timeout=1.0))
+
+    def test_pubsub_close_releases_pending_main_thread_callback_queue_capacity(
+        self,
+    ) -> None:
+        drain_main_thread_callbacks()
+        first = PubSub(
+            topic="context.main-thread-capacity-first",
+            schema=Temperature,
+        )
+        first.subscribe(
+            lambda _row: None,
+            callback_placement=CallbackPlacement.main_thread(queue_limit=1),
+        )
+        first.publish(Temperature(degrees=72.0, unit="F"))
+        first.close()
+
+        observed: list[float] = []
+        second = PubSub(
+            topic="context.main-thread-capacity-second",
+            schema=Temperature,
+        )
+        second.subscribe(
+            lambda row: observed.append(row.degrees),
+            callback_placement=CallbackPlacement.main_thread(queue_limit=1),
+        )
+        second.publish(Temperature(degrees=73.0, unit="F"))
+
+        self.assertEqual(drain_main_thread_callbacks(), 1)
+        self.assertEqual(observed, [73.0])
+
+    def test_pubsub_close_cancels_pending_observable_wrapper_delivery(
+        self,
+    ) -> None:
+        stream = PubSub(topic="context.observable-cancel", schema=Temperature)
+        observed: list[float] = []
+        drain_main_thread_callbacks()
+
+        subscription = stream.map(lambda row: row.degrees).subscribe(
+            observed.append,
+            callback_placement=CallbackPlacement.main_thread(),
+        )
+        stream.publish(Temperature(degrees=72.0, unit="F"))
+        stream.close()
+
+        self.assertTrue(subscription.is_disposed)
+        self.assertEqual(drain_main_thread_callbacks(), 0)
+        self.assertEqual(observed, [])
+
+    def test_pubsub_close_cancels_pending_spawned_thread_callback_delivery(
+        self,
+    ) -> None:
+        stream = PubSub(topic="context.spawned-thread-cancel", schema=Temperature)
+        first_started = Queue()
+        release_first = Event()
+        observed: Queue[float] = Queue()
+
+        def observe(row: StreamRow) -> None:
+            observed.put(row.degrees)
+            if row.degrees == 72.0:
+                first_started.put(True)
+                release_first.wait(timeout=2.0)
+
+        stream.subscribe(
+            observe,
+            callback_placement=CallbackPlacement.spawned_thread(
+                "context-spawned-cancel",
+            ),
+        )
+        stream.publish(Temperature(degrees=72.0, unit="F"))
+        self.assertTrue(first_started.get(timeout=1.0))
+        stream.publish(Temperature(degrees=73.0, unit="F"))
+        stream.close()
+        release_first.set()
+
+        self.assertEqual(observed.get(timeout=1.0), 72.0)
+        with self.assertRaises(Empty):
+            observed.get(timeout=0.2)
+
+    def test_pubsub_topic_context_closes_borrowed_handle_not_named_fabric(
+        self,
+    ) -> None:
+        namespace = "test-context-borrowed-topic"
+
+        with PubSubTopic("input", namespace=namespace) as outer:
+            outer.publish(b"first")
+            with PubSubTopic("input", namespace=namespace) as inner:
+                self.assertIsNot(outer, inner)
+                inner.publish(b"second")
+            self.assertFalse(outer.is_closed)
+            outer.publish(b"third")
+
+        self.assertTrue(outer.is_closed)
+        fresh = PubSubTopic("input", namespace=namespace)
+        try:
+            self.assertIsNot(fresh, outer)
+            self.assertFalse(fresh.is_closed)
+            self.assertEqual(fresh.latest().payload, b"third")
+        finally:
+            fresh.close()
+
+    def test_pubsub_topic_context_does_not_close_existing_alias(self) -> None:
+        namespace = "test-context-borrowed-alias"
+        retained = PubSubTopic("input", namespace=namespace)
+
+        with PubSubTopic("input", namespace=namespace) as scoped:
+            self.assertIsNot(retained, scoped)
+            scoped.publish(b"scoped")
+
+        retained.publish(b"retained")
+        self.assertFalse(retained.is_closed)
+        self.assertEqual(retained.latest().payload, b"retained")
+        retained.close()
+
+    def test_pubsub_fabric_context_owns_and_closes_attached_topics(self) -> None:
+        fabric = PubSubFabric(namespace="test-fabric-context")
+
+        with fabric as active:
+            topic = active.topic("owned", schema=Temperature)
+            topic.publish(Temperature(degrees=70.0, unit="F"))
+
+        self.assertTrue(fabric.is_closed)
+        self.assertTrue(topic.is_closed)
+        with self.assertRaisesRegex(RuntimeError, "fabric .* closed"):
+            fabric.topic("late")
 
     def test_pubsub_exposes_lock_and_clock_endpoints_without_proxy_api(self) -> None:
         stream = PubSub(topic="heart.proxyless", schema=GamepadEvent)

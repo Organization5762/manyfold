@@ -50,21 +50,20 @@ class Temperature:
     unit: str
 
 
-temperature = PubSub()
-
-temperature.publish(Temperature(degrees=72.4, unit="F"))
-temperature.publish(Temperature(degrees=72.9, unit="F"))
-latest = temperature.latest()
-latest_row = temperature.query_one(
-    """
-    SELECT pad_name, offset + 1 AS seq_source, degrees, unit
-    FROM stream
-    ORDER BY event_time DESC, process_sequence DESC
-    LIMIT 1
-    """
-)
-if latest is not None and latest_row is not None:
-    print(f"latest #{latest_row['seq_source']}: {latest.degrees}{latest.unit}")
+with PubSub(schema=Temperature) as temperature:
+    temperature.publish(Temperature(degrees=72.4, unit="F"))
+    temperature.publish(Temperature(degrees=72.9, unit="F"))
+    latest = temperature.latest()
+    latest_row = temperature.query_one(
+        """
+        SELECT pad_name, offset + 1 AS seq_source, degrees, unit
+        FROM stream
+        ORDER BY event_time DESC, process_sequence DESC
+        LIMIT 1
+        """
+    )
+    if latest is not None and latest_row is not None:
+        print(f"latest #{latest_row['seq_source']}: {latest.degrees}{latest.unit}")
 ```
 
 Output:
@@ -86,6 +85,30 @@ dataclasses work through type annotations.
 Callers may still pass generated FlatBuffer bytes, builder `Output()`, or table
 objects. The queue assigns a default `event_time` when callers omit it, and
 `key` defaults to `None`.
+
+Use a `PubSub` context for application-scoped streams. Exiting the context
+deterministically closes the stream handle, stops topic-local callback
+delivery, and makes later publish/query attempts fail instead of silently
+retaining callback workers. Calling `close()` directly is equivalent and
+idempotent.
+
+Named topics created with `PubSubTopic(...)` borrow a namespace-scoped
+process-local `PubSubFabric`. A topic context releases that topic handle and
+its callbacks, but it does not close the shared fabric or erase retained stream
+data. Use an explicit `PubSubFabric` context when the fabric lifetime itself is
+owned by the block:
+
+```python
+from manyfold.architecture import PubSubFabric
+
+with PubSubFabric(namespace="device-test") as fabric:
+    commands = fabric.topic("commands")
+    commands.publish(b"calibrate")
+```
+
+Manyfold does not expose an async PubSub context because the current PubSub
+runtime has no async-owned resources; callback placement and transport workers
+remain closed by their synchronous owners.
 
 Manyfold-native architecture elements remain available from
 `manyfold.architecture.native` for lower-level topology descriptions, but the

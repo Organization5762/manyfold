@@ -6,13 +6,13 @@ from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
 from queue import Empty, Full, Queue
-from threading import Event, Lock, Thread, get_ident
+from threading import Event, Lock, Thread, current_thread, get_ident
 from typing import Any, Literal
 
 CallbackPlacementKind = Literal["inline", "main", "thread"]
 DEFAULT_CALLBACK_QUEUE_LIMIT = 2048
 
-_main_thread_callbacks: deque[Callable[[], None]] = deque()
+_main_thread_callbacks: deque["_CallbackTask"] = deque()
 _main_thread_lock = Lock()
 _main_thread_ident = None
 
@@ -105,6 +105,7 @@ class CallbackDelivery:
         self.placement = placement or CallbackPlacement.inline()
         self._closed = False
         self._lock = Lock()
+        self._pending: set[_CallbackTask] = set()
         self._worker: _CallbackWorker | None = None
         if self.placement.kind == "thread":
             self._worker = _CallbackWorker(
@@ -116,34 +117,78 @@ class CallbackDelivery:
         """Deliver one callback invocation and return whether it was accepted."""
         return self.submit(lambda: callback(value))
 
+    @property
+    def is_closed(self) -> bool:
+        """Return whether this delivery has been closed."""
+        with self._lock:
+            return self._closed
+
     def submit(self, callback: Callable[[], object]) -> bool:
         """Submit one no-argument callback for placement-aware execution."""
         if not callable(callback):
             raise TypeError("callback must be callable")
+        if self.placement.kind == "inline":
+            with self._lock:
+                if self._closed:
+                    return False
+                task = _CallbackTask(self, callback)
+                self._pending.add(task)
+            task()
+            return True
         with self._lock:
             if self._closed:
                 return False
-        if self.placement.kind == "inline":
-            callback()
-            return True
-        if self.placement.kind == "main":
-            return _enqueue_main_thread_callback(callback, self.placement.queue_limit)
-        if self._worker is None:
-            raise RuntimeError("callback worker is not initialized")
-        return self._worker.submit(callback)
+            task = _CallbackTask(self, callback)
+            self._pending.add(task)
+            if self.placement.kind == "main":
+                if not _enqueue_main_thread_callback(
+                    task,
+                    self.placement.queue_limit,
+                ):
+                    self._pending.discard(task)
+                    task.cancel()
+                    return False
+            elif self._worker is None:
+                self._pending.discard(task)
+                task.cancel()
+                raise RuntimeError("callback worker is not initialized")
+            elif not self._worker.submit(task):
+                self._pending.discard(task)
+                task.cancel()
+                return False
+        return True
 
     def close(self) -> None:
-        """Stop accepting callbacks and release owned worker resources."""
+        """Stop accepting callbacks and cancel queued callback work."""
         with self._lock:
             if self._closed:
                 return
             self._closed = True
+            pending = tuple(self._pending)
+            self._pending.clear()
+        if self.placement.kind == "main":
+            _discard_main_thread_callbacks(pending)
+        for task in pending:
+            task.cancel()
         if self._worker is not None:
             self._worker.close()
 
+    def _complete_task(self, task: "_CallbackTask") -> Callable[[], object] | None:
+        with self._lock:
+            self._pending.discard(task)
+            is_closed = self._closed
+        callback = task._take_callback()
+        if is_closed:
+            return None
+        return callback
+
+    def _forget_task(self, task: "_CallbackTask") -> None:
+        with self._lock:
+            self._pending.discard(task)
+
 
 def _enqueue_main_thread_callback(
-    callback: Callable[[], object],
+    callback: "_CallbackTask",
     queue_limit: int,
 ) -> bool:
     with _main_thread_lock:
@@ -151,6 +196,20 @@ def _enqueue_main_thread_callback(
             return False
         _main_thread_callbacks.append(callback)
     return True
+
+
+def _discard_main_thread_callbacks(callbacks: tuple["_CallbackTask", ...]) -> None:
+    if not callbacks:
+        return
+    discarded = set(callbacks)
+    with _main_thread_lock:
+        retained = [
+            callback
+            for callback in _main_thread_callbacks
+            if callback not in discarded
+        ]
+        _main_thread_callbacks.clear()
+        _main_thread_callbacks.extend(retained)
 
 
 def _require_thread_name(value: str | None) -> str:
@@ -168,9 +227,35 @@ def _validate_max_items(max_items: int | None) -> None:
         raise ValueError("max_items must not be negative")
 
 
+class _CallbackTask:
+    def __init__(
+        self,
+        delivery: CallbackDelivery,
+        callback: Callable[[], object],
+    ) -> None:
+        self._delivery = delivery
+        self._callback: Callable[[], object] | None = callback
+        self._lock = Lock()
+
+    def __call__(self) -> None:
+        callback = self._delivery._complete_task(self)
+        if callback is not None:
+            callback()
+
+    def cancel(self) -> None:
+        with self._lock:
+            self._callback = None
+
+    def _take_callback(self) -> Callable[[], object] | None:
+        with self._lock:
+            callback = self._callback
+            self._callback = None
+        return callback
+
+
 class _CallbackWorker:
     def __init__(self, *, name: str, queue_limit: int) -> None:
-        self._queue: Queue[Callable[[], object] | None] = Queue(maxsize=queue_limit)
+        self._queue: Queue[_CallbackTask | None] = Queue(maxsize=queue_limit)
         self._closed = Event()
         self._thread = Thread(target=self._run, name=name, daemon=True)
         self._thread.start()
@@ -190,6 +275,8 @@ class _CallbackWorker:
             self._queue.put_nowait(None)
         except Full:
             pass
+        if current_thread() is self._thread:
+            return
         self._thread.join(timeout=1.0)
 
     def _run(self) -> None:
