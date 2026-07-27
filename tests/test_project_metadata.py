@@ -42,6 +42,13 @@ RUNTIME_ASSERT_ROOTS = (
     PROJECT_ROOT / "python" / "manyfold",
     PROJECT_ROOT / "python" / "manyfold_example_catalog.py",
 )
+TRANSPORT_DELIVERY_SOURCE_GLOBS = (
+    PROJECT_ROOT
+    / "python"
+    / "manyfold"
+    / "architecture",
+    PROJECT_ROOT / "tests",
+)
 HOT_PATH_PYTHON_PATHS = (
     PROJECT_ROOT / "python" / "manyfold" / "graph.py",
     PROJECT_ROOT / "python" / "manyfold" / "memory_benchmarks.py",
@@ -106,6 +113,32 @@ class ProjectMetadataTests(unittest.TestCase):
             violation
             for path in HOT_PATH_PYTHON_PATHS
             for violation in _frame_introspection_uses(path)
+        )
+
+        self.assertEqual(violations, ())
+
+    def test_transport_delivery_modules_stay_below_one_thousand_lines(
+        self,
+    ) -> None:
+        paths = tuple(
+            sorted(
+                (
+                    *TRANSPORT_DELIVERY_SOURCE_GLOBS[0].glob(
+                        "*transport_delivery*.py"
+                    ),
+                    *TRANSPORT_DELIVERY_SOURCE_GLOBS[1].glob(
+                        "test*transport_delivery*.py"
+                    ),
+                )
+            )
+        )
+        violations = tuple(
+            (
+                str(path.relative_to(PROJECT_ROOT)),
+                len(path.read_text(encoding="utf-8").splitlines()),
+            )
+            for path in paths
+            if len(path.read_text(encoding="utf-8").splitlines()) >= 1000
         )
 
         self.assertEqual(violations, ())

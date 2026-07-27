@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import os
 import socket
 import subprocess
@@ -7,9 +8,10 @@ import sys
 import tempfile
 import time
 import unittest
+import weakref
 from pathlib import Path
 from queue import Queue
-from threading import Thread
+from threading import Thread, enumerate as enumerate_threads
 
 from manyfold.architecture.transport import (
     FrameKind,
@@ -25,9 +27,10 @@ from manyfold.architecture.transport_delivery import (
     DeliveryClosed,
     DeliveryConfig,
     DeliveryConflict,
-    DeliveryError,
+    DeliveryOutcome,
     DeliveryStorageFull,
     DurableDelivery,
+    TopicDeliveryPolicy,
 )
 
 from tests.test_support import subprocess_test_env
@@ -119,7 +122,11 @@ from manyfold.architecture.transport import (
     FrameKind, NodeIdentity, ReconnectPolicy, TcpAddress, TcpTransport,
     TransportConfig, TransportMessage, TransportSecurity,
 )
-from manyfold.architecture.transport_delivery import DeliveryConfig, DurableDelivery
+from manyfold.architecture.transport_delivery import (
+    DeliveryConfig,
+    DurableDelivery,
+    TopicDeliveryPolicy,
+)
 
 transport = TcpTransport.connect(
     NodeIdentity("cluster", "sender", "crashed-process"),
@@ -143,6 +150,14 @@ delivery = DurableDelivery(
         max_message_bytes=4096,
         retry_initial_seconds=0.02,
         retry_max_seconds=0.1,
+        topic_policies=(
+            TopicDeliveryPolicy.commands(
+                "recovery",
+                max_items=16,
+                max_bytes=65536,
+                ttl_seconds=5.0,
+            ),
+        ),
     ),
 )
 delivery.send(
@@ -331,8 +346,14 @@ os._exit(0)
                 DeliveryConfig(
                     self._root / "bounded.sqlite3",
                     max_outbox_items=1,
+                    recovery_batch_size=1,
                     max_storage_bytes=128 * 1024,
                     max_message_bytes=4096,
+                    topic_policies=_topic_policies(
+                        ttl_seconds=5.0,
+                        max_items=1,
+                        max_bytes=128 * 1024,
+                    ),
                 ),
             )
         )
@@ -386,14 +407,17 @@ os._exit(0)
         )
         self.assertEqual(delivery.health().outbox_items, 0)
 
-    def test_inbox_expiry_releases_inflight_memory_and_allows_redelivery(
+    def test_inbox_expiry_persists_terminal_outcome_and_releases_inflight(
         self,
     ) -> None:
         sender_transport, receiver_transport = self._transport_pair()
         sender = self._track_delivery(
             DurableDelivery(
                 sender_transport,
-                _delivery_config(self._root / "sender.sqlite3"),
+                _delivery_config(
+                    self._root / "sender.sqlite3",
+                    message_ttl_seconds=5.0,
+                ),
             )
         )
         receiver = self._track_delivery(
@@ -401,7 +425,8 @@ os._exit(0)
                 receiver_transport,
                 _delivery_config(
                     self._root / "receiver.sqlite3",
-                    dedupe_retention_seconds=0.1,
+                    message_ttl_seconds=0.1,
+                    dedupe_retention_seconds=0.2,
                 ),
             )
         )
@@ -409,7 +434,7 @@ os._exit(0)
             TransportMessage(FrameKind.PUBSUB, "events", b"expires"),
             message_id="inflight-expiry-1",
         )
-        first = receiver.receive(timeout=2.0)
+        receiver.receive(timeout=2.0)
 
         self.assertTrue(
             _wait_for(
@@ -418,12 +443,129 @@ os._exit(0)
             )
         )
         self.assertEqual(receiver.health().inflight_deliveries, 0)
-        redelivered = receiver.receive(timeout=2.0)
-        receiver.ack(redelivered.message_id)
-
-        self.assertEqual(redelivered.message_id, first.message_id)
-        self.assertGreater(redelivered.delivery_attempt, first.delivery_attempt)
+        with self.assertRaises(TimeoutError):
+            receiver.receive(timeout=0.2)
         self.assertTrue(sender.flush(timeout=2.0))
+        self.assertEqual(sender.health().outbox_items, 0)
+        self.assertEqual(sender.health().peer_negative_acknowledgements, 1)
+
+    def test_terminal_outcome_survives_lost_control_frame_and_restart(
+        self,
+    ) -> None:
+        sender_transport, receiver_transport = self._transport_pair()
+        sender_path = self._root / "terminal-sender.sqlite3"
+        receiver_path = self._root / "terminal-receiver.sqlite3"
+        sender = self._track_delivery(
+            DurableDelivery(sender_transport, _delivery_config(sender_path))
+        )
+        receiver = self._track_delivery(
+            DurableDelivery(receiver_transport, _delivery_config(receiver_path))
+        )
+        sender.send(
+            TransportMessage(FrameKind.PUBSUB, "events", b"terminal"),
+            message_id="terminal-restart",
+        )
+        received = receiver.receive(timeout=2.0)
+        sender_transport.close()
+        self.assertTrue(_wait_for(lambda: sender.health().closed, timeout=1.0))
+        receiver.nack(
+            received.message_id,
+            outcome=DeliveryOutcome.terminal("invalid command"),
+        )
+        self.assertEqual(receiver.health().terminal_drops, 1)
+        receiver.close()
+        receiver_transport.close()
+        sender.close()
+
+        restarted_sender_transport, restarted_receiver_transport = (
+            self._transport_pair()
+        )
+        restarted_sender = self._track_delivery(
+            DurableDelivery(
+                restarted_sender_transport,
+                _delivery_config(sender_path),
+            )
+        )
+        restarted_receiver = self._track_delivery(
+            DurableDelivery(
+                restarted_receiver_transport,
+                _delivery_config(receiver_path),
+            )
+        )
+
+        self.assertTrue(restarted_sender.flush(timeout=2.0))
+        with self.assertRaises(TimeoutError):
+            restarted_receiver.receive(timeout=0.2)
+        self.assertEqual(restarted_receiver.health().terminal_drops, 0)
+        self.assertGreaterEqual(
+            restarted_receiver.health().duplicates_suppressed,
+            1,
+        )
+
+    def test_expired_outcome_survives_lost_control_frame_and_restart(
+        self,
+    ) -> None:
+        sender_transport, receiver_transport = self._transport_pair()
+        sender_path = self._root / "expired-sender.sqlite3"
+        receiver_path = self._root / "expired-receiver.sqlite3"
+        sender = self._track_delivery(
+            DurableDelivery(sender_transport, _delivery_config(sender_path))
+        )
+        receiver = self._track_delivery(
+            DurableDelivery(
+                receiver_transport,
+                _delivery_config(
+                    receiver_path,
+                    message_ttl_seconds=0.1,
+                    dedupe_retention_seconds=2.0,
+                ),
+            )
+        )
+        sender.send(
+            TransportMessage(FrameKind.PUBSUB, "events", b"expires"),
+            message_id="expired-restart",
+        )
+        receiver.receive(timeout=2.0)
+        sender_transport.close()
+        self.assertTrue(_wait_for(lambda: sender.health().closed, timeout=1.0))
+        self.assertTrue(
+            _wait_for(
+                lambda: receiver.health().expired_inbox == 1,
+                timeout=1.0,
+            )
+        )
+        receiver.close()
+        receiver_transport.close()
+        sender.close()
+
+        restarted_sender_transport, restarted_receiver_transport = (
+            self._transport_pair()
+        )
+        restarted_sender = self._track_delivery(
+            DurableDelivery(
+                restarted_sender_transport,
+                _delivery_config(sender_path),
+            )
+        )
+        restarted_receiver = self._track_delivery(
+            DurableDelivery(
+                restarted_receiver_transport,
+                _delivery_config(
+                    receiver_path,
+                    message_ttl_seconds=0.1,
+                    dedupe_retention_seconds=2.0,
+                ),
+            )
+        )
+
+        self.assertTrue(restarted_sender.flush(timeout=2.0))
+        with self.assertRaises(TimeoutError):
+            restarted_receiver.receive(timeout=0.2)
+        self.assertEqual(restarted_receiver.health().expired_inbox, 0)
+        self.assertGreaterEqual(
+            restarted_receiver.health().duplicates_suppressed,
+            1,
+        )
 
     def test_logical_byte_bound_rejects_payload_before_disk_growth(self) -> None:
         address = _unused_address()
@@ -431,7 +573,7 @@ os._exit(0)
             TcpTransport.connect(
                 NodeIdentity("cluster", "sender", "sender-1"),
                 address,
-                config=_transport_config(max_payload_bytes=256 * 1024),
+                config=_transport_config(max_payload_bytes=1024 * 1024),
                 expected_peer_node_id="receiver",
             )
         )
@@ -441,19 +583,25 @@ os._exit(0)
                 DeliveryConfig(
                     self._root / "byte-bounded.sqlite3",
                     max_outbox_items=8,
-                    max_storage_bytes=128 * 1024,
-                    max_message_bytes=70_000,
+                    recovery_batch_size=8,
+                    max_storage_bytes=512 * 1024,
+                    max_message_bytes=280_000,
+                    topic_policies=_topic_policies(
+                        ttl_seconds=5.0,
+                        max_items=8,
+                        max_bytes=512 * 1024,
+                    ),
                 ),
             )
         )
         delivery.send(
-            TransportMessage(FrameKind.PUBSUB, "events", b"a" * 70_000),
+            TransportMessage(FrameKind.PUBSUB, "events", b"a" * 270_000),
             message_id="large-1",
         )
 
         with self.assertRaisesRegex(DeliveryStorageFull, "byte"):
             delivery.send(
-                TransportMessage(FrameKind.PUBSUB, "events", b"b" * 70_000),
+                TransportMessage(FrameKind.PUBSUB, "events", b"b" * 270_000),
                 message_id="large-2",
             )
 
@@ -523,21 +671,150 @@ os._exit(0)
                 TransportMessage(FrameKind.PUBSUB, "events", b"late")
             )
 
-    def test_journal_rejects_a_second_live_owner(self) -> None:
-        address = _unused_address()
-        transport = self._track_transport(
-            TcpTransport.connect(
-                NodeIdentity("cluster", "sender", "sender-1"),
-                address,
-                config=_transport_config(),
-                expected_peer_node_id="receiver",
+    def test_final_attempt_ack_wins_before_persisted_response_window(self) -> None:
+        sender_transport, receiver_transport = self._transport_pair()
+        sender_policy = TopicDeliveryPolicy.commands(
+            "events",
+            max_items=1,
+            max_bytes=1024 * 1024,
+            ttl_seconds=5.0,
+            max_attempts=1,
+        )
+        sender = self._track_delivery(
+            DurableDelivery(
+                sender_transport,
+                DeliveryConfig(
+                    self._root / "final-attempt-sender.sqlite3",
+                    max_outbox_items=1,
+                    max_inbox_items=1,
+                    max_storage_bytes=1024 * 1024,
+                    recovery_batch_size=1,
+                    max_message_bytes=4096,
+                    message_ttl_seconds=5.0,
+                    retry_initial_seconds=0.4,
+                    retry_max_seconds=0.4,
+                    max_delivery_attempts=1,
+                    topic_policies=(sender_policy,),
+                ),
             )
         )
-        config = _delivery_config(self._root / "owned.sqlite3")
-        self._track_delivery(DurableDelivery(transport, config))
+        receiver = self._track_delivery(
+            DurableDelivery(
+                receiver_transport,
+                _delivery_config(self._root / "final-attempt-receiver.sqlite3"),
+            )
+        )
+        sender.send(
+            TransportMessage(FrameKind.PUBSUB, "events", b"delayed-ack"),
+            message_id="final-attempt",
+        )
+        received = receiver.receive(timeout=2.0)
+        with self.assertRaises(DeliveryStorageFull):
+            sender.send(
+                TransportMessage(FrameKind.PUBSUB, "events", b"must-wait"),
+                message_id="second-attempt",
+            )
+        self.assertEqual(sender.health().outbox_items, 1)
+        receiver.ack(received.message_id)
 
-        with self.assertRaisesRegex(DeliveryError, "already owned"):
-            DurableDelivery(transport, config)
+        self.assertTrue(sender.flush(timeout=2.0))
+        self.assertEqual(sender.health().retry_exhausted, 0)
+        self.assertEqual(sender.health().outbox_items, 0)
+
+    def test_unexpected_transport_close_wakes_waiters_and_flush(self) -> None:
+        sender, _ = self._delivery_pair()
+        receive_errors: Queue[BaseException] = Queue()
+
+        def wait_for_receive() -> None:
+            try:
+                sender.receive()
+            except BaseException as error:
+                receive_errors.put(error)
+
+        blocked = Thread(target=wait_for_receive)
+        blocked.start()
+        sender.transport.close()
+        self.assertTrue(
+            _wait_for(lambda: sender.health().closed, timeout=1.0)
+        )
+        snapshot = sender.health()
+        started = time.monotonic()
+        with self.assertRaises(DeliveryClosed):
+            sender.flush()
+        self.assertLess(time.monotonic() - started, 0.2)
+        started = time.monotonic()
+        with self.assertRaises(DeliveryClosed):
+            sender.wait_for_health_change(
+                snapshot.generation,
+                timeout=1.0,
+            )
+        self.assertLess(time.monotonic() - started, 0.2)
+        blocked.join(timeout=1.0)
+        self.assertFalse(blocked.is_alive())
+        self.assertIsInstance(receive_errors.get_nowait(), DeliveryClosed)
+
+    def test_close_releases_threads_fds_controls_and_callback_graphs(self) -> None:
+        baseline_threads = {
+            thread.name
+            for thread in enumerate_threads()
+            if thread.name.startswith("manyfold-delivery-")
+        }
+        baseline_fds = len(os.listdir("/dev/fd"))
+
+        class Callback:
+            def __call__(self, value: object) -> None:
+                del value
+
+        for index in range(5):
+            observer = Callback()
+            validator = Callback()
+            observer_ref = weakref.ref(observer)
+            validator_ref = weakref.ref(validator)
+            transport = TcpTransport.connect(
+                NodeIdentity("cluster", f"tail-{index}", f"tail-{index}"),
+                _unused_address(),
+                config=_transport_config(),
+                expected_peer_node_id="missing",
+            )
+            delivery = DurableDelivery(
+                transport,
+                _delivery_config(self._root / f"tail-{index}.sqlite3"),
+                observer=observer,
+                receive_validator=validator,
+            )
+            del observer
+            del validator
+            delivery._runtime.stop.set()
+            delivery._sender.wake()
+            delivery._receiver.wake_receivers()
+            self.assertTrue(delivery._sender.join(1.0))
+            self.assertTrue(delivery._receiver.join(1.0))
+            delivery._sender.enqueue_retryable("pending-control", "retained")
+            self.assertGreater(delivery._sender._controls.qsize(), 0)
+            delivery.close()
+            transport.close()
+            gc.collect()
+            self.assertIsNone(observer_ref())
+            self.assertIsNone(validator_ref())
+            self.assertEqual(delivery._sender._controls.qsize(), 0)
+
+        self.assertTrue(
+            _wait_for(
+                lambda: {
+                    thread.name
+                    for thread in enumerate_threads()
+                    if thread.name.startswith("manyfold-delivery-")
+                }
+                == baseline_threads,
+                timeout=1.0,
+            )
+        )
+        self.assertTrue(
+            _wait_for(
+                lambda: len(os.listdir("/dev/fd")) <= baseline_fds,
+                timeout=1.0,
+            )
+        )
 
     def _delivery_pair(
         self,
@@ -622,12 +899,41 @@ def _delivery_config(
         max_inbox_items=16,
         max_storage_bytes=1024 * 1024,
         receive_queue_limit=4,
+        recovery_batch_size=16,
         max_message_bytes=4096,
         message_ttl_seconds=message_ttl_seconds,
         dedupe_retention_seconds=dedupe_retention_seconds,
         retry_initial_seconds=retry_initial_seconds,
         retry_multiplier=1.5,
         retry_max_seconds=0.1,
+        topic_policies=_topic_policies(
+            ttl_seconds=message_ttl_seconds,
+            max_items=16,
+            max_bytes=1024 * 1024,
+        ),
+    )
+
+
+def _topic_policies(
+    *,
+    ttl_seconds: float,
+    max_items: int,
+    max_bytes: int,
+) -> tuple[TopicDeliveryPolicy, ...]:
+    return tuple(
+        TopicDeliveryPolicy.commands(
+            topic,
+            max_items=max_items,
+            max_bytes=max_bytes,
+            ttl_seconds=ttl_seconds,
+        )
+        for topic in (
+            "cache.get",
+            "events",
+            "orders.created",
+            "reconnect",
+            "recovery",
+        )
     )
 
 
