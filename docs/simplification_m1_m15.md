@@ -440,7 +440,10 @@ narrowing.
 - The local Heart checkout contains user changes and is read-only evidence.
 - Heart commit `8d34cd85` is superseded. It may supply policy evidence but must
   never be pinned, merged, or used to preserve hidden `Graph` fallbacks.
-- Heart PR #954 head `d86556c6` is the producer-identity prerequisite.
+- Current Heart main after #956 is
+  `8dc9be041bf9991d42d522966e7d1d50bd9e9286`; post-merge run
+  `30237739910` passed 707 tests with five skips. H remains unpinned pending the
+  exact M11/M14 contracts.
 - Published #280 `ae411bc423aa68227d346ad65d8f816b70e3a8d5` remains
   blocked. Its pending startup validation materializes all retained outbox
   payloads into one `O(total journal bytes)` tuple instead of a bounded
@@ -453,19 +456,16 @@ narrowing.
   soft-watermark `expired_outbox` emission, so removing an outbox row can still
   report `terminal == false`.
   Published #281 remains
-  `3c62dd1c08eb0bd18e7647a82889b332c585b3b3`; local `e962d13` is
-  unpublished and blocked. Its STARTED-to-RUNNING ordering and 18 focused tests
-  pass, but a second same-object start can return successfully while the first
-  is still STARTING with `is_running == false`; its docs also incorrectly claim
-  subscriber callbacks are lock-free. Its staged waiter fix also lets the
-  owning `start()` return success when close wins before RUNNING, including a
-  closed object escaping `__enter__`; every readiness-losing start caller must
-  raise after cleanup. PR #282
-  `a9909ae3d02820a7e9587e3bf6256cbe02674347` is formally blocked. Its
-  deadlock fix is sound, but `PubSubFabric.topic()` strongly retains every
-  dropped borrowed handle in unbounded `_topic_handles` until fabric close.
-  Predecessor `f0e3163ecfa1a077031be2261207563d1b8b08c6` is stale and blocked
-  by the lifecycle-lock re-entry race. PR #279 has no candidate.
+  `3c62dd1c08eb0bd18e7647a82889b332c585b3b3`; local
+  `4be164da8619976fbb6ef5a2a3655fd600f95bf3` clears the owner
+  false-success blocker and passes independent concurrent-start and callback
+  close regressions, but remains unpublished and composition-blocked.
+  PR #282 source head `68de122da0b310879b6f1a51327e8659f0c52970`
+  settled its borrowed-handle ownership with a `WeakSet`; hosted run
+  `30238174358` passed and squash merge
+  `1af8bb10fa5bc2ab562c5cd90ff5814f16008f0c` is authoritative. PR #279
+  still has no candidate and #283 is preservation-only; #279/#281/H
+  composition remains frozen until their separate gates settle.
 - PR3 remains independent of those candidates and must record exact base/head
   ancestry. No Heart pin guidance is valid until the required verdicts and
   hosted checks are green.
