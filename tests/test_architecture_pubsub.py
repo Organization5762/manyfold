@@ -306,7 +306,7 @@ class PubSubStreamTests(unittest.TestCase):
             {"percent": None},
         )
 
-    def test_pubsub_topic_reuses_existing_topic_and_schema(self) -> None:
+    def test_pubsub_topic_reuses_fabric_runtime_and_schema(self) -> None:
         first = PubSubTopic(
             "input",
             schema=Temperature,
@@ -318,12 +318,37 @@ class PubSubStreamTests(unittest.TestCase):
             namespace="test-schema-lock",
         )
 
-        self.assertIs(first, second)
+        self.assertIsNot(first, second)
+        self.assertIs(first._runtime, second._runtime)
+        self.assertIs(second.schema, Temperature)
         with self.assertRaisesRegex(ValueError, "schema is already fixed"):
             PubSubTopic(
                 "input",
                 schema=_Humidity,
                 namespace="test-schema-lock",
+            )
+
+    def test_pubsub_topic_preserves_lazily_inferred_schema_after_detach(
+        self,
+    ) -> None:
+        first = PubSubTopic(
+            "input",
+            namespace="test-lazy-schema-lock",
+        )
+        first.publish(Temperature(degrees=72.0, unit="F"))
+        first.close()
+
+        second = PubSubTopic(
+            "input",
+            namespace="test-lazy-schema-lock",
+        )
+
+        self.assertIs(second.schema, Temperature)
+        with self.assertRaisesRegex(ValueError, "schema is already fixed"):
+            PubSubTopic(
+                "input",
+                schema=_Humidity,
+                namespace="test-lazy-schema-lock",
             )
 
     def test_pubsub_topic_defaults_to_default_namespace_ephemeral_name_and_no_schema(
@@ -395,6 +420,30 @@ class PubSubStreamTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "closed"):
             stream.publish(Temperature(degrees=72.5, unit="F"))
 
+    def test_pubsub_spawned_thread_callback_can_close_own_stream(self) -> None:
+        stream = PubSub(topic="context.self-close-callback", schema=Temperature)
+        closed = Queue()
+        errors: Queue[Exception] = Queue()
+
+        def close_stream(_row: StreamRow) -> None:
+            try:
+                stream.close()
+            except Exception as error:
+                errors.put(error)
+            closed.put(stream.is_closed)
+
+        stream.subscribe(
+            close_stream,
+            callback_placement=CallbackPlacement.spawned_thread(
+                "context-self-close-callback",
+            ),
+        )
+        stream.publish(Temperature(degrees=72.4, unit="F"))
+
+        self.assertTrue(closed.get(timeout=1.0))
+        with self.assertRaises(Empty):
+            errors.get(timeout=0.1)
+
     def test_pubsub_close_cancels_pending_main_thread_callback_delivery(
         self,
     ) -> None:
@@ -462,6 +511,24 @@ class PubSubStreamTests(unittest.TestCase):
         self.assertEqual(drain_main_thread_callbacks(), 1)
         self.assertEqual(observed, [73.0])
 
+    def test_pubsub_close_cancels_pending_observable_wrapper_delivery(
+        self,
+    ) -> None:
+        stream = PubSub(topic="context.observable-cancel", schema=Temperature)
+        observed: list[float] = []
+        drain_main_thread_callbacks()
+
+        subscription = stream.map(lambda row: row.degrees).subscribe(
+            observed.append,
+            callback_placement=CallbackPlacement.main_thread(),
+        )
+        stream.publish(Temperature(degrees=72.0, unit="F"))
+        stream.close()
+
+        self.assertTrue(subscription.is_disposed)
+        self.assertEqual(drain_main_thread_callbacks(), 0)
+        self.assertEqual(observed, [])
+
     def test_pubsub_close_cancels_pending_spawned_thread_callback_delivery(
         self,
     ) -> None:
@@ -500,7 +567,7 @@ class PubSubStreamTests(unittest.TestCase):
         with PubSubTopic("input", namespace=namespace) as outer:
             outer.publish(b"first")
             with PubSubTopic("input", namespace=namespace) as inner:
-                self.assertIs(outer, inner)
+                self.assertIsNot(outer, inner)
                 inner.publish(b"second")
             self.assertFalse(outer.is_closed)
             outer.publish(b"third")
@@ -513,6 +580,19 @@ class PubSubStreamTests(unittest.TestCase):
             self.assertEqual(fresh.latest().payload, b"third")
         finally:
             fresh.close()
+
+    def test_pubsub_topic_context_does_not_close_existing_alias(self) -> None:
+        namespace = "test-context-borrowed-alias"
+        retained = PubSubTopic("input", namespace=namespace)
+
+        with PubSubTopic("input", namespace=namespace) as scoped:
+            self.assertIsNot(retained, scoped)
+            scoped.publish(b"scoped")
+
+        retained.publish(b"retained")
+        self.assertFalse(retained.is_closed)
+        self.assertEqual(retained.latest().payload, b"retained")
+        retained.close()
 
     def test_pubsub_fabric_context_owns_and_closes_attached_topics(self) -> None:
         fabric = PubSubFabric(namespace="test-fabric-context")

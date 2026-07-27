@@ -137,6 +137,7 @@ class PubSub:
             )
         self._callbacks: dict[int, Callable[[StreamRow], object]] = {}
         self._callback_deliveries: dict[int, CallbackDelivery] = {}
+        self._callback_subscriptions: dict[int, PubSubCallbackSubscription] = {}
         self._next_callback_id = 1
         self._owner = _owner
         self._closed = False
@@ -281,6 +282,7 @@ class PubSub:
             with self._lifecycle_lock:
                 removed = self._callbacks.pop(callback_id, None) is not None
                 stored_delivery = self._callback_deliveries.pop(callback_id, None)
+                self._callback_subscriptions.pop(callback_id, None)
             (stored_delivery or delivery).close()
             return removed
 
@@ -288,6 +290,11 @@ class PubSub:
             dispose,
             is_disposed_callback=lambda: self._callback_is_disposed(callback_id),
         )
+        with self._lifecycle_lock:
+            if self._closed:
+                subscription.dispose()
+                raise RuntimeError(f"PubSub stream {self.topic!r} is closed")
+            self._callback_subscriptions[callback_id] = subscription
         if replay_latest:
             try:
                 latest = self.latest()
@@ -608,6 +615,8 @@ class PubSub:
         return float(row.average)
 
     def _infer_stream_schema(self, model: type) -> None:
+        if self._owner is not None:
+            self._owner._register_topic_schema(self.topic, model)
         self.schema = model
         self._stream_schema = _coerce_stream_schema(self.topic, model)
         if self._stream_schema is None:
@@ -646,14 +655,16 @@ class PubSub:
                 return
             self._closed = True
             self._context_depth = 0
-            deliveries = tuple(self._callback_deliveries.values())
+            subscriptions = tuple(self._callback_subscriptions.values())
+            owner = self._owner
+        for subscription in subscriptions:
+            subscription.dispose()
+        with self._lifecycle_lock:
             self._callbacks.clear()
             self._callback_deliveries.clear()
-            owner = self._owner
-        for delivery in deliveries:
-            delivery.close()
+            self._callback_subscriptions.clear()
         if detach_owner and owner is not None:
-            owner._detach_topic(self.topic, self)
+            owner._detach_topic(self)
 
     def _close_from_fabric(self) -> None:
         self._close(detach_owner=False)
@@ -670,6 +681,7 @@ class PubSubCallbackSubscription:
     ) -> None:
         self._dispose_callback: Callable[[], bool] | None = dispose_callback
         self._is_disposed_callback = is_disposed_callback
+        self._dispose_listeners: list[Callable[[], object]] = []
 
     @property
     def is_disposed(self) -> bool:
@@ -684,7 +696,21 @@ class PubSubCallbackSubscription:
             return False
         dispose_callback = self._dispose_callback
         self._dispose_callback = None
-        return dispose_callback()
+        try:
+            return dispose_callback()
+        finally:
+            listeners = tuple(self._dispose_listeners)
+            self._dispose_listeners.clear()
+            for listener in listeners:
+                listener()
+
+    def _add_dispose_callback(self, callback: Callable[[], object]) -> None:
+        if not callable(callback):
+            raise TypeError("dispose callback must be callable")
+        if self.is_disposed:
+            callback()
+            return
+        self._dispose_listeners.append(callback)
 
 
 class PubSubObservable:
@@ -1183,7 +1209,9 @@ class PubSubFabric:
             name=self.namespace,
             retained_messages=retained_messages,
         )
-        self._topics: dict[str, PubSub] = {}
+        self._topics: set[str] = set()
+        self._topic_schemas: dict[str, type] = {}
+        self._topic_handles: set[PubSub] = set()
         self._closed = False
         self._lock = ThreadLock()
 
@@ -1191,7 +1219,7 @@ class PubSubFabric:
     def topics(self) -> tuple[str, ...]:
         """Return topics already attached to this fabric."""
         with self._lock:
-            return tuple(self._topics)
+            return tuple(sorted(self._topics))
 
     @property
     def is_closed(self) -> bool:
@@ -1212,8 +1240,10 @@ class PubSubFabric:
             if self._closed:
                 return
             self._closed = True
-            topics = tuple(self._topics.values())
+            topics = tuple(self._topic_handles)
             self._topics.clear()
+            self._topic_schemas.clear()
+            self._topic_handles.clear()
         with self.boot_lock.take(owner=f"PubSubFabric.close:{self.namespace}"):
             if _PUBSUB_FABRICS.get(self.namespace) is self:
                 del _PUBSUB_FABRICS[self.namespace]
@@ -1225,26 +1255,29 @@ class PubSubFabric:
         resolved_topic = _resolve_topic(topic)
         with self._lock:
             self._require_open_locked()
-            existing = self._topics.get(resolved_topic)
-            if existing is not None:
-                if schema is not None and existing.schema is not schema:
-                    raise ValueError("PubSubTopic schema is already fixed")
-                return existing
+            resolved_schema = self._resolve_topic_schema_locked(
+                resolved_topic,
+                schema,
+            )
             created = PubSub(
                 topic=resolved_topic,
-                schema=schema,
+                schema=resolved_schema,
                 schedule=True,
                 _runtime=self._runtime,
                 _schedule=self.schedule,
                 _owner=self,
             )
-            self._topics[resolved_topic] = created
+            self._topics.add(resolved_topic)
+            self._topic_handles.add(created)
         return created
 
-    def _detach_topic(self, topic: str, handle: PubSub) -> None:
+    def _detach_topic(self, handle: PubSub) -> None:
         with self._lock:
-            if self._topics.get(topic) is handle:
-                del self._topics[topic]
+            self._topic_handles.discard(handle)
+
+    def _register_topic_schema(self, topic: str, schema: type) -> None:
+        with self._lock:
+            self._resolve_topic_schema_locked(topic, schema)
 
     def _require_open(self) -> None:
         with self._lock:
@@ -1253,6 +1286,20 @@ class PubSubFabric:
     def _require_open_locked(self) -> None:
         if self._closed:
             raise RuntimeError(f"PubSub fabric {self.namespace!r} is closed")
+
+    def _resolve_topic_schema_locked(
+        self,
+        topic: str,
+        schema: type | None,
+    ) -> type | None:
+        existing = self._topic_schemas.get(topic)
+        if existing is not None:
+            if schema is not None and existing is not schema:
+                raise ValueError("PubSubTopic schema is already fixed")
+            return existing
+        if schema is not None:
+            self._topic_schemas[topic] = schema
+        return schema
 
 
 class PubSubValueSurface:
@@ -1493,6 +1540,8 @@ def _subscription_with_delivery(
     subscription: PubSubCallbackSubscription,
     delivery: CallbackDelivery,
 ) -> PubSubCallbackSubscription:
+    subscription._add_dispose_callback(delivery.close)
+
     def dispose() -> bool:
         disposed = subscription.dispose()
         delivery.close()

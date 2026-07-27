@@ -6,7 +6,7 @@ from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
 from queue import Empty, Full, Queue
-from threading import Event, Lock, Thread, get_ident
+from threading import Event, Lock, Thread, current_thread, get_ident
 from typing import Any, Literal
 
 CallbackPlacementKind = Literal["inline", "main", "thread"]
@@ -263,6 +263,8 @@ class _CallbackWorker:
             self._queue.put_nowait(None)
         except Full:
             pass
+        if current_thread() is self._thread:
+            return
         self._thread.join(timeout=1.0)
 
     def _run(self) -> None:
