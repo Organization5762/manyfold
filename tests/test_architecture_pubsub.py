@@ -675,6 +675,55 @@ class PubSubStreamTests(unittest.TestCase):
                     f"{error!r}"
                 )
 
+    def test_pubsub_subscribe_racing_close_does_not_deadlock(self) -> None:
+        subscribe_errors: Queue[Exception] = Queue()
+
+        for attempt in range(200):
+            stream = PubSub(
+                topic=f"context.subscribe-close-race.{attempt}",
+                schema=Temperature,
+            )
+            subscriptions: Queue[PubSubCallbackSubscription] = Queue()
+            start = Barrier(3)
+
+            def subscribe() -> None:
+                try:
+                    start.wait(timeout=1.0)
+                    subscriptions.put(stream.subscribe(lambda _row: None))
+                except RuntimeError as error:
+                    if "closed" not in str(error):
+                        subscribe_errors.put(error)
+                except Exception as error:
+                    subscribe_errors.put(error)
+
+            def close() -> None:
+                try:
+                    start.wait(timeout=1.0)
+                    stream.close()
+                except Exception as error:
+                    subscribe_errors.put(error)
+
+            subscriber = Thread(target=subscribe)
+            closer = Thread(target=close)
+            subscriber.start()
+            closer.start()
+            start.wait(timeout=1.0)
+            subscriber.join(timeout=2.0)
+            closer.join(timeout=2.0)
+
+            self.assertFalse(subscriber.is_alive())
+            self.assertFalse(closer.is_alive())
+            while True:
+                try:
+                    subscription = subscriptions.get_nowait()
+                except Empty:
+                    break
+                self.assertTrue(subscription.is_disposed)
+
+        with self.assertRaises(Empty):
+            error = subscribe_errors.get(timeout=0.1)
+            raise AssertionError("subscribe or close raised") from error
+
     def test_subscription_dispose_callback_added_during_dispose_runs(self) -> None:
         dispose_entered = Event()
         release_dispose = Event()
@@ -696,6 +745,36 @@ class PubSubStreamTests(unittest.TestCase):
 
         self.assertFalse(disposer.is_alive())
         self.assertTrue(cleanup_ran.get(timeout=1.0))
+
+    def test_subscription_is_disposed_rechecks_after_external_callback(
+        self,
+    ) -> None:
+        external_entered = Event()
+        release_external = Event()
+        observed = Queue()
+
+        def external_is_disposed() -> bool:
+            external_entered.set()
+            self.assertTrue(release_external.wait(timeout=1.0))
+            return False
+
+        subscription = PubSubCallbackSubscription(
+            lambda: True,
+            is_disposed_callback=external_is_disposed,
+        )
+
+        def check_disposed() -> None:
+            observed.put(subscription.is_disposed)
+
+        checker = Thread(target=check_disposed)
+        checker.start()
+        self.assertTrue(external_entered.wait(timeout=1.0))
+        self.assertTrue(subscription.dispose())
+        release_external.set()
+        checker.join(timeout=2.0)
+
+        self.assertFalse(checker.is_alive())
+        self.assertTrue(observed.get(timeout=1.0))
 
     def test_pubsub_close_releases_pending_main_thread_callback_queue_capacity(
         self,

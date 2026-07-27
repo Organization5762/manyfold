@@ -284,22 +284,21 @@ class PubSub:
             self._callbacks[callback_id] = deliver
             self._callback_deliveries[callback_id] = delivery
 
-        def dispose() -> bool:
-            with self._lifecycle_lock:
-                removed = self._callbacks.pop(callback_id, None) is not None
-                stored_delivery = self._callback_deliveries.pop(callback_id, None)
-                self._callback_subscriptions.pop(callback_id, None)
-            (stored_delivery or delivery).close()
-            return removed
+            def dispose() -> bool:
+                with self._lifecycle_lock:
+                    removed = self._callbacks.pop(callback_id, None) is not None
+                    stored_delivery = self._callback_deliveries.pop(
+                        callback_id,
+                        None,
+                    )
+                    self._callback_subscriptions.pop(callback_id, None)
+                (stored_delivery or delivery).close()
+                return removed
 
-        subscription = PubSubCallbackSubscription(
-            dispose,
-            is_disposed_callback=lambda: self._callback_is_disposed(callback_id),
-        )
-        with self._lifecycle_lock:
-            if self._closed:
-                subscription.dispose()
-                raise RuntimeError(f"PubSub stream {self.topic!r} is closed")
+            subscription = PubSubCallbackSubscription(
+                dispose,
+                is_disposed_callback=lambda: self._callback_is_disposed(callback_id),
+            )
             self._callback_subscriptions[callback_id] = subscription
         if replay_latest:
             try:
@@ -715,6 +714,9 @@ class PubSubCallbackSubscription:
                 return True
         if self._is_disposed_callback is not None and self._is_disposed_callback():
             return True
+        with self._lock:
+            if self._dispose_callback is None:
+                return True
         return False
 
     def dispose(self) -> bool:
