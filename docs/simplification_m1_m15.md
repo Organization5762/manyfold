@@ -56,8 +56,8 @@ The canonical native interface has exactly these modes:
 | `SOURCE_ENVELOPE` | Accept one known-unrouted source and return its envelope. |
 | `SOURCE_DROP` | Accept one known-unrouted source without constructing a Python envelope. |
 | `MATERIALIZED_ENVELOPES` | For topology-isolated source and targets, accept one source, run all registered native materializers, and return source then targets in registration order. |
-| `SINGLE_MATERIALIZED_DROP` | For topology-isolated source and sole target with no delivery/taint requirement, accept both without Python envelopes. |
-| `ALL_MATERIALIZED_DROP` | For topology-isolated source and targets with no delivery/taint requirement, accept all without Python envelopes. |
+| `SINGLE_MATERIALIZED_DROP` | Only when `DROP_SAFE_FACTS` holds for a topology-isolated source and sole target, accept both without Python envelopes. |
+| `ALL_MATERIALIZED_DROP` | Only when `DROP_SAFE_FACTS` holds for a topology-isolated source and every target, accept all without Python envelopes. |
 
 The golden rows below name the existing native call sequence and the stable
 semantic leaf/mode that replaces it. Rows marked as defects freeze evidence,
@@ -275,10 +275,19 @@ Companion rows alternate `publish`/`publish_nowait` and empty/nonempty payloads
 on one unchanged route, proving API, control, and payload contents are call
 facts rather than invalidation triggers.
 
-The plan key is route identity plus route-scoped dependency versions. A
-materializer plan depends on the source and every target's topology,
-subscriptions, retention, and taint versions. The golden matrix asserts both
-positive and negative invalidation:
+The plan key is route identity plus a cycle-safe transitive snapshot of every
+route whose topology, materializers, delivery subscriptions, retention, or
+taint can affect the emitted traversal. Immediate materialized targets are not
+a sufficient dependency boundary. Plan validation and execution are atomic
+with respect to every relevant version mutation, either under the owning
+runtime lock or through validate-before/after with a bounded retry.
+
+A coordinated mutation-versus-publish regression changes a transitive
+topology/materializer dependency while publishing. The event must execute
+wholly under the old plan or wholly under the new plan: it cannot skip or
+duplicate a routed/materialized output, mix retention actions, or leak payload
+ownership. The golden matrix also asserts both positive and negative
+invalidation:
 
 | Mutation | Required plan evidence |
 | --- | --- |
