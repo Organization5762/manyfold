@@ -539,13 +539,14 @@ class PubSubStreamTests(unittest.TestCase):
 
     def test_pubsub_publish_racing_close_does_not_deliver_after_close(self) -> None:
         delivered_after_close = Queue()
-        publish_errors: Queue[Exception] = Queue()
+        publish_errors: Queue[tuple[int, float, Exception]] = Queue()
 
         for attempt in range(200):
-            stream = PubSub(
-                topic=f"context.close-publish-race.{attempt}",
+            namespace = f"context-close-publish-race-{attempt}"
+            stream = PubSubTopic(
+                "temperature",
+                namespace=namespace,
                 schema=Temperature,
-                retained_messages=4096,
             )
             for seed in range(256):
                 stream.publish(Temperature(degrees=float(seed), unit="F"))
@@ -560,14 +561,12 @@ class PubSubStreamTests(unittest.TestCase):
             start = Barrier(3)
 
             def publish() -> None:
+                degrees = 1000.0 + attempt
                 try:
                     start.wait(timeout=1.0)
-                    stream.publish(Temperature(degrees=1000.0 + attempt, unit="F"))
-                except RuntimeError as error:
-                    if not stream.is_closed:
-                        publish_errors.put(error)
+                    stream.publish(Temperature(degrees=degrees, unit="F"))
                 except Exception as error:
-                    publish_errors.put(error)
+                    publish_errors.put((attempt, degrees, error))
 
             def close() -> None:
                 try:
@@ -589,8 +588,25 @@ class PubSubStreamTests(unittest.TestCase):
 
         with self.assertRaises(Empty):
             delivered_after_close.get(timeout=0.1)
-        with self.assertRaises(Empty):
-            publish_errors.get(timeout=0.1)
+        while True:
+            try:
+                attempt, degrees, error = publish_errors.get_nowait()
+            except Empty:
+                break
+            retained = PubSubTopic(
+                "temperature",
+                namespace=f"context-close-publish-race-{attempt}",
+            )
+            try:
+                latest = retained.latest()
+                retained_degrees = None if latest is None else latest.degrees
+            finally:
+                retained.close()
+            if retained_degrees == degrees:
+                self.fail(
+                    "publish raised after retaining its value during close race: "
+                    f"{error!r}"
+                )
 
     def test_pubsub_close_releases_pending_main_thread_callback_queue_capacity(
         self,

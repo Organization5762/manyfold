@@ -1274,7 +1274,7 @@ class PubSubFabric:
             topic._close_from_fabric()
 
     def topic(self, topic: str, *, schema: type | None = None) -> PubSub:
-        """Return the topic handle, creating it on first use."""
+        """Return a fresh borrowed handle backed by this fabric's shared runtime."""
         resolved_topic = _resolve_topic(topic)
         with self._lock:
             self._require_open_locked()
