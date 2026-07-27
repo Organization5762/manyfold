@@ -452,6 +452,11 @@ class PubSub:
             return None
         return float(row.average)
 
+    @property
+    def value(self) -> "PubSubValueView":
+        """Return value-oriented helpers over this topic."""
+        return PubSubValueView(self)
+
     def _infer_stream_schema(self, model: type) -> None:
         self.schema = model
         self._stream_schema = _coerce_stream_schema(self.topic, model)
@@ -853,6 +858,133 @@ class PubSubObservable:
             return PubSubCallbackSubscription(dispose)
 
         return PubSubObservable(subscribe_factory=subscribe)
+
+
+@dataclass(frozen=True)
+class ImmutableValue:
+    """Immutable value snapshot read from a PubSub topic."""
+
+    value: object
+    row: "StreamRow"
+
+
+@dataclass(frozen=True)
+class Value:
+    """Current value snapshot read from a mutable PubSub topic."""
+
+    value: object
+    row: "StreamRow"
+
+
+class PubSubValueView:
+    """Value-oriented read view over a PubSub topic."""
+
+    def __init__(self, pubsub: PubSub) -> None:
+        self._pubsub = pubsub
+
+    @property
+    def current(self) -> "PubSubCurrentValueView":
+        """Return mutable current-value helpers for this topic."""
+        return PubSubCurrentValueView(self._pubsub)
+
+    def latest(self) -> ImmutableValue | None:
+        """Return the latest immutable value snapshot."""
+        row = self._pubsub.latest()
+        if row is None:
+            return None
+        return ImmutableValue(value=_row_value(self._pubsub, row), row=row)
+
+    def subscribe(
+        self,
+        callback: Callable[[ImmutableValue], object] | object | None = None,
+        on_error: Callable[[Exception], object] | None = None,
+        on_completed: Callable[[], object] | None = None,
+        scheduler: object | None = None,
+        *,
+        on_next: Callable[[ImmutableValue], object] | None = None,
+        replay_latest: bool = False,
+    ) -> PubSubCallbackSubscription:
+        """Call ``callback`` with immutable value snapshots."""
+        del on_error, on_completed, scheduler
+        callback = _callback_from_observer(
+            "PubSubValueView.subscribe",
+            callback,
+            on_next=on_next,
+        )
+        if not callable(callback):
+            raise TypeError("PubSubValueView.subscribe requires a callable callback")
+        return self._pubsub.subscribe(
+            lambda row: callback(ImmutableValue(value=_row_value(self._pubsub, row), row=row)),
+            replay_latest=replay_latest,
+        )
+
+    def map(
+        self,
+        transform: Callable[[ImmutableValue], object],
+    ) -> PubSubObservable:
+        """Return a live stream of transformed immutable value snapshots."""
+        if not callable(transform):
+            raise TypeError("PubSubValueView.map requires a callable transform")
+        return PubSubObservable(self._pubsub).map(
+            lambda row: transform(ImmutableValue(value=_row_value(self._pubsub, row), row=row))
+        )
+
+
+class PubSubCurrentValueView:
+    """BehaviorSubject-like current value facade over a PubSub topic."""
+
+    def __init__(self, pubsub: PubSub) -> None:
+        self._pubsub = pubsub
+
+    def latest(self) -> Value | None:
+        """Return the latest current value snapshot."""
+        row = self._pubsub.latest()
+        if row is None:
+            return None
+        return Value(value=_row_value(self._pubsub, row), row=row)
+
+    def publish(self, value: object) -> None:
+        """Publish a new current value."""
+        self._pubsub.publish(value)
+
+    def on_next(self, value: object) -> None:
+        """Alias for ``publish`` for Subject-like code paths."""
+        self.publish(value)
+
+    def subscribe(
+        self,
+        callback: Callable[[Value], object] | object | None = None,
+        on_error: Callable[[Exception], object] | None = None,
+        on_completed: Callable[[], object] | None = None,
+        scheduler: object | None = None,
+        *,
+        on_next: Callable[[Value], object] | None = None,
+        replay_latest: bool = False,
+    ) -> PubSubCallbackSubscription:
+        """Call ``callback`` with current value snapshots."""
+        del on_error, on_completed, scheduler
+        callback = _callback_from_observer(
+            "PubSubCurrentValueView.subscribe",
+            callback,
+            on_next=on_next,
+        )
+        if not callable(callback):
+            raise TypeError("PubSubCurrentValueView.subscribe requires a callable callback")
+        return self._pubsub.subscribe(
+            lambda row: callback(Value(value=_row_value(self._pubsub, row), row=row)),
+            replay_latest=replay_latest,
+        )
+
+    def map(
+        self,
+        transform: Callable[[Value], object],
+    ) -> PubSubObservable:
+        """Return a live stream of transformed current value snapshots."""
+        if not callable(transform):
+            raise TypeError("PubSubCurrentValueView.map requires a callable transform")
+        return PubSubObservable(self._pubsub).map(
+            lambda row: transform(Value(value=_row_value(self._pubsub, row), row=row))
+        )
 
 
 class PubSubFabric:

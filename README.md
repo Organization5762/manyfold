@@ -4,32 +4,23 @@
   <img src="docs/assets/manyfold-topology-graph.png" alt="A schematic logical board with overlapping graph regions and circuit-style routes" width="640">
 </p>
 
-Manyfold is a component library for execution graphs.
+Manyfold is a Python component library for programs that become easier to
+understand when their data flow is explicit.
 
-It helps make graph-shaped programs easier to build, inspect, and explain.
-Routes, schemas, buffers, demand, time, payload access, writes, taints, and
-lineage are modeled as graph concerns instead of being hidden in callback code
-or queue configuration.
-
-Think of it as a logical board: routes are traces, ports are pads, components
-shape execution, and overlapping regions show where ownership, policy, and data
-flow meet.
+Start with a typed stream. If the program grows, promote its routing,
+computation, buffering, demand, and execution policy into an inspectable graph.
+The same values remain visible from application code instead of disappearing
+behind callbacks and queues.
 
 This repository is an RFC-stage Python package with a PyO3/Rust extension. It
-is not a production runtime yet, but the package is runnable and the examples
-exercise the supported surface.
+is runnable, but it is not a production runtime yet. The supported examples are
+tested with the package.
 
-## Start Fast
+## Start with a changing value
 
 ```sh
 uv sync
-uv run python examples/simple_latest.py
-uv run python -m unittest tests.test_examples
 ```
-
-## A Small Graph in Motion
-
-### Publish Values
 
 ```python
 from dataclasses import dataclass
@@ -43,21 +34,19 @@ class Temperature:
     unit: str
 
 
-temperature = PubSub()
+temperature = PubSub(
+    topic="sensor.environment.temperature",
+    schema=Temperature,
+)
 
 temperature.publish(Temperature(degrees=72.4, unit="F"))
 temperature.publish(Temperature(degrees=72.9, unit="F"))
+
 latest = temperature.latest()
-latest_row = temperature.query_one(
-    """
-    SELECT pad_name, offset + 1 AS seq_source, degrees, unit
-    FROM stream
-    ORDER BY event_time DESC, process_sequence DESC
-    LIMIT 1
-    """
-)
-if latest is not None and latest_row is not None:
-    print(f"latest #{latest_row['seq_source']}: {latest.degrees}{latest.unit}")
+if latest is None:
+    raise RuntimeError("temperature stream is empty")
+
+print(f"latest #{latest.seq_source}: {latest.degrees}{latest.unit}")
 ```
 
 Output:
@@ -66,152 +55,136 @@ Output:
 latest #2: 72.9F
 ```
 
-When a topic matters, pass it explicitly. Dotted topics keep the same ownership
-shape as a route name:
+That is the complete publish/read path. You do not need to write SQL and call
+`latest()` for the same value. `latest()` is the concise choice when you want
+current state; SQL is available when the question is more specific.
 
-- `owner` is the component or subsystem responsible for the signal.
-- `family` groups related streams.
-- `stream` names this specific signal.
+The explicit topic gives the stream a stable application identity. Its dotted
+parts read from broad ownership to a specific signal: `sensor` owns the
+`environment` family, which contains `temperature`. For local experiments,
+`PubSub()` can create an ephemeral topic and infer a dataclass or Pydantic
+schema from the first value.
 
-`PubSub` is a stream backed by PubSub delivery and a Rust SQL
-stream processor, so `latest()` is an ordinary ordered `query_one(...)` under
-the hood. If no topic is provided, the stream gets an ephemeral UUID5 topic.
-`latest()` returns a row object, so SQL-backed fields can be read as
-`latest.degrees` or `latest["degrees"]`. The SQL table exposes `pad_name` for
-filtering and joins. If no schema is provided, the first structured model
-publish fixes the stream schema lazily.
-Pydantic models work through their `model_fields` and `model_dump()` surface;
-dataclasses work through type annotations.
-The current runtime encodes those values as FlatBuffer bytes in `payload` and
-materializes the logical fields as typed SQL columns during Rust ingestion.
-Callers may still pass generated FlatBuffer bytes, builder `Output()`, or table
-objects. The queue assigns a default `event_time` when callers do not provide
-one, and `key` defaults to `None`; distributed queue implementations own their
-ordering contract.
+## Choose the surface that matches the problem
 
-Manyfold-native architecture elements remain available from
-`manyfold.architecture.native` for lower-level topology descriptions, but
-`PubSub` is the primary application stream surface. Behavior-heavy substrates
-stay backed by the runtime implementation.
+| If you want to… | Start with… | Why |
+| --- | --- | --- |
+| Publish changing state and read its current value | `PubSub.publish()` and `latest()` | Smallest typed stream surface |
+| Filter, aggregate, or inspect retained history | `PubSub` query helpers or `query()` | The retained stream is exposed as a SQL relation |
+| React to new values | `PubSub.subscribe()`, `map()`, and `filter()` | Disposable live callbacks without building a graph |
+| Make computation or flow policy inspectable | `Graph`, typed routes, and graph components | Routing, demand, storage, and execution become explicit |
+| Adapt a device or outside system | Architecture interfaces backed by `PubSub` | Lifecycle, schema, data, and errors share one queryable stream |
 
-### Outside Interfaces
+These surfaces are a progression, not a checklist. Use only the layer that
+answers the problem you have.
 
-Use architecture interfaces when external sources have lifecycle or schema
-state that needs to compose with streams:
+## Ask a stream a specific question
+
+Use built-in helpers for common operations such as `latest()`, `average()`,
+`where()`, and `take()`. Use SQL when you need a custom projection, filter,
+window, or join:
 
 ```python
-from manyfold.architecture import BluetoothControllerInterface, SerialBusInterface
-
-controllers = BluetoothControllerInterface("controllers")
-controllers.connect_controller("joy-0", name="8BitDo Lite 2")
-controllers.publish_controller_state("joy-0", {"dpad_x": 1, "south": True})
-controllers.disconnect_controller("joy-0", reason="link lost")
-
-serial = SerialBusInterface("serial")
-serial.discover_bus("/dev/ttyUSB0")
-serial.publish_bus_schema("/dev/ttyUSB0", {"rotation": "int", "pressed": "bool"})
-serial.publish_frame("/dev/ttyUSB0", {"rotation": 3, "pressed": True})
+warm_readings = temperature.query(
+    """
+    SELECT offset + 1 AS sequence, degrees, unit
+    FROM stream
+    WHERE degrees >= :minimum
+    ORDER BY offset
+    """,
+    {"minimum": 72.5},
+)
+print([(row.sequence, row.degrees, row.unit) for row in warm_readings])
 ```
 
-Both adapters publish normalized lifecycle, schema, data, and error events to a
-`PubSub` stream, so Bluetooth reconnect churn and serial bus discovery remain
-queryable beside the payloads they produce.
+Output:
 
-### Stats: Compute Values
+```text
+[(2, 72.9, 'F')]
+```
+
+The `stream` relation is scoped to this `PubSub` topic. Retention is bounded by
+`retained_messages`, so a query describes retained stream state rather than an
+unbounded event archive. Structured schema fields become typed SQL columns;
+the encoded value remains available as `payload`.
+
+## Make behavior part of the graph
+
+Callbacks are enough when reacting to a value is the whole job. Use `Graph`
+when the connection itself matters: when someone should be able to inspect
+where a value came from, how it was transformed, where it runs, or what bounds
+its flow.
 
 ```python
+from manyfold import Graph, Schema, route
+
+graph = Graph()
 temperature = route(
     owner="sensor",
     family="environment",
     stream="temperature",
     schema=Schema.float(name="Temperature"),
 )
-average_temperature = temperature.derivative_route(
-    stream="average_temperature",
+average = temperature.derivative_route(
+    stream="average",
     schema=Schema.float(name="AverageTemperature"),
 )
 
-subscription = graph.observe(temperature, replay_latest=False).moving_average(
-    window_size=3
-).connect(average_temperature)
+subscription = (
+    graph.observe(temperature, replay_latest=False)
+    .moving_average(window_size=3)
+    .connect(average)
+)
+
 for reading in (72.4, 72.9, 73.7):
     graph.publish(temperature, reading)
+
+latest_average = graph.latest(average)
 subscription.dispose()
+if latest_average is None:
+    raise RuntimeError("average route is empty")
 
-latest_average = graph.latest(average_temperature)
-assert latest_average is not None
 print(f"average: {latest_average.value:.1f}F")
-
-node = next(
-    node
-    for node in graph.diagram_nodes()
-    if dict(node.metadata).get("statistic") == "moving_average"
-)
-print(dict(node.metadata))
 ```
 
 Output:
 
 ```text
 average: 73.0F
-{'statistic': 'moving_average', 'storage': 'sliding_capacitor', 'window_size': '3'}
 ```
 
-The shape is the same: computed values are just values published to another
-typed route. The moving average also renders as a graph-visible node backed by
-a sliding capacitor, so derived state and operational inspection stay in the
-same vocabulary.
+The moving average is now a graph-visible node between two typed routes.
+Manyfold uses the same model for bounded capacitors, demand gates, mailboxes,
+joins, windows, watchdogs, write shadows, thread placement, and other execution
+decisions. Add those components when the behavior must be operated or
+explained—not merely because they exist.
 
-### Model Consensus
+## Bring outside state into the same model
 
-```python
-from manyfold import Consensus
+Architecture interfaces normalize an external source's lifecycle, schema,
+data, and errors into a `PubSub` stream. For example,
+`BluetoothControllerInterface` keeps controller connect/disconnect cycles beside
+sampled state, while `SerialBusInterface` keeps bus discovery and schema changes
+beside frames.
 
-consensus = Consensus.install(graph, nodes=("node-a", "node-b"))
-consensus.tick(1)
-consensus.tick(2)
-consensus.propose(1, "set mode=auto")
-consensus.propose(2, "set temp=21")
+This is useful when downstream code needs to answer both “what is the latest
+reading?” and “was the device connected with the expected schema?” without
+maintaining a separate state convention. See
+[Using Manyfold](docs/using_manyfold.md#interfaces) for the complete examples.
 
-print(consensus.latest_leader())
-print(consensus.latest_log())
-```
+## The mental model
 
-Output:
+Think of a Manyfold graph as a logical board:
 
-```text
-('node-a', 3, True)
-((1, 'set mode=auto'), (2, 'set temp=21'))
-```
+- routes are named, typed traces;
+- components transform or control flow;
+- ports show the boundary of a part;
+- the manifest and runtime snapshots expose what is connected and retained.
 
-The consensus component uses Raft-shaped leader election and replicated-log
-concepts from Diego Ongaro and John Ousterhout's
-[“In Search of an Understandable Consensus Algorithm”](https://www.usenix.org/conference/atc14/technical-sessions/presentation/ongaro)
-(USENIX ATC 2014).
-
-## Read Next
-
-- [Onboarding](docs/onboarding.md): repo setup, first commands, and where to look first.
-- [Using Manyfold](docs/using_manyfold.md): routes, graphs, observation, flow components, and examples.
-- [Performance](docs/performance.md): how to represent performance concerns as graph concerns.
-- [Distributed systems catalog](docs/distributed_systems_lego_catalog.md): higher-level component ideas.
-- [v1.0.0 Vision](docs/v1_0_0_vision.md): a far-off but reachable target for distributed graph computing and primitive building.
-- [Wiregraph RFC](docs/rfc/wiregraph_rfc_rev2.md): the larger design target.
-
-## What It Models
-
-- Typed routes for logical signals.
-- Replayable latest-value reads and Rx-style observation.
-- Graph-visible node thread placement for main, background, pooled, or isolated
-  execution.
-- Graph-visible capacitors, resistors, watchdogs, mailboxes, windows, and joins.
-- Explicit demand, retention, lazy payload access, and write-shadow state.
-- Lineage, taints, route audit snapshots, and topology queries.
-- Local file-backed stores and a small consensus component scaffold.
-
-The public Python surface is intentionally narrow at the top level. Advanced
-helpers live under `manyfold.graph`, and the examples are the best way to see
-which parts are supported today.
+The public `manyfold` namespace covers the common graph API. Application streams
+and interface adapters live under `manyfold.architecture`; lower-level topology
+descriptions live under `manyfold.architecture.native`; advanced graph helpers
+live under `manyfold.graph`.
 
 ## Examples
 
@@ -252,6 +225,15 @@ under [examples/archived/](examples/archived/). The example manifest, README fea
 list, and RFC reference suite all derive from the shared example catalog,
 so supported versus archived status lives in one place.
 <!-- manyfold:featured-examples:end -->
+
+## Go deeper
+
+- [Using Manyfold](docs/using_manyfold.md) develops the stream and graph APIs.
+- [Performance](docs/performance.md) explains how flow and performance concerns
+  become graph components.
+- [Onboarding](docs/onboarding.md) covers repository setup and contribution.
+- [Wiregraph RFC](docs/rfc/wiregraph_rfc_rev2.md) describes the larger design
+  target.
 
 ## Verify
 
