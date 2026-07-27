@@ -435,13 +435,16 @@ narrowing.
 - Published #280 `ae411bc423aa68227d346ad65d8f816b70e3a8d5` remains
   blocked. Its pending startup validation materializes all retained outbox
   payloads into one `O(total journal bytes)` tuple instead of a bounded
-  stream/batch, and its benchmark provenance lacks a git tree SHA. Published
-  #281 remains
-  `3c62dd1c08eb0bd18e7647a82889b332c585b3b3`; its unpublished correction
-  serializes start/close but its stress test retains 50 replacement workers
-  until teardown and requires per-iteration disposal and rereview. PR #282
-  candidate `f0e3163ecfa1a077031be2261207563d1b8b08c6` is under dedicated
-  exact-head review and hosted CI. Predecessor
+  stream/batch, its benchmark provenance lacks a git tree SHA, and its pending
+  usage fast path copies peer totals into public topic-capacity fields.
+  Published #281 remains
+  `3c62dd1c08eb0bd18e7647a82889b332c585b3b3`; local `e962d13` is
+  unpublished and blocked. Its STARTED-to-RUNNING ordering and 18 focused tests
+  pass, but a second same-object start can return successfully while the first
+  is still STARTING with `is_running == false`; its docs also incorrectly claim
+  subscriber callbacks are lock-free. PR #282 candidate
+  `f0e3163ecfa1a077031be2261207563d1b8b08c6` is under dedicated exact-head
+  review and hosted CI. Predecessor
   `b8123ef208141d57ec7848c2a0578b01afc94c59` is stale and blocked: fan-out
   conflates a closed `deliver() == false` result with queue pressure, and
   disposal can race callback registration and strand cleanup listeners. PR
