@@ -192,6 +192,30 @@ class PubSub:
         )
         self._publish_to_callbacks()
 
+    def encode_row(self, row: "StreamRow") -> bytes:
+        """Encode one row using this topic's registered schema."""
+        if not isinstance(row, StreamRow):
+            raise TypeError("row must be a StreamRow")
+        if self._stream_schema is None:
+            return _payload_bytes(row.payload)
+        return self._stream_schema.encode(
+            {
+                field_name: row[field_name]
+                for field_name in self._stream_schema.field_types
+            }
+        )
+
+    def publish_encoded(self, payload: bytes, *, key: str | None = None) -> None:
+        """Publish already encoded bytes after native schema validation."""
+        payload_bytes = _payload_bytes(payload)
+        self._runtime.publish(
+            self.topic,
+            payload_bytes,
+            pad_name=self.topic,
+            key=key,
+        )
+        self._publish_to_callbacks()
+
     def subscribe(
         self,
         callback: Callable[[StreamRow], object] | object | None = None,
@@ -1381,6 +1405,8 @@ def _composite_subscription(
 
 def _coerce_stream_schema(topic: str, value: type | None) -> _StreamSchema | None:
     if value is None:
+        return None
+    if value is bytes:
         return None
     if isinstance(value, type):
         return _StreamSchema(

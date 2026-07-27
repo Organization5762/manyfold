@@ -374,6 +374,64 @@ finally:
 
         self.assertGreaterEqual(client.health().connections_established, 6)
 
+    def test_listener_accepts_restarted_same_instance_sequence(self) -> None:
+        config = _test_config()
+        server = self._track(
+            TcpTransport.listen(
+                NodeIdentity("cluster", "server", "server-1"),
+                config=config,
+                expected_peer_node_id="client",
+            )
+        )
+        client_identity = NodeIdentity("cluster", "client", "client-1")
+        client = self._track(
+            TcpTransport.connect(
+                client_identity,
+                server.address,
+                config=config,
+                expected_peer_node_id="server",
+            )
+        )
+        self.assertTrue(client.wait_until_connected(timeout=2.0))
+        self.assertTrue(server.wait_until_connected(timeout=2.0))
+        for value in range(5):
+            client.send(
+                TransportMessage(
+                    FrameKind.PUBSUB,
+                    "events",
+                    str(value).encode(),
+                )
+            )
+            self.assertEqual(
+                server.receive(timeout=2.0).payload,
+                str(value).encode(),
+            )
+
+        client.close()
+        restarted = self._track(
+            TcpTransport.connect(
+                client_identity,
+                server.address,
+                config=config,
+                expected_peer_node_id="server",
+            )
+        )
+        self.assertTrue(restarted.wait_until_connected(timeout=2.0))
+        self.assertTrue(
+            _wait_for(
+                lambda: server.health().connections_established == 2,
+                timeout=2.0,
+            )
+        )
+        restarted.send(
+            TransportMessage(FrameKind.PUBSUB, "events", b"after-restart")
+        )
+
+        self.assertEqual(
+            server.receive(timeout=2.0).payload,
+            b"after-restart",
+        )
+
     def test_health_generation_is_waitable_and_close_releases_workers(self) -> None:
         transport = self._track(
             TcpTransport.listen(

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import os
+import random
 import socket
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -22,12 +24,15 @@ from manyfold.architecture.transport import (
     TransportSecurity,
 )
 from manyfold.architecture.transport_delivery import (
+    DEFAULT_RENDERED_FRAME_TTL_SECONDS,
+    MAX_FRAME_TICK_TTL_SECONDS,
     DeliveryClosed,
     DeliveryConfig,
     DeliveryConflict,
     DeliveryError,
     DeliveryStorageFull,
     DurableDelivery,
+    TopicDeliveryPolicy,
 )
 
 from tests.test_support import subprocess_test_env
@@ -463,6 +468,293 @@ os._exit(0)
             delivery.config.max_storage_bytes,
         )
 
+    def test_latest_replaces_before_topic_capacity_check_atomically(self) -> None:
+        journal_path = self._root / "latest.sqlite3"
+        transport = self._disconnected_transport()
+        policy = TopicDeliveryPolicy.latest(
+            "sensor.state",
+            max_sources=1,
+            max_bytes=300,
+            ttl_seconds=5.0,
+        )
+        delivery = self._track_delivery(
+            DurableDelivery(
+                transport,
+                _delivery_config(journal_path, topic_policies=(policy,)),
+            )
+        )
+        first_id = delivery.send(
+            TransportMessage(FrameKind.PUBSUB, policy.topic, b"old"),
+            source="imu-1",
+        )
+        second_id = delivery.send(
+            TransportMessage(FrameKind.PUBSUB, policy.topic, b"new"),
+            source="imu-1",
+        )
+
+        with self.assertRaisesRegex(DeliveryStorageFull, "byte limit"):
+            delivery.send(
+                TransportMessage(FrameKind.PUBSUB, policy.topic, b"x" * 200),
+                source="imu-1",
+            )
+
+        delivery.close()
+        row = sqlite3.connect(journal_path).execute(
+            "SELECT message_id, payload FROM outbox"
+        ).fetchone()
+        self.assertNotEqual(first_id, second_id)
+        self.assertEqual(row, (second_id, b"new"))
+        health = delivery.health()
+        self.assertEqual(health.outbox_items, 1)
+        self.assertEqual(health.latest_outbox_items, 1)
+        self.assertEqual(health.coalesced, 1)
+        self.assertEqual(health.storage_rejections, 1)
+
+    def test_generated_ids_keep_journal_namespace_and_sequence_after_reopen(
+        self,
+    ) -> None:
+        journal_path = self._root / "stable-ids.sqlite3"
+        transport = self._disconnected_transport()
+        policy = TopicDeliveryPolicy.frame_ticks("frame.tick", max_bytes=4096)
+        config = _delivery_config(journal_path, topic_policies=(policy,))
+        first = self._track_delivery(DurableDelivery(transport, config))
+        first_id = first.send(
+            TransportMessage(FrameKind.PUBSUB, policy.topic, b"one")
+        )
+        first.close()
+
+        reopened = self._track_delivery(DurableDelivery(transport, config))
+        second_id = reopened.send(
+            TransportMessage(FrameKind.PUBSUB, policy.topic, b"two")
+        )
+
+        first_namespace, first_sequence = first_id.rsplit("-", 1)
+        second_namespace, second_sequence = second_id.rsplit("-", 1)
+        self.assertEqual(second_namespace, first_namespace)
+        self.assertGreater(int(second_sequence, 16), int(first_sequence, 16))
+        self.assertEqual(reopened.health().recovered_outbox, 1)
+        self.assertEqual(reopened.health().outbox_items, 1)
+
+    def test_per_topic_limits_are_stricter_than_peer_hard_caps(self) -> None:
+        transport = self._disconnected_transport()
+        navigation = TopicDeliveryPolicy.commands(
+            "navigation.command",
+            max_items=2,
+            max_bytes=4096,
+        )
+        delivery = self._track_delivery(
+            DurableDelivery(
+                transport,
+                DeliveryConfig(
+                    self._root / "topic-limits.sqlite3",
+                    max_outbox_items=4,
+                    max_storage_bytes=1024 * 1024,
+                    max_message_bytes=4096,
+                    topic_policies=(navigation,),
+                ),
+            )
+        )
+        for index in range(2):
+            delivery.send(
+                TransportMessage(
+                    FrameKind.PUBSUB,
+                    navigation.topic,
+                    f"go-{index}".encode(),
+                ),
+                message_id=f"nav-{index}",
+            )
+
+        with self.assertRaisesRegex(DeliveryStorageFull, "navigation.command"):
+            delivery.send(
+                TransportMessage(
+                    FrameKind.PUBSUB,
+                    navigation.topic,
+                    b"overflow",
+                ),
+                message_id="nav-overflow",
+            )
+        delivery.send(
+            TransportMessage(FrameKind.PUBSUB, "other.command", b"allowed"),
+            message_id="other-1",
+        )
+
+        self.assertEqual(delivery.health().outbox_items, 3)
+
+    def test_soft_watermark_expires_old_rows_during_send(self) -> None:
+        transport = self._disconnected_transport()
+        policy = TopicDeliveryPolicy.commands(
+            "short.command",
+            max_items=2,
+            max_bytes=4096,
+            ttl_seconds=0.02,
+            soft_limit_ratio=0.5,
+        )
+        delivery = self._track_delivery(
+            DurableDelivery(
+                transport,
+                _delivery_config(
+                    self._root / "soft-watermark.sqlite3",
+                    topic_policies=(policy,),
+                ),
+            )
+        )
+        delivery.send(
+            TransportMessage(FrameKind.PUBSUB, policy.topic, b"expired"),
+            message_id="expired",
+        )
+        time.sleep(0.03)
+        delivery.send(
+            TransportMessage(FrameKind.PUBSUB, policy.topic, b"current"),
+            message_id="current",
+        )
+
+        health = delivery.health()
+        self.assertEqual(health.outbox_items, 1)
+        self.assertEqual(health.expired_outbox, 1)
+        self.assertGreaterEqual(health.soft_compactions, 1)
+        self.assertEqual(health.soft_watermark_crossings, 1)
+
+    def test_retry_budget_compacts_unacknowledged_message(self) -> None:
+        sender_transport, receiver_transport = self._transport_pair()
+        policy = TopicDeliveryPolicy.commands(
+            "bounded.command",
+            max_items=4,
+            max_bytes=4096,
+            ttl_seconds=5.0,
+            max_attempts=2,
+        )
+        sender = self._track_delivery(
+            DurableDelivery(
+                sender_transport,
+                _delivery_config(
+                    self._root / "bounded-retry.sqlite3",
+                    retry_initial_seconds=0.01,
+                    topic_policies=(policy,),
+                ),
+            )
+        )
+        sender.send(
+            TransportMessage(FrameKind.PUBSUB, policy.topic, b"unacked"),
+            message_id="bounded-1",
+        )
+
+        self.assertTrue(
+            _wait_for(
+                lambda: sender.health().retry_exhausted == 1,
+                timeout=1.5,
+            )
+        )
+        self.assertEqual(sender.health().outbox_items, 0)
+        receiver_transport.receive(timeout=0.2)
+        receiver_transport.receive(timeout=0.2)
+        with self.assertRaises(TimeoutError):
+            receiver_transport.receive(timeout=0.1)
+
+    def test_randomized_journal_model_stays_bounded_and_deduplicated(self) -> None:
+        journal_path = self._root / "property.sqlite3"
+        transport = self._disconnected_transport()
+        commands = TopicDeliveryPolicy.commands(
+            "navigation.command",
+            max_items=16,
+            max_bytes=64 * 1024,
+        )
+        sensors = TopicDeliveryPolicy.latest(
+            "sensor.state",
+            max_sources=4,
+            max_bytes=64 * 1024,
+            ttl_seconds=5.0,
+        )
+        delivery = self._track_delivery(
+            DurableDelivery(
+                transport,
+                _delivery_config(
+                    journal_path,
+                    topic_policies=(commands, sensors),
+                ),
+            )
+        )
+        expected_latest: dict[str, bytes] = {}
+        generator = random.Random(5762)
+        for _ in range(250):
+            if generator.random() < 0.65:
+                source = f"sensor-{generator.randrange(4)}"
+                payload = generator.randbytes(16)
+                expected_latest[source] = payload
+                delivery.send(
+                    TransportMessage(FrameKind.PUBSUB, sensors.topic, payload),
+                    source=source,
+                )
+            else:
+                command = generator.randrange(12)
+                delivery.send(
+                    TransportMessage(
+                        FrameKind.PUBSUB,
+                        commands.topic,
+                        f"command-{command}".encode(),
+                    ),
+                    message_id=f"command-{command}",
+                )
+
+        health = delivery.health()
+        self.assertLessEqual(health.latest_outbox_items, sensors.max_items)
+        self.assertLessEqual(
+            health.append_outbox_items,
+            commands.max_items,
+        )
+        delivery.close()
+        connection = sqlite3.connect(journal_path)
+        latest_rows = dict(
+            connection.execute(
+                """
+                SELECT source_key, payload FROM outbox
+                WHERE topic = ? AND semantics = 'latest'
+                """,
+                (sensors.topic,),
+            )
+        )
+        command_ids = tuple(
+            row[0]
+            for row in connection.execute(
+                """
+                SELECT message_id FROM outbox
+                WHERE topic = ? AND semantics = 'append'
+                """,
+                (commands.topic,),
+            )
+        )
+        connection.close()
+        self.assertEqual(latest_rows, expected_latest)
+        self.assertEqual(len(command_ids), len(set(command_ids)))
+        self.assertLessEqual(len(command_ids), 12)
+        self.assertGreater(health.coalesced, 0)
+        self.assertGreater(health.outbox_deduplicated, 0)
+
+    def test_frame_and_rendered_frame_profiles_have_short_latest_slots(
+        self,
+    ) -> None:
+        ticks = TopicDeliveryPolicy.frame_ticks(
+            "frame.tick",
+            max_bytes=4096,
+            cadence_seconds=0.2,
+        )
+        rendered = TopicDeliveryPolicy.rendered_frames(
+            "frame.rendered",
+            max_sources=2,
+            max_bytes=16 * 1024,
+        )
+
+        self.assertEqual(ticks.max_items, 1)
+        self.assertEqual(ticks.max_attempts, 1)
+        self.assertEqual(ticks.ttl_seconds, MAX_FRAME_TICK_TTL_SECONDS)
+        self.assertFalse(ticks.latest_per_source)
+        self.assertEqual(
+            rendered.ttl_seconds,
+            DEFAULT_RENDERED_FRAME_TTL_SECONDS,
+        )
+        self.assertGreaterEqual(rendered.ttl_seconds, 0.1)
+        self.assertLessEqual(rendered.ttl_seconds, 0.25)
+        self.assertTrue(rendered.latest_per_source)
+
     def test_stable_id_conflict_and_close_release_resources(self) -> None:
         address = _unused_address()
         transport = self._track_transport(
@@ -586,6 +878,16 @@ os._exit(0)
         self.assertTrue(client.wait_until_connected(timeout=2.0))
         return client, server
 
+    def _disconnected_transport(self) -> TcpTransport:
+        return self._track_transport(
+            TcpTransport.connect(
+                NodeIdentity("cluster", "sender", "sender-1"),
+                _unused_address(),
+                config=_transport_config(),
+                expected_peer_node_id="receiver",
+            )
+        )
+
     def _track_delivery(self, delivery: DurableDelivery) -> DurableDelivery:
         self._deliveries.append(delivery)
         return delivery
@@ -615,6 +917,7 @@ def _delivery_config(
     retry_initial_seconds: float = 0.05,
     message_ttl_seconds: float = 5.0,
     dedupe_retention_seconds: float = 5.0,
+    topic_policies: tuple[TopicDeliveryPolicy, ...] = (),
 ) -> DeliveryConfig:
     return DeliveryConfig(
         path,
@@ -628,6 +931,7 @@ def _delivery_config(
         retry_initial_seconds=retry_initial_seconds,
         retry_multiplier=1.5,
         retry_max_seconds=0.1,
+        topic_policies=topic_policies,
     )
 
 

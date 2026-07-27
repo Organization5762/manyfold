@@ -3,14 +3,22 @@
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass
-from pathlib import Path
 from queue import Empty, Full, Queue
 from threading import Condition, Event, Lock, Thread
 from time import monotonic, time
 from typing import final
-from uuid import uuid4
 
+from ._transport_delivery_events import (
+    DeliveryCapacity,
+    DeliveryClosed,
+    DeliveryConflict,
+    DeliveryEvent,
+    DeliveryEventKind,
+    DeliveryHealth,
+    DeliveryObserver,
+    DeliveryStorageFull,
+    ReceivedDelivery,
+)
 from ._transport_delivery_journal import (
     _DeliveryJournal,
     _InboxDisposition,
@@ -19,7 +27,24 @@ from ._transport_delivery_journal import (
     _JournalError,
     _JournalFull,
     _JournalStats,
+    _OutboxDisposition,
     _OutboxRecord,
+    _OutboxUsage,
+)
+from ._transport_delivery_policy import (
+    DEFAULT_DELIVERY_ITEM_LIMIT,
+    DEFAULT_DELIVERY_MAX_ATTEMPTS,
+    DEFAULT_DELIVERY_SOFT_LIMIT_RATIO,
+    DEFAULT_DELIVERY_STORAGE_BYTES,
+    DEFAULT_RENDERED_FRAME_TTL_SECONDS,
+    MAX_FRAME_TICK_TTL_SECONDS,
+    DeliveryConfig,
+    DeliverySemantics,
+    TopicDeliveryPolicy,
+    _require_nonnegative_number,
+    _require_optional_timeout,
+    _require_positive_number,
+    _require_text,
 )
 from ._transport_delivery_protocol import (
     _DELIVERY_HEADER_SIZE,
@@ -43,107 +68,14 @@ from .transport import (
     TransportQueueFull,
 )
 
-DEFAULT_DELIVERY_ITEM_LIMIT = 1024
-DEFAULT_DELIVERY_STORAGE_BYTES = 64 * 1024 * 1024
-
 _WORK_BATCH_LIMIT = 32
 _WORK_POLL_SECONDS = 0.05
 _CLOSED_SENTINEL = object()
 
 
-class DeliveryClosed(DeliveryError):
-    """Raised when an operation targets a closed delivery layer."""
-
-
-class DeliveryStorageFull(DeliveryError):
-    """Raised when a configured journal item or byte bound is full."""
-
-
-class DeliveryConflict(DeliveryError):
-    """Raised when one stable message ID names different content."""
-
-
-@dataclass(frozen=True, slots=True)
-class DeliveryConfig:
-    """Durability, retry, expiry, and memory limits for one delivery endpoint."""
-
-    journal_path: Path
-    max_outbox_items: int = DEFAULT_DELIVERY_ITEM_LIMIT
-    max_inbox_items: int = DEFAULT_DELIVERY_ITEM_LIMIT
-    max_storage_bytes: int = DEFAULT_DELIVERY_STORAGE_BYTES
-    receive_queue_limit: int = 256
-    max_message_bytes: int = 8 * 1024 * 1024
-    message_ttl_seconds: float = 24 * 60 * 60
-    dedupe_retention_seconds: float = 24 * 60 * 60
-    retry_initial_seconds: float = 0.1
-    retry_multiplier: float = 2.0
-    retry_max_seconds: float = 5.0
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.journal_path, Path):
-            raise ValueError("journal_path must be a pathlib.Path")
-        _require_positive_integer(self.max_outbox_items, "max_outbox_items")
-        _require_positive_integer(self.max_inbox_items, "max_inbox_items")
-        _require_positive_integer(self.max_storage_bytes, "max_storage_bytes")
-        _require_positive_integer(self.receive_queue_limit, "receive_queue_limit")
-        _require_positive_integer(self.max_message_bytes, "max_message_bytes")
-        _require_positive_number(self.message_ttl_seconds, "message_ttl_seconds")
-        _require_positive_number(
-            self.dedupe_retention_seconds,
-            "dedupe_retention_seconds",
-        )
-        _require_positive_number(
-            self.retry_initial_seconds,
-            "retry_initial_seconds",
-        )
-        _require_positive_number(self.retry_multiplier, "retry_multiplier")
-        _require_positive_number(self.retry_max_seconds, "retry_max_seconds")
-        if self.max_storage_bytes < 64 * 1024:
-            raise ValueError("max_storage_bytes must be at least 65536")
-        if self.retry_multiplier < 1:
-            raise ValueError("retry_multiplier must be at least 1")
-        if self.retry_max_seconds < self.retry_initial_seconds:
-            raise ValueError(
-                "retry_max_seconds must be at least retry_initial_seconds"
-            )
-
-
-@dataclass(frozen=True, slots=True)
-class ReceivedDelivery:
-    """One durable application message awaiting explicit ACK or NACK."""
-
-    message_id: str
-    message: TransportMessage
-    delivery_attempt: int
-
-
-@dataclass(frozen=True, slots=True)
-class DeliveryHealth:
-    """Immutable delivery, retry, retention, and journal health snapshot."""
-
-    generation: int
-    closed: bool
-    outbox_items: int
-    pending_inbox_items: int
-    acked_inbox_items: int
-    logical_storage_bytes: int
-    queued_deliveries: int
-    inflight_deliveries: int
-    accepted: int
-    frames_sent: int
-    retries: int
-    delivered: int
-    acknowledgements: int
-    negative_acknowledgements: int
-    duplicates_suppressed: int
-    expired_outbox: int
-    expired_inbox: int
-    last_error: str | None
-
-
 @final
 class DurableDelivery:
-    """SQLite-backed at-least-once delivery over one owned receive stream."""
+    """SQLite-backed at-least-once delivery over one transport."""
 
     def __init__(
         self,
@@ -151,6 +83,8 @@ class DurableDelivery:
         config: DeliveryConfig,
         *,
         owns_transport: bool = False,
+        owns_receive_loop: bool = True,
+        observer: DeliveryObserver | None = None,
     ) -> None:
         if not isinstance(transport, TcpTransport):
             raise ValueError("transport must be a TcpTransport")
@@ -158,6 +92,10 @@ class DurableDelivery:
             raise ValueError("config must be a DeliveryConfig")
         if not isinstance(owns_transport, bool):
             raise ValueError("owns_transport must be a boolean")
+        if not isinstance(owns_receive_loop, bool):
+            raise ValueError("owns_receive_loop must be a boolean")
+        if observer is not None and not callable(observer):
+            raise TypeError("observer must be callable")
         if config.max_message_bytes + _DELIVERY_HEADER_SIZE + 256 > (
             transport.config.max_payload_bytes
         ):
@@ -167,7 +105,14 @@ class DurableDelivery:
             )
         self.transport = transport
         self.config = config
+        self._topic_policies = {
+            policy.topic: policy for policy in config.topic_policies
+        }
         self._owns_transport = owns_transport
+        self._owns_receive_loop = owns_receive_loop
+        self._observer = observer
+        self._observer_lock = Lock()
+        self._event_sequence = 0
         try:
             self._journal = _DeliveryJournal(
                 config.journal_path,
@@ -196,22 +141,45 @@ class DurableDelivery:
         self._acknowledgements = 0
         self._negative_acknowledgements = 0
         self._duplicates_suppressed = 0
+        self._outbox_deduplicated = 0
+        self._coalesced = 0
+        self._soft_compactions = 0
+        self._soft_watermark_crossings = 0
+        self._soft_watermark_topics: set[str] = set()
+        self._storage_rejections = 0
+        self._retry_exhausted = 0
         self._expired_outbox = 0
         self._expired_inbox = 0
         self._last_error: str | None = None
+        recovered_records = self._journal.outbox_records()
         self._last_stats = self._journal.stats()
+        self._recovered_outbox = len(recovered_records)
         self._fill_receive_queue()
-        self._receiver = Thread(
-            target=self._run_receiver,
-            name=f"manyfold-delivery-{transport.identity.node_id}-receiver",
-            daemon=True,
+        self._receiver = (
+            Thread(
+                target=self._run_receiver,
+                name=f"manyfold-delivery-{transport.identity.node_id}-receiver",
+                daemon=True,
+            )
+            if owns_receive_loop
+            else None
         )
         self._sender = Thread(
             target=self._run_sender,
             name=f"manyfold-delivery-{transport.identity.node_id}-sender",
             daemon=True,
         )
-        self._receiver.start()
+        for record in recovered_records:
+            self._emit(
+                DeliveryEventKind.REPLAYED,
+                record.message_id,
+                record.topic,
+                record.source_key,
+                correlation_id=record.correlation_id,
+                attempt=record.attempts,
+            )
+        if self._receiver is not None:
+            self._receiver.start()
         self._sender.start()
 
     def __enter__(self) -> "DurableDelivery":
@@ -226,8 +194,9 @@ class DurableDelivery:
         *,
         message_id: str | None = None,
         ttl_seconds: float | None = None,
+        source: str | None = None,
     ) -> str:
-        """Durably retain one message before scheduling network delivery."""
+        """Durably retain one append command or replaceable latest value."""
         self._require_open()
         if not isinstance(message, TransportMessage):
             raise TypeError("message must be a TransportMessage")
@@ -238,8 +207,10 @@ class DurableDelivery:
                 "payload exceeds configured max_message_bytes "
                 f"({len(message.payload)} > {self.config.max_message_bytes})"
             )
+        policy = self._policy_for(message.channel)
+        source_key = self._source_key(policy, source)
         resolved_message_id = (
-            uuid4().hex
+            self._journal.next_message_id()
             if message_id is None
             else _require_text(message_id, "message_id")
         )
@@ -259,34 +230,126 @@ class DurableDelivery:
                 "encoded durable message exceeds transport max_payload_bytes "
                 f"({len(encoded)} > {self.transport.config.max_payload_bytes})"
             )
-        resolved_ttl = (
-            self.config.message_ttl_seconds
-            if ttl_seconds is None
-            else _require_positive_number(ttl_seconds, "ttl_seconds")
-        )
+        resolved_ttl = policy.ttl_seconds
+        if ttl_seconds is not None:
+            requested_ttl = _require_positive_number(ttl_seconds, "ttl_seconds")
+            if (
+                message.channel in self._topic_policies
+                and requested_ttl > policy.ttl_seconds
+            ):
+                raise ValueError(
+                    f"ttl_seconds {requested_ttl} exceeds topic "
+                    f"{policy.topic!r} limit {policy.ttl_seconds}"
+                )
+            resolved_ttl = requested_ttl
         now = time()
         record = _OutboxRecord(
             message_id=resolved_message_id,
+            topic=policy.topic,
+            semantics=policy.semantics.value,
+            source_key=source_key,
             frame_kind=int(message.kind),
             channel=message.channel,
             correlation_id=message.correlation_id,
             payload=message.payload,
             attempts=0,
+            max_attempts=policy.max_attempts,
         )
         try:
-            inserted = self._journal.insert_outbox(
+            result = self._journal.insert_outbox(
                 record,
                 created_at=now,
                 expires_at=now + resolved_ttl,
+                topic_item_limit=policy.max_items,
+                topic_byte_limit=policy.max_bytes,
+                soft_limit_ratio=policy.soft_limit_ratio,
             )
         except _JournalFull as error:
+            self._change(storage_rejections=1, error=str(error))
+            self._emit(
+                DeliveryEventKind.DROPPED,
+                resolved_message_id,
+                policy.topic,
+                source_key,
+                correlation_id=message.correlation_id,
+                detail=str(error),
+                capacity=self._delivery_capacity(policy, error.capacity),
+                terminal=True,
+            )
             raise DeliveryStorageFull(str(error)) from error
         except _JournalConflict as error:
+            self._emit(
+                DeliveryEventKind.DROPPED,
+                resolved_message_id,
+                policy.topic,
+                source_key,
+                correlation_id=message.correlation_id,
+                detail=str(error),
+                terminal=True,
+            )
             raise DeliveryConflict(str(error)) from error
         except _JournalError as error:
             raise DeliveryError(f"could not retain outbound message: {error}") from error
-        if inserted:
-            self._change(accepted=1)
+        if result.disposition is _OutboxDisposition.DEDUPLICATED:
+            self._change(outbox_deduplicated=1)
+            self._emit(
+                DeliveryEventKind.DEDUPLICATED,
+                resolved_message_id,
+                policy.topic,
+                source_key,
+                correlation_id=message.correlation_id,
+            )
+        else:
+            crossed_soft_watermark = (
+                result.soft_compaction
+                and policy.topic not in self._soft_watermark_topics
+            )
+            self._change(
+                accepted=1,
+                coalesced=(
+                    1
+                    if result.disposition is _OutboxDisposition.REPLACED
+                    else 0
+                ),
+                expired_outbox=len(result.expired_outbox),
+                soft_compactions=1 if result.soft_compaction else 0,
+                soft_watermark_crossings=(
+                    1 if crossed_soft_watermark else 0
+                ),
+            )
+            self._emit(
+                (
+                    DeliveryEventKind.COALESCED
+                    if result.disposition is _OutboxDisposition.REPLACED
+                    else DeliveryEventKind.ENQUEUED
+                ),
+                resolved_message_id,
+                policy.topic,
+                source_key,
+                correlation_id=message.correlation_id,
+                related_message_id=result.replaced_message_id,
+            )
+            if crossed_soft_watermark:
+                self._soft_watermark_topics.add(policy.topic)
+                self._emit(
+                    DeliveryEventKind.SOFT_WATERMARK,
+                    resolved_message_id,
+                    policy.topic,
+                    source_key,
+                    correlation_id=message.correlation_id,
+                    capacity=self._delivery_capacity(policy, result.capacity),
+                )
+            for expired in result.expired_outbox:
+                self._emit(
+                    DeliveryEventKind.EXPIRED,
+                    expired.message_id,
+                    expired.topic,
+                    expired.source_key,
+                    correlation_id=expired.correlation_id,
+                    attempt=expired.attempts,
+                    detail="soft watermark expiry sweep",
+                    terminal=True,
+                )
         self._wake_sender.set()
         return resolved_message_id
 
@@ -339,6 +402,26 @@ class DurableDelivery:
                 continue
             self._fill_receive_queue()
             return item
+
+    def handle_transport_message(self, message: TransportMessage) -> None:
+        """Process one delivery frame supplied by an external receive-loop owner."""
+        self._require_open()
+        if self._owns_receive_loop:
+            raise DeliveryConflict(
+                "handle_transport_message requires owns_receive_loop=False"
+            )
+        try:
+            frame = _decode_delivery_frame(
+                message,
+                max_message_bytes=self.config.max_message_bytes,
+            )
+            self._handle_frame(frame)
+        except DeliveryError:
+            raise
+        except Exception as error:
+            raise DeliveryProtocolError(
+                f"could not process externally received delivery frame: {error}"
+            ) from error
 
     def ack(self, message_id: str) -> None:
         """Persist successful application processing and schedule an ACK."""
@@ -418,6 +501,8 @@ class DurableDelivery:
                 generation=self._generation,
                 closed=self._closed,
                 outbox_items=stats.outbox_items,
+                append_outbox_items=stats.append_outbox_items,
+                latest_outbox_items=stats.latest_outbox_items,
                 pending_inbox_items=stats.pending_inbox_items,
                 acked_inbox_items=stats.acked_inbox_items,
                 logical_storage_bytes=stats.logical_bytes,
@@ -430,6 +515,13 @@ class DurableDelivery:
                 acknowledgements=self._acknowledgements,
                 negative_acknowledgements=self._negative_acknowledgements,
                 duplicates_suppressed=self._duplicates_suppressed,
+                outbox_deduplicated=self._outbox_deduplicated,
+                coalesced=self._coalesced,
+                soft_compactions=self._soft_compactions,
+                soft_watermark_crossings=self._soft_watermark_crossings,
+                storage_rejections=self._storage_rejections,
+                retry_exhausted=self._retry_exhausted,
+                recovered_outbox=self._recovered_outbox,
                 expired_outbox=self._expired_outbox,
                 expired_inbox=self._expired_inbox,
                 last_error=self._last_error,
@@ -471,13 +563,24 @@ class DurableDelivery:
             self._condition.notify_all()
         self._stop.set()
         self._wake_sender.set()
-        self._receiver.join()
+        if self._receiver is not None:
+            self._receiver.join()
         self._sender.join()
         self._drain_receive_queue()
         self._last_stats = self._journal_stats()
         self._journal.close()
         if self._owns_transport:
             self.transport.close()
+
+    def _retained_topic_rows(self, topic: str) -> int:
+        """Return current durable rows for an internal composed owner."""
+        return self._journal.topic_row_count(_require_text(topic, "topic"))
+
+    def _retained_topic_outbox_items(self, topic: str) -> int:
+        """Return current outbound rows for an internal composed owner."""
+        return self._journal.outbox_usage(
+            _require_text(topic, "topic")
+        ).topic_items
 
     def _run_receiver(self) -> None:
         while not self._stop.is_set():
@@ -534,22 +637,51 @@ class DurableDelivery:
                     timeout=0.01,
                 )
             except (TransportClosed, TransportQueueFull) as error:
-                self._journal.mark_outbox_attempt(
+                attempt = record.attempts + 1
+                retained = self._journal.mark_outbox_attempt(
                     record.message_id,
                     next_attempt_at=now + self.config.retry_initial_seconds,
                     error=f"{type(error).__name__}: {error}",
-                    increment_attempts=False,
+                    increment_attempts=True,
                 )
                 self._change(error=f"{type(error).__name__}: {error}")
+                if retained and attempt < record.max_attempts:
+                    self._emit(
+                        DeliveryEventKind.RETRY_SCHEDULED,
+                        record.message_id,
+                        record.topic,
+                        record.source_key,
+                        correlation_id=record.correlation_id,
+                        attempt=attempt + 1,
+                        detail=f"{type(error).__name__}: {error}",
+                    )
                 continue
             attempt = record.attempts + 1
-            self._journal.mark_outbox_attempt(
+            retained = self._journal.mark_outbox_attempt(
                 record.message_id,
                 next_attempt_at=now + self._retry_delay(attempt),
                 error=None,
                 increment_attempts=True,
             )
             self._change(frames_sent=1, retries=1 if record.attempts else 0)
+            self._emit(
+                DeliveryEventKind.SENT,
+                record.message_id,
+                record.topic,
+                record.source_key,
+                correlation_id=record.correlation_id,
+                attempt=attempt,
+            )
+            if retained and attempt < record.max_attempts:
+                self._emit(
+                    DeliveryEventKind.RETRY_SCHEDULED,
+                    record.message_id,
+                    record.topic,
+                    record.source_key,
+                    correlation_id=record.correlation_id,
+                    attempt=attempt + 1,
+                    detail="awaiting acknowledgement",
+                )
 
     def _send_due_acks(self) -> None:
         now = time()
@@ -568,8 +700,17 @@ class DurableDelivery:
         elif frame.operation is _DeliveryOperation.ACK:
             deleted = self._journal.delete_outbox(frame.message_id)
             self._send_control(_DeliveryOperation.CONFIRM, frame.message_id)
-            if deleted:
+            if deleted is not None:
                 self._change()
+                self._emit(
+                    DeliveryEventKind.ACKNOWLEDGED,
+                    deleted.message_id,
+                    deleted.topic,
+                    deleted.source_key,
+                    correlation_id=deleted.correlation_id,
+                    attempt=deleted.attempts,
+                )
+                self._refresh_soft_watermark(deleted.topic)
         elif frame.operation is _DeliveryOperation.NACK:
             reason = frame.payload.decode("utf-8", errors="replace")
             self._journal.mark_outbox_attempt(
@@ -619,9 +760,27 @@ class DurableDelivery:
             self._journal.schedule_ack_now(frame.message_id, now)
             self._wake_sender.set()
             self._change(duplicates_suppressed=1)
+            self._emit(
+                DeliveryEventKind.DUPLICATE_SUPPRESSED,
+                frame.message_id,
+                frame.channel,
+                None,
+                correlation_id=frame.correlation_id,
+                attempt=frame.delivery_attempt,
+                detail="already acknowledged",
+            )
             return
         if disposition is _InboxDisposition.PENDING_DUPLICATE:
             self._change(duplicates_suppressed=1)
+            self._emit(
+                DeliveryEventKind.DUPLICATE_SUPPRESSED,
+                frame.message_id,
+                frame.channel,
+                None,
+                correlation_id=frame.correlation_id,
+                attempt=frame.delivery_attempt,
+                detail="already pending",
+            )
         else:
             self._change(delivered=1)
         self._fill_receive_queue()
@@ -693,18 +852,56 @@ class DurableDelivery:
         except _JournalError as error:
             self._change(error=f"{type(error).__name__}: {error}")
             return
-        expired_outbox = len(result.expired_outbox_ids)
-        expired_inbox = len(result.expired_inbox_ids)
+        expired_outbox = len(result.expired_outbox)
+        retry_exhausted = len(result.exhausted_outbox)
+        expired_inbox = len(result.expired_inbox)
         if expired_inbox:
-            self._purge_expired_inbox(result.expired_inbox_ids)
-        if expired_outbox or expired_inbox:
+            self._purge_expired_inbox(
+                tuple(expired.message_id for expired in result.expired_inbox)
+            )
+        if expired_outbox or retry_exhausted or expired_inbox:
             self._change(
                 expired_outbox=expired_outbox,
+                retry_exhausted=retry_exhausted,
                 expired_inbox=expired_inbox,
                 error=(
-                    f"expired {expired_outbox} outbox and "
-                    f"{expired_inbox} inbox records"
+                    f"compacted {expired_outbox} expired outbox, "
+                    f"{retry_exhausted} retry-exhausted outbox, and "
+                    f"{expired_inbox} expired inbox records"
                 ),
+            )
+        for expired in result.expired_outbox:
+            self._emit(
+                DeliveryEventKind.EXPIRED,
+                expired.message_id,
+                expired.topic,
+                expired.source_key,
+                correlation_id=expired.correlation_id,
+                attempt=expired.attempts,
+                terminal=True,
+            )
+            self._refresh_soft_watermark(expired.topic)
+        for exhausted in result.exhausted_outbox:
+            self._emit(
+                DeliveryEventKind.DROPPED,
+                exhausted.message_id,
+                exhausted.topic,
+                exhausted.source_key,
+                correlation_id=exhausted.correlation_id,
+                attempt=exhausted.attempts,
+                detail="retry budget exhausted",
+                terminal=True,
+            )
+            self._refresh_soft_watermark(exhausted.topic)
+        for expired in result.expired_inbox:
+            self._emit(
+                DeliveryEventKind.EXPIRED,
+                expired.message_id,
+                expired.topic,
+                None,
+                correlation_id=expired.correlation_id,
+                attempt=expired.delivery_attempt,
+                detail="inbox retention expired",
             )
 
     def _purge_expired_inbox(self, message_ids: tuple[str, ...]) -> None:
@@ -731,6 +928,136 @@ class DurableDelivery:
             self._inflight_ids.difference_update(expired)
             self._generation += 1
             self._condition.notify_all()
+
+    def _emit(
+        self,
+        kind: DeliveryEventKind,
+        message_id: str,
+        topic: str,
+        source: str | None,
+        *,
+        correlation_id: str | None = None,
+        attempt: int = 0,
+        related_message_id: str | None = None,
+        detail: str | None = None,
+        capacity: DeliveryCapacity | None = None,
+        terminal: bool = False,
+    ) -> None:
+        observer = self._observer
+        if observer is None:
+            return
+        with self._observer_lock:
+            with self._condition:
+                self._event_sequence += 1
+                event = DeliveryEvent(
+                    sequence=self._event_sequence,
+                    occurred_at=time(),
+                    kind=kind,
+                    message_id=message_id,
+                    topic=topic,
+                    source=source or None,
+                    correlation_id=correlation_id,
+                    attempt=attempt,
+                    related_message_id=related_message_id,
+                    detail=detail,
+                    capacity=capacity,
+                    terminal=terminal,
+                )
+            try:
+                observer(event)
+            except Exception as error:
+                with self._condition:
+                    self._last_error = (
+                        f"delivery observer failed for event {event.sequence}: "
+                        f"{type(error).__name__}: {error}"
+                    )
+                    self._generation += 1
+                    self._condition.notify_all()
+
+    def _delivery_capacity(
+        self,
+        policy: TopicDeliveryPolicy,
+        usage: _OutboxUsage | None,
+    ) -> DeliveryCapacity | None:
+        if usage is None:
+            return None
+        return DeliveryCapacity(
+            peer_items=usage.items,
+            peer_item_limit=self.config.max_outbox_items,
+            peer_logical_bytes=usage.logical_bytes,
+            peer_byte_limit=self.config.max_storage_bytes,
+            topic_items=usage.topic_items,
+            topic_item_limit=policy.max_items,
+            topic_bytes=usage.topic_bytes,
+            topic_byte_limit=policy.max_bytes,
+            soft_limit_ratio=policy.soft_limit_ratio,
+        )
+
+    def _refresh_soft_watermark(self, topic: str) -> None:
+        if topic not in self._soft_watermark_topics:
+            return
+        policy = self._policy_for(topic)
+        try:
+            usage = self._journal.outbox_usage(topic)
+        except _JournalError:
+            return
+        is_crossed = any(
+            (
+                usage.items / self.config.max_outbox_items
+                >= policy.soft_limit_ratio,
+                usage.logical_bytes / self.config.max_storage_bytes
+                >= policy.soft_limit_ratio,
+                usage.topic_items / policy.max_items >= policy.soft_limit_ratio,
+                usage.topic_bytes / policy.max_bytes >= policy.soft_limit_ratio,
+            )
+        )
+        if is_crossed:
+            return
+        self._soft_watermark_topics.remove(topic)
+        self._emit(
+            DeliveryEventKind.SOFT_WATERMARK_RECOVERED,
+            f"watermark:{topic}",
+            topic,
+            None,
+            capacity=self._delivery_capacity(policy, usage),
+        )
+
+    def _policy_for(self, topic: str) -> TopicDeliveryPolicy:
+        configured = self._topic_policies.get(topic)
+        if configured is not None:
+            return configured
+        return TopicDeliveryPolicy.commands(
+            topic,
+            max_items=self.config.max_outbox_items,
+            max_bytes=self.config.max_storage_bytes,
+            ttl_seconds=self.config.message_ttl_seconds,
+            max_attempts=self.config.max_delivery_attempts,
+            soft_limit_ratio=self.config.soft_limit_ratio,
+        )
+
+    def _source_key(
+        self,
+        policy: TopicDeliveryPolicy,
+        source: str | None,
+    ) -> str | None:
+        if policy.semantics is DeliverySemantics.APPEND:
+            if source is not None:
+                raise ValueError("source is only valid for latest topic policies")
+            return None
+        if not policy.latest_per_source:
+            if source is not None:
+                raise ValueError(
+                    f"latest topic {policy.topic!r} has one shared slot"
+                )
+            return ""
+        if source is None:
+            raise ValueError(
+                f"latest topic {policy.topic!r} requires a source"
+            )
+        source = _require_text(source, "source")
+        if len(source.encode("utf-8")) > _MAX_TEXT_BYTES:
+            raise ValueError("encoded source is too long")
+        return source
 
     def _retry_delay(self, attempt: int) -> float:
         try:
@@ -772,6 +1099,12 @@ class DurableDelivery:
         acknowledgements: int = 0,
         negative_acknowledgements: int = 0,
         duplicates_suppressed: int = 0,
+        outbox_deduplicated: int = 0,
+        coalesced: int = 0,
+        soft_compactions: int = 0,
+        soft_watermark_crossings: int = 0,
+        storage_rejections: int = 0,
+        retry_exhausted: int = 0,
         expired_outbox: int = 0,
         expired_inbox: int = 0,
         error: str | None = None,
@@ -784,6 +1117,12 @@ class DurableDelivery:
             self._acknowledgements += acknowledgements
             self._negative_acknowledgements += negative_acknowledgements
             self._duplicates_suppressed += duplicates_suppressed
+            self._outbox_deduplicated += outbox_deduplicated
+            self._coalesced += coalesced
+            self._soft_compactions += soft_compactions
+            self._soft_watermark_crossings += soft_watermark_crossings
+            self._storage_rejections += storage_rejections
+            self._retry_exhausted += retry_exhausted
             self._expired_outbox += expired_outbox
             self._expired_inbox += expired_inbox
             if error is not None:
@@ -807,45 +1146,28 @@ class DurableDelivery:
             pass
 
 
-def _require_text(value: str, field_name: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{field_name} must be a non-empty string")
-    return value.strip()
-
-
-def _require_positive_integer(value: int, field_name: str) -> None:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-        raise ValueError(f"{field_name} must be a positive integer")
-
-
-def _require_positive_number(value: float, field_name: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, int | float) or value <= 0:
-        raise ValueError(f"{field_name} must be a positive number")
-    return float(value)
-
-
-def _require_nonnegative_number(value: float, field_name: str) -> None:
-    if isinstance(value, bool) or not isinstance(value, int | float) or value < 0:
-        raise ValueError(f"{field_name} must be a non-negative number")
-
-
-def _require_optional_timeout(value: float | None) -> None:
-    if value is not None:
-        _require_nonnegative_number(value, "timeout")
-
-
 __all__ = [
     "DEFAULT_DELIVERY_ITEM_LIMIT",
+    "DEFAULT_DELIVERY_MAX_ATTEMPTS",
+    "DEFAULT_DELIVERY_SOFT_LIMIT_RATIO",
     "DEFAULT_DELIVERY_STORAGE_BYTES",
+    "DEFAULT_RENDERED_FRAME_TTL_SECONDS",
     "DELIVERY_CHANNEL",
     "DELIVERY_PROTOCOL_VERSION",
+    "DeliveryCapacity",
     "DeliveryClosed",
     "DeliveryConfig",
     "DeliveryConflict",
     "DeliveryError",
+    "DeliveryEvent",
+    "DeliveryEventKind",
     "DeliveryHealth",
+    "DeliveryObserver",
     "DeliveryProtocolError",
+    "DeliverySemantics",
     "DeliveryStorageFull",
     "DurableDelivery",
+    "MAX_FRAME_TICK_TTL_SECONDS",
     "ReceivedDelivery",
+    "TopicDeliveryPolicy",
 ]
