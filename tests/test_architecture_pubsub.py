@@ -540,6 +540,7 @@ class PubSubStreamTests(unittest.TestCase):
     def test_pubsub_publish_racing_close_does_not_deliver_after_close(self) -> None:
         delivered_after_close = Queue()
         publish_errors: Queue[tuple[int, float, Exception]] = Queue()
+        close_errors: Queue[tuple[int, Exception]] = Queue()
 
         for attempt in range(200):
             namespace = f"context-close-publish-race-{attempt}"
@@ -574,7 +575,7 @@ class PubSubStreamTests(unittest.TestCase):
                     stream.close()
                     close_returned.set()
                 except Exception as error:
-                    publish_errors.put(error)
+                    close_errors.put((attempt, error))
 
             publisher = Thread(target=publish)
             closer = Thread(target=close)
@@ -588,6 +589,11 @@ class PubSubStreamTests(unittest.TestCase):
 
         with self.assertRaises(Empty):
             delivered_after_close.get(timeout=0.1)
+        with self.assertRaises(Empty):
+            attempt, error = close_errors.get(timeout=0.1)
+            raise AssertionError(
+                f"close raised during publish race attempt {attempt}"
+            ) from error
         while True:
             try:
                 attempt, degrees, error = publish_errors.get_nowait()
