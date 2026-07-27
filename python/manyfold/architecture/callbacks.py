@@ -117,6 +117,12 @@ class CallbackDelivery:
         """Deliver one callback invocation and return whether it was accepted."""
         return self.submit(lambda: callback(value))
 
+    @property
+    def is_closed(self) -> bool:
+        """Return whether this delivery has been closed."""
+        with self._lock:
+            return self._closed
+
     def submit(self, callback: Callable[[], object]) -> bool:
         """Submit one no-argument callback for placement-aware execution."""
         if not callable(callback):

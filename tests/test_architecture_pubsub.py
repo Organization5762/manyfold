@@ -537,6 +537,67 @@ class PubSubStreamTests(unittest.TestCase):
         with self.assertRaises(Empty):
             publish_errors.get(timeout=0.1)
 
+    def test_pubsub_observable_dispose_racing_publish_treats_close_as_cancel(
+        self,
+    ) -> None:
+        delivered_after_dispose = Queue()
+        publish_errors: Queue[Exception] = Queue()
+        drain_main_thread_callbacks()
+
+        for attempt in range(200):
+            stream = PubSub(
+                topic=f"context.observable-dispose-publish-race.{attempt}",
+                schema=Temperature,
+                retained_messages=4096,
+            )
+            for seed in range(256):
+                stream.publish(Temperature(degrees=float(seed), unit="F"))
+
+            dispose_returned = Event()
+
+            def observe(_degrees: float) -> None:
+                if dispose_returned.is_set():
+                    delivered_after_dispose.put(attempt)
+
+            subscription = stream.map(lambda row: row.degrees).subscribe(
+                observe,
+                callback_placement=CallbackPlacement.main_thread(),
+            )
+            start = Barrier(3)
+
+            def publish() -> None:
+                try:
+                    start.wait(timeout=1.0)
+                    stream.publish(Temperature(degrees=1000.0 + attempt, unit="F"))
+                except Exception as error:
+                    publish_errors.put(error)
+
+            def dispose() -> None:
+                try:
+                    start.wait(timeout=1.0)
+                    subscription.dispose()
+                    dispose_returned.set()
+                except Exception as error:
+                    publish_errors.put(error)
+
+            publisher = Thread(target=publish)
+            disposer = Thread(target=dispose)
+            publisher.start()
+            disposer.start()
+            start.wait(timeout=1.0)
+            publisher.join(timeout=2.0)
+            disposer.join(timeout=2.0)
+            self.assertFalse(publisher.is_alive())
+            self.assertFalse(disposer.is_alive())
+            stream.close()
+
+        drain_main_thread_callbacks()
+        with self.assertRaises(Empty):
+            delivered_after_dispose.get(timeout=0.1)
+        with self.assertRaises(Empty):
+            error = publish_errors.get(timeout=0.1)
+            raise AssertionError("publish or dispose raised") from error
+
     def test_pubsub_publish_racing_close_does_not_deliver_after_close(self) -> None:
         delivered_after_close = Queue()
         publish_errors: Queue[tuple[int, float, Exception]] = Queue()
@@ -613,6 +674,28 @@ class PubSubStreamTests(unittest.TestCase):
                     "publish raised after retaining its value during close race: "
                     f"{error!r}"
                 )
+
+    def test_subscription_dispose_callback_added_during_dispose_runs(self) -> None:
+        dispose_entered = Event()
+        release_dispose = Event()
+        cleanup_ran = Queue()
+
+        def dispose_callback() -> bool:
+            dispose_entered.set()
+            self.assertTrue(release_dispose.wait(timeout=1.0))
+            return True
+
+        subscription = PubSubCallbackSubscription(dispose_callback)
+        disposer = Thread(target=subscription.dispose)
+        disposer.start()
+        self.assertTrue(dispose_entered.wait(timeout=1.0))
+
+        subscription._add_dispose_callback(lambda: cleanup_ran.put(True))
+        release_dispose.set()
+        disposer.join(timeout=2.0)
+
+        self.assertFalse(disposer.is_alive())
+        self.assertTrue(cleanup_ran.get(timeout=1.0))
 
     def test_pubsub_close_releases_pending_main_thread_callback_queue_capacity(
         self,

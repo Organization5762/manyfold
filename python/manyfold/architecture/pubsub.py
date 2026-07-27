@@ -705,35 +705,49 @@ class PubSubCallbackSubscription:
         self._dispose_callback: Callable[[], bool] | None = dispose_callback
         self._is_disposed_callback = is_disposed_callback
         self._dispose_listeners: list[Callable[[], object]] = []
+        self._lock = ThreadLock()
 
     @property
     def is_disposed(self) -> bool:
         """Return whether this subscription has already been disposed."""
+        with self._lock:
+            if self._dispose_callback is None:
+                return True
         if self._is_disposed_callback is not None and self._is_disposed_callback():
             return True
-        return self._dispose_callback is None
+        return False
 
     def dispose(self) -> bool:
         """Stop future callback delivery."""
-        if self._dispose_callback is None:
-            return False
-        dispose_callback = self._dispose_callback
-        self._dispose_callback = None
+        with self._lock:
+            if self._dispose_callback is None:
+                return False
+            dispose_callback = self._dispose_callback
+            self._dispose_callback = None
+            listeners = tuple(self._dispose_listeners)
+            self._dispose_listeners.clear()
         try:
             return dispose_callback()
         finally:
-            listeners = tuple(self._dispose_listeners)
-            self._dispose_listeners.clear()
             for listener in listeners:
                 listener()
 
     def _add_dispose_callback(self, callback: Callable[[], object]) -> None:
         if not callable(callback):
             raise TypeError("dispose callback must be callable")
-        if self.is_disposed:
+        with self._lock:
+            if self._dispose_callback is None:
+                should_run = True
+            elif (
+                self._is_disposed_callback is not None
+                and self._is_disposed_callback()
+            ):
+                should_run = True
+            else:
+                self._dispose_listeners.append(callback)
+                should_run = False
+        if should_run:
             callback()
-            return
-        self._dispose_listeners.append(callback)
 
 
 class PubSubObservable:
@@ -1555,8 +1569,11 @@ def _deliver_callback_or_raise(
     value: object,
     method: str,
 ) -> None:
-    if not delivery.deliver(callback, value):
-        raise RuntimeError(f"{method} callback queue is full")
+    if delivery.deliver(callback, value):
+        return
+    if delivery.is_closed:
+        return
+    raise RuntimeError(f"{method} callback queue is full")
 
 
 def _subscription_with_delivery(
