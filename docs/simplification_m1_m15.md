@@ -355,6 +355,7 @@ observed variance.
 | `publish_plan_before_noisy_attempt_1.json` | `982a2eecc3588e6c8eacde4ff4e3eac4d020e393` | `d309e5e0476a6d661150a54ca67a11677f95ded3e2f4addfd3bb9d2fec108af9` | Semantics and provenance accepted. Performance rejected: every per-route first-publish row and seven warmed rows exceeded 10% RSD. Preserved as noisy evidence, never used for comparison. |
 | `publish_plan_before_noisy_attempt_2.json` | `febb45b39666db7c052d963e921a2bb2e3890f76` | `8c3e0be8944bfe8b4719e5b15dd201b58f714f383f53562f00d958abfe739727` | Semantics and provenance accepted. Performance rejected: all ten single-sample per-route first-publish rows exceeded 10% RSD; three warmed rows also failed. Preserved as the evidence that required repeated fresh-route samples. |
 | `publish_plan_before_noisy_attempt_3.json` | `b440035ed8514cc28d0accbead585f2a70b544e8` | `e4e2598c9f5b061c3322ad95497a604feb26941d45b4ea813e742ca1baf565f6` | Semantics and provenance accepted. Performance rejected under concurrent host validation: all ten per-route first-publish rows, eight warmed rows, and six end-to-end rows exceeded 10% RSD. The repeated sampler exposed rather than hid the contention. |
+| `publish_plan_before_noisy_attempt_4.json` | `fef4f422583993292ed31aa7f3e283b60eeadec4` | `608cf5370900bf8664bc5fa016aa739a84a7b96688200d7852d38e4ee113725e` | Quiet-host steady and end-to-end evidence passes for all ten workloads (RSD at most 8.99% and 9.69%). Performance still rejected: eight first-publish rows exceed 10% RSD (10.52%–30.40%), with bimodal run means despite 64 fresh samples. No row may be used for comparison until the first-publish statistical unit is repaired. |
 | `publish_plan_before.json` | Pending | Pending | A quiet-host run must satisfy the declared variance gate before M2/M3. |
 
 The benchmark currently records whether `Graph.dispose()` releases
@@ -440,20 +441,23 @@ narrowing.
   Validator rejection is implemented as `DROPPED` plus NACK/retry despite
   being documented as terminal, while #279 maps every `DROPPED` outcome to
   `DELIVERY_FAILED`; composition requires explicit terminality and an
-  exhaustion-order regression.
+  exhaustion-order regression. The staged terminal bit also misses the
+  soft-watermark `expired_outbox` emission, so removing an outbox row can still
+  report `terminal == false`.
   Published #281 remains
   `3c62dd1c08eb0bd18e7647a82889b332c585b3b3`; local `e962d13` is
   unpublished and blocked. Its STARTED-to-RUNNING ordering and 18 focused tests
   pass, but a second same-object start can return successfully while the first
   is still STARTING with `is_running == false`; its docs also incorrectly claim
-  subscriber callbacks are lock-free. PR #282
-  `f0e3163ecfa1a077031be2261207563d1b8b08c6` is formally blocked despite
-  green CI: when close wins the registration race, `subscribe()` can dispose
-  while holding `_lifecycle_lock` and re-enter the same lock. Predecessor
-  `b8123ef208141d57ec7848c2a0578b01afc94c59` is stale and blocked: fan-out
-  conflates a closed `deliver() == false` result with queue pressure, and
-  disposal can race callback registration and strand cleanup listeners. PR
-  #279 has no candidate.
+  subscriber callbacks are lock-free. Its staged waiter fix also lets the
+  owning `start()` return success when close wins before RUNNING, including a
+  closed object escaping `__enter__`; every readiness-losing start caller must
+  raise after cleanup. PR #282
+  `a9909ae3d02820a7e9587e3bf6256cbe02674347` is formally blocked. Its
+  deadlock fix is sound, but `PubSubFabric.topic()` strongly retains every
+  dropped borrowed handle in unbounded `_topic_handles` until fabric close.
+  Predecessor `f0e3163ecfa1a077031be2261207563d1b8b08c6` is stale and blocked
+  by the lifecycle-lock re-entry race. PR #279 has no candidate.
 - PR3 remains independent of those candidates and must record exact base/head
   ancestry. No Heart pin guidance is valid until the required verdicts and
   hosted checks are green.
