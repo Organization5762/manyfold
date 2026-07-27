@@ -482,6 +482,55 @@ class PubSubStreamTests(unittest.TestCase):
         self.assertEqual(drain_main_thread_callbacks(), 0)
         self.assertEqual(observed, [])
 
+    def test_pubsub_dispose_ignores_fanout_snapshot_after_unsubscribe(
+        self,
+    ) -> None:
+        stream = PubSub(topic="context.dispose-fanout-snapshot", schema=Temperature)
+        observed: list[float] = []
+        stream.publish(Temperature(degrees=72.0, unit="F"))
+        row = stream.latest()
+        self.assertIsNotNone(row)
+
+        subscription = stream.subscribe(lambda value: observed.append(value.degrees))
+        deliver = next(iter(stream._callbacks.values()))
+        self.assertTrue(subscription.dispose())
+
+        deliver(row)
+
+        self.assertEqual(observed, [])
+
+    def test_pubsub_close_ignores_fanout_snapshot_after_close(self) -> None:
+        stream = PubSub(topic="context.close-fanout-snapshot", schema=Temperature)
+        observed: list[float] = []
+        stream.publish(Temperature(degrees=72.0, unit="F"))
+        row = stream.latest()
+        self.assertIsNotNone(row)
+
+        stream.subscribe(lambda value: observed.append(value.degrees))
+        deliver = next(iter(stream._callbacks.values()))
+        stream.close()
+
+        deliver(row)
+
+        self.assertEqual(observed, [])
+
+    def test_pubsub_publish_ignores_close_race_after_runtime_write(self) -> None:
+        stream = PubSub(topic="context.close-during-fanout", schema=Temperature)
+        observed: list[float] = []
+        stream.subscribe(lambda value: observed.append(value.degrees))
+        original_latest = stream.latest
+
+        def close_then_read_latest() -> StreamRow | None:
+            stream.close()
+            return original_latest()
+
+        stream.latest = close_then_read_latest  # type: ignore[method-assign]
+
+        stream.publish(Temperature(degrees=72.0, unit="F"))
+
+        self.assertTrue(stream.is_closed)
+        self.assertEqual(observed, [])
+
     def test_pubsub_close_releases_pending_main_thread_callback_queue_capacity(
         self,
     ) -> None:

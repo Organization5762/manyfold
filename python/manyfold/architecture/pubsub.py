@@ -261,20 +261,26 @@ class PubSub:
             raise TypeError("PubSub.subscribe requires a callable callback")
         delivery = CallbackDelivery(callback_placement)
 
-        def deliver(row: StreamRow) -> None:
-            _deliver_callback_or_raise(
-                delivery,
-                callback,
-                row,
-                "PubSub.subscribe",
-            )
-
         with self._lifecycle_lock:
             if self._closed:
                 delivery.close()
                 raise RuntimeError(f"PubSub stream {self.topic!r} is closed")
             callback_id = self._next_callback_id
             self._next_callback_id += 1
+
+            def deliver(row: StreamRow) -> None:
+                if not self._callback_is_current(callback_id, deliver):
+                    return
+
+                def invoke(current_row: StreamRow) -> None:
+                    if self._callback_is_current(callback_id, deliver):
+                        callback(current_row)
+
+                if delivery.deliver(invoke, row):
+                    return
+                if self._callback_is_current(callback_id, deliver):
+                    raise RuntimeError("PubSub.subscribe callback queue is full")
+
             self._callbacks[callback_id] = deliver
             self._callback_deliveries[callback_id] = delivery
 
@@ -298,7 +304,10 @@ class PubSub:
         if replay_latest:
             try:
                 latest = self.latest()
-                if latest is not None and callback_id in self._callbacks:
+                if latest is not None and self._callback_is_current(
+                    callback_id,
+                    deliver,
+                ):
                     deliver(latest)
             except Exception:
                 subscription.dispose()
@@ -633,7 +642,13 @@ class PubSub:
             callbacks = tuple(self._callbacks.values())
         if not callbacks:
             return
-        row = self.latest()
+        try:
+            row = self.latest()
+        except RuntimeError:
+            with self._lifecycle_lock:
+                if self._closed:
+                    return
+            raise
         if row is None:
             return
         for callback in callbacks:
@@ -647,6 +662,14 @@ class PubSub:
     def _callback_is_disposed(self, callback_id: int) -> bool:
         with self._lifecycle_lock:
             return self._closed or callback_id not in self._callbacks
+
+    def _callback_is_current(
+        self,
+        callback_id: int,
+        callback: Callable[[StreamRow], object],
+    ) -> bool:
+        with self._lifecycle_lock:
+            return not self._closed and self._callbacks.get(callback_id) is callback
 
     def _close(self, *, detach_owner: bool) -> None:
         owner: PubSubFabric | None
