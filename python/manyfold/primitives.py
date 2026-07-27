@@ -795,6 +795,11 @@ def _release_known_any_schema_value(payload: bytes) -> None:
         _ANY_SCHEMA_VALUES.pop(payload, None)
 
 
+def _has_known_any_schema_value(payload: bytes) -> bool:
+    with _ANY_SCHEMA_LOCK:
+        return payload in _ANY_SCHEMA_VALUES
+
+
 def _is_any_schema_payload(payload: bytes) -> bool:
     return payload.startswith(_ANY_SCHEMA_PREFIX_BYTES)
 

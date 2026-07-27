@@ -323,19 +323,26 @@ time, all run results, variance, final-state equality, and repository/native
 provenance.
 
 The first-publish metric is named `per_route_first_publish`: the unmeasured
-preflight warms process and native globals, while each measured value uses a
-mean of 64 fresh `Graph`/fresh-route samples. Each sample times only its first
-publish; setup, verification, disposal, and process-local cleanup are outside
-the hot timer. The reported RSD compares seven run means and the artifact keeps
-all 448 raw samples per workload. Formal CLI runs reject a dirty worktree.
-Provenance is sampled before the output artifact is created, and includes the
-loaded native extension's SHA-256 digest.
+preflight warms process and native globals. Each run contains 64 bounded
+batches of 16 fresh `Graph`/fresh-route sessions, for 1,024 first publishes.
+Sessions are created before a batch timer; that timer covers one tight loop
+containing exactly one publish per session. Verification, disposal, and
+process-local cleanup are outside the timer and every failure path attempts
+cleanup for all created sessions. The run mean is total timed duration divided
+by all 1,024 publishes, never a median or trimmed mean. The artifact retains
+every raw batch mean/duration, session verification count, and rotated workload
+order. Code rejects a batch size above 16, and a formal clean run rejects fewer
+than 512 first publishes per workload/run; only dirty calibration/tests may use
+smaller totals. Formal CLI runs reject a dirty worktree. Provenance is sampled
+before the output artifact is created, and includes the loaded native
+extension's SHA-256 digest.
 
 Frozen before/after command:
 
 ```sh
 uv run python -m manyfold.private.profiling.publish_benchmarks \
-  --first-publish-samples 64 \
+  --first-publish-batch-size 16 \
+  --first-publish-batches 64 \
   --iterations 100000 \
   --runs 7 \
   --warmup-iterations 10000 \

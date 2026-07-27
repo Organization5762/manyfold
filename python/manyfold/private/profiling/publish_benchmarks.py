@@ -12,7 +12,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -28,6 +28,7 @@ from manyfold.primitives import (
     TypedRoute,
     Variant,
     _any_schema_value_count,
+    _has_known_any_schema_value,
     _release_known_any_schema_value,
     route,
 )
@@ -57,12 +58,15 @@ WORKLOADS: tuple[PublishWorkload, ...] = (
     "typed_encoded_nowait",
     "typed_encoded_publish",
 )
+MAX_FIRST_PUBLISH_BATCH_SIZE = 16
+MIN_FORMAL_FIRST_PUBLISHES_PER_RUN = 512
 
 
 def run_publish_benchmarks(
     workloads: Sequence[PublishWorkload] = WORKLOADS,
     *,
-    first_publish_samples: int = 64,
+    first_publish_batch_size: int = 16,
+    first_publish_batches: int = 64,
     iterations: int = 100_000,
     require_clean: bool = True,
     runs: int = 7,
@@ -70,7 +74,9 @@ def run_publish_benchmarks(
 ) -> dict[str, object]:
     """Run selected publish workloads and return a reusable evidence artifact."""
 
-    _require_positive_int(first_publish_samples, "first_publish_samples")
+    _require_positive_int(first_publish_batch_size, "first_publish_batch_size")
+    _require_positive_int(first_publish_batches, "first_publish_batches")
+    _require_batch_size(first_publish_batch_size)
     _require_positive_int(iterations, "iterations")
     _require_positive_int(runs, "runs")
     _require_positive_int(warmup_iterations, "warmup_iterations")
@@ -80,28 +86,73 @@ def run_publish_benchmarks(
     unsupported = tuple(workload for workload in selected if workload not in WORKLOADS)
     if unsupported:
         raise ValueError(f"unsupported publish workload: {unsupported[0]}")
+    if len(set(selected)) != len(selected):
+        duplicate = next(
+            workload
+            for index, workload in enumerate(selected)
+            if workload in selected[:index]
+        )
+        raise ValueError(f"publish workloads must be unique; duplicate: {duplicate}")
+    first_publishes_per_run = first_publish_batch_size * first_publish_batches
+    if (
+        require_clean
+        and first_publishes_per_run < MIN_FORMAL_FIRST_PUBLISHES_PER_RUN
+    ):
+        raise ValueError(
+            "formal publish benchmark requires at least "
+            f"{MIN_FORMAL_FIRST_PUBLISHES_PER_RUN} first publishes per run; "
+            f"observed {first_publishes_per_run}"
+        )
     provenance = _repository_provenance()
     if require_clean and provenance["dirty"]:
         raise RuntimeError(
             "formal publish benchmark requires a clean git worktree; "
             "commit or remove local changes first"
         )
+    setups = {workload: _workload_setup(workload) for workload in selected}
+    for setup in setups.values():
+        _run_once(
+            setup,
+            iterations=max(1, min(iterations, 16)),
+            warmup_iterations=max(1, min(warmup_iterations, 16)),
+        )
+    measurements = {
+        workload: _WorkloadMeasurements() for workload in selected
+    }
+    run_workload_orders: list[tuple[PublishWorkload, ...]] = []
+    for run_index in range(runs):
+        run_order = _rotated_workloads(selected, run_index)
+        run_workload_orders.append(run_order)
+        for workload in run_order:
+            first_publish_result = _run_first_publish_batches(
+                setups[workload],
+                batch_size=first_publish_batch_size,
+                batches=first_publish_batches,
+            )
+            result = _run_once(
+                setups[workload],
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+            )
+            measurements[workload].append(first_publish_result, result)
     return {
         "environment": _environment(),
-        "first_publish_samples": first_publish_samples,
+        "first_publish_batch_size": first_publish_batch_size,
+        "first_publish_batches": first_publish_batches,
+        "first_publishes_per_run": first_publishes_per_run,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "iterations": iterations,
         "provenance": provenance,
+        "run_workload_orders": tuple(run_workload_orders),
         "runs": runs,
-        "schema_version": 3,
+        "schema_version": 4,
         "warmup_iterations": warmup_iterations,
         "workloads": tuple(
-            _run_repeated(
+            _summarize_workload(
                 workload,
-                first_publish_samples=first_publish_samples,
-                iterations=iterations,
-                runs=runs,
-                warmup_iterations=warmup_iterations,
+                measurements[workload],
+                batch_size=first_publish_batch_size,
+                batches=first_publish_batches,
             )
             for workload in selected
         ),
@@ -116,7 +167,8 @@ def _main(argv: list[str] | None = None) -> int:
         choices=WORKLOADS,
         help="workloads to run; defaults to the full publish matrix",
     )
-    parser.add_argument("--first-publish-samples", type=int, default=64)
+    parser.add_argument("--first-publish-batch-size", type=int, default=16)
+    parser.add_argument("--first-publish-batches", type=int, default=64)
     parser.add_argument("--iterations", type=int, default=100_000)
     parser.add_argument("--runs", type=int, default=7)
     parser.add_argument("--warmup-iterations", type=int, default=10_000)
@@ -129,7 +181,8 @@ def _main(argv: list[str] | None = None) -> int:
         return 0
     result = run_publish_benchmarks(
         args.workloads or WORKLOADS,
-        first_publish_samples=args.first_publish_samples,
+        first_publish_batch_size=args.first_publish_batch_size,
+        first_publish_batches=args.first_publish_batches,
         iterations=args.iterations,
         require_clean=not args.allow_dirty,
         runs=args.runs,
@@ -143,91 +196,160 @@ def _main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _run_repeated(
+def _summarize_workload(
     workload: PublishWorkload,
+    measurements: _WorkloadMeasurements,
     *,
-    first_publish_samples: int,
-    iterations: int,
-    runs: int,
-    warmup_iterations: int,
+    batch_size: int,
+    batches: int,
 ) -> dict[str, object]:
-    setup = _workload_setup(workload)
-    _run_once(
-        setup,
-        iterations=max(1, min(iterations, 16)),
-        warmup_iterations=max(1, min(warmup_iterations, 16)),
+    first_state = _require_equal_states(
+        workload,
+        "steady",
+        measurements.final_states,
     )
-    end_to_end_seconds: list[float] = []
-    final_states: list[dict[str, int | bool]] = []
-    first_publish_event_us: list[float] = []
-    first_publish_final_states: list[dict[str, int | bool]] = []
-    first_publish_raw_samples: list[tuple[float, ...]] = []
-    steady_event_us: list[float] = []
-    for _ in range(runs):
-        first_publish_result = _run_first_publish_samples(
-            setup,
-            samples=first_publish_samples,
-        )
-        result = _run_once(
-            setup,
-            iterations=iterations,
-            warmup_iterations=warmup_iterations,
-        )
-        end_to_end_seconds.append(result["end_to_end_seconds"])
-        final_states.append(result["final_state"])
-        first_publish_event_us.append(first_publish_result["average_event_us"])
-        first_publish_final_states.append(first_publish_result["final_state"])
-        first_publish_raw_samples.append(first_publish_result["event_us"])
-        steady_event_us.append(result["steady_event_us"])
-    first_state = _require_equal_states(workload, "steady", final_states)
     first_publish_state = _require_equal_states(
         workload,
         "per-route first-publish",
-        first_publish_final_states,
+        measurements.first_publish_final_states,
     )
     return {
-        "end_to_end_seconds": _timing_summary(end_to_end_seconds),
+        "end_to_end_seconds": _timing_summary(measurements.end_to_end_seconds),
         "final_state": first_state,
         "per_route_first_publish": {
-            **_timing_summary(first_publish_event_us),
-            "raw_samples": tuple(first_publish_raw_samples),
+            **_timing_summary(measurements.first_publish_event_us),
+            "batch_size": batch_size,
+            "batches_per_run": batches,
+            "publishes_per_run": batch_size * batches,
+            "raw_batch_means_us": tuple(
+                measurements.first_publish_batch_means_us
+            ),
+            "raw_batch_process_local_value_deltas": tuple(
+                measurements.first_publish_batch_process_local_value_deltas
+            ),
+            "raw_batch_timed_duration_us": tuple(
+                measurements.first_publish_batch_timed_duration_us
+            ),
             "run_final_state": first_publish_state,
-            "run_final_states": tuple(first_publish_final_states),
-            "samples_per_run": first_publish_samples,
+            "run_final_states": tuple(
+                measurements.first_publish_final_states
+            ),
+            "run_total_timed_duration_us": tuple(
+                measurements.first_publish_total_timed_duration_us
+            ),
+            "run_verified_sessions": tuple(
+                measurements.first_publish_verified_sessions
+            ),
         },
-        "run_final_states": tuple(final_states),
-        "steady_publish": _timing_summary(steady_event_us),
+        "run_final_states": tuple(measurements.final_states),
+        "steady_publish": _timing_summary(measurements.steady_event_us),
         "workload": workload,
     }
 
 
-def _run_first_publish_samples(
+def _rotated_workloads(
+    workloads: tuple[PublishWorkload, ...],
+    run_index: int,
+) -> tuple[PublishWorkload, ...]:
+    offset = run_index % len(workloads)
+    return workloads[offset:] + workloads[:offset]
+
+
+def _run_first_publish_batches(
     setup: Callable[[], _WorkloadSession],
     *,
-    samples: int,
+    batch_size: int,
+    batches: int,
 ) -> dict[str, Any]:
-    event_us: list[float] = []
-    final_states: list[dict[str, int | bool]] = []
-    for _ in range(samples):
-        session = setup()
-        try:
-            started = time.perf_counter()
-            session.publish_one()
-            event_us.append((time.perf_counter() - started) * 1_000_000.0)
-            final_state = session.final_state(1)
-        finally:
-            disposal_state = session.dispose()
-        final_state.update(disposal_state)
-        final_states.append(final_state)
+    _require_positive_int(batch_size, "batch_size")
+    _require_positive_int(batches, "batches")
+    _require_batch_size(batch_size)
+    batch_means_us: list[float] = []
+    batch_process_local_value_deltas: list[int] = []
+    batch_timed_duration_us: list[float] = []
+    batch_final_states: list[dict[str, int | bool]] = []
+    verified_sessions = 0
+    for _ in range(batches):
+        result = _run_first_publish_batch(setup, batch_size=batch_size)
+        batch_means_us.append(result["average_event_us"])
+        batch_process_local_value_deltas.append(
+            result["process_local_value_delta"]
+        )
+        batch_timed_duration_us.append(result["timed_duration_us"])
+        batch_final_states.append(result["final_state"])
+        verified_sessions += result["verified_sessions"]
     first_state = _require_equal_states(
         "fresh route",
-        "per-route first-publish sample",
+        "per-route first-publish batch",
+        batch_final_states,
+    )
+    total_timed_duration_us = sum(batch_timed_duration_us)
+    total_publishes = batch_size * batches
+    return {
+        "average_event_us": total_timed_duration_us / total_publishes,
+        "batch_means_us": tuple(batch_means_us),
+        "batch_process_local_value_deltas": tuple(
+            batch_process_local_value_deltas
+        ),
+        "batch_timed_duration_us": tuple(batch_timed_duration_us),
+        "final_state": first_state,
+        "total_timed_duration_us": total_timed_duration_us,
+        "verified_sessions": verified_sessions,
+    }
+
+
+def _run_first_publish_batch(
+    setup: Callable[[], _WorkloadSession],
+    *,
+    batch_size: int,
+) -> dict[str, Any]:
+    process_local_baseline = _any_schema_value_count()
+    sessions: list[_WorkloadSession] = []
+    final_states: list[dict[str, int | bool]] = []
+    error: BaseException | None = None
+    process_local_value_delta = 0
+    timed_duration_us = 0.0
+    try:
+        for _ in range(batch_size):
+            sessions.append(setup())
+        started_ns = time.perf_counter_ns()
+        for session in sessions:
+            session.publish_one()
+        timed_duration_us = (time.perf_counter_ns() - started_ns) / 1_000.0
+        for session in sessions:
+            final_states.append(session.final_state(1))
+        process_local_value_delta = (
+            _any_schema_value_count() - process_local_baseline
+        )
+    except BaseException as caught:
+        error = caught
+    for index, session in enumerate(sessions):
+        try:
+            disposal_state = session.dispose()
+        except BaseException as caught:
+            if error is None:
+                error = caught
+            continue
+        if index < len(final_states):
+            final_states[index].update(disposal_state)
+    if _any_schema_value_count() != process_local_baseline and error is None:
+        error = RuntimeError(
+            "first-publish batch did not restore process-local payload ownership: "
+            f"expected {process_local_baseline}, observed {_any_schema_value_count()}"
+        )
+    if error is not None:
+        raise error
+    final_state = _require_equal_states(
+        "fresh route",
+        "per-route first-publish session",
         final_states,
     )
     return {
-        "average_event_us": statistics.fmean(event_us),
-        "event_us": tuple(event_us),
-        "final_state": first_state,
+        "average_event_us": timed_duration_us / batch_size,
+        "final_state": final_state,
+        "process_local_value_delta": process_local_value_delta,
+        "timed_duration_us": timed_duration_us,
+        "verified_sessions": len(final_states),
     }
 
 
@@ -319,7 +441,6 @@ def _setup_typed_encoded_nowait() -> _WorkloadSession:
 
 
 def _setup_process_local_nowait() -> _WorkloadSession:
-    start_count = _any_schema_value_count()
     graph = Graph()
     target = _benchmark_route("process_local", Schema.any("PublishProcessLocal"))
     payload = object()
@@ -329,11 +450,10 @@ def _setup_process_local_nowait() -> _WorkloadSession:
         final_state=lambda _events: {
             "latest_preserves_identity": _require_latest_value(graph, target)
             is payload,
-            "retained_process_local_values": _any_schema_value_count()
-            - start_count,
+            "retained_process_local_values": len(graph._materialized_payloads),
             "retained_history": _retained_history(graph, target),
         },
-        process_local_value_baseline=start_count,
+        tracks_process_local_values=True,
     )
 
 
@@ -485,12 +605,12 @@ def _session(
     final_state: Callable[[int], dict[str, int | bool]],
     disposables: tuple[SubscriptionLike, ...] = (),
     after_dispose: Callable[[], dict[str, int | bool]] = lambda: {},
-    process_local_value_baseline: int | None = None,
+    tracks_process_local_values: bool = False,
 ) -> _WorkloadSession:
     def dispose() -> dict[str, int | bool]:
         process_local_values = (
             ()
-            if process_local_value_baseline is None
+            if not tracks_process_local_values
             else tuple(graph._materialized_payloads.values())
         )
         disposal_error: BaseException | None = None
@@ -523,15 +643,17 @@ def _session(
                 if disposal_error is None:
                     disposal_error = error
         finally:
-            if process_local_value_baseline is not None:
-                state["released_by_graph"] = (
-                    _any_schema_value_count() == process_local_value_baseline
+            if tracks_process_local_values:
+                state["released_by_graph"] = all(
+                    not _has_known_any_schema_value(payload)
+                    for payload in process_local_values
                 )
             for payload in process_local_values:
                 _release_known_any_schema_value(payload)
-            if process_local_value_baseline is not None:
-                state["released_by_benchmark_cleanup"] = (
-                    _any_schema_value_count() == process_local_value_baseline
+            if tracks_process_local_values:
+                state["released_by_benchmark_cleanup"] = all(
+                    not _has_known_any_schema_value(payload)
+                    for payload in process_local_values
                 )
         if disposal_error is not None:
             raise disposal_error
@@ -722,11 +844,71 @@ def _require_positive_int(value: int, field: str) -> None:
         raise ValueError(f"{field} must be positive")
 
 
+def _require_batch_size(batch_size: int) -> None:
+    if batch_size > MAX_FIRST_PUBLISH_BATCH_SIZE:
+        raise ValueError(
+            "first-publish batch size must not exceed "
+            f"{MAX_FIRST_PUBLISH_BATCH_SIZE}; observed {batch_size}"
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class _WorkloadSession:
     publish_one: Callable[[], object]
     final_state: Callable[[int], dict[str, int | bool]]
     dispose: Callable[[], dict[str, int | bool]]
+
+
+@dataclass(slots=True)
+class _WorkloadMeasurements:
+    end_to_end_seconds: list[float] = field(default_factory=list)
+    final_states: list[dict[str, int | bool]] = field(default_factory=list)
+    first_publish_batch_means_us: list[tuple[float, ...]] = field(
+        default_factory=list
+    )
+    first_publish_batch_process_local_value_deltas: list[tuple[int, ...]] = field(
+        default_factory=list
+    )
+    first_publish_batch_timed_duration_us: list[tuple[float, ...]] = field(
+        default_factory=list
+    )
+    first_publish_event_us: list[float] = field(default_factory=list)
+    first_publish_final_states: list[dict[str, int | bool]] = field(
+        default_factory=list
+    )
+    first_publish_total_timed_duration_us: list[float] = field(
+        default_factory=list
+    )
+    first_publish_verified_sessions: list[int] = field(default_factory=list)
+    steady_event_us: list[float] = field(default_factory=list)
+
+    def append(
+        self,
+        first_publish_result: dict[str, Any],
+        steady_result: dict[str, Any],
+    ) -> None:
+        self.end_to_end_seconds.append(steady_result["end_to_end_seconds"])
+        self.final_states.append(steady_result["final_state"])
+        self.first_publish_batch_means_us.append(
+            first_publish_result["batch_means_us"]
+        )
+        self.first_publish_batch_process_local_value_deltas.append(
+            first_publish_result["batch_process_local_value_deltas"]
+        )
+        self.first_publish_batch_timed_duration_us.append(
+            first_publish_result["batch_timed_duration_us"]
+        )
+        self.first_publish_event_us.append(
+            first_publish_result["average_event_us"]
+        )
+        self.first_publish_final_states.append(first_publish_result["final_state"])
+        self.first_publish_total_timed_duration_us.append(
+            first_publish_result["total_timed_duration_us"]
+        )
+        self.first_publish_verified_sessions.append(
+            first_publish_result["verified_sessions"]
+        )
+        self.steady_event_us.append(steady_result["steady_event_us"])
 
 
 if __name__ == "__main__":
